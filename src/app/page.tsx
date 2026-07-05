@@ -68,8 +68,7 @@ export default function Home() {
         </section>
 
         <footer className="mt-16 text-xs text-zinc-500 dark:text-zinc-500">
-          Phase 1 · Webpage · Data stays in your browser until we wire up
-          Supabase.
+          Phase 1 · Webpage · Powered by Supabase.
         </footer>
       </main>
     </div>
