@@ -92,8 +92,22 @@ export default async function OnboardingPage({
 }) {
   const { error } = await searchParams;
 
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const existing = await supabase
+    .from("profiles")
+    .select("household_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existing.data) redirect("/settings");
+
   return (
-    <div className="mx-auto max-w-xl">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+      <div className="mx-auto max-w-xl px-6 py-16">
       <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Set up your household
       </h1>
@@ -159,6 +173,7 @@ export default async function OnboardingPage({
           Create household
         </button>
       </form>
+      </div>
     </div>
   );
 }

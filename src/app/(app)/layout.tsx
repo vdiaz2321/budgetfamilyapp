@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./sign-out-button";
 
+
 const NAV = [
   { href: "/log", label: "Log" },
   { href: "/budget", label: "Budget" },
@@ -27,6 +28,8 @@ export default async function AppLayout({
     .select("household_id, display_name")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  if (!profile) redirect("/onboarding");
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -53,33 +56,7 @@ export default async function AppLayout({
         </div>
       </header>
 
-      {!profile ? (
-        <div className="mx-auto max-w-2xl px-6 py-16">
-          <NoProfileNotice email={user.email ?? ""} />
-        </div>
-      ) : (
-        <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
-      )}
-    </div>
-  );
-}
-
-function NoProfileNotice({ email }: { email: string }) {
-  return (
-    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
-      <p className="font-medium">One-time setup</p>
-      <p className="mt-2">
-        You&apos;re signed in as <strong>{email}</strong>, but haven&apos;t set
-        up a household yet.
-      </p>
-      <p className="mt-4">
-        <Link
-          href="/onboarding"
-          className="inline-flex rounded-lg bg-amber-600 px-4 py-2 font-medium text-white hover:bg-amber-700"
-        >
-          Create household
-        </Link>
-      </p>
+      <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
     </div>
   );
 }
