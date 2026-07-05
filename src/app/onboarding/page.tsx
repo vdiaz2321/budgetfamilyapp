@@ -128,7 +128,8 @@ export default async function OnboardingPage({
             id="name"
             name="name"
             type="text"
-            defaultValue="Diaz Family"
+            required
+            placeholder="e.g. Smith Family"
             className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
           />
         </div>
@@ -143,7 +144,7 @@ export default async function OnboardingPage({
             id="displayName"
             name="displayName"
             type="text"
-            defaultValue="Victor"
+            placeholder="First name"
             className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
           />
         </div>
@@ -155,10 +156,10 @@ export default async function OnboardingPage({
             className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500"
           />
           <span className="text-emerald-900 dark:text-emerald-100">
-            <strong className="block">Seed with my spreadsheet vocabulary</strong>
-            Pre-load the exact Bills / Expenses / Savings / Debt categories,
-            subcategories, and credit-card accounts from your 2026 Budget
-            Tracker. You can edit any of it later in Settings.
+            <strong className="block">Start with common categories</strong>
+            Pre-load a small, generic set of Bills / Expenses / Savings / Debt
+            categories and a couple of accounts to get going. You can rename,
+            add, or remove any of it later in Settings.
           </span>
         </label>
 
