@@ -7,6 +7,7 @@ import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
 import { TransactionsPanel } from "./transactions-panel";
+import { SummaryPanel } from "./summary-panel";
 import type {
   AccountOption,
   GroupData,
@@ -41,6 +42,7 @@ export function BudgetBoard({
   transactions,
 }: Props) {
   const [mode, setMode] = useState<ViewMode>("remaining");
+  const [railTab, setRailTab] = useState<"summary" | "transactions">("transactions");
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
   const toggleMode = () => setMode((m) => (m === "remaining" ? "spent" : "remaining"));
   const positive = leftToBudget >= 0;
@@ -99,19 +101,55 @@ export function BudgetBoard({
         </div>
       </div>
 
-      {/* Right rail: item detail when selected, otherwise the Log */}
+      {/* Right rail: item detail when selected, otherwise Summary / Log */}
       <aside className="hidden w-[360px] shrink-0 lg:block">
-        <div className="sticky top-6">
+        <div className="sticky top-6 space-y-3">
           {itemPanel ?? (
-            <TransactionsPanel
-              monthKey={month.key}
-              monthLabel={month.label}
-              firstOfMonth={month.firstOfMonth}
-              currency={currency}
-              transactions={transactions}
-              subOptions={subOptions}
-              accountOptions={accountOptions}
-            />
+            <>
+              {/* Summary | Transactions toggle */}
+              <div className="grid grid-cols-2 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+                <button
+                  type="button"
+                  onClick={() => setRailTab("summary")}
+                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+                    railTab === "summary"
+                      ? "bg-brand-soft text-brand"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z" />
+                  </svg>
+                  Summary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRailTab("transactions")}
+                  className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
+                    railTab === "transactions"
+                      ? "bg-brand-soft text-brand"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <span className="font-bold">$</span>
+                  Transactions
+                </button>
+              </div>
+
+              {railTab === "summary" ? (
+                <SummaryPanel groups={groups} currency={currency} mode={mode} />
+              ) : (
+                <TransactionsPanel
+                  monthKey={month.key}
+                  monthLabel={month.label}
+                  firstOfMonth={month.firstOfMonth}
+                  currency={currency}
+                  transactions={transactions}
+                  subOptions={subOptions}
+                  accountOptions={accountOptions}
+                />
+              )}
+            </>
           )}
         </div>
       </aside>
