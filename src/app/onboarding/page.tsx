@@ -23,7 +23,7 @@ async function createHousehold(formData: FormData) {
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (existing.data) redirect("/settings");
+  if (existing.data) redirect("/budget");
 
   const { error: rpcErr } = await supabase.rpc("create_household_with_profile", {
     household_name: name,
@@ -33,7 +33,7 @@ async function createHousehold(formData: FormData) {
     redirect(`/onboarding?error=${encodeURIComponent(rpcErr.message)}`);
   }
 
-  redirect("/settings");
+  redirect("/budget");
 }
 
 type SearchParams = Promise<{ error?: string }>;
@@ -56,7 +56,7 @@ export default async function OnboardingPage({
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (existing.data) redirect("/settings");
+  if (existing.data) redirect("/budget");
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">

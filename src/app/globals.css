@@ -40,19 +40,32 @@
   --color-surface: var(--surface);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
-  --color-border: var(--border);
+  /* Named `line` (not `border`) on purpose: a `--color-border` token makes
+     Tailwind v4 emit a `border-line` class that collides with the `border`
+     width utility, so the color never applies and borders fall back to black. */
+  --color-line: var(--border);
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
   --color-accent: var(--accent);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-app);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, -apple-system, Arial, sans-serif;
+  font-family: var(--font-app), system-ui, -apple-system, Arial, sans-serif;
+}
+
+/* Hide the native up/down spinner arrows on number inputs (money fields). */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }

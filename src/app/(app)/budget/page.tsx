@@ -1,13 +1,204 @@
-import PagePlaceholder from "../page-placeholder";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { ensureCategories, type CategoryKind } from "@/lib/categories";
+import { resolveMonth } from "@/lib/month";
+import { BudgetBoard } from "./budget-board";
+import type { AccountOption, GroupData, SubOption, TxData } from "./types";
 
 export const metadata = { title: "Budget · Capitall" };
 
-export default function BudgetPage() {
+type SearchParams = Promise<{ month?: string }>;
+
+export default async function BudgetPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const { month: monthParam } = await searchParams;
+  const month = resolveMonth(monthParam);
+  const nextFirst = `${month.nextKey}-01`;
+
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("household_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!profile) redirect("/onboarding");
+
+  const { data: household } = await supabase
+    .from("households")
+    .select("id, name, currency")
+    .eq("id", profile.household_id)
+    .single();
+  if (!household) redirect("/onboarding");
+
+  const categories = await ensureCategories(supabase, household.id);
+
+  const [
+    { data: subs },
+    { data: plans },
+    { data: actuals },
+    { data: goals },
+    { data: debts },
+    { data: txRows },
+    { data: payees },
+    { data: accounts },
+  ] = await Promise.all([
+    supabase
+      .from("subcategories")
+      .select("id, category_id, name, due_day, sort_order")
+      .eq("household_id", household.id)
+      .order("sort_order"),
+    supabase
+      .from("budget_plans")
+      .select("subcategory_id, planned_cents")
+      .eq("household_id", household.id)
+      .eq("month", month.firstOfMonth),
+    supabase
+      .from("v_monthly_actuals")
+      .select("subcategory_id, actual_cents")
+      .eq("household_id", household.id)
+      .eq("month", month.firstOfMonth),
+    supabase
+      .from("savings_goals")
+      .select("subcategory_id, goal_cents, start_cents, monthly_contribution_cents")
+      .eq("household_id", household.id),
+    supabase
+      .from("debts")
+      .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day")
+      .eq("household_id", household.id),
+    supabase
+      .from("transactions")
+      .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id")
+      .eq("household_id", household.id)
+      .gte("occurred_on", month.firstOfMonth)
+      .lt("occurred_on", nextFirst)
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("payees")
+      .select("id, name")
+      .eq("household_id", household.id),
+    supabase
+      .from("accounts")
+      .select("id, name")
+      .eq("household_id", household.id)
+      .eq("active", true)
+      .order("name"),
+  ]);
+
+  const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
+  const spentBySub = new Map((actuals ?? []).map((a) => [a.subcategory_id, a.actual_cents]));
+  const goalBySub = new Map((goals ?? []).map((g) => [g.subcategory_id, g]));
+  const debtBySub = new Map((debts ?? []).map((d) => [d.subcategory_id, d]));
+  const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
+  const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
+  const kindBySub = new Map(
+    (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
+  );
+  const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
+
+  const groups: GroupData[] = categories.map((cat) => {
+    const kind = cat.kind as CategoryKind;
+    const rows = (subs ?? [])
+      .filter((s) => s.category_id === cat.id)
+      .map((s) => {
+        const plannedCents = plannedBySub.get(s.id) ?? 0;
+        const spentCents = spentBySub.get(s.id) ?? 0;
+        const g = goalBySub.get(s.id);
+        const d = debtBySub.get(s.id);
+        return {
+          subId: s.id,
+          name: s.name,
+          dueDay: s.due_day,
+          plannedCents,
+          spentCents,
+          savings:
+            kind === "savings"
+              ? {
+                  goalCents: g?.goal_cents ?? 0,
+                  startCents: g?.start_cents ?? 0,
+                  monthlyCents: g?.monthly_contribution_cents ?? 0,
+                }
+              : null,
+          debt:
+            kind === "debt"
+              ? {
+                  balanceCents: d?.current_balance_cents ?? 0,
+                  minCents: d?.min_payment_cents ?? 0,
+                  apr: d ? Number(d.apr) : 0,
+                  dueDay: d?.due_day ?? s.due_day,
+                }
+              : null,
+        };
+      });
+
+    return {
+      categoryId: cat.id,
+      kind,
+      name: cat.name,
+      rows,
+      plannedTotal: rows.reduce((sum, r) => sum + r.plannedCents, 0),
+      spentTotal: rows.reduce((sum, r) => sum + r.spentCents, 0),
+    };
+  });
+
+  const incomePlanned = groups
+    .filter((g) => g.kind === "income")
+    .reduce((sum, g) => sum + g.plannedTotal, 0);
+  const outflowPlanned = groups
+    .filter((g) => g.kind !== "income")
+    .reduce((sum, g) => sum + g.plannedTotal, 0);
+
+  const subOptions: SubOption[] = (subs ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
+  }));
+
+  const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+  }));
+
+  const transactions: TxData[] = (txRows ?? []).map((t) => ({
+    id: t.id,
+    date: t.occurred_on,
+    amountCents: t.amount_cents,
+    memo: t.memo,
+    payee: t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+    subId: t.subcategory_id ?? null,
+    subName: t.subcategory_id
+      ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
+      : "Uncategorized",
+    accountId: t.account_id ?? null,
+    kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
+  }));
+
   return (
-    <PagePlaceholder
-      title="Budget"
-      step="Step 2 — next"
-      blurb="Your home base. Plan every category by month — Income, Bills, Expenses, Savings, Debt — with Planned vs. Spent and a running 'left to budget'. Transactions (your Log) live right here too."
+    <BudgetBoard
+      month={{
+        key: month.key,
+        label: month.label,
+        prevKey: month.prevKey,
+        nextKey: month.nextKey,
+        firstOfMonth: month.firstOfMonth,
+      }}
+      currency={household.currency}
+      groups={groups}
+      incomePlanned={incomePlanned}
+      outflowPlanned={outflowPlanned}
+      leftToBudget={incomePlanned - outflowPlanned}
+      subOptions={subOptions}
+      accountOptions={accountOptions}
+      transactions={transactions}
     />
   );
 }

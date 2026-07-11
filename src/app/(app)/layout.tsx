@@ -27,7 +27,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* Sidebar */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-surface px-3 py-5 md:flex">
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface px-3 py-5 md:flex">
         <Link href="/budget" className="mb-6 flex items-center gap-2 px-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-base font-bold text-white">
             C
@@ -37,17 +37,11 @@ export default async function AppLayout({
 
         <SidebarNav />
 
-        <div className="mt-auto border-t border-border pt-4">
+        <div className="mt-auto border-t border-line pt-4">
           <p className="truncate px-3 text-xs text-muted" title={user.email ?? ""}>
             {user.email}
           </p>
-          <div className="mt-2 flex items-center justify-between px-1">
-            <Link
-              href="/settings"
-              className="rounded-md px-2 py-1 text-xs text-muted hover:text-foreground"
-            >
-              Settings
-            </Link>
+          <div className="mt-2 flex items-center justify-end px-1">
             <SignOutButton />
           </div>
         </div>
@@ -55,7 +49,7 @@ export default async function AppLayout({
 
       {/* Mobile top bar */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border bg-surface px-4 py-3 md:hidden">
+        <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
           <Link href="/budget" className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white">
               C
@@ -66,7 +60,7 @@ export default async function AppLayout({
         </header>
 
         {/* Mobile nav row */}
-        <div className="flex gap-1 overflow-x-auto border-b border-border bg-surface px-2 py-2 md:hidden">
+        <div className="flex gap-1 overflow-x-auto border-b border-line bg-surface px-2 py-2 md:hidden">
           <SidebarNav />
         </div>
 

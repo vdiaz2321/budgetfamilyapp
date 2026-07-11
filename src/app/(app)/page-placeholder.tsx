@@ -19,7 +19,7 @@ export default function PagePlaceholder({
       </div>
       <p className="mt-2 max-w-prose text-sm text-muted">{blurb}</p>
 
-      <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface p-10 text-center">
+      <div className="mt-8 rounded-2xl border border-dashed border-line bg-surface p-10 text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-brand-soft text-brand">
           <svg
             width="22"

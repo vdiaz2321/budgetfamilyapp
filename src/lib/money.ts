@@ -10,11 +10,31 @@ export function displayToCents(value: string | number | null | undefined): numbe
   return Math.round(n * 100);
 }
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  CAD: "$",
+  AUD: "$",
+  MXN: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+};
+
+// Accepts either a currency code ("USD") or an already-symbol ("$").
+export function currencySymbol(currency: string | null | undefined): string {
+  if (!currency) return "$";
+  const upper = currency.toUpperCase();
+  if (CURRENCY_SYMBOLS[upper]) return CURRENCY_SYMBOLS[upper];
+  // Short non-alphabetic values are treated as literal symbols already.
+  return currency.length <= 2 ? currency : "$";
+}
+
 export function formatMoney(cents: number, currency = "$"): string {
+  const symbol = currencySymbol(currency);
   const abs = Math.abs(cents);
   const whole = Math.floor(abs / 100);
   const frac = String(abs % 100).padStart(2, "0");
   const withCommas = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const sign = cents < 0 ? "-" : "";
-  return `${sign}${currency}${withCommas}.${frac}`;
+  return `${sign}${symbol}${withCommas}.${frac}`;
 }
