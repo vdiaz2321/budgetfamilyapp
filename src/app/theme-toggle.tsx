@@ -4,24 +4,28 @@ import { useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
 
-function getInitialTheme(): Theme {
-  if (typeof document === "undefined") return "light";
-  return document.documentElement.getAttribute("data-theme") === "dark"
-    ? "dark"
-    : "light";
-}
-
 export default function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [theme, setTheme] = useState<Theme>("light");
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    const current =
+      document.documentElement.getAttribute("data-theme") === "dark"
+        ? "dark"
+        : "light";
+    setTheme(current);
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     document.documentElement.setAttribute("data-theme", theme);
     try {
       localStorage.setItem("theme", theme);
     } catch {
       /* ignore private-mode storage errors */
     }
-  }, [theme]);
+  }, [theme, mounted]);
 
   const next = theme === "dark" ? "light" : "dark";
 
@@ -29,11 +33,14 @@ export default function ThemeToggle() {
     <button
       type="button"
       onClick={() => setTheme(next)}
-      aria-label={`Switch to ${next} mode`}
-      title={`Switch to ${next} mode`}
+      aria-label={mounted ? `Switch to ${next} mode` : "Toggle theme"}
+      title={mounted ? `Switch to ${next} mode` : "Toggle theme"}
+      suppressHydrationWarning
       className="fixed right-4 top-4 z-50 rounded-full border border-zinc-300 bg-white/80 p-2 text-zinc-700 shadow-sm backdrop-blur transition hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300 dark:hover:border-emerald-400 dark:hover:text-emerald-400"
     >
-      {theme === "dark" ? (
+      {!mounted ? (
+        <span className="block h-[18px] w-[18px]" aria-hidden />
+      ) : theme === "dark" ? (
         // Sun icon — click to go light
         <svg
           xmlns="http://www.w3.org/2000/svg"
