@@ -25,24 +25,12 @@ async function createHousehold(formData: FormData) {
     .maybeSingle();
   if (existing.data) redirect("/settings");
 
-  const { data: household, error: hhErr } = await supabase
-    .from("households")
-    .insert({ name })
-    .select("id")
-    .single();
-  if (hhErr || !household) {
-    redirect(
-      `/onboarding?error=${encodeURIComponent(hhErr?.message ?? "household-failed")}`,
-    );
-  }
-
-  const { error: profileErr } = await supabase.from("profiles").insert({
-    user_id: user.id,
-    household_id: household.id,
+  const { error: rpcErr } = await supabase.rpc("create_household_with_profile", {
+    household_name: name,
     display_name: displayName,
   });
-  if (profileErr) {
-    redirect(`/onboarding?error=${encodeURIComponent(profileErr.message)}`);
+  if (rpcErr) {
+    redirect(`/onboarding?error=${encodeURIComponent(rpcErr.message)}`);
   }
 
   redirect("/settings");
@@ -71,7 +59,7 @@ export default async function OnboardingPage({
   if (existing.data) redirect("/settings");
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
       <div className="mx-auto max-w-xl px-6 py-16">
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
           Set up your household
@@ -97,7 +85,7 @@ export default async function OnboardingPage({
               type="text"
               required
               placeholder="e.g. Smith Family"
-              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
             />
           </div>
           <div>
@@ -112,7 +100,7 @@ export default async function OnboardingPage({
               name="displayName"
               type="text"
               placeholder="First name"
-              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
             />
           </div>
 

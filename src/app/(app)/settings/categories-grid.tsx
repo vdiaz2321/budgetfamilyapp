@@ -67,7 +67,7 @@ function CategoryColumn({
   const colors = COLUMN_HEADERS[category.kind];
 
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-800">
       <div className={`${colors.bg} ${colors.text} rounded-t-xl px-3 py-2 text-center text-xs font-semibold uppercase tracking-widest`}>
         {category.name}
       </div>
@@ -146,7 +146,7 @@ function AddSubcategoryForm({
           name="name"
           placeholder="Add row…"
           required
-          className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+          className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
         />
         {hasDue ? (
           <input
@@ -155,7 +155,7 @@ function AddSubcategoryForm({
             min={1}
             max={31}
             placeholder="—"
-            className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-right text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-right text-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
           />
         ) : null}
       </div>

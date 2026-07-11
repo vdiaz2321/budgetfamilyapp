@@ -20,7 +20,7 @@ export function GlobalsCard({
   const [pending, start] = useTransition();
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-800">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
         Globals
       </h2>
@@ -38,7 +38,7 @@ export function GlobalsCard({
             name="currency"
             defaultValue={currency}
             maxLength={3}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </Field>
         <Field label="Year">
@@ -46,7 +46,7 @@ export function GlobalsCard({
             name="year"
             type="number"
             defaultValue={year}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </Field>
         <Field label="Snowball start date">
@@ -54,7 +54,7 @@ export function GlobalsCard({
             name="snowballStartDate"
             type="date"
             defaultValue={snowballStartDate ?? ""}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </Field>
         <Field label="Snowball monthly extra">
@@ -63,7 +63,7 @@ export function GlobalsCard({
             type="number"
             step="0.01"
             defaultValue={centsToDisplay(snowballMonthlyExtraCents)}
-            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </Field>
 

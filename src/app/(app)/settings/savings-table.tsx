@@ -41,7 +41,7 @@ export function SavingsTable({ currency, savingsSubcategories, goals }: Props) {
         S A V I N G S &nbsp; &amp; &nbsp; S I N K I N G &nbsp; F U N D S
       </header>
 
-      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-800">
         <div className="grid grid-cols-[minmax(160px,1.5fr),1fr,1fr,1fr] gap-2 border-b border-zinc-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
           <span>Fund</span>
           <span className="text-right">Goal</span>
@@ -66,7 +66,7 @@ export function SavingsTable({ currency, savingsSubcategories, goals }: Props) {
           </ul>
         )}
 
-        <div className="grid grid-cols-[minmax(160px,1.5fr),1fr,1fr,1fr] gap-2 border-t-2 border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100">
+        <div className="grid grid-cols-[minmax(160px,1.5fr),1fr,1fr,1fr] gap-2 border-t-2 border-zinc-200 bg-zinc-50 px-4 py-2 text-sm font-semibold text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
           <span>TOTAL</span>
           <span className="text-right tabular-nums">{formatMoney(totals.goal, currency)}</span>
           <span className="text-right tabular-nums">{formatMoney(totals.start, currency)}</span>
@@ -110,7 +110,7 @@ function MoneyInput({ name, defaultCents }: { name: string; defaultCents: number
       type="number"
       step="0.01"
       defaultValue={centsToDisplay(defaultCents)}
-      className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-right text-sm tabular-nums focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+      className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-right text-sm tabular-nums focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
     />
   );
 }

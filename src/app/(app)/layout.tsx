@@ -32,8 +32,8 @@ export default async function AppLayout({
   if (!profile) redirect("/onboarding");
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
+      <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-800">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <Link
             href="/"

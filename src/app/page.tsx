@@ -29,7 +29,7 @@ const cards = [
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
       <main className="mx-auto max-w-5xl px-6 py-16 sm:py-24">
         <header className="mb-12">
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
@@ -50,7 +50,7 @@ export default function Home() {
             <Link
               key={c.href}
               href={c.href}
-              className="group rounded-2xl border border-zinc-200 bg-white p-6 transition hover:border-emerald-500 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-400"
+              className="group rounded-2xl border border-zinc-200 bg-white p-6 transition hover:border-emerald-500 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-800 dark:hover:border-emerald-400"
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
