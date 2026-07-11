@@ -11,7 +11,7 @@ export function SignOutButton() {
   return (
     <button
       type="button"
-      className="text-zinc-500 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
+      className="rounded-md px-2 py-1 text-xs text-muted hover:text-negative disabled:opacity-50"
       disabled={pending}
       onClick={() =>
         start(async () => {

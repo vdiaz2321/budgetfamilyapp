@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Budget Family App",
+  title: "Capitall",
   description: "A budget built for how your family actually spends.",
 };
 

@@ -1,14 +1,13 @@
-export const metadata = { title: "Budget · Budget Family App" };
+import PagePlaceholder from "../page-placeholder";
+
+export const metadata = { title: "Budget · Capitall" };
 
 export default function BudgetPage() {
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-        Budget
-      </h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        Planned vs. actual per subcategory, by month. Coming after the Log.
-      </p>
-    </div>
+    <PagePlaceholder
+      title="Budget"
+      step="Step 2 — next"
+      blurb="Your home base. Plan every category by month — Income, Bills, Expenses, Savings, Debt — with Planned vs. Spent and a running 'left to budget'. Transactions (your Log) live right here too."
+    />
   );
 }

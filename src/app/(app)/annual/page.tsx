@@ -1,15 +1,13 @@
-export const metadata = { title: "Annual · Budget Family App" };
+import PagePlaceholder from "../page-placeholder";
 
-export default function AnnualPage() {
+export const metadata = { title: "Annual Overview · Capitall" };
+
+export default function AnnualOverviewPage() {
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-        Annual / Year
-      </h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        Toggle between the Annual Breakdown pivot and the Year summary. Coming
-        after Budget.
-      </p>
-    </div>
+    <PagePlaceholder
+      title="Annual Overview"
+      step="Step 7"
+      blurb="The whole picture across the year — past, current, and projected — rolled up from each month's budget. Scroll back through prior years, just like your Year tab."
+    />
   );
 }

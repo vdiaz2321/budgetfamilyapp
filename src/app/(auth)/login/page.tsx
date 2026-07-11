@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = {
-  title: "Sign in · Budget Family App",
+  title: "Sign in · Capitall",
 };
 
 async function signIn(formData: FormData) {
@@ -23,7 +23,7 @@ async function signIn(formData: FormData) {
     );
   }
 
-  redirect("/settings");
+  redirect("/budget");
 }
 
 async function createAccount(formData: FormData) {
@@ -59,7 +59,7 @@ async function createAccount(formData: FormData) {
     );
   }
 
-  redirect("/settings");
+  redirect("/budget");
 }
 
 type SearchParams = Promise<{
@@ -80,8 +80,11 @@ export default async function LoginPage({
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
       <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
         <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-800">
-          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-            Budget Family App
+          <p className="flex items-center gap-2 text-sm font-medium text-indigo-600 dark:text-indigo-400">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">
+              C
+            </span>
+            Capitall
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
             {isSignup ? "Create your account" : "Sign in"}
@@ -111,7 +114,7 @@ export default async function LoginPage({
                 autoComplete="email"
                 autoFocus
                 defaultValue={email}
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
               />
             </div>
 
@@ -130,7 +133,7 @@ export default async function LoginPage({
                 minLength={6}
                 autoComplete={isSignup ? "new-password" : "current-password"}
                 placeholder={isSignup ? "At least 6 characters" : ""}
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
               />
             </div>
 
@@ -140,7 +143,7 @@ export default async function LoginPage({
 
             <button
               type="submit"
-              className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+              className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
             >
               {isSignup ? "Create account" : "Sign in"}
             </button>
@@ -152,7 +155,7 @@ export default async function LoginPage({
                 Already have an account?{" "}
                 <a
                   href="/login"
-                  className="font-medium text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-400"
+                  className="font-medium text-indigo-700 underline hover:text-indigo-800 dark:text-indigo-400"
                 >
                   Sign in
                 </a>
@@ -162,7 +165,7 @@ export default async function LoginPage({
                 First time here?{" "}
                 <a
                   href="/login?mode=signup"
-                  className="font-medium text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-400"
+                  className="font-medium text-indigo-700 underline hover:text-indigo-800 dark:text-indigo-400"
                 >
                   Create an account
                 </a>
