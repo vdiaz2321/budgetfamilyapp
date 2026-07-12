@@ -18,7 +18,7 @@ export async function captureSnapshots(
   const month = currentMonthFirst();
   const now = new Date().toISOString();
 
-  const [{ data: accounts }, { data: debts }] = await Promise.all([
+  const [{ data: accounts }, { data: debts }, { data: buckets }] = await Promise.all([
     supabase
       .from("accounts")
       .select("id, kind, current_balance_cents")
@@ -27,6 +27,10 @@ export async function captureSnapshots(
     supabase
       .from("debts")
       .select("subcategory_id, current_balance_cents")
+      .eq("household_id", householdId),
+    supabase
+      .from("buckets")
+      .select("id, account_id, balance_cents")
       .eq("household_id", householdId),
   ]);
 
@@ -54,6 +58,20 @@ export async function captureSnapshots(
         updated_at: now,
       })),
       { onConflict: "household_id,month,subcategory_id" },
+    );
+  }
+
+  if (buckets?.length) {
+    await supabase.from("bucket_snapshots").upsert(
+      buckets.map((b) => ({
+        household_id: householdId,
+        month,
+        bucket_id: b.id,
+        account_id: b.account_id,
+        balance_cents: b.balance_cents ?? 0,
+        updated_at: now,
+      })),
+      { onConflict: "household_id,month,bucket_id" },
     );
   }
 }

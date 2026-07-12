@@ -6,11 +6,25 @@ export type SavingsDetail = {
   monthlyCents: number;
 };
 
+export const DEBT_KINDS = [
+  { value: "credit_card", label: "Credit Card" },
+  { value: "auto", label: "Auto" },
+  { value: "student_loan", label: "Student Loan" },
+  { value: "bank_loan", label: "Bank Loan" },
+  { value: "real_estate_loan", label: "Real Estate Loan" },
+  { value: "medical", label: "Medical" },
+  { value: "family", label: "Family" },
+  { value: "other", label: "Other" },
+] as const;
+
 export type DebtDetail = {
   balanceCents: number;
   minCents: number;
   apr: number;
   dueDay: number | null;
+  debtKind: string | null;
+  notes: string | null;
+  promoAprEndsOn: string | null; // YYYY-MM-DD
   // Linked account (e.g. the credit card this debt represents) — Networth
   // skips the account's balance so it isn't counted twice.
   accountId: string | null;

@@ -1,16 +1,17 @@
 "use client";
 
-import { useTransition } from "react";
+import { useRef, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
   deleteSubcategory,
   updateSubcategory,
-  upsertDebt,
+  upsertDebtAndPlan,
   upsertPlan,
   upsertSavingsGoal,
 } from "./actions";
 import type { AccountOption, RowData } from "./types";
+import { DEBT_KINDS } from "./types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
@@ -26,10 +27,21 @@ type Props = {
   currency: string;
   monthKey: string; // YYYY-MM-01
   debtAccountOptions: AccountOption[];
+  snowballExtraCents: number;
+  isSnowballFocus: boolean;
   onClose: () => void;
 };
 
-export function ItemPanel({ row, kind, currency, monthKey, debtAccountOptions, onClose }: Props) {
+export function ItemPanel({
+  row,
+  kind,
+  currency,
+  monthKey,
+  debtAccountOptions,
+  snowballExtraCents,
+  isSnowballFocus,
+  onClose,
+}: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   const headerLabel = isIncome ? "Received" : remaining < 0 ? "Overspent" : "Remaining";
@@ -68,10 +80,18 @@ export function ItemPanel({ row, kind, currency, monthKey, debtAccountOptions, o
       </div>
 
       <div className="space-y-4 px-5 py-4">
-        <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} />
         {kind === "debt" && row.debt ? (
-          <DebtForm row={row} accountOptions={debtAccountOptions} />
-        ) : null}
+          <DebtForm
+            row={row}
+            currency={currency}
+            monthKey={monthKey}
+            accountOptions={debtAccountOptions}
+            snowballExtraCents={snowballExtraCents}
+            isSnowballFocus={isSnowballFocus}
+          />
+        ) : (
+          <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} />
+        )}
         {kind === "savings" && row.savings ? <SavingsForm row={row} /> : null}
         <RenameForm row={row} kind={kind} onDeleted={onClose} />
       </div>
@@ -109,6 +129,7 @@ function PlannedForm({
           type="number"
           step="0.01"
           defaultValue={centsToDisplay(plannedCents)}
+          onFocus={(e) => e.currentTarget.select()}
           className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
         <SaveBtn pending={pending} />
@@ -117,19 +138,94 @@ function PlannedForm({
   );
 }
 
-function DebtForm({ row, accountOptions }: { row: RowData; accountOptions: AccountOption[] }) {
+function DebtForm({
+  row,
+  currency,
+  monthKey,
+  accountOptions,
+  snowballExtraCents,
+  isSnowballFocus,
+}: {
+  row: RowData;
+  currency: string;
+  monthKey: string;
+  accountOptions: AccountOption[];
+  snowballExtraCents: number;
+  isSnowballFocus: boolean;
+}) {
   const [pending, start] = useTransition();
+  const plannedRef = useRef<HTMLInputElement>(null);
   const d = row.debt!;
+  // What the Snowball page currently schedules for this debt this month —
+  // its min payment, plus the snowball extra if it's the focus debt. This is
+  // just informational: "Planned this month" is what YOU'RE budgeting to pay
+  // and can differ from the contractual "Min. payment" below it.
+  const scheduledCents = d.minCents + (isSnowballFocus ? snowballExtraCents : 0);
   return (
     <Section title="Debt details">
-      <form action={(fd) => start(() => upsertDebt(fd))} className="space-y-2">
+      <form action={(fd) => start(() => upsertDebtAndPlan(fd))} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
+        <input type="hidden" name="month" value={monthKey} />
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Planned this month
+          </span>
+          <input
+            ref={plannedRef}
+            key={row.plannedCents}
+            name="planned"
+            type="number"
+            step="0.01"
+            defaultValue={centsToDisplay(row.plannedCents)}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <p className="mt-1 text-[10px] text-muted">
+            What you&apos;re budgeting to pay — can differ from the Min. payment below.
+            {" "}Scheduled by Snowball:{" "}
+            <button
+              type="button"
+              onClick={() => {
+                if (plannedRef.current) plannedRef.current.value = centsToDisplay(scheduledCents);
+              }}
+              className="font-semibold text-brand hover:underline"
+            >
+              {formatMoney(scheduledCents, currency)}
+            </button>
+            {isSnowballFocus && snowballExtraCents > 0 ? (
+              <> (incl. {formatMoney(snowballExtraCents, currency)} snowball extra)</>
+            ) : null}
+          </p>
+        </label>
         <Grid>
           <Labeled label="Balance" name="balance" type="number" step="0.01" defaultValue={centsToDisplay(d.balanceCents)} />
           <Labeled label="Min. payment" name="minPayment" type="number" step="0.01" defaultValue={centsToDisplay(d.minCents)} />
           <Labeled label="Interest %" name="apr" type="number" step="0.001" defaultValue={String(d.apr)} />
           <Labeled label="Due day" name="dueDay" type="number" min={1} max={31} defaultValue={d.dueDay ?? ""} />
         </Grid>
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Debt type
+          </span>
+          <select
+            key={d.debtKind ?? "none"}
+            name="debtKind"
+            defaultValue={d.debtKind ?? ""}
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          >
+            <option value="">Not set</option>
+            {DEBT_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>{k.label}</option>
+            ))}
+          </select>
+        </label>
+        <Labeled
+          label="0% APR ends"
+          name="promoAprEndsOn"
+          type="date"
+          defaultValue={d.promoAprEndsOn ?? ""}
+          title="If you signed up for an intro 0% offer, set when it ends so you know before real interest kicks in."
+        />
         {accountOptions.length > 0 ? (
           <label className="block">
             <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
@@ -152,6 +248,19 @@ function DebtForm({ row, accountOptions }: { row: RowData; accountOptions: Accou
             </span>
           </label>
         ) : null}
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+            Notes
+          </span>
+          <textarea
+            key={d.notes ?? ""}
+            name="notes"
+            defaultValue={d.notes ?? ""}
+            rows={2}
+            placeholder="Anything worth remembering about this debt…"
+            className="w-full resize-none rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
         <SaveBtn pending={pending} full />
       </form>
     </Section>
@@ -187,7 +296,9 @@ function RenameForm({
 }) {
   const [savePending, startSave] = useTransition();
   const [delPending, startDel] = useTransition();
-  const hasDue = KINDS_WITH_DUE.includes(kind);
+  // Debt owns its own due-day field in Debt Details above (synced to this
+  // same column on save) — showing it twice here was confusing.
+  const hasDue = kind !== "debt" && KINDS_WITH_DUE.includes(kind);
 
   return (
     <Section title="Rename or remove">
@@ -224,6 +335,7 @@ function Grid({ children }: { children: React.ReactNode }) {
 
 function Labeled({
   label,
+  onFocus,
   ...inputProps
 }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
@@ -231,6 +343,9 @@ function Labeled({
       <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">{label}</span>
       <input
         {...inputProps}
+        // Select the existing value on focus so typing replaces a "0" or
+        // "0.00" placeholder instead of requiring it to be deleted first.
+        onFocus={onFocus ?? ((e) => e.currentTarget.select())}
         className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </label>

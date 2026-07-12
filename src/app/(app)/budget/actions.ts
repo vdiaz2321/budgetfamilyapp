@@ -148,6 +148,9 @@ export async function upsertDebt(formData: FormData) {
   const apr = aprRaw === "" ? 0 : parseFloat(aprRaw);
   const rawDue = String(formData.get("dueDay") ?? "").trim();
   const dueDay = rawDue === "" ? null : Math.min(31, Math.max(1, parseInt(rawDue, 10)));
+  const debtKind = String(formData.get("debtKind") ?? "").trim() || null;
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+  const promoAprEndsOn = String(formData.get("promoAprEndsOn") ?? "").trim() || null;
 
   // Linked account (only if it belongs to this household).
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
@@ -170,13 +173,32 @@ export async function upsertDebt(formData: FormData) {
       min_payment_cents: minPaymentCents,
       apr: Number.isNaN(apr) ? 0 : apr,
       due_day: dueDay,
+      debt_kind: debtKind,
+      notes,
+      promo_apr_ends_on: promoAprEndsOn,
       account_id: accountId,
     },
     { onConflict: "household_id,subcategory_id" },
   );
 
+  // Keep subcategories.due_day in sync — the budget row list badge and the
+  // Rename form read from there, not from debts.due_day. Without this, the
+  // due day set here silently didn't show up anywhere else.
+  await supabase
+    .from("subcategories")
+    .update({ due_day: dueDay })
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId);
+
   await captureSnapshots(supabase, householdId);
   revalidatePath("/budget");
+}
+
+// Combined save for the Debt panel: planned amount + debt details in one
+// action, so there's a single Save button instead of two.
+export async function upsertDebtAndPlan(formData: FormData) {
+  await upsertPlan(formData);
+  await upsertDebt(formData);
 }
 
 // ---------- Transactions (the Log, right rail) ----------
@@ -331,6 +353,46 @@ export async function toggleCleared(formData: FormData) {
 
   revalidatePath("/budget");
   revalidatePath("/transactions");
+}
+
+// ---------- Snowball extra periods (time-varying extra) ----------
+
+// A date input gives YYYY-MM-DD; snap to first-of-month.
+function toFirstOfMonth(value: string): string | null {
+  const v = value.trim();
+  if (!/^\d{4}-\d{2}/.test(v)) return null;
+  return `${v.slice(0, 7)}-01`;
+}
+
+export async function addSnowballPeriod(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const start = toFirstOfMonth(String(formData.get("startMonth") ?? ""));
+  const end = toFirstOfMonth(String(formData.get("endMonth") ?? ""));
+  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  if (!start) return;
+
+  await supabase.from("snowball_extra_periods").insert({
+    household_id: householdId,
+    start_month: start,
+    end_month: end,
+    amount_cents: amountCents,
+  });
+
+  revalidatePath("/snowball");
+}
+
+export async function deleteSnowballPeriod(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  await supabase
+    .from("snowball_extra_periods")
+    .delete()
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  revalidatePath("/snowball");
 }
 
 // ---------- Household globals (settings popover) ----------

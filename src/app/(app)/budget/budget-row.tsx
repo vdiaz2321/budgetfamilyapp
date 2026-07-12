@@ -19,7 +19,12 @@ type Props = {
 export function BudgetRow({ row, kind, mode, currency, monthKey, selected, onSelect }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
-  const paidOff = kind === "debt" && row.debt != null && row.debt.balanceCents <= 0;
+  // Only strike an *established* debt that's been paid down to zero — not a
+  // brand-new debt whose balance hasn't been entered yet. dueDay is set at
+  // add-time (before the balance), so it's NOT a signal of "set up" — only
+  // min payment / interest (entered later, in the detail panel) count.
+  const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
+  const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
   // "spent" mode shows the actual (money received for income, spent otherwise);
   // "remaining" mode shows planned − actual for both.
   const modeValue = mode === "spent" ? row.spentCents : remaining;
@@ -105,26 +110,28 @@ function PlannedInput({
     <form
       ref={formRef}
       action={(fd) => start(() => upsertPlan(fd))}
-      className="relative justify-self-end"
+      className="flex items-center justify-end gap-0.5 justify-self-end"
     >
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
-      <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted">
+      <span className="pointer-events-none text-sm text-muted">
         {currencySymbol(currency)}
       </span>
       <input
         // Remount (reset to the server value) whenever the saved amount changes.
         key={initial}
         name="planned"
-        type="number"
-        step="0.01"
+        // type=text (not number) so the `size` attr can shrink the box to fit
+        // its content — `size` is ignored on number inputs, which strands the $.
+        type="text"
         inputMode="decimal"
         defaultValue={initial}
+        size={Math.max(initial.length, 4) + 2}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`w-[7rem] rounded-md bg-transparent py-1 pl-5 pr-2 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />

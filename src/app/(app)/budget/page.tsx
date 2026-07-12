@@ -34,10 +34,12 @@ export default async function BudgetPage({
 
   const { data: household } = await supabase
     .from("households")
-    .select("id, name, currency")
+    .select("id, name, currency, snowball_monthly_extra_cents")
     .eq("id", profile.household_id)
     .single();
   if (!household) redirect("/onboarding");
+
+  const snowballExtraCents = household.snowball_monthly_extra_cents ?? 0;
 
   const categories = await ensureCategories(supabase, household.id);
 
@@ -72,7 +74,9 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("debts")
-      .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day, account_id")
+      .select(
+        "subcategory_id, current_balance_cents, min_payment_cents, apr, due_day, account_id, debt_kind, notes, promo_apr_ends_on",
+      )
       .eq("household_id", household.id),
     supabase
       .from("transactions")
@@ -135,6 +139,9 @@ export default async function BudgetPage({
                   minCents: d?.min_payment_cents ?? 0,
                   apr: d ? Number(d.apr) : 0,
                   dueDay: d?.due_day ?? s.due_day,
+                  debtKind: d?.debt_kind ?? null,
+                  notes: d?.notes ?? null,
+                  promoAprEndsOn: d?.promo_apr_ends_on ?? null,
                   accountId: d?.account_id ?? null,
                 }
               : null,
@@ -150,6 +157,14 @@ export default async function BudgetPage({
       spentTotal: rows.reduce((sum, r) => sum + r.spentCents, 0),
     };
   });
+
+  // Same "smallest unpaid balance first" rule as the Snowball page, so the
+  // debt panel can show which debt is currently getting the extra payment.
+  const debtRows = groups.find((g) => g.kind === "debt")?.rows ?? [];
+  const snowballFocusSubId =
+    debtRows
+      .filter((r) => (r.debt?.balanceCents ?? 0) > 0)
+      .sort((a, b) => (a.debt?.balanceCents ?? 0) - (b.debt?.balanceCents ?? 0))[0]?.subId ?? null;
 
   const incomePlanned = groups
     .filter((g) => g.kind === "income")
@@ -206,6 +221,8 @@ export default async function BudgetPage({
       subOptions={subOptions}
       accountOptions={accountOptions}
       debtAccountOptions={debtAccountOptions}
+      snowballExtraCents={snowballExtraCents}
+      snowballFocusSubId={snowballFocusSubId}
       transactions={transactions}
     />
   );

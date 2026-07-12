@@ -11,13 +11,7 @@ export function displayToCents(value: string | number | null | undefined): numbe
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: "$",
-  CAD: "$",
-  AUD: "$",
-  MXN: "$",
-  EUR: "€",
-  GBP: "£",
-  JPY: "¥",
+  USD: "$"
 };
 
 // Accepts either a currency code ("USD") or an already-symbol ("$").

@@ -51,6 +51,18 @@
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --font-sans: var(--font-app);
+
+  /* Larger + tighter than Tailwind's defaults — EveryDollar reads bigger/denser
+     than our default 14px/12px scale. Bumped a full step so it's actually
+     noticeable: sm 14→16px, xs 12→13.5px, base 16→17px. */
+  --text-xs: 0.84375rem;
+  --text-xs--line-height: 1.15rem;
+  --text-sm: 1rem;
+  --text-sm--line-height: 1.35rem;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.45rem;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.6rem;
 }
 
 body {

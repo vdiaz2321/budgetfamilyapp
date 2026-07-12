@@ -28,6 +28,8 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   debtAccountOptions: AccountOption[];
+  snowballExtraCents: number;
+  snowballFocusSubId: string | null;
   transactions: TxData[];
 };
 
@@ -41,6 +43,8 @@ export function BudgetBoard({
   subOptions,
   accountOptions,
   debtAccountOptions,
+  snowballExtraCents,
+  snowballFocusSubId,
   transactions,
 }: Props) {
   const [mode, setMode] = useState<ViewMode>("remaining");
@@ -63,6 +67,8 @@ export function BudgetBoard({
         currency={currency}
         monthKey={month.firstOfMonth}
         debtAccountOptions={debtAccountOptions}
+        snowballExtraCents={snowballExtraCents}
+        isSnowballFocus={selected.subId === snowballFocusSubId}
         onClose={() => setSelected(null)}
       />
     ) : null;
@@ -106,7 +112,7 @@ export function BudgetBoard({
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
       <aside className="hidden w-[360px] shrink-0 lg:block">
-        <div className="sticky top-6 space-y-3">
+        <div className="sticky top-20 space-y-3">
           {itemPanel ?? (
             <>
               {/* Summary | Transactions toggle */}

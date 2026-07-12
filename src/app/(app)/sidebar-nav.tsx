@@ -37,7 +37,7 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   },
   {
     href: "/networth",
-    label: "Networth",
+    label: "Net Worth",
     icon: <path d="M3 17l6-6 4 4 8-8M21 7v6M21 7h-6" />,
   },
   {

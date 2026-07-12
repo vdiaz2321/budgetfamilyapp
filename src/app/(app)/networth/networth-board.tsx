@@ -59,6 +59,12 @@ export type GridRow = {
   // Account is linked to a Budget debt — shown but not counted (the debt row is).
   linked: boolean;
   balances: (number | null)[]; // aligned to gridMonths
+  // A bucket / "Unallocated" sub-row indented under its parent account.
+  indent?: boolean;
+  // Parent account that has bucket sub-rows below it.
+  hasChildren?: boolean;
+  // The auto "Unallocated" remainder row — rendered subtly.
+  muted?: boolean;
 };
 
 type Props = {
@@ -74,7 +80,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4">
       <div>
-        <h1 className="text-xl font-bold">Networth</h1>
+        <h1 className="text-xl font-bold">Net Worth</h1>
         <p className="text-sm text-muted">
           Assets minus debts, archived monthly from your Accounts and Budget debt balances.
         </p>
@@ -336,11 +342,28 @@ function BalanceGrid({
             </tr>
           </thead>
           <tbody>
-            {assets.map((r) => (
-              <tr key={`a-${r.name}`} className="border-b border-line">
-                <td className={`${stickyCls} whitespace-nowrap px-4 py-2 font-medium`}>{r.name}</td>
+            {assets.map((r, ri) => (
+              <tr key={`a-${ri}-${r.name}`} className={`border-b border-line ${r.indent ? "bg-background/30" : ""}`}>
+                <td
+                  className={`${stickyCls} whitespace-nowrap py-2 ${
+                    r.indent ? "pl-9 text-[0.9375rem]" : "px-4"
+                  } ${
+                    r.muted
+                      ? "italic text-muted"
+                      : r.indent
+                        ? "text-foreground"
+                        : "font-medium"
+                  } ${r.hasChildren ? "font-semibold" : ""}`}
+                >
+                  {r.name}
+                </td>
                 {months.map((m, i) => (
-                  <td key={m} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                  <td
+                    key={m}
+                    className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${
+                      r.muted ? "italic text-muted" : ""
+                    }`}
+                  >
                     {cell(r, i)}
                   </td>
                 ))}

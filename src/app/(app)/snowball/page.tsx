@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { formatMoney } from "@/lib/money";
+import { currentMonthFirst } from "@/lib/snapshots";
+import { projectSnowball } from "@/lib/snowball";
+import { SnowballBoard } from "./snowball-board";
 import { SnowballSettings } from "./snowball-settings";
 
 export const metadata = { title: "Debt Snowball · Capitall" };
@@ -29,40 +31,102 @@ export default async function SnowballPage() {
   if (!household) redirect("/onboarding");
 
   const currency = household.currency;
-  const extraCents = household.snowball_monthly_extra_cents ?? 0;
+  // Manual top-up used ONLY by the classic textbook Snowball (below) — pure
+  // "pay minimums + throw this much extra at the smallest debt," independent
+  // of whatever's Planned per debt. Kept as a shareable reference method.
+  const manualExtraCents = household.snowball_monthly_extra_cents ?? 0;
+  const month = currentMonthFirst();
 
-  const [{ data: debts }, { data: subs }] = await Promise.all([
-    supabase
-      .from("debts")
-      .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day")
-      .eq("household_id", household.id),
-    supabase
-      .from("subcategories")
-      .select("id, name")
-      .eq("household_id", household.id),
-  ]);
+  const [{ data: debts }, { data: subs }, { data: plans }, { data: periodRows }] =
+    await Promise.all([
+      supabase
+        .from("debts")
+        .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day")
+        .eq("household_id", household.id),
+      supabase
+        .from("subcategories")
+        .select("id, name")
+        .eq("household_id", household.id),
+      supabase
+        .from("budget_plans")
+        .select("subcategory_id, planned_cents")
+        .eq("household_id", household.id)
+        .eq("month", month),
+      supabase
+        .from("snowball_extra_periods")
+        .select("id, start_month, end_month, amount_cents")
+        .eq("household_id", household.id)
+        .order("start_month"),
+    ]);
 
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
+  const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
+
+  const periods = (periodRows ?? []).map((p) => ({
+    id: p.id as string,
+    startMonth: p.start_month as string,
+    endMonth: (p.end_month as string | null) ?? null,
+    amountCents: p.amount_cents as number,
+  }));
+
+  // Extra thrown at the focus debt in a given month = flat base + every period
+  // whose range covers that month.
+  const extraForMonth = (m: string) =>
+    manualExtraCents +
+    periods.reduce(
+      (sum, p) => (m >= p.startMonth && (p.endMonth == null || m <= p.endMonth) ? sum + p.amountCents : sum),
+      0,
+    );
+  const currentExtraCents = extraForMonth(month);
 
   const rows = (debts ?? []).map((d) => ({
     subId: d.subcategory_id,
     name: nameBySub.get(d.subcategory_id) ?? "Debt",
     balanceCents: d.current_balance_cents,
     minCents: d.min_payment_cents,
+    plannedCents: plannedBySub.get(d.subcategory_id) ?? 0,
     apr: Number(d.apr),
     dueDay: d.due_day as number | null,
   }));
 
-  // Classic snowball order: smallest balance first. Paid-off debts sink to the
-  // bottom; the smallest unpaid balance is the "focus" that gets the extra.
+  // Card order: smallest balance first (used by both modes, purely for
+  // display — "My Plan" doesn't attack in any particular order).
   const unpaid = rows.filter((r) => r.balanceCents > 0).sort((a, b) => a.balanceCents - b.balanceCents);
   const paidOff = rows.filter((r) => r.balanceCents <= 0);
   const ordered = [...unpaid, ...paidOff];
-  const focusId = unpaid[0]?.subId ?? null;
 
   const totalBalance = unpaid.reduce((s, r) => s + r.balanceCents, 0);
   const totalMin = unpaid.reduce((s, r) => s + r.minCents, 0);
-  const monthlyAttack = totalMin + extraCents;
+
+  // ---- Mode 1: "My Plan" — each debt paid at ITS OWN Planned amount (or its
+  // minimum, whichever's higher), independently. No waterfall, no shared
+  // "extra" pool — this is what actually happens if everyone pays exactly
+  // what's Planned in Budget every month. Default, since Victor pays a fixed
+  // amount per debt to hit promo deadlines rather than snowballing the
+  // smallest balance first.
+  const focusId = unpaid[0]?.subId ?? null; // still used to badge classic mode
+  const plannedTotal = unpaid.reduce((s, r) => s + Math.max(r.minCents, r.plannedCents), 0);
+  const { payoffMonth: plannedPayoff, ledger: plannedLedger } = projectSnowball(
+    unpaid.map((r) => ({
+      id: r.subId,
+      balanceCents: r.balanceCents,
+      minCents: Math.max(r.minCents, r.plannedCents),
+      apr: r.apr,
+    })),
+    0, // no shared extra — each debt's own scheduled amount is baked into minCents above
+    month,
+  );
+
+  // ---- Mode 2: classic textbook Snowball — pay every minimum, throw the
+  // extra (base + any active dated periods) at the smallest balance. Doesn't
+  // look at Planned amounts at all — a pure reference method, kept so it can
+  // be shared/explained to someone else.
+  const monthlyAttack = totalMin + currentExtraCents;
+  const { payoffMonth: classicPayoff, ledger: classicLedger } = projectSnowball(
+    unpaid.map((r) => ({ id: r.subId, balanceCents: r.balanceCents, minCents: r.minCents, apr: r.apr })),
+    extraForMonth,
+    month,
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -76,125 +140,35 @@ export default async function SnowballPage() {
         </Link>
       </div>
 
-      {/* Summary */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <SummaryCard label="Total debt" value={formatMoney(totalBalance, currency)} />
-        <SummaryCard label="Minimums / mo" value={formatMoney(totalMin, currency)} />
-        <SummaryCard
-          label="Monthly attack"
-          value={formatMoney(monthlyAttack, currency)}
-          hint={`incl. ${formatMoney(extraCents, currency)} extra`}
-          highlight
-        />
-      </div>
-
-      {/* Ordered debt list */}
-      <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-        <div className="grid grid-cols-[auto_1fr_7rem_7rem] items-center gap-2 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-          <span>#</span>
-          <span>Debt</span>
-          <span className="text-right">Balance</span>
-          <span className="text-right">This month</span>
-        </div>
-
-        {ordered.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted">
-            No debts yet. Add them in the Debt group on the{" "}
-            <Link href="/budget" className="font-medium text-brand hover:text-brand-strong">
-              Budget tab
-            </Link>
-            .
-          </p>
-        ) : (
-          <ul className="divide-y divide-line">
-            {ordered.map((r, i) => {
-              const isFocus = r.subId === focusId;
-              const isPaid = r.balanceCents <= 0;
-              const thisMonth = isPaid
-                ? 0
-                : r.minCents + (isFocus ? extraCents : 0);
-              return (
-                <li
-                  key={r.subId}
-                  className={`grid grid-cols-[auto_1fr_7rem_7rem] items-center gap-2 px-4 py-3 ${
-                    isFocus ? "bg-brand-soft/40" : ""
-                  }`}
-                >
-                  <span
-                    className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-                      isPaid
-                        ? "bg-positive/15 text-positive"
-                        : isFocus
-                          ? "bg-brand text-white"
-                          : "bg-brand-soft text-brand"
-                    }`}
-                  >
-                    {isPaid ? "✓" : i + 1}
-                  </span>
-                  <div>
-                    <p className={`text-sm ${isPaid ? "text-muted line-through" : "text-foreground"}`}>
-                      {r.name}
-                      {isFocus ? (
-                        <span className="ml-2 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand">
-                          Focus
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="text-[11px] text-muted">
-                      {r.apr ? `${r.apr}% APR` : "—"}
-                      {r.dueDay ? ` · due ${r.dueDay}` : ""}
-                    </p>
-                  </div>
-                  <span className="text-right text-sm tabular-nums text-foreground">
-                    {formatMoney(r.balanceCents, currency)}
-                  </span>
-                  <span
-                    className={`text-right text-sm tabular-nums ${
-                      isFocus ? "font-semibold text-brand" : "text-foreground"
-                    }`}
-                  >
-                    {formatMoney(thisMonth, currency)}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      <SnowballBoard
+        rows={ordered.map((r) => ({
+          subId: r.subId,
+          name: r.name,
+          balanceCents: r.balanceCents,
+          minCents: r.minCents,
+          plannedCents: r.plannedCents,
+          apr: r.apr,
+          dueDay: r.dueDay,
+        }))}
+        focusId={focusId}
+        totalBalanceCents={totalBalance}
+        totalMinCents={totalMin}
+        plannedTotalCents={plannedTotal}
+        currentExtraCents={currentExtraCents}
+        monthlyAttackCents={monthlyAttack}
+        plannedPayoffMonth={Object.fromEntries(plannedPayoff)}
+        plannedLedger={Object.fromEntries(plannedLedger)}
+        classicPayoffMonth={Object.fromEntries(classicPayoff)}
+        classicLedger={Object.fromEntries(classicLedger)}
+        currency={currency}
+      />
 
       <SnowballSettings
         currency={currency}
         snowballStartDate={household.snowball_start_date}
-        snowballMonthlyExtraCents={extraCents}
+        snowballMonthlyExtraCents={manualExtraCents}
+        periods={periods}
       />
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  hint,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-2xl px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${
-        highlight ? "bg-brand text-white ring-0" : "bg-surface"
-      }`}
-    >
-      <p className={`text-xs font-medium uppercase tracking-wide ${highlight ? "text-white/80" : "text-muted"}`}>
-        {label}
-      </p>
-      <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
-      {hint ? (
-        <p className={`text-[11px] ${highlight ? "text-white/80" : "text-muted"}`}>{hint}</p>
-      ) : null}
     </div>
   );
 }
