@@ -19,6 +19,16 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    href: "/savings",
+    label: "Savings",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 3" />
+      </>
+    ),
+  },
+  {
     href: "/snowball",
     label: "Debt Snowball",
     icon: (
@@ -69,8 +79,8 @@ export default function SidebarNav() {
             aria-current={active ? "page" : undefined}
             className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
               active
-                ? "bg-brand-soft text-brand"
-                : "text-muted hover:bg-zinc-100 hover:text-foreground dark:hover:bg-zinc-800"
+                ? "bg-white/15 text-white"
+                : "text-white/65 hover:bg-white/10 hover:text-white"
             }`}
           >
             <svg

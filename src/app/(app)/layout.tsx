@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./sign-out-button";
 import SidebarNav from "./sidebar-nav";
+import { SidebarAccounts, type SidebarGroup } from "./sidebar-accounts";
 
 export default async function AppLayout({
   children,
@@ -24,24 +25,80 @@ export default async function AppLayout({
 
   if (!profile) redirect("/onboarding");
 
+  // Sidebar account list (YNAB-style): cash + investment accounts from
+  // Accounts, debts from Budget (single source of truth), split like YNAB's
+  // "Credit Card / Loans" sections.
+  const [{ data: household }, { data: accounts }, { data: debts }, { data: subs }] =
+    await Promise.all([
+      supabase.from("households").select("currency").eq("id", profile.household_id).single(),
+      supabase
+        .from("accounts")
+        .select("id, name, kind, active, current_balance_cents")
+        .eq("household_id", profile.household_id)
+        .order("name"),
+      supabase
+        .from("debts")
+        .select("subcategory_id, current_balance_cents, debt_kind")
+        .eq("household_id", profile.household_id),
+      supabase.from("subcategories").select("id, name").eq("household_id", profile.household_id),
+    ]);
+
+  const currency = household?.currency ?? "USD";
+  const subName = new Map((subs ?? []).map((s) => [s.id, s.name]));
+
+  const cashKinds = new Set(["checking", "savings_bucket"]);
+  const active = (accounts ?? []).filter((a) => a.active !== false);
+  const toItem = (a: { id: string; name: string; current_balance_cents: number | null }) => ({
+    id: a.id,
+    name: a.name,
+    balanceCents: a.current_balance_cents ?? 0,
+  });
+
+  const debtItems = (debts ?? [])
+    .filter((d) => (d.current_balance_cents ?? 0) > 0)
+    .map((d) => ({
+      id: d.subcategory_id as string,
+      name: subName.get(d.subcategory_id) ?? "Debt",
+      balanceCents: d.current_balance_cents ?? 0,
+      kind: (d.debt_kind as string | null) ?? null,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const groups: SidebarGroup[] = [
+    { label: "Budget", items: active.filter((a) => cashKinds.has(a.kind)).map(toItem) },
+    { label: "Investments", items: active.filter((a) => a.kind === "investment").map(toItem) },
+    {
+      label: "Credit Cards",
+      items: debtItems.filter((d) => d.kind === "credit_card"),
+      liability: true,
+    },
+    {
+      label: "Loans",
+      items: debtItems.filter((d) => d.kind !== "credit_card"),
+      liability: true,
+    },
+  ];
+
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      {/* Sidebar */}
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface px-3 py-5 md:flex">
-        <Link href="/budget" className="mb-6 flex items-center gap-2 px-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-base font-bold text-white">
+      {/* Sidebar — YNAB-style navy in both themes */}
+      <aside className="hidden h-screen w-64 shrink-0 flex-col overflow-hidden bg-sidebar px-3 py-5 text-white md:sticky md:top-0 md:flex">
+        <Link href="/budget" className="mb-5 flex items-center gap-2 px-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 text-base font-bold text-white">
             C
           </span>
-          <span className="text-lg font-semibold tracking-tight">Capitall</span>
+          <span className="text-lg font-semibold tracking-tight text-white">Capitall</span>
         </Link>
 
         <SidebarNav />
 
-        <div className="mt-auto border-t border-line pt-4">
-          <p className="truncate px-3 text-xs text-muted" title={user.email ?? ""}>
+        <SidebarAccounts groups={groups} currency={currency} />
+
+        <div className="mt-4 border-t border-white/15 pt-3">
+          <p className="truncate px-2 text-xs text-white/50" title={user.email ?? ""}>
             {user.email}
           </p>
-          <div className="mt-2 flex items-center justify-end px-1">
+          <div className="mt-1 flex items-center justify-end px-1">
             <SignOutButton />
           </div>
         </div>
@@ -49,18 +106,18 @@ export default async function AppLayout({
 
       {/* Mobile top bar */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-3 md:hidden">
+        <header className="flex items-center justify-between bg-sidebar px-4 py-3 text-white md:hidden">
           <Link href="/budget" className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/15 text-sm font-bold text-white">
               C
             </span>
-            <span className="font-semibold">Capitall</span>
+            <span className="font-semibold text-white">Capitall</span>
           </Link>
           <SignOutButton />
         </header>
 
         {/* Mobile nav row */}
-        <div className="flex gap-1 overflow-x-auto border-b border-line bg-surface px-2 py-2 md:hidden">
+        <div className="flex gap-1 overflow-x-auto bg-sidebar px-2 py-2 text-white md:hidden">
           <SidebarNav />
         </div>
 

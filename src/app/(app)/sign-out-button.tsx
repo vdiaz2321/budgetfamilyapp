@@ -11,7 +11,7 @@ export function SignOutButton() {
   return (
     <button
       type="button"
-      className="rounded-md px-2 py-1 text-xs text-muted hover:text-negative disabled:opacity-50"
+      className="rounded-md px-2 py-1 text-xs text-white/60 hover:text-red-300 disabled:opacity-50"
       disabled={pending}
       onClick={() =>
         start(async () => {

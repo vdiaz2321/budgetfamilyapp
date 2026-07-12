@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AccountsBoard, type AccountData, type BudgetDebt } from "./accounts-board";
+import { syncAllBucketedAccounts } from "./actions";
 
 export const metadata = { title: "Accounts · Capitall" };
 
@@ -25,6 +26,11 @@ export default async function AccountsPage() {
     .eq("id", profile.household_id)
     .single();
   if (!household) redirect("/onboarding");
+
+  // Self-heal any account whose top-level balance drifted from its buckets'
+  // sum before this sync existed (e.g. a manually-entered total that never
+  // matched the buckets underneath it).
+  await syncAllBucketedAccounts(supabase, household.id);
 
   const [{ data: rows }, { data: bucketRows }, { data: debtRows }, { data: subRows }] =
     await Promise.all([

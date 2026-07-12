@@ -5,6 +5,23 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
+import { adjustBucketBalance } from "@/lib/buckets";
+
+// The bucket a Savings subcategory contributes to, if any linked — null when
+// not a savings item or not linked, so callers can skip the bucket math.
+async function getLinkedBucketId(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  subcategoryId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("subcategories")
+    .select("linked_bucket_id")
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  return data?.linked_bucket_id ?? null;
+}
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -120,6 +137,7 @@ export async function upsertSavingsGoal(formData: FormData) {
   const goalCents = displayToCents(String(formData.get("goal") ?? "0"));
   const startCents = displayToCents(String(formData.get("start") ?? "0"));
   const monthlyCents = displayToCents(String(formData.get("monthly") ?? "0"));
+  const targetDate = String(formData.get("targetDate") ?? "").trim() || null;
 
   await supabase.from("savings_goals").upsert(
     {
@@ -128,11 +146,49 @@ export async function upsertSavingsGoal(formData: FormData) {
       goal_cents: goalCents,
       start_cents: startCents,
       monthly_contribution_cents: monthlyCents,
+      target_date: targetDate,
     },
     { onConflict: "household_id,subcategory_id" },
   );
 
   revalidatePath("/budget");
+}
+
+// Links (or unlinks) a Savings item to a real bucket in Accounts. Once
+// linked, transactions logged under this item add straight to the bucket's
+// balance — no re-typing the contribution over on Accounts.
+export async function updateSavingsLink(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  if (!subcategoryId) return;
+
+  const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
+  let bucketId: string | null = null;
+  if (bucketIdRaw) {
+    const { data: bucket } = await supabase
+      .from("buckets")
+      .select("id")
+      .eq("id", bucketIdRaw)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    bucketId = bucket?.id ?? null;
+  }
+
+  await supabase
+    .from("subcategories")
+    .update({ linked_bucket_id: bucketId })
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId);
+
+  revalidatePath("/budget");
+  revalidatePath("/accounts");
+}
+
+// Combined save for the Savings panel: goal fields + bucket link in one
+// action, so there's a single Save button instead of two.
+export async function upsertSavingsGoalAndLink(formData: FormData) {
+  await upsertSavingsGoal(formData);
+  await updateSavingsLink(formData);
 }
 
 // ---------- Debt (detail panel) ----------
@@ -211,6 +267,7 @@ export async function addTransaction(formData: FormData) {
   const payeeName = String(formData.get("payee") ?? "").trim();
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
+  const isWithdrawal = formData.get("isWithdrawal") === "on";
   if (!subcategoryId || !occurredOn || amountCents <= 0) return;
 
   // Keep category_id consistent with the chosen subcategory.
@@ -256,11 +313,21 @@ export async function addTransaction(formData: FormData) {
     payee_id: payeeId,
     account_id: accountId,
     memo,
+    is_withdrawal: isWithdrawal,
     source: "manual",
   });
 
+  // A contribution adds to the linked bucket; a withdrawal (e.g. using the
+  // Real Estate bucket for a down payment) subtracts from it instead.
+  const bucketId = await getLinkedBucketId(supabase, householdId, subcategoryId);
+  if (bucketId) {
+    await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
+    await captureSnapshots(supabase, householdId);
+  }
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
+  revalidatePath("/accounts");
 }
 
 export async function updateTransaction(formData: FormData) {
@@ -272,7 +339,17 @@ export async function updateTransaction(formData: FormData) {
   const payeeName = String(formData.get("payee") ?? "").trim();
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
+  const isWithdrawal = formData.get("isWithdrawal") === "on";
   if (!id || !subcategoryId || !occurredOn || amountCents <= 0) return;
+
+  // Snapshot the pre-edit values so we can undo their bucket effect below —
+  // the old subcategory/amount/direction may differ from the new ones.
+  const { data: prevTx } = await supabase
+    .from("transactions")
+    .select("subcategory_id, amount_cents, is_withdrawal")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .maybeSingle();
 
   const { data: sub } = await supabase
     .from("subcategories")
@@ -316,12 +393,32 @@ export async function updateTransaction(formData: FormData) {
       payee_id: payeeId,
       account_id: accountId,
       memo,
+      is_withdrawal: isWithdrawal,
     })
     .eq("id", id)
     .eq("household_id", householdId);
 
+  // Undo the old transaction's bucket effect (it may have hit a different
+  // bucket, or none at all), then apply the new one's.
+  let touchedBucket = false;
+  if (prevTx) {
+    const prevBucketId = await getLinkedBucketId(supabase, householdId, prevTx.subcategory_id);
+    if (prevBucketId) {
+      const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
+      await adjustBucketBalance(supabase, householdId, prevBucketId, undoDelta);
+      touchedBucket = true;
+    }
+  }
+  const bucketId = await getLinkedBucketId(supabase, householdId, subcategoryId);
+  if (bucketId) {
+    await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
+    touchedBucket = true;
+  }
+  if (touchedBucket) await captureSnapshots(supabase, householdId);
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
+  revalidatePath("/accounts");
 }
 
 export async function deleteTransaction(formData: FormData) {
@@ -329,14 +426,31 @@ export async function deleteTransaction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
+  const { data: tx } = await supabase
+    .from("transactions")
+    .select("subcategory_id, amount_cents, is_withdrawal")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .maybeSingle();
+
   await supabase
     .from("transactions")
     .delete()
     .eq("id", id)
     .eq("household_id", householdId);
 
+  if (tx?.subcategory_id) {
+    const bucketId = await getLinkedBucketId(supabase, householdId, tx.subcategory_id);
+    if (bucketId) {
+      const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
+      await adjustBucketBalance(supabase, householdId, bucketId, undoDelta);
+      await captureSnapshots(supabase, householdId);
+    }
+  }
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
+  revalidatePath("/accounts");
 }
 
 // The Log tab's Clear column: checked = verified against the bank/card app.

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
-import type { AccountOption, GroupData, SubOption, TxData } from "./types";
+import type { AccountOption, BucketOption, GroupData, SubOption, TxData } from "./types";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -52,10 +52,11 @@ export default async function BudgetPage({
     { data: txRows },
     { data: payees },
     { data: accounts },
+    { data: buckets },
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, due_day, sort_order")
+      .select("id, category_id, name, due_day, sort_order, linked_bucket_id")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -70,7 +71,7 @@ export default async function BudgetPage({
       .eq("month", month.firstOfMonth),
     supabase
       .from("savings_goals")
-      .select("subcategory_id, goal_cents, start_cents, monthly_contribution_cents")
+      .select("subcategory_id, goal_cents, start_cents, monthly_contribution_cents, target_date")
       .eq("household_id", household.id),
     supabase
       .from("debts")
@@ -80,7 +81,9 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("transactions")
-      .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared")
+      .select(
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal",
+      )
       .eq("household_id", household.id)
       .gte("occurred_on", month.firstOfMonth)
       .lt("occurred_on", nextFirst)
@@ -96,6 +99,11 @@ export default async function BudgetPage({
       .eq("household_id", household.id)
       .eq("active", true)
       .order("name"),
+    supabase
+      .from("buckets")
+      .select("id, account_id, name")
+      .eq("household_id", household.id)
+      .order("name"),
   ]);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
@@ -108,6 +116,10 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
   const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
+  const linkedBucketBySub = new Map(
+    (subs ?? []).map((s) => [s.id, (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null]),
+  );
+  const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
 
   const groups: GroupData[] = categories.map((cat) => {
     const kind = cat.kind as CategoryKind;
@@ -130,6 +142,8 @@ export default async function BudgetPage({
                   goalCents: g?.goal_cents ?? 0,
                   startCents: g?.start_cents ?? 0,
                   monthlyCents: g?.monthly_contribution_cents ?? 0,
+                  targetDate: g?.target_date ?? null,
+                  linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
                 }
               : null,
           debt:
@@ -177,6 +191,7 @@ export default async function BudgetPage({
     id: s.id,
     name: s.name,
     kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
+    linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
   }));
 
   const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
@@ -188,6 +203,14 @@ export default async function BudgetPage({
   const debtAccountOptions: AccountOption[] = (accounts ?? [])
     .filter((a) => a.kind === "credit_card" || a.kind === "debt_loan")
     .map((a) => ({ id: a.id, name: a.name }));
+
+  // Buckets a Savings item can link to, so its contributions/withdrawals
+  // flow straight into the Accounts balance.
+  const bucketOptions: BucketOption[] = (buckets ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    accountName: accountNameById.get(b.account_id) ?? "Account",
+  }));
 
   const transactions: TxData[] = (txRows ?? []).map((t) => ({
     id: t.id,
@@ -202,6 +225,7 @@ export default async function BudgetPage({
     accountId: t.account_id ?? null,
     kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
     cleared: t.cleared ?? false,
+    isWithdrawal: t.is_withdrawal ?? false,
   }));
 
   return (
@@ -221,6 +245,7 @@ export default async function BudgetPage({
       subOptions={subOptions}
       accountOptions={accountOptions}
       debtAccountOptions={debtAccountOptions}
+      bucketOptions={bucketOptions}
       snowballExtraCents={snowballExtraCents}
       snowballFocusSubId={snowballFocusSubId}
       transactions={transactions}

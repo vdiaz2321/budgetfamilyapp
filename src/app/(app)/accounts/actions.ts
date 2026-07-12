@@ -5,11 +5,12 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
+import { syncAccountFromBuckets, syncAllBucketedAccounts } from "@/lib/buckets";
 
 // Kinds the UI lets you create — asset accounts only. Debts (credit cards /
 // loans) live in the Budget Debt group and flow to Net Worth + Snowball from
 // there, so they're never entered here (single source of truth).
-const ALLOWED_KINDS = ["checking", "savings_bucket", "cash", "investment"];
+const ALLOWED_KINDS = ["checking", "savings_bucket", "investment"];
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -32,7 +33,11 @@ function revalidate() {
   revalidatePath("/accounts");
   // The transaction modal's account dropdown lives on /budget.
   revalidatePath("/budget");
+  // The sidebar's account totals live in the shared (app) layout.
+  revalidatePath("/", "layout");
 }
+
+export { syncAllBucketedAccounts };
 
 export async function addAccount(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
@@ -141,6 +146,7 @@ export async function addBucket(formData: FormData) {
     };
   }
 
+  await syncAccountFromBuckets(supabase, householdId, accountId);
   await captureSnapshots(supabase, householdId);
   revalidate();
   return { error: null };
@@ -177,12 +183,15 @@ export async function updateBucketBalance(formData: FormData) {
 
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
 
-  await supabase
+  const { data: bucket } = await supabase
     .from("buckets")
     .update({ balance_cents: balanceCents, updated_at: new Date().toISOString() })
     .eq("id", id)
-    .eq("household_id", householdId);
+    .eq("household_id", householdId)
+    .select("account_id")
+    .single();
 
+  if (bucket) await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
   await captureSnapshots(supabase, householdId);
   revalidate();
 }
@@ -192,6 +201,13 @@ export async function deleteBucket(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
+  const { data: bucket } = await supabase
+    .from("buckets")
+    .select("account_id")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .single();
+
   // bucket_snapshots cascade-delete with the bucket.
   await supabase
     .from("buckets")
@@ -199,5 +215,7 @@ export async function deleteBucket(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId);
 
+  if (bucket) await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
+  await captureSnapshots(supabase, householdId);
   revalidate();
 }

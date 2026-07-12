@@ -65,6 +65,8 @@ export function TransactionModal({
   firstOfMonth,
   subOptions,
   accountOptions,
+  initialKind,
+  initialSubId,
   onClose,
 }: {
   editTx: TxData | null;
@@ -72,11 +74,15 @@ export function TransactionModal({
   firstOfMonth: string;
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  // Preselects the type + budget item when opened from an item's own panel
+  // (e.g. its "+ Add transaction" button) instead of the general Log tab.
+  initialKind?: CategoryKind;
+  initialSubId?: string;
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
   const isEdit = editTx != null;
-  const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? "expenses");
+  const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
   const formRef = useRef<HTMLFormElement>(null);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -192,26 +198,19 @@ export function TransactionModal({
             </select>
 
             {/* Budget item */}
-            <div>
-              <p className="mb-1.5 text-sm font-bold">Budget Items</p>
-              <select
-                key={txType}
-                name="subcategoryId"
-                required
-                defaultValue={editTx && editTx.kind === txType ? editTx.subId ?? "" : ""}
-                className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="" disabled>Choose Budget Item…</option>
-                {options.map((o) => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
-              </select>
-              {options.length === 0 ? (
-                <p className="mt-1 text-xs text-muted">
-                  No {KIND_TAB[txType]} items yet — add one on the budget first.
-                </p>
-              ) : null}
-            </div>
+            <BudgetItemField
+              key={txType}
+              kindLabel={KIND_TAB[txType]}
+              options={options}
+              defaultValue={
+                editTx && editTx.kind === txType
+                  ? editTx.subId ?? ""
+                  : !isEdit && initialKind === txType
+                    ? initialSubId ?? ""
+                    : ""
+              }
+              defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
+            />
 
             {/* Note */}
             <input
@@ -248,6 +247,60 @@ export function TransactionModal({
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Keyed by txType from the parent (remounts on tab switch, resetting local
+// state) so a stale selection from another tab can't leak in. Shows the
+// withdrawal toggle only when the chosen item is a Savings item linked to a
+// bucket in Accounts.
+function BudgetItemField({
+  kindLabel,
+  options,
+  defaultValue,
+  defaultIsWithdrawal,
+}: {
+  kindLabel: string;
+  options: SubOption[];
+  defaultValue: string;
+  defaultIsWithdrawal: boolean;
+}) {
+  const [subId, setSubId] = useState(defaultValue);
+  const linkedBucketId = options.find((o) => o.id === subId)?.linkedBucketId;
+
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-bold">Budget Items</p>
+      <select
+        name="subcategoryId"
+        required
+        value={subId}
+        onChange={(e) => setSubId(e.target.value)}
+        className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      >
+        <option value="" disabled>Choose Budget Item…</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>{o.name}</option>
+        ))}
+      </select>
+      {options.length === 0 ? (
+        <p className="mt-1 text-xs text-muted">
+          No {kindLabel} items yet — add one on the budget first.
+        </p>
+      ) : null}
+      {linkedBucketId ? (
+        <label className="mt-2 flex items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            name="isWithdrawal"
+            defaultChecked={defaultIsWithdrawal}
+            className="h-4 w-4 rounded accent-[var(--brand)]"
+          />
+          This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a
+          purchase)
+        </label>
+      ) : null}
     </div>
   );
 }

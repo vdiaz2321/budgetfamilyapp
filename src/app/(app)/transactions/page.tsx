@@ -46,13 +46,13 @@ export default async function TransactionsPage({
     await Promise.all([
       supabase
         .from("subcategories")
-        .select("id, category_id, name")
+        .select("id, category_id, name, linked_bucket_id")
         .eq("household_id", household.id)
         .order("sort_order"),
       supabase
         .from("transactions")
         .select(
-          "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared",
+          "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal",
         )
         .eq("household_id", household.id)
         .gte("occurred_on", month.firstOfMonth)
@@ -81,6 +81,7 @@ export default async function TransactionsPage({
     id: s.id,
     name: s.name,
     kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
+    linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
   }));
 
   const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
@@ -101,6 +102,7 @@ export default async function TransactionsPage({
     accountId: t.account_id ?? null,
     kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
     cleared: t.cleared ?? false,
+    isWithdrawal: t.is_withdrawal ?? false,
   }));
 
   return (

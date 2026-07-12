@@ -202,12 +202,21 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
       >
+        <defs>
+          {/* Area wash fades to nothing toward the baseline — reads cleaner
+              than a flat fill, especially in dark mode. */}
+          <linearGradient id="nw-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+
         {/* Gridlines + y ticks */}
         {ticks.map((t) => (
           <g key={t}>
             <line
               x1={M.l} x2={W - M.r} y1={y(t)} y2={y(t)}
-              stroke="var(--border)" strokeWidth="1"
+              stroke="var(--border)" strokeWidth="1" strokeDasharray="2 4"
             />
             <text
               x={M.l - 8} y={y(t) + 3.5}
@@ -225,13 +234,13 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
         ) : null}
 
         {/* Area wash + line */}
-        {areaPath ? <path d={areaPath} fill="var(--brand)" opacity="0.1" /> : null}
+        {areaPath ? <path d={areaPath} fill="url(#nw-fill)" /> : null}
         {points.length > 1 ? (
           <path
             d={linePath}
             fill="none"
             stroke="var(--brand)"
-            strokeWidth="2"
+            strokeWidth="2.5"
             strokeLinejoin="round"
             strokeLinecap="round"
           />

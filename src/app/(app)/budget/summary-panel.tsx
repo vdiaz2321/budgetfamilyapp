@@ -54,9 +54,13 @@ export function SummaryPanel({ groups, currency, mode }: Props) {
   // Precompute each arc's dash length + offset via prefix sums so the render
   // body never mutates a running accumulator (React-compiler-safe).
   const lens = base.map((s) => (total > 0 ? (s.arcValue / total) * C : 0));
+  // Breathing room between segments (YNAB-style): shave a small gap off the
+  // end of each visible arc — only when there's more than one to separate.
+  const visibleCount = lens.filter((l) => l > 0).length;
+  const GAP = visibleCount > 1 ? 3 : 0;
   const segments = base.map((s, i) => ({
     ...s,
-    len: lens[i],
+    len: Math.max(0.1, lens[i] - GAP),
     // Offset = negative sum of all preceding arc lengths.
     arcOffset: -lens.slice(0, i).reduce((sum, l) => sum + l, 0),
   }));

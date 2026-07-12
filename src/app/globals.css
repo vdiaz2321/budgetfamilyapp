@@ -18,6 +18,10 @@
   --accent: #f59e0b; /* amber-500 */
   --positive: #16a34a; /* green-600 */
   --negative: #dc2626; /* red-600 */
+
+  /* YNAB-style sidebar: deep indigo-navy in light mode, near-black navy in
+     dark mode. White text lives on it in both themes. */
+  --sidebar: #303c6b;
 }
 
 :root[data-theme="dark"] {
@@ -33,6 +37,8 @@
   --accent: #fbbf24; /* amber-400 */
   --positive: #22c55e;
   --negative: #f87171;
+
+  --sidebar: #10182e; /* dark navy, a touch bluer than the canvas */
 }
 
 @theme inline {
@@ -44,6 +50,7 @@
      Tailwind v4 emit a `border-line` class that collides with the `border`
      width utility, so the color never applies and borders fall back to black. */
   --color-line: var(--border);
+  --color-sidebar: var(--sidebar);
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);

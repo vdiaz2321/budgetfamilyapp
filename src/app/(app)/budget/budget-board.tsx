@@ -7,9 +7,11 @@ import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
 import { TransactionsPanel } from "./transactions-panel";
+import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
 import type {
   AccountOption,
+  BucketOption,
   GroupData,
   MonthNav,
   RowData,
@@ -28,6 +30,7 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   debtAccountOptions: AccountOption[];
+  bucketOptions: BucketOption[];
   snowballExtraCents: number;
   snowballFocusSubId: string | null;
   transactions: TxData[];
@@ -43,6 +46,7 @@ export function BudgetBoard({
   subOptions,
   accountOptions,
   debtAccountOptions,
+  bucketOptions,
   snowballExtraCents,
   snowballFocusSubId,
   transactions,
@@ -50,6 +54,9 @@ export function BudgetBoard({
   const [mode, setMode] = useState<ViewMode>("remaining");
   const [railTab, setRailTab] = useState<"summary" | "transactions">("transactions");
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
+  // Set from the item panel's "+ Add transaction" button so it doesn't
+  // require switching to the Log tab first.
+  const [quickAdd, setQuickAdd] = useState(false);
   const toggleMode = () => setMode((m) => (m === "remaining" ? "spent" : "remaining"));
   const positive = leftToBudget >= 0;
 
@@ -67,9 +74,11 @@ export function BudgetBoard({
         currency={currency}
         monthKey={month.firstOfMonth}
         debtAccountOptions={debtAccountOptions}
+        bucketOptions={bucketOptions}
         snowballExtraCents={snowballExtraCents}
         isSnowballFocus={selected.subId === snowballFocusSubId}
         onClose={() => setSelected(null)}
+        onAddTransaction={() => setQuickAdd(true)}
       />
     ) : null;
 
@@ -176,6 +185,19 @@ export function BudgetBoard({
             {itemPanel}
           </div>
         </div>
+      ) : null}
+
+      {quickAdd && selected ? (
+        <TransactionModal
+          editTx={null}
+          monthKey={month.key}
+          firstOfMonth={month.firstOfMonth}
+          subOptions={subOptions}
+          accountOptions={accountOptions}
+          initialKind={selected.kind}
+          initialSubId={selected.subId}
+          onClose={() => setQuickAdd(false)}
+        />
       ) : null}
     </div>
   );

@@ -4,6 +4,19 @@ export type SavingsDetail = {
   goalCents: number;
   startCents: number;
   monthlyCents: number;
+  // When set, the dashboard checks whether the Monthly amount is on pace to
+  // reach the Goal by this date instead of just tracking raw progress.
+  targetDate: string | null; // YYYY-MM-DD
+  // The bucket (over on Accounts) this savings item contributes to — once
+  // linked, logged transactions add/subtract from its balance automatically.
+  linkedBucketId: string | null;
+};
+
+// A bucket a Savings item can link to, labeled with its parent account.
+export type BucketOption = {
+  id: string;
+  name: string;
+  accountName: string;
 };
 
 export const DEBT_KINDS = [
@@ -64,6 +77,9 @@ export type SubOption = {
   id: string;
   name: string;
   kind: CategoryKind;
+  // Set only for Savings items linked to a bucket — lets the transaction
+  // form offer the withdrawal toggle for those.
+  linkedBucketId?: string | null;
 };
 
 // An account option for the add-transaction form.
@@ -84,4 +100,5 @@ export type TxData = {
   accountId: string | null;
   kind: CategoryKind | null;
   cleared: boolean;
+  isWithdrawal: boolean;
 };

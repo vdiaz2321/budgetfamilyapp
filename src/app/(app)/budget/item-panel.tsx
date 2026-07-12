@@ -8,9 +8,9 @@ import {
   updateSubcategory,
   upsertDebtAndPlan,
   upsertPlan,
-  upsertSavingsGoal,
+  upsertSavingsGoalAndLink,
 } from "./actions";
-import type { AccountOption, RowData } from "./types";
+import type { AccountOption, BucketOption, RowData } from "./types";
 import { DEBT_KINDS } from "./types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
@@ -27,9 +27,11 @@ type Props = {
   currency: string;
   monthKey: string; // YYYY-MM-01
   debtAccountOptions: AccountOption[];
+  bucketOptions: BucketOption[];
   snowballExtraCents: number;
   isSnowballFocus: boolean;
   onClose: () => void;
+  onAddTransaction: () => void;
 };
 
 export function ItemPanel({
@@ -38,9 +40,11 @@ export function ItemPanel({
   currency,
   monthKey,
   debtAccountOptions,
+  bucketOptions,
   snowballExtraCents,
   isSnowballFocus,
   onClose,
+  onAddTransaction,
 }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
@@ -79,7 +83,20 @@ export function ItemPanel({
         </p>
       </div>
 
-      <div className="space-y-4 px-5 py-4">
+      <div className="px-5 pt-4">
+        <button
+          type="button"
+          onClick={onAddTransaction}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-soft py-2 text-sm font-semibold text-brand hover:bg-brand-soft/70"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add transaction
+        </button>
+      </div>
+
+      <div className="space-y-4 px-5 pb-4 pt-3">
         {kind === "debt" && row.debt ? (
           <DebtForm
             row={row}
@@ -92,7 +109,9 @@ export function ItemPanel({
         ) : (
           <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} />
         )}
-        {kind === "savings" && row.savings ? <SavingsForm row={row} /> : null}
+        {kind === "savings" && row.savings ? (
+          <SavingsForm row={row} bucketOptions={bucketOptions} />
+        ) : null}
         <RenameForm row={row} kind={kind} onDeleted={onClose} />
       </div>
     </div>
@@ -267,18 +286,49 @@ function DebtForm({
   );
 }
 
-function SavingsForm({ row }: { row: RowData }) {
+function SavingsForm({ row, bucketOptions }: { row: RowData; bucketOptions: BucketOption[] }) {
   const [pending, start] = useTransition();
   const s = row.savings!;
   return (
     <Section title="Savings goal">
-      <form action={(fd) => start(() => upsertSavingsGoal(fd))} className="space-y-2">
+      <form action={(fd) => start(() => upsertSavingsGoalAndLink(fd))} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <Grid>
           <Labeled label="Goal" name="goal" type="number" step="0.01" defaultValue={centsToDisplay(s.goalCents)} />
           <Labeled label="Start" name="start" type="number" step="0.01" defaultValue={centsToDisplay(s.startCents)} />
           <Labeled label="Monthly" name="monthly" type="number" step="0.01" defaultValue={centsToDisplay(s.monthlyCents)} />
         </Grid>
+        <Labeled
+          label="Target date (optional)"
+          name="targetDate"
+          type="date"
+          defaultValue={s.targetDate ?? ""}
+          title="Set this to see whether your Monthly amount is on pace to hit the Goal by then."
+        />
+        {bucketOptions.length > 0 ? (
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+              Linked bucket
+            </span>
+            <select
+              key={s.linkedBucketId ?? "none"}
+              name="bucketId"
+              defaultValue={s.linkedBucketId ?? ""}
+              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Not linked</option>
+              {bucketOptions.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.accountName} → {b.name}
+                </option>
+              ))}
+            </select>
+            <span className="mt-0.5 block text-[10px] text-muted">
+              Once linked, transactions logged under this item add to (or, marked as a
+              withdrawal, subtract from) this bucket&apos;s balance in Accounts automatically.
+            </span>
+          </label>
+        ) : null}
         <SaveBtn pending={pending} full />
       </form>
     </Section>

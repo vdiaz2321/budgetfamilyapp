@@ -61,14 +61,6 @@ const SECTIONS: Section[] = [
     kindLabels: { checking: "Checking", savings_bucket: "Savings" },
   },
   {
-    key: "cash",
-    label: "Cash",
-    dot: "bg-positive",
-    kinds: ["cash"],
-    liability: false,
-    kindLabels: { cash: "Cash" },
-  },
-  {
     key: "investments",
     label: "Investments & Brokerages",
     dot: "bg-sky-500",
@@ -419,12 +411,16 @@ function AccountRow({
           {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
         </button>
 
-        <BalanceInput
-          id={account.id}
-          balanceCents={account.balanceCents}
-          currency={currency}
-          liability={section.liability}
-        />
+        {allowBuckets && bucketCount > 0 ? (
+          <DerivedBalance balanceCents={account.balanceCents} currency={currency} />
+        ) : (
+          <BalanceInput
+            id={account.id}
+            balanceCents={account.balanceCents}
+            currency={currency}
+            liability={section.liability}
+          />
+        )}
       </div>
 
       {allowBuckets && bucketsOpen ? (
@@ -436,13 +432,12 @@ function AccountRow({
   );
 }
 
-// The bucket breakdown for one account: named sinking funds + an auto-computed
-// "Unallocated" remainder so the parts always reconcile to the account total.
+// The bucket breakdown for one account: named sinking funds. The account's
+// top-level balance is always the sum of these — there's no separate
+// "Unallocated" remainder to keep in sync; floating cash is just its own
+// bucket (e.g. "Extra Cash").
 function BucketDrawer({ account, currency }: { account: AccountData; currency: string }) {
   const [adding, setAdding] = useState(false);
-
-  const allocated = account.buckets.reduce((sum, b) => sum + b.balanceCents, 0);
-  const unallocated = account.balanceCents - allocated;
 
   return (
     <div className="border-t border-line bg-background/40 pl-11 pr-4 py-2">
@@ -458,19 +453,6 @@ function BucketDrawer({ account, currency }: { account: AccountData; currency: s
           ))}
         </ul>
       )}
-
-      {/* Auto remainder — the "AMEX Savings (Extra)" plug. Only meaningful once
-          at least one bucket exists. */}
-      {account.buckets.length > 0 ? (
-        <div className="mt-1 flex items-center justify-between border-t border-line/60 pt-1.5">
-          <span className="text-xs font-medium text-muted">
-            Unallocated{unallocated < 0 ? " (over-allocated)" : ""}
-          </span>
-          <span className={`text-sm tabular-nums ${unallocated < 0 ? "text-negative" : "text-muted"}`}>
-            {formatMoney(unallocated, currency)}
-          </span>
-        </div>
-      ) : null}
 
       {adding ? (
         <AddBucketForm accountId={account.id} onDone={() => setAdding(false)} />
@@ -632,6 +614,20 @@ function AddBucketForm({ accountId, onDone }: { accountId: string; onDone: () =>
         </button>
       </form>
       {error ? <p className="mt-1 text-xs font-medium text-negative">{error}</p> : null}
+    </div>
+  );
+}
+
+// Read-only total for accounts with buckets — always the sum of the buckets
+// below, so edit the buckets, not this.
+function DerivedBalance({ balanceCents, currency }: { balanceCents: number; currency: string }) {
+  return (
+    <div
+      title="Sum of this account's buckets — edit the buckets below to change it"
+      className="flex items-center justify-end gap-0.5 justify-self-end py-1 px-1"
+    >
+      <span className="text-sm text-muted">{currencySymbol(currency)}</span>
+      <span className="text-[0.9375rem] tabular-nums">{centsToDisplay(balanceCents)}</span>
     </div>
   );
 }
