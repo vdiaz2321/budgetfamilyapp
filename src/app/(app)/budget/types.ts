@@ -11,6 +11,9 @@ export type DebtDetail = {
   minCents: number;
   apr: number;
   dueDay: number | null;
+  // Linked account (e.g. the credit card this debt represents) — Networth
+  // skips the account's balance so it isn't counted twice.
+  accountId: string | null;
 };
 
 export type RowData = {
@@ -55,7 +58,7 @@ export type AccountOption = {
   name: string;
 };
 
-// A transaction shown in the right-rail Log.
+// A transaction shown in the right-rail Log and the Transactions page.
 export type TxData = {
   id: string;
   date: string; // YYYY-MM-DD
@@ -66,4 +69,5 @@ export type TxData = {
   subName: string;
   accountId: string | null;
   kind: CategoryKind | null;
+  cleared: boolean;
 };

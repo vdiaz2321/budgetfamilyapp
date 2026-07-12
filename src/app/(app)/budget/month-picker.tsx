@@ -16,7 +16,13 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-export function MonthPicker({ monthKey }: { monthKey: string }) {
+export function MonthPicker({
+  monthKey,
+  basePath = "/budget",
+}: {
+  monthKey: string;
+  basePath?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
@@ -29,7 +35,7 @@ export function MonthPicker({ monthKey }: { monthKey: string }) {
 
   function goTo(key: string) {
     setOpen(false);
-    router.push(`/budget?month=${key}`);
+    router.push(`${basePath}?month=${key}`);
   }
 
   function toggle() {

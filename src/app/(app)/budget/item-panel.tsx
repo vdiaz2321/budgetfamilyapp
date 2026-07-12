@@ -10,7 +10,7 @@ import {
   upsertPlan,
   upsertSavingsGoal,
 } from "./actions";
-import type { RowData } from "./types";
+import type { AccountOption, RowData } from "./types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
@@ -25,10 +25,11 @@ type Props = {
   kind: CategoryKind;
   currency: string;
   monthKey: string; // YYYY-MM-01
+  debtAccountOptions: AccountOption[];
   onClose: () => void;
 };
 
-export function ItemPanel({ row, kind, currency, monthKey, onClose }: Props) {
+export function ItemPanel({ row, kind, currency, monthKey, debtAccountOptions, onClose }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   const headerLabel = isIncome ? "Received" : remaining < 0 ? "Overspent" : "Remaining";
@@ -68,7 +69,9 @@ export function ItemPanel({ row, kind, currency, monthKey, onClose }: Props) {
 
       <div className="space-y-4 px-5 py-4">
         <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} />
-        {kind === "debt" && row.debt ? <DebtForm row={row} /> : null}
+        {kind === "debt" && row.debt ? (
+          <DebtForm row={row} accountOptions={debtAccountOptions} />
+        ) : null}
         {kind === "savings" && row.savings ? <SavingsForm row={row} /> : null}
         <RenameForm row={row} kind={kind} onDeleted={onClose} />
       </div>
@@ -114,7 +117,7 @@ function PlannedForm({
   );
 }
 
-function DebtForm({ row }: { row: RowData }) {
+function DebtForm({ row, accountOptions }: { row: RowData; accountOptions: AccountOption[] }) {
   const [pending, start] = useTransition();
   const d = row.debt!;
   return (
@@ -127,6 +130,28 @@ function DebtForm({ row }: { row: RowData }) {
           <Labeled label="Interest %" name="apr" type="number" step="0.001" defaultValue={String(d.apr)} />
           <Labeled label="Due day" name="dueDay" type="number" min={1} max={31} defaultValue={d.dueDay ?? ""} />
         </Grid>
+        {accountOptions.length > 0 ? (
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+              Linked account
+            </span>
+            <select
+              key={d.accountId ?? "none"}
+              name="accountId"
+              defaultValue={d.accountId ?? ""}
+              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Not linked</option>
+              {accountOptions.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <span className="mt-0.5 block text-[10px] text-muted">
+              Link the credit card / loan account this debt represents — Networth then
+              counts it once (this balance, not the account&apos;s).
+            </span>
+          </label>
+        ) : null}
         <SaveBtn pending={pending} full />
       </form>
     </Section>

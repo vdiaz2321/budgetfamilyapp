@@ -59,21 +59,86 @@ that retirement planner later.
   strike through with a "Hide Paid-Off" toggle. Unified debt list (credit cards
   live here), matching the Start tab.
 
+## Open design item — savings sub-buckets / envelopes (NOT YET BUILT)
+
+Discussed on the PC before the Mac handoff; missed getting written down here, which
+is exactly the kind of drift this doc exists to prevent. Captured now so it
+survives the next machine switch. Victor is sending Google Sheet screenshots to
+clarify further — **do not build until those land and this section is confirmed.**
+
+- **The real-world shape:** Victor consolidated multiple savings goals into ONE
+  physical bank account (Amex Savings) to maximize APY, rather than keeping
+  separate accounts per goal. But he still tracks each goal as its own
+  **virtual envelope / sinking fund** inside that one account balance — e.g.
+  Real Estate, Vehicle Purchase, Emergency Fund, Wallet$, each with its own
+  running total that should sum to the parent account's actual balance.
+- **Budget's Savings category = the planning side, not a balance tracker.** The
+  Savings items in Budget represent "how much am I putting into fund X *this
+  month*" — a plan/contribution amount. They are NOT meant to show "Spent" the
+  way Bills/Expenses/Debt do, because money isn't spent, it's being moved into
+  savings (still an asset). **Bug/behavior fix needed:** Budget's Savings group
+  currently reuses the same Spent/Remaining language as other groups — it
+  shouldn't say "Spent."
+- **The gap:** there is currently no feature connecting a Savings budget item to
+  (a) a specific envelope/bucket balance that persists and snapshots monthly, or
+  (b) the physical account it actually lives in. `savings_goals` (goal/start/
+  monthly per subcategory) is the closest existing piece but has no monthly
+  history and no link to an account.
+- **What's needed once scoped:** likely a new "bucket" or "envelope" concept —
+  either sub-rows under an Account (Amex Savings → Real Estate, Vehicle
+  Purchase, Emergency Fund, Wallet$, ...) that sum to the account's balance and
+  each get their own monthly snapshot row (mirrors his Monthly Net Worth sheet
+  screenshot), OR a link from a Budget Savings subcategory to an account (same
+  pattern as the debt↔account link in migration `0006`) plus monthly snapshots
+  for those subcategories. Needs Victor's screenshots to decide which.
+- **Withdrawals matter too:** money can flow out of a bucket (e.g. pulling from
+  Emergency Fund), not just in. Whatever gets built must handle both directions
+  and keep the account's total balance reconciled with its buckets' sum.
+
+## Open design item — NOT zero-based; rollover months (NOT YET BUILT)
+
+Victor does **not** want a zero-based budget. He needs unspent planned money to
+be able to **roll over to the next month** (e.g. saved up for a vacation or
+school supplies that land in a later month), rather than the "left to budget"
+number just resetting or implying leftover money vanished. He'll send a Google
+Sheet screenshot showing how he currently handles this. Needs that screenshot
+before scoping — likely touches `budget_plans` (per-month, per-subcategory
+already) and possibly needs a rollover/carry-forward calculation or an explicit
+"carried over" line, separate from the current month's fresh plan.
+
 ## Build order & status
 
 1. ✅ **Design system + app shell** — Capitall brand, indigo/amber theme, sidebar,
    placeholder pages. (commit `2c5962a`)
-2. ⏭️ **Budget page** — month navigator, collapsible groups (Income/Bills/Expenses/
+2. ✅ **Budget page** — month navigator, collapsible groups (Income/Bills/Expenses/
    Savings/Debt), Planned + Remaining↔Spent toggle, "left to budget" banner, debt
-   rows + detail panel. Absorbs the current Settings category editor. **NEXT.**
-3. **Transactions panel (the Log)** inside Budget — add txn (date, amount,
-   category→subcategory, payee, account, memo) → drives Spent/Remaining.
-4. **Accounts page** — types above; balances feed Networth.
-5. **Monthly snapshot engine** — archive plan + balances per month.
-6. **Networth** — aggregate + over-time + year-by-year.
-7. **Annual Overview** — Year tab across months (past/current/projected).
+   rows + detail panel, per-row progress lines, Summary donut. Absorbed Settings;
+   Debt Snowball got its own tab.
+3. ✅ **Transactions panel (the Log)** inside Budget — right rail with Summary/
+   Transactions toggle, search, add/edit/delete txn modal (5 category tabs) →
+   drives Spent/Remaining.
+4. ✅ **Accounts page** — Banking / Cash / Investments / Credit Cards with live
+   balances + net worth summary (migration `0004`); balances feed Networth.
+5. ✅ **Monthly snapshot engine** — `account_snapshots` + `debt_snapshots`
+   (migration `0005`), lazily upserted for the *current* month on every balance
+   change and Networth visit; prior months freeze automatically. No cron.
+6. ✅ **Networth** — current Assets/Debts/Net cards, over-time SVG line chart
+   with hover tooltip, year-by-year closing positions + delta, monthly history
+   table. Liabilities = credit-card/loan accounts + Budget debts, de-duplicated:
+   a Budget debt can link to its account (migration `0006`, "Linked account" in
+   the debt panel) and Networth then counts only the debt's balance.
+7. ✅ **Annual Overview** — year navigator; 12-month table (Income/Savings/Bills/
+   Expenses/Debt/Net): actuals through the current month, planned (projected,
+   grayed) beyond; year totals + Income/Outflow/Net cards.
+7b. ✅ **Transactions page** — dedicated `/transactions` register (Clear ✓ / Date /
+   Payee / Category / Account / Memo / Amount), month picker, search + type +
+   account filters, totals row, add/edit via the shared modal. `cleared` column
+   (migration `0007`) is a simple checkmark — deliberately NO reconcile flow.
+7c. ✅ **Monthly balances grid on Networth** — accounts × months table (the
+   MonthlyNetWorth tab): per-account value each month from snapshots, frozen
+   history, Net worth row, linked accounts shown but not double-counted.
 8. **Insights** — the four charts + date filter.
-9. **Goals** — light family info.
+9. ~~Goals~~ — dropped (Victor: not interested in a Goals tab). Route removed.
 
 Later: optional history importer (2024–2026 from the sheet); app view; receipt
 scanner.
@@ -83,8 +148,7 @@ scanner.
 - Next.js 16 (App Router, Turbopack) + TS + Tailwind v4 + Supabase. Repo:
   https://github.com/vdiaz2321/budgetfamilyapp
 - Schema migrations are numbered SQL in `supabase/migrations/` — apply each new one
-  once via Supabase SQL Editor (shared DB). Current: `0001`–`0003`. The snapshot
-  engine (step 5) will add a new migration for monthly balance snapshots.
+  once via Supabase SQL Editor (shared DB). Current: `0001`–`0007`.
 - Existing schema already has households/profiles/categories/subcategories/payees/
   accounts/transactions/budget_plans/debts/savings_goals + views. The current
   `/settings` page (Start-tab mirror) will be reworked into the Budget page.

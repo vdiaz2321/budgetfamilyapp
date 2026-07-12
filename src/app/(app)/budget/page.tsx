@@ -72,11 +72,11 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("debts")
-      .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day")
+      .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day, account_id")
       .eq("household_id", household.id),
     supabase
       .from("transactions")
-      .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id")
+      .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared")
       .eq("household_id", household.id)
       .gte("occurred_on", month.firstOfMonth)
       .lt("occurred_on", nextFirst)
@@ -88,7 +88,7 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("accounts")
-      .select("id, name")
+      .select("id, name, kind")
       .eq("household_id", household.id)
       .eq("active", true)
       .order("name"),
@@ -135,6 +135,7 @@ export default async function BudgetPage({
                   minCents: d?.min_payment_cents ?? 0,
                   apr: d ? Number(d.apr) : 0,
                   dueDay: d?.due_day ?? s.due_day,
+                  accountId: d?.account_id ?? null,
                 }
               : null,
         };
@@ -168,6 +169,11 @@ export default async function BudgetPage({
     name: a.name,
   }));
 
+  // Liability accounts a Budget debt can link to (credit cards, loans).
+  const debtAccountOptions: AccountOption[] = (accounts ?? [])
+    .filter((a) => a.kind === "credit_card" || a.kind === "debt_loan")
+    .map((a) => ({ id: a.id, name: a.name }));
+
   const transactions: TxData[] = (txRows ?? []).map((t) => ({
     id: t.id,
     date: t.occurred_on,
@@ -180,6 +186,7 @@ export default async function BudgetPage({
       : "Uncategorized",
     accountId: t.account_id ?? null,
     kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
+    cleared: t.cleared ?? false,
   }));
 
   return (
@@ -198,6 +205,7 @@ export default async function BudgetPage({
       leftToBudget={incomePlanned - outflowPlanned}
       subOptions={subOptions}
       accountOptions={accountOptions}
+      debtAccountOptions={debtAccountOptions}
       transactions={transactions}
     />
   );

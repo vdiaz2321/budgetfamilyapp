@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
+import { captureSnapshots } from "@/lib/snapshots";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -148,6 +149,19 @@ export async function upsertDebt(formData: FormData) {
   const rawDue = String(formData.get("dueDay") ?? "").trim();
   const dueDay = rawDue === "" ? null : Math.min(31, Math.max(1, parseInt(rawDue, 10)));
 
+  // Linked account (only if it belongs to this household).
+  const accountIdRaw = String(formData.get("accountId") ?? "").trim();
+  let accountId: string | null = null;
+  if (accountIdRaw) {
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("id", accountIdRaw)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    accountId = account?.id ?? null;
+  }
+
   await supabase.from("debts").upsert(
     {
       household_id: householdId,
@@ -156,10 +170,12 @@ export async function upsertDebt(formData: FormData) {
       min_payment_cents: minPaymentCents,
       apr: Number.isNaN(apr) ? 0 : apr,
       due_day: dueDay,
+      account_id: accountId,
     },
     { onConflict: "household_id,subcategory_id" },
   );
 
+  await captureSnapshots(supabase, householdId);
   revalidatePath("/budget");
 }
 
@@ -222,6 +238,7 @@ export async function addTransaction(formData: FormData) {
   });
 
   revalidatePath("/budget");
+  revalidatePath("/transactions");
 }
 
 export async function updateTransaction(formData: FormData) {
@@ -282,6 +299,7 @@ export async function updateTransaction(formData: FormData) {
     .eq("household_id", householdId);
 
   revalidatePath("/budget");
+  revalidatePath("/transactions");
 }
 
 export async function deleteTransaction(formData: FormData) {
@@ -296,6 +314,23 @@ export async function deleteTransaction(formData: FormData) {
     .eq("household_id", householdId);
 
   revalidatePath("/budget");
+  revalidatePath("/transactions");
+}
+
+// The Log tab's Clear column: checked = verified against the bank/card app.
+export async function toggleCleared(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  await supabase
+    .from("transactions")
+    .update({ cleared: formData.get("cleared") === "true" })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  revalidatePath("/budget");
+  revalidatePath("/transactions");
 }
 
 // ---------- Household globals (settings popover) ----------

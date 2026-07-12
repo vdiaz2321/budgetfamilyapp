@@ -27,6 +27,7 @@ type Props = {
   leftToBudget: number;
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  debtAccountOptions: AccountOption[];
   transactions: TxData[];
 };
 
@@ -39,6 +40,7 @@ export function BudgetBoard({
   leftToBudget,
   subOptions,
   accountOptions,
+  debtAccountOptions,
   transactions,
 }: Props) {
   const [mode, setMode] = useState<ViewMode>("remaining");
@@ -60,6 +62,7 @@ export function BudgetBoard({
         kind={selected.kind}
         currency={currency}
         monthKey={month.firstOfMonth}
+        debtAccountOptions={debtAccountOptions}
         onClose={() => setSelected(null)}
       />
     ) : null;
