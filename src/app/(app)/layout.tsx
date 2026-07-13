@@ -99,8 +99,27 @@ export default async function AppLayout({
             {user.email}
           </p>
           <div className="mt-1 flex items-center justify-between px-1">
-            <Link href="/household" className="rounded-md px-2 py-1 text-xs text-white/60 hover:text-white">
-              Invite spouse
+            <Link
+              href="/household"
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-white/60 hover:text-white"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
+              </svg>
+              Share
             </Link>
             <SignOutButton />
           </div>
