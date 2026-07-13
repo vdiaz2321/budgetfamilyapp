@@ -98,7 +98,10 @@ export default async function AppLayout({
           <p className="truncate px-2 text-xs text-white/50" title={user.email ?? ""}>
             {user.email}
           </p>
-          <div className="mt-1 flex items-center justify-end px-1">
+          <div className="mt-1 flex items-center justify-between px-1">
+            <Link href="/household" className="rounded-md px-2 py-1 text-xs text-white/60 hover:text-white">
+              Invite spouse
+            </Link>
             <SignOutButton />
           </div>
         </div>
