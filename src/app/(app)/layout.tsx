@@ -99,6 +99,7 @@ export default async function AppLayout({
             {user.email}
           </p>
           <div className="mt-1 flex items-center justify-between px-1">
+            <SignOutButton />
             <Link
               href="/household"
               className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-white/60 hover:text-white"
@@ -121,7 +122,6 @@ export default async function AppLayout({
               </svg>
               Share
             </Link>
-            <SignOutButton />
           </div>
         </div>
       </aside>

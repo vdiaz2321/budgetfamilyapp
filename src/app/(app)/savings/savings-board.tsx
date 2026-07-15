@@ -64,7 +64,7 @@ export function SavingsBoard({ cards, currency }: Props) {
               label="Left to save"
               value={leftToSave}
               currency={currency}
-              tone={leftToSave <= 0 ? "text-positive" : "text-foreground"}
+              tone={leftToSave <= 0 ? "text-positive" : "text-negative"}
             />
           </div>
 
@@ -173,8 +173,8 @@ function Ring({ percent, label, reached }: { percent: number; label: string; rea
           className={reached ? "stroke-positive" : "stroke-brand"}
         />
       </svg>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <span className="text-[11px] font-bold tabular-nums">{label}</span>
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-2">
+        <span className="text-center text-[10px] font-bold leading-tight tabular-nums">{label}</span>
       </div>
     </div>
   );

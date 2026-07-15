@@ -25,8 +25,28 @@ type Props = {
 // YNAB-style account list under the nav: collapsible sections with a group
 // total in the header and per-account balances, plus Add Account at the foot.
 export function SidebarAccounts({ groups, currency }: Props) {
+  // Net worth = every group's total, liabilities subtracted — so it stays
+  // correct as groups are added (e.g. a future Real Estate group) without
+  // needing to touch this calculation.
+  const netWorthCents = groups.reduce(
+    (sum, g) => sum + (g.liability ? -1 : 1) * g.items.reduce((s, a) => s + a.balanceCents, 0),
+    0,
+  );
+
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col">
+      <div className="mb-3 flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-white/70">
+          Net Worth
+        </span>
+        <span
+          className={`text-sm font-bold tabular-nums ${
+            netWorthCents < 0 ? "text-red-300" : "text-green-300"
+          }`}
+        >
+          {formatMoney(netWorthCents, currency)}
+        </span>
+      </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         {groups
           .filter((g) => g.items.length > 0)
@@ -74,11 +94,11 @@ function AccountGroup({ group, currency }: { group: SidebarGroup; currency: stri
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-bold uppercase tracking-wider text-white/60">
+        <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wider text-white/60">
           {group.label}
         </span>
         <span
-          className={`shrink-0 text-[12px] font-semibold tabular-nums ${
+          className={`shrink-0 text-[11px] font-semibold tabular-nums ${
             sign * total < 0 ? "text-red-300" : "text-white/80"
           }`}
         >

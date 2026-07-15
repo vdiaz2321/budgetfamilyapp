@@ -47,19 +47,13 @@ export default async function SavingsPage() {
 
   const savingsSubs = (subs ?? []).filter((s) => savingsCategoryIds.includes(s.category_id));
   const savingsSubIds = savingsSubs.map((s) => s.id);
-  const linkedBucketIds = savingsSubs
-    .map((s) => s.linked_bucket_id as string | null)
-    .filter((id): id is string => id != null);
 
-  const [{ data: savingsGoals }, { data: bucketRows }, { data: savingsTx }] = await Promise.all([
+  const [{ data: savingsGoals }, { data: savingsTx }] = await Promise.all([
     savingsSubIds.length
       ? supabase
           .from("savings_goals")
           .select("subcategory_id, goal_cents, start_cents, monthly_contribution_cents, target_date")
           .eq("household_id", household.id)
-      : Promise.resolve({ data: [] }),
-    linkedBucketIds.length
-      ? supabase.from("buckets").select("id, balance_cents").in("id", linkedBucketIds)
       : Promise.resolve({ data: [] }),
     savingsSubIds.length
       ? supabase
@@ -71,7 +65,6 @@ export default async function SavingsPage() {
   ]);
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));
-  const bucketBalanceById = new Map((bucketRows ?? []).map((b) => [b.id, b.balance_cents ?? 0]));
   const contribBySub = new Map<string, number>();
   for (const t of savingsTx ?? []) {
     const delta = t.is_withdrawal ? -t.amount_cents : t.amount_cents;
@@ -84,14 +77,10 @@ export default async function SavingsPage() {
     const startCents = g?.start_cents ?? 0;
     const monthlyCents = g?.monthly_contribution_cents ?? 0;
     const targetDate = (g?.target_date as string | null) ?? null;
-    const linkedBucketId = s.linked_bucket_id as string | null;
-    // A linked bucket's real balance IS the running total (it already covers
-    // the starting amount plus every contribution/withdrawal logged since);
-    // without one, fall back to Start + everything logged under this item.
-    const savedCents =
-      linkedBucketId != null && bucketBalanceById.has(linkedBucketId)
-        ? bucketBalanceById.get(linkedBucketId)!
-        : startCents + (contribBySub.get(s.id) ?? 0);
+    // Saved tracks progress toward the Goal, so it's Start + everything
+    // logged under this item — not the linked bucket's account balance,
+    // which can include market movement or funds beyond this goal.
+    const savedCents = startCents + (contribBySub.get(s.id) ?? 0);
     const leftToSaveCents = goalCents - savedCents;
     const reached = goalCents > 0 && leftToSaveCents <= 0;
 
