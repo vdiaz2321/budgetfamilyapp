@@ -7,16 +7,19 @@ import { TransactionsTable } from "./transactions-table";
 
 export const metadata = { title: "Transactions · Capitall" };
 
-type SearchParams = Promise<{ month?: string }>;
+type SearchParams = Promise<{ month?: string; from?: string; to?: string }>;
 
 export default async function TransactionsPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  const { month: monthParam } = await searchParams;
+  const { month: monthParam, from, to } = await searchParams;
   const month = resolveMonth(monthParam);
   const nextFirst = `${month.nextKey}-01`;
+  // A custom date range overrides the month scoping entirely, so searching
+  // isn't limited to whatever month happens to be selected.
+  const hasRange = Boolean(from || to);
 
   const supabase = await createClient();
 
@@ -42,6 +45,20 @@ export default async function TransactionsPage({
   const categories = await ensureCategories(supabase, household.id);
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
 
+  let txQuery = supabase
+    .from("transactions")
+    .select(
+      "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal",
+    )
+    .eq("household_id", household.id);
+  if (hasRange) {
+    if (from) txQuery = txQuery.gte("occurred_on", from);
+    if (to) txQuery = txQuery.lte("occurred_on", to);
+  } else {
+    txQuery = txQuery.gte("occurred_on", month.firstOfMonth).lt("occurred_on", nextFirst);
+  }
+  txQuery = txQuery.order("occurred_on", { ascending: false }).order("created_at", { ascending: false });
+
   const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }] =
     await Promise.all([
       supabase
@@ -49,16 +66,7 @@ export default async function TransactionsPage({
         .select("id, category_id, name, linked_bucket_id")
         .eq("household_id", household.id)
         .order("sort_order"),
-      supabase
-        .from("transactions")
-        .select(
-          "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal",
-        )
-        .eq("household_id", household.id)
-        .gte("occurred_on", month.firstOfMonth)
-        .lt("occurred_on", nextFirst)
-        .order("occurred_on", { ascending: false })
-        .order("created_at", { ascending: false }),
+      txQuery,
       supabase
         .from("payees")
         .select("id, name")
@@ -116,6 +124,7 @@ export default async function TransactionsPage({
       transactions={transactions}
       subOptions={subOptions}
       accountOptions={accountOptions}
+      dateRange={{ from: from ?? null, to: to ?? null }}
     />
   );
 }

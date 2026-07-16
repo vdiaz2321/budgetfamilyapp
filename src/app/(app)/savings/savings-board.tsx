@@ -159,17 +159,29 @@ function Ring({ percent, label, reached }: { percent: number; label: string; rea
   const R = 34;
   const STROKE = 7;
   const C = 2 * Math.PI * R;
-  const len = (percent / 100) * C;
+  // Gauge-style arc with a gap at the bottom, like a speedometer, instead of
+  // a full ring — the track spans (360 - GAP_DEG) degrees, centered so the
+  // opening sits at 6 o'clock.
+  const GAP_DEG = 70;
+  const trackLen = ((360 - GAP_DEG) / 360) * C;
+  const progressLen = (percent / 100) * trackLen;
+  const rotate = 90 + GAP_DEG / 2;
 
   return (
     <div className="relative h-[84px] w-[84px]">
-      <svg viewBox="0 0 84 84" className="h-full w-full -rotate-90">
-        <circle cx="42" cy="42" r={R} fill="none" strokeWidth={STROKE} className="stroke-line/60" />
+      <svg viewBox="0 0 84 84" className="h-full w-full" style={{ transform: `rotate(${rotate}deg)` }}>
         <circle
           cx="42" cy="42" r={R} fill="none"
           strokeWidth={STROKE}
           strokeLinecap="round"
-          strokeDasharray={`${len} ${C - len}`}
+          strokeDasharray={`${trackLen} ${C - trackLen}`}
+          className="stroke-line/60"
+        />
+        <circle
+          cx="42" cy="42" r={R} fill="none"
+          strokeWidth={STROKE}
+          strokeLinecap="round"
+          strokeDasharray={`${progressLen} ${C - progressLen}`}
           className={reached ? "stroke-positive" : "stroke-brand"}
         />
       </svg>

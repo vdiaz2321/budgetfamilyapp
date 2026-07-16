@@ -61,7 +61,7 @@ export default async function NetworthPage() {
       .order("month"),
     supabase
       .from("accounts")
-      .select("id, name")
+      .select("id, name, kind")
       .eq("household_id", household.id),
     supabase
       .from("buckets")
@@ -74,6 +74,20 @@ export default async function NetworthPage() {
       .select("id, name")
       .eq("household_id", household.id),
   ]);
+
+  // Same grouping as the sidebar (Budget / Investments / Credit Cards / Loans)
+  // so the two views read as one system.
+  const { data: debtRows } = await supabase
+    .from("debts")
+    .select("subcategory_id, debt_kind")
+    .eq("household_id", household.id);
+  const debtKindBySub = new Map((debtRows ?? []).map((d) => [d.subcategory_id, d.debt_kind as string | null]));
+  const cashKinds = new Set(["checking", "savings_bucket"]);
+  const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
+  const sectionForAccount = (accountId: string): GridRow["section"] =>
+    accountKindById.get(accountId) === "investment" ? "Investments" : "Budget";
+  const sectionForDebt = (subcategoryId: string): GridRow["section"] =>
+    debtKindBySub.get(subcategoryId) === "credit_card" ? "Credit Cards" : "Loans";
 
   // Aggregate per month: assets (asset-kind accounts) vs liabilities (Budget
   // debts). Liability-kind account snapshots are skipped — debts live in Budget.
@@ -165,6 +179,7 @@ export default async function NetworthPage() {
         name: subName.get(s.subcategory_id) ?? "Debt",
         liability: true,
         linked: false,
+        section: sectionForDebt(s.subcategory_id),
         balances: months.map(() => null),
       };
       debtGrid.set(s.subcategory_id, r);
@@ -184,12 +199,15 @@ export default async function NetworthPage() {
   const rows: GridRow[] = [];
   for (const a of assetAccounts) {
     const buckets = bucketsByAccount.get(a.id) ?? [];
+    const section = sectionForAccount(a.id);
     rows.push({
       name: a.name,
       liability: false,
       linked: false,
+      section,
       balances: a.balances,
       hasChildren: buckets.length > 0,
+      id: a.id,
     });
     if (buckets.length === 0) continue;
     for (const b of buckets) {
@@ -197,11 +215,16 @@ export default async function NetworthPage() {
         name: b.name,
         liability: false,
         linked: false,
+        section,
         indent: true,
+        parentId: a.id,
         balances: bucketBalances.get(b.id) ?? months.map(() => null),
       });
     }
-    // Unallocated = account balance − sum of its buckets, per month.
+    // Unallocated = account balance − sum of its buckets, per month. This is
+    // a running check, not an error: it's whatever part of the account isn't
+    // parked in one of its named buckets, so it should read $0 once every
+    // dollar has a bucket, or the "spare" amount otherwise.
     const unallocated = months.map((_, i) => {
       const acct = a.balances[i];
       if (acct == null) return null;
@@ -213,7 +236,9 @@ export default async function NetworthPage() {
       name: "Unallocated",
       liability: false,
       linked: false,
+      section,
       indent: true,
+      parentId: a.id,
       muted: true,
       balances: unallocated,
     });

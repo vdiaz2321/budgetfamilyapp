@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { deleteTransaction, toggleCleared } from "../budget/actions";
@@ -32,6 +33,7 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  dateRange: { from: string | null; to: string | null };
 };
 
 export function TransactionsTable({
@@ -40,12 +42,30 @@ export function TransactionsTable({
   transactions,
   subOptions,
   accountOptions,
+  dateRange,
 }: Props) {
+  const router = useRouter();
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
   const [query, setQuery] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
+  const [fromDate, setFromDate] = useState(dateRange.from ?? "");
+  const [toDate, setToDate] = useState(dateRange.to ?? "");
+  const hasRange = Boolean(dateRange.from || dateRange.to);
+
+  function applyRange(nextFrom: string, nextTo: string) {
+    const params = new URLSearchParams();
+    if (nextFrom) params.set("from", nextFrom);
+    if (nextTo) params.set("to", nextTo);
+    router.push(params.toString() ? `/transactions?${params}` : "/transactions");
+  }
+
+  function clearRange() {
+    setFromDate("");
+    setToDate("");
+    router.push(`/transactions?month=${month.key}`);
+  }
 
   const accountName = new Map(accountOptions.map((a) => [a.id, a.name]));
 
@@ -67,7 +87,13 @@ export function TransactionsTable({
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <MonthPicker monthKey={month.key} basePath="/transactions" />
+        {hasRange ? (
+          <span className="text-2xl font-bold tracking-tight text-foreground">
+            Custom range
+          </span>
+        ) : (
+          <MonthPicker monthKey={month.key} basePath="/transactions" />
+        )}
         <button
           type="button"
           onClick={() => setModal("new")}
@@ -120,6 +146,50 @@ export function TransactionsTable({
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
         </select>
+      </div>
+
+      {/* Date range — searches across months instead of just the one selected above */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted">From</span>
+        <input
+          type="date"
+          value={fromDate}
+          onChange={(e) => {
+            setFromDate(e.target.value);
+            applyRange(e.target.value, toDate);
+          }}
+          className="rounded-xl bg-surface px-3 py-1.5 shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
+        />
+        <span className="text-muted">To</span>
+        <input
+          type="date"
+          value={toDate}
+          onChange={(e) => {
+            setToDate(e.target.value);
+            applyRange(fromDate, e.target.value);
+          }}
+          className="rounded-xl bg-surface px-3 py-1.5 shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setFromDate("2000-01-01");
+            setToDate("");
+            applyRange("2000-01-01", "");
+          }}
+          className="rounded-xl px-3 py-1.5 font-medium text-brand hover:bg-brand-soft"
+        >
+          All time
+        </button>
+        {hasRange ? (
+          <button
+            type="button"
+            onClick={clearRange}
+            className="rounded-xl px-3 py-1.5 font-medium text-muted hover:bg-brand-soft hover:text-foreground"
+          >
+            Clear — back to {month.label}
+          </button>
+        ) : null}
       </div>
 
       {/* Register */}
