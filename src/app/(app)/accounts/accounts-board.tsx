@@ -83,17 +83,6 @@ const SECTIONS: Section[] = [
     offerSubtype: true,
   },
   {
-    key: "kids",
-    label: "Kids Funding",
-    dot: "bg-violet-500",
-    liability: false,
-    match: (a) => a.isKidsAccount,
-    kindLabels: {},
-    fixedKind: "checking",
-    offerSubtype: true,
-    kidsGroup: true,
-  },
-  {
     key: "credit",
     label: "Credit Cards",
     dot: "bg-negative",
@@ -108,6 +97,19 @@ const SECTIONS: Section[] = [
     liability: true,
     match: (a) => a.kind === "debt_loan",
     kindLabels: { debt_loan: "Loan" },
+  },
+  // Kids Funding sits last — it's the kids' money, excluded from Assets / Net
+  // Worth, so it reads as a footnote beneath the household's own accounts.
+  {
+    key: "kids",
+    label: "Kids Funding",
+    dot: "bg-violet-500",
+    liability: false,
+    match: (a) => a.isKidsAccount,
+    kindLabels: {},
+    fixedKind: "checking",
+    offerSubtype: true,
+    kidsGroup: true,
   },
 ];
 

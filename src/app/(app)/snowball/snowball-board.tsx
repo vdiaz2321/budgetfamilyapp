@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { formatMoney } from "@/lib/money";
 import type { MonthlyEntry } from "@/lib/snowball";
 
@@ -31,6 +31,7 @@ type Row = {
   minCents: number;
   plannedCents: number;
   paidCents: number;
+  paidThisMonthCents: number;
   apr: number;
   dueDay: number | null;
 };
@@ -50,6 +51,9 @@ type Props = {
   classicPayoffMonth: Record<string, string | null>;
   classicLedger: Record<string, MonthlyEntry[]>;
   currency: string;
+  // The Monthly Extra / dated-period controls only drive the classic method,
+  // so they're rendered here and shown only when Classic Snowball is active.
+  settings: ReactNode;
 };
 
 export function SnowballBoard({
@@ -65,6 +69,7 @@ export function SnowballBoard({
   classicPayoffMonth,
   classicLedger,
   currency,
+  settings,
 }: Props) {
   const [mode, setMode] = useState<Mode>("planned");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -138,7 +143,6 @@ export function SnowballBoard({
             const isPaid = r.balanceCents <= 0;
             const payoff = payoffMonth[r.subId] ?? null;
             const months = ledger[r.subId] ?? [];
-            const thisMonth = months[0]?.paymentCents ?? 0;
             const hasLedger = months.length > 0;
             const isSelected = selectedId === r.subId;
             // Classic mode, non-focus debt: the month the snowball reaches it
@@ -193,7 +197,11 @@ export function SnowballBoard({
                     <CardRow label="Interest Rate" value={r.apr ? `${r.apr}%` : "—"} />
                     <CardRow label="Planned/mo" value={formatMoney(r.plannedCents, currency)} />
                     {!isPaid ? (
-                      <CardRow label="This month" value={formatMoney(thisMonth, currency)} highlight />
+                      <CardRow
+                        label="Paid this month"
+                        value={formatMoney(r.paidThisMonthCents, currency)}
+                        highlight
+                      />
                     ) : null}
                     {!isPaid && isFocus && currentExtraCents > 0 ? (
                       <CardRow label="+ Snowball extra" value={formatMoney(currentExtraCents, currency)} highlight />
@@ -239,6 +247,9 @@ export function SnowballBoard({
           </ul>
         </section>
       ) : null}
+
+      {/* Extra / dated-period controls only affect the classic method. */}
+      {mode === "classic" ? settings : null}
     </div>
   );
 }

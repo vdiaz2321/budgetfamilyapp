@@ -4,19 +4,18 @@ import { useRef, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { upsertPlan } from "./actions";
-import type { RowData, ViewMode } from "./types";
+import type { RowData } from "./types";
 
 type Props = {
   row: RowData;
   kind: CategoryKind;
-  mode: ViewMode;
   currency: string;
   monthKey: string; // YYYY-MM-01
   selected: boolean;
   onSelect: () => void;
 };
 
-export function BudgetRow({ row, kind, mode, currency, monthKey, selected, onSelect }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, onSelect }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   // Only strike an *established* debt that's been paid down to zero — not a
@@ -25,18 +24,10 @@ export function BudgetRow({ row, kind, mode, currency, monthKey, selected, onSel
   // min payment / interest (entered later, in the detail panel) count.
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
-  // "spent" mode shows the actual (money received for income, spent otherwise);
-  // "remaining" mode shows planned − actual for both.
-  const modeValue = mode === "spent" ? row.spentCents : remaining;
-  // Income received is good news (green); a red negative is reserved for
-  // over-spending an expense, never for income.
-  const valueClass = isIncome
-    ? mode === "spent" && row.spentCents > 0
-      ? "text-positive"
-      : "text-foreground"
-    : mode === "remaining" && remaining < 0
-      ? "text-negative"
-      : "text-foreground";
+  // Spent column: income received is good news (green). Remaining column: a red
+  // negative is reserved for over-spending an expense, never for income.
+  const spentClass = isIncome && row.spentCents > 0 ? "text-positive" : "text-foreground";
+  const remainingClass = !isIncome && remaining < 0 ? "text-negative" : "text-foreground";
 
   // Progress line: green fill up to plan; red (full) once overspent.
   // Income can't "overspend" — receiving more than planned is fine, so it
@@ -52,7 +43,7 @@ export function BudgetRow({ row, kind, mode, currency, monthKey, selected, onSel
 
   return (
     <li className={selected ? "bg-brand-soft/50" : "hover:bg-brand-soft/25"}>
-      <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem] items-center gap-2 px-4 py-1.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_6.5rem_5.5rem_5.5rem] items-center gap-2 px-4 py-1.5">
         <button
           type="button"
           onClick={onSelect}
@@ -74,9 +65,17 @@ export function BudgetRow({ row, kind, mode, currency, monthKey, selected, onSel
         <button
           type="button"
           onClick={onSelect}
-          className={`text-right text-sm tabular-nums ${valueClass}`}
+          className={`text-right text-sm tabular-nums ${spentClass}`}
         >
-          {formatMoney(modeValue, currency)}
+          {formatMoney(row.spentCents, currency)}
+        </button>
+
+        <button
+          type="button"
+          onClick={onSelect}
+          className={`text-right text-sm tabular-nums ${remainingClass}`}
+        >
+          {formatMoney(remaining, currency)}
         </button>
       </div>
 

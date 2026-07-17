@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { projectSnowball } from "@/lib/snowball";
+import { TransactionsPanel } from "../budget/transactions-panel";
+import type { AccountOption, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
 import { SnowballSettings } from "./snowball-settings";
 
@@ -66,16 +68,72 @@ export default async function SnowballPage() {
   // card can show progress independent of the current balance.
   const debtSubIds = (debts ?? []).map((d) => d.subcategory_id);
   const paidBySub = new Map<string, number>();
+  // Actually paid into each debt THIS month, so the card's "Paid this month"
+  // row reflects what really happened rather than the projected schedule.
+  const paidThisMonthBySub = new Map<string, number>();
   if (debtSubIds.length) {
     const { data: paidRows } = await supabase
       .from("v_monthly_actuals")
-      .select("subcategory_id, actual_cents")
+      .select("subcategory_id, actual_cents, month")
       .eq("household_id", household.id)
       .in("subcategory_id", debtSubIds);
     for (const r of paidRows ?? []) {
       paidBySub.set(r.subcategory_id, (paidBySub.get(r.subcategory_id) ?? 0) + r.actual_cents);
+      if (r.month === month) {
+        paidThisMonthBySub.set(
+          r.subcategory_id,
+          (paidThisMonthBySub.get(r.subcategory_id) ?? 0) + r.actual_cents,
+        );
+      }
     }
   }
+
+  // Debt payment history + the bits the edit modal needs, so payments can be
+  // reviewed/searched/edited right here instead of bouncing to Transactions.
+  // Every logged debt payment (all-time), newest first.
+  let debtTxData: TxData[] = [];
+  let accountOptions: AccountOption[] = [];
+  if (debtSubIds.length) {
+    const [{ data: txRows }, { data: payees }, { data: accounts }] = await Promise.all([
+      supabase
+        .from("transactions")
+        .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal")
+        .eq("household_id", household.id)
+        .in("subcategory_id", debtSubIds)
+        .order("occurred_on", { ascending: false })
+        .order("created_at", { ascending: false }),
+      supabase.from("payees").select("id, name").eq("household_id", household.id),
+      supabase
+        .from("accounts")
+        .select("id, name")
+        .eq("household_id", household.id)
+        .eq("active", true)
+        .order("name"),
+    ]);
+    const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
+    accountOptions = (accounts ?? []).map((a) => ({ id: a.id, name: a.name }));
+    debtTxData = (txRows ?? []).map((t) => ({
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: t.amount_cents,
+      memo: t.memo,
+      payee: t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+      subId: t.subcategory_id ?? null,
+      subName: t.subcategory_id ? nameBySub.get(t.subcategory_id) ?? "Debt" : "Debt",
+      accountId: t.account_id ?? null,
+      kind: "debt",
+      cleared: t.cleared ?? false,
+      isWithdrawal: t.is_withdrawal ?? false,
+    }));
+  }
+
+  // Debt line items as pickable options in the edit modal.
+  const debtSubOptions: SubOption[] = debtSubIds.map((id) => ({
+    id,
+    name: nameBySub.get(id) ?? "Debt",
+    kind: "debt",
+    linkedBucketId: null,
+  }));
 
   const periods = (periodRows ?? []).map((p) => ({
     id: p.id as string,
@@ -101,6 +159,7 @@ export default async function SnowballPage() {
     minCents: d.min_payment_cents,
     plannedCents: plannedBySub.get(d.subcategory_id) ?? 0,
     paidCents: paidBySub.get(d.subcategory_id) ?? 0,
+    paidThisMonthCents: paidThisMonthBySub.get(d.subcategory_id) ?? 0,
     apr: Number(d.apr),
     dueDay: d.due_day as number | null,
   }));
@@ -164,6 +223,7 @@ export default async function SnowballPage() {
           minCents: r.minCents,
           plannedCents: r.plannedCents,
           paidCents: r.paidCents,
+          paidThisMonthCents: r.paidThisMonthCents,
           apr: r.apr,
           dueDay: r.dueDay,
         }))}
@@ -178,14 +238,31 @@ export default async function SnowballPage() {
         classicPayoffMonth={Object.fromEntries(classicPayoff)}
         classicLedger={Object.fromEntries(classicLedger)}
         currency={currency}
+        settings={
+          <SnowballSettings
+            currency={currency}
+            snowballStartDate={household.snowball_start_date}
+            snowballMonthlyExtraCents={manualExtraCents}
+            periods={periods}
+          />
+        }
       />
 
-      <SnowballSettings
-        currency={currency}
-        snowballStartDate={household.snowball_start_date}
-        snowballMonthlyExtraCents={manualExtraCents}
-        periods={periods}
-      />
+      {debtSubIds.length ? (
+        <TransactionsPanel
+          monthKey={month.slice(0, 7)}
+          monthLabel=""
+          firstOfMonth={month}
+          currency={currency}
+          transactions={debtTxData}
+          subOptions={debtSubOptions}
+          accountOptions={accountOptions}
+          title="Debt Payments"
+          subtitle="All debt payments — search or edit"
+          addLabel="Add Payment"
+          initialKind="debt"
+        />
+      ) : null}
     </div>
   );
 }

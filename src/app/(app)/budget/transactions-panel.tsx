@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
+import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction } from "./actions";
 import { TransactionModal } from "./transaction-modal";
 import type { AccountOption, SubOption, TxData } from "./types";
@@ -19,6 +20,12 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  // Optional overrides so the same panel can be reused elsewhere (e.g. a
+  // "Debt Payments" list on the Snowball page). Default to the Budget wording.
+  title?: string;
+  subtitle?: string;
+  addLabel?: string;
+  initialKind?: CategoryKind;
 };
 
 export function TransactionsPanel({
@@ -29,6 +36,10 @@ export function TransactionsPanel({
   transactions,
   subOptions,
   accountOptions,
+  title = "Transactions",
+  subtitle,
+  addLabel = "Add Transaction",
+  initialKind,
 }: Props) {
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
@@ -45,8 +56,8 @@ export function TransactionsPanel({
     <div className="relative flex max-h-[calc(100vh-6rem)] min-h-[320px] flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <div>
-          <h2 className="text-sm font-bold">Transactions</h2>
-          <p className="text-xs text-muted">{monthLabel}</p>
+          <h2 className="text-sm font-bold">{title}</h2>
+          <p className="text-xs text-muted">{subtitle ?? monthLabel}</p>
         </div>
         <button
           type="button"
@@ -56,7 +67,7 @@ export function TransactionsPanel({
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
             <path d="M12 5v14M5 12h14" />
           </svg>
-          Add Transaction
+          {addLabel}
         </button>
       </div>
 
@@ -110,6 +121,7 @@ export function TransactionsPanel({
           firstOfMonth={firstOfMonth}
           subOptions={subOptions}
           accountOptions={accountOptions}
+          initialKind={modal === "new" ? initialKind : undefined}
           onClose={() => setModal(null)}
         />
       ) : null}

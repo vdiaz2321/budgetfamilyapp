@@ -6,7 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { addSubcategory } from "./actions";
 import { BudgetRow } from "./budget-row";
-import type { GroupData, RowData, ViewMode } from "./types";
+import type { GroupData, RowData } from "./types";
 
 const ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
@@ -18,18 +18,18 @@ const ACCENT: Record<CategoryKind, string> = {
 
 type Props = {
   group: GroupData;
-  mode: ViewMode;
-  onToggleMode: () => void;
   currency: string;
   monthKey: string; // YYYY-MM-01
   selectedSubId: string | null;
   onSelectRow: (row: RowData, kind: CategoryKind) => void;
 };
 
+// name | Planned | Spent/Received | Remaining — all three shown at once, like
+// the source spreadsheet (no toggle).
+const GRID = "grid-cols-[minmax(0,1fr)_6.5rem_5.5rem_5.5rem]";
+
 export function BudgetGroup({
   group,
-  mode,
-  onToggleMode,
   currency,
   monthKey,
   selectedSubId,
@@ -42,24 +42,20 @@ export function BudgetGroup({
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
   const isDebt = group.kind === "debt";
   const isIncome = group.kind === "income";
-  // Same toggle for every group; only the "actual" label differs — income
-  // "receives" money while everything else "spends" it.
+  // Income "receives" money; everything else "spends" it.
   const actualLabel = isIncome ? "Received" : "Spent";
-  const modeLabel = mode === "spent" ? actualLabel : "Remaining";
 
   const visibleRows = group.rows.filter((r) => {
     if (isDebt && hidePaidOff && r.debt && r.debt.balanceCents <= 0) return false;
     return true;
   });
 
-  // Both modes use the same formula (planned − actual for "remaining").
-  const modeTotal =
-    mode === "spent" ? group.spentTotal : group.plannedTotal - group.spentTotal;
+  const remainingTotal = group.plannedTotal - group.spentTotal;
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header row */}
-      <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem] items-center gap-2 px-4 py-2.5">
+      <div className={`grid ${GRID} items-center gap-2 px-4 py-2.5`}>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -83,17 +79,12 @@ export function BudgetGroup({
             <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
               Planned
             </span>
-            <button
-              type="button"
-              onClick={onToggleMode}
-              title={`Switch ${actualLabel} / Remaining`}
-              className="flex items-center justify-end gap-0.5 text-[11px] font-medium uppercase tracking-wide text-muted hover:text-foreground"
-            >
-              {modeLabel}
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
+            <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
+              {actualLabel}
+            </span>
+            <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
+              Remaining
+            </span>
           </>
         ) : (
           <>
@@ -101,7 +92,10 @@ export function BudgetGroup({
               {formatMoney(group.plannedTotal, currency)}
             </span>
             <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(modeTotal, currency)}
+              {formatMoney(group.spentTotal, currency)}
+            </span>
+            <span className="text-right text-sm font-bold tabular-nums">
+              {formatMoney(remainingTotal, currency)}
             </span>
           </>
         )}
@@ -118,7 +112,6 @@ export function BudgetGroup({
                   key={row.subId}
                   row={row}
                   kind={group.kind}
-                  mode={mode}
                   currency={currency}
                   monthKey={monthKey}
                   selected={row.subId === selectedSubId}
@@ -137,7 +130,7 @@ export function BudgetGroup({
           ) : null}
 
           {/* Footer: add link + totals */}
-          <div className="grid grid-cols-[minmax(0,1fr)_7rem_6rem] items-center gap-2 border-t border-line px-4 py-2">
+          <div className={`grid ${GRID} items-center gap-2 border-t border-line px-4 py-2`}>
             <div className="flex items-center gap-3">
               {!adding ? (
                 <button
@@ -167,7 +160,10 @@ export function BudgetGroup({
               {formatMoney(group.plannedTotal, currency)}
             </span>
             <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(modeTotal, currency)}
+              {formatMoney(group.spentTotal, currency)}
+            </span>
+            <span className="text-right text-sm font-bold tabular-nums">
+              {formatMoney(remainingTotal, currency)}
             </span>
           </div>
         </div>

@@ -187,6 +187,51 @@ export default async function BudgetPage({
     .filter((g) => g.kind !== "income")
     .reduce((sum, g) => sum + g.plannedTotal, 0);
 
+  // ---- Rollover (destination-keyed): the control lives on the month that
+  // RECEIVES the money — a per-month include/exclude toggle for the previous
+  // month's actual leftover cash (income received minus what was actually
+  // spent). A budget_rollovers row for THIS month = "include last month's
+  // leftover here." The amount is recomputed live from the prior month's
+  // actuals, so it stays correct as those transactions change.
+  const actualLeftover = (bySub: Map<string, number>) => {
+    let income = 0;
+    let outflow = 0;
+    for (const [subId, cents] of bySub) {
+      const kind = kindBySub.get(subId);
+      if (kind === "income") income += cents;
+      else if (kind) outflow += cents;
+    }
+    return income - outflow;
+  };
+
+  const prevFirst = `${month.prevKey}-01`;
+  const [{ data: rolloverRows }, { data: prevActuals }] = await Promise.all([
+    supabase
+      .from("budget_rollovers")
+      .select("month")
+      .eq("household_id", household.id)
+      .eq("month", month.firstOfMonth),
+    supabase
+      .from("v_monthly_actuals")
+      .select("subcategory_id, actual_cents")
+      .eq("household_id", household.id)
+      .eq("month", prevFirst),
+  ]);
+  const rolloverInEnabled = (rolloverRows ?? []).length > 0;
+  const prevSpentBySub = new Map((prevActuals ?? []).map((a) => [a.subcategory_id, a.actual_cents]));
+  // A deficit doesn't carry forward as negative money — only real leftover.
+  const incomingAvailableCents = Math.max(0, actualLeftover(prevSpentBySub));
+  const rolloverInCents = rolloverInEnabled ? incomingAvailableCents : 0;
+
+  const labelForKey = (key: string) => {
+    const [y, m] = key.split("-");
+    const names = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
+    return `${names[parseInt(m, 10) - 1]} ${y}`;
+  };
+
   const subOptions: SubOption[] = (subs ?? []).map((s) => ({
     id: s.id,
     name: s.name,
@@ -242,6 +287,12 @@ export default async function BudgetPage({
       incomePlanned={incomePlanned}
       outflowPlanned={outflowPlanned}
       leftToBudget={incomePlanned - outflowPlanned}
+      rollover={{
+        inCents: rolloverInCents,
+        availableCents: incomingAvailableCents,
+        enabled: rolloverInEnabled,
+        prevMonthLabel: labelForKey(month.prevKey),
+      }}
       subOptions={subOptions}
       accountOptions={accountOptions}
       debtAccountOptions={debtAccountOptions}

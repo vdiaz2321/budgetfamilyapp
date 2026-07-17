@@ -555,3 +555,26 @@ export async function updateGlobals(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/snowball");
 }
+
+// ---------- Rollover (carry a month's leftover cash into the next) ----------
+
+export async function setRollover(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const month = String(formData.get("month") ?? ""); // YYYY-MM-01 (source month)
+  const enable = formData.get("enable") === "on";
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+
+  if (enable) {
+    await supabase
+      .from("budget_rollovers")
+      .upsert({ household_id: householdId, month }, { onConflict: "household_id,month" });
+  } else {
+    await supabase
+      .from("budget_rollovers")
+      .delete()
+      .eq("household_id", householdId)
+      .eq("month", month);
+  }
+
+  revalidatePath("/budget");
+}

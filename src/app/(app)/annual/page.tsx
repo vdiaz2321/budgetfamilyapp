@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CATEGORY_KINDS, ensureCategories, type CategoryKind } from "@/lib/categories";
 import { formatMoney } from "@/lib/money";
 import { MonthsTable } from "./months-table";
+import { YearPicker } from "./year-picker";
 import {
   CategoryMonthsTable,
   type CatMonthGroup,
@@ -205,18 +206,7 @@ export default async function AnnualOverviewPage({
         {/* Year navigator */}
         <div className="flex items-center gap-1 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <YearArrow year={year - 1} dir="prev" />
-          {year === currentYear ? (
-            <span className="min-w-[3.5rem] text-center text-sm font-bold">{year}</span>
-          ) : (
-            // Off-year: the label doubles as a one-click jump back to today.
-            <Link
-              href="/annual"
-              title={`Back to ${currentYear}`}
-              className="min-w-[3.5rem] rounded-lg text-center text-sm font-bold text-brand hover:bg-brand-soft"
-            >
-              {year}
-            </Link>
-          )}
+          <YearPicker year={year} currentYear={currentYear} />
           <YearArrow year={year + 1} dir="next" />
         </div>
       </div>

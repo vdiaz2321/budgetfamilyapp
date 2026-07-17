@@ -22,10 +22,12 @@ const PALETTE = [
 type Props = {
   groups: GroupData[];
   currency: string;
-  mode: ViewMode;
 };
 
-export function SummaryPanel({ groups, currency, mode }: Props) {
+export function SummaryPanel({ groups, currency }: Props) {
+  // The donut has its own Spent/Remaining view now that the budget rows show
+  // both columns at once.
+  const [mode, setMode] = useState<ViewMode>("spent");
   // The donut mirrors EveryDollar: outflow only (income has its own line up
   // top). Each segment's size uses the current shared mode value.
   const outflow = groups.filter((g) => g.kind !== "income");
@@ -70,9 +72,19 @@ export function SummaryPanel({ groups, currency, mode }: Props) {
 
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="border-b border-line px-4 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <h2 className="text-sm font-bold">Summary</h2>
-        <p className="text-xs text-muted">{modeLabel} by category</p>
+        <button
+          type="button"
+          onClick={() => setMode((m) => (m === "spent" ? "remaining" : "spent"))}
+          title="Switch Spent / Remaining"
+          className="flex items-center gap-0.5 text-xs text-muted hover:text-foreground"
+        >
+          {modeLabel} by category
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
       </div>
 
       {total <= 0 ? (
