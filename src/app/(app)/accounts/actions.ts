@@ -44,6 +44,8 @@ export async function addAccount(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const kind = String(formData.get("kind") ?? "");
   const holder = String(formData.get("holder") ?? "").trim() || null;
+  const subtype = String(formData.get("subtype") ?? "").trim() || null;
+  const isKidsAccount = formData.get("kidsAccount") === "on";
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
   if (!name) return { error: "Account name is required." };
   if (!ALLOWED_KINDS.includes(kind)) return { error: "Invalid account type." };
@@ -53,6 +55,9 @@ export async function addAccount(formData: FormData) {
     name,
     kind,
     holder,
+    subtype,
+    is_kids_account: isKidsAccount,
+    include_net_worth: !isKidsAccount,
     current_balance_cents: balanceCents,
   });
 
@@ -74,12 +79,22 @@ export async function updateAccount(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   const holder = String(formData.get("holder") ?? "").trim() || null;
+  const subtype = String(formData.get("subtype") ?? "").trim() || null;
+  const isKidsAccount = formData.get("kidsAccount") === "on";
   const active = formData.get("active") === "on";
   if (!id || !name) return;
 
   await supabase
     .from("accounts")
-    .update({ name, holder, active, updated_at: new Date().toISOString() })
+    .update({
+      name,
+      holder,
+      subtype,
+      is_kids_account: isKidsAccount,
+      include_net_worth: !isKidsAccount,
+      active,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
     .eq("household_id", householdId);
 

@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./sign-out-button";
 import SidebarNav from "./sidebar-nav";
-import { SidebarAccounts, type SidebarGroup } from "./sidebar-accounts";
+import { Sidebar } from "./sidebar";
+import type { SidebarGroup } from "./sidebar-accounts";
 
 export default async function AppLayout({
   children,
@@ -33,7 +34,7 @@ export default async function AppLayout({
       supabase.from("households").select("currency").eq("id", profile.household_id).single(),
       supabase
         .from("accounts")
-        .select("id, name, kind, active, current_balance_cents")
+        .select("id, name, kind, active, is_kids_account, current_balance_cents")
         .eq("household_id", profile.household_id)
         .order("name"),
       supabase
@@ -47,11 +48,20 @@ export default async function AppLayout({
   const subName = new Map((subs ?? []).map((s) => [s.id, s.name]));
 
   const cashKinds = new Set(["checking", "savings_bucket"]);
+  // Kids Funding accounts (any kind) get their own sidebar group and are
+  // always excluded from the Net Worth pill — it's their money, not the
+  // household's.
   const active = (accounts ?? []).filter((a) => a.active !== false);
-  const toItem = (a: { id: string; name: string; current_balance_cents: number | null }) => ({
+  const toItem = (a: {
+    id: string;
+    name: string;
+    is_kids_account?: boolean | null;
+    current_balance_cents: number | null;
+  }) => ({
     id: a.id,
     name: a.name,
     balanceCents: a.current_balance_cents ?? 0,
+    inNetWorth: !a.is_kids_account,
   });
 
   const debtItems = (debts ?? [])
@@ -65,8 +75,18 @@ export default async function AppLayout({
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const groups: SidebarGroup[] = [
-    { label: "Budget", items: active.filter((a) => cashKinds.has(a.kind)).map(toItem) },
-    { label: "Investments", items: active.filter((a) => a.kind === "investment").map(toItem) },
+    {
+      label: "Budget",
+      items: active.filter((a) => !a.is_kids_account && cashKinds.has(a.kind)).map(toItem),
+    },
+    {
+      label: "Investments",
+      items: active.filter((a) => !a.is_kids_account && a.kind === "investment").map(toItem),
+    },
+    {
+      label: "Kids Funding",
+      items: active.filter((a) => a.is_kids_account).map(toItem),
+    },
     {
       label: "Credit Cards",
       items: debtItems.filter((d) => d.kind === "credit_card"),
@@ -82,49 +102,7 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* Sidebar — YNAB-style navy in both themes */}
-      <aside className="hidden h-screen w-64 shrink-0 flex-col overflow-hidden bg-sidebar px-3 py-5 text-white md:sticky md:top-0 md:flex">
-        <Link href="/budget" className="mb-5 flex items-center gap-2 px-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 text-base font-bold text-white">
-            C
-          </span>
-          <span className="text-lg font-semibold tracking-tight text-white">Capitall</span>
-        </Link>
-
-        <SidebarNav />
-
-        <SidebarAccounts groups={groups} currency={currency} />
-
-        <div className="mt-4 border-t border-white/15 pt-3">
-          <p className="truncate px-2 text-xs text-white/50" title={user.email ?? ""}>
-            {user.email}
-          </p>
-          <div className="mt-1 flex items-center justify-between px-1">
-            <SignOutButton />
-            <Link
-              href="/household"
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-white/60 hover:text-white"
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <circle cx="18" cy="5" r="3" />
-                <circle cx="6" cy="12" r="3" />
-                <circle cx="18" cy="19" r="3" />
-                <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
-              </svg>
-              Share
-            </Link>
-          </div>
-        </div>
-      </aside>
+      <Sidebar groups={groups} currency={currency} userEmail={user.email ?? ""} />
 
       {/* Mobile top bar */}
       <div className="flex min-w-0 flex-1 flex-col">

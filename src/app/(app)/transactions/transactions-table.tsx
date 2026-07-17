@@ -228,23 +228,22 @@ export function TransactionsTable({
               </ul>
             )}
 
-            {/* Totals */}
-            <div className="flex items-center justify-between gap-4 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10">
-              <span className="whitespace-nowrap text-sm font-bold">
+            {/* Totals — same grid as the rows so the net sits under the Amount column */}
+            <div className={`grid ${GRID} items-center gap-2 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
+              <span className="col-span-3 whitespace-nowrap text-sm font-bold">
                 {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
               </span>
-              <div className="flex items-baseline gap-3">
-                <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-muted">
-                  Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
-                </span>
-                <span
-                  className={`whitespace-nowrap text-sm font-bold tabular-nums ${
-                    incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"
-                  }`}
-                >
-                  {formatMoney(incomeTotal - outflowTotal, currency)}
-                </span>
-              </div>
+              <span className="col-span-3 truncate text-right text-xs font-medium uppercase tracking-wide text-muted">
+                Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
+              </span>
+              <span
+                className={`whitespace-nowrap text-right text-sm font-bold tabular-nums ${
+                  incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"
+                }`}
+              >
+                {formatMoney(incomeTotal - outflowTotal, currency)}
+              </span>
+              <span />
             </div>
           </div>
         </div>
@@ -288,11 +287,13 @@ function TxLine({
 
   return (
     <li
-      className={`group grid ${GRID} items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
+      onDoubleClick={onEdit}
+      title="Double-click to edit"
+      className={`group grid ${GRID} cursor-default select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
         tx.cleared ? "opacity-60" : ""
       }`}
     >
-      <span>
+      <span onDoubleClick={(e) => e.stopPropagation()}>
         <input
           type="checkbox"
           checked={tx.cleared}
@@ -325,7 +326,11 @@ function TxLine({
         {isIncome ? "+" : "−"}
         {formatMoney(tx.amountCents, currency)}
       </button>
-      <form action={(fd) => startDel(() => deleteTransaction(fd))} className="justify-self-end">
+      <form
+        action={(fd) => startDel(() => deleteTransaction(fd))}
+        onDoubleClick={(e) => e.stopPropagation()}
+        className="justify-self-end"
+      >
         <input type="hidden" name="id" value={tx.id} />
         <button
           type="submit"

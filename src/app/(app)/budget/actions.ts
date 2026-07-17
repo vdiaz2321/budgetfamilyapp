@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
 import { adjustBucketBalance } from "@/lib/buckets";
+import { adjustDebtBalance } from "@/lib/debts";
 
 // The bucket a Savings subcategory contributes to, if any linked — null when
 // not a savings item or not linked, so callers can skip the bucket math.
@@ -325,6 +326,13 @@ export async function addTransaction(formData: FormData) {
     await captureSnapshots(supabase, householdId);
   }
 
+  // A payment logged against a debt lowers its outstanding balance.
+  const touchedDebt = await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents);
+  if (touchedDebt) {
+    await captureSnapshots(supabase, householdId);
+    revalidatePath("/snowball");
+  }
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
@@ -416,6 +424,18 @@ export async function updateTransaction(formData: FormData) {
   }
   if (touchedBucket) await captureSnapshots(supabase, householdId);
 
+  // Undo the old payment's effect on its debt balance, then apply the new one's
+  // — the edit may have changed the amount or moved it off/onto a debt entirely.
+  let touchedDebt = false;
+  if (prevTx) {
+    touchedDebt = await adjustDebtBalance(supabase, householdId, prevTx.subcategory_id, prevTx.amount_cents);
+  }
+  if (await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)) touchedDebt = true;
+  if (touchedDebt) {
+    await captureSnapshots(supabase, householdId);
+    revalidatePath("/snowball");
+  }
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
@@ -445,6 +465,12 @@ export async function deleteTransaction(formData: FormData) {
       const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
       await adjustBucketBalance(supabase, householdId, bucketId, undoDelta);
       await captureSnapshots(supabase, householdId);
+    }
+
+    // Deleting a debt payment adds its amount back to the outstanding balance.
+    if (await adjustDebtBalance(supabase, householdId, tx.subcategory_id, tx.amount_cents)) {
+      await captureSnapshots(supabase, householdId);
+      revalidatePath("/snowball");
     }
   }
 

@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { ensureCategories, type CategoryKind } from "@/lib/categories";
+import { CATEGORY_KINDS, ensureCategories, type CategoryKind } from "@/lib/categories";
 import { formatMoney } from "@/lib/money";
+import { MonthsTable } from "./months-table";
+import {
+  CategoryMonthsTable,
+  type CatMonthGroup,
+  type CatMonthRow,
+} from "./category-months-table";
 
 export const metadata = { title: "Annual Overview · Capitall" };
 
@@ -75,8 +81,9 @@ export default async function AnnualOverviewPage({
   const [{ data: subs }, { data: plans }, { data: actuals }] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id")
-      .eq("household_id", household.id),
+      .select("id, category_id, name, sort_order")
+      .eq("household_id", household.id)
+      .order("sort_order"),
     supabase
       .from("budget_plans")
       .select("subcategory_id, planned_cents, month")
@@ -94,6 +101,10 @@ export default async function AnnualOverviewPage({
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
+  const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
+
+  // Per-subcategory actuals by month (cents), for the Category by Months table.
+  const actualBySub = new Map<string, number[]>();
 
   // planned[monthIdx][kind] and actual[monthIdx][kind], all cents.
   const emptyKinds = (): Record<CategoryKind, number> => ({
@@ -110,7 +121,15 @@ export default async function AnnualOverviewPage({
   for (const a of actuals ?? []) {
     const kind = kindBySub.get(a.subcategory_id);
     if (!kind) continue;
-    actual[parseInt(a.month.slice(5, 7), 10) - 1][kind] += a.actual_cents;
+    const monthIdx = parseInt(a.month.slice(5, 7), 10) - 1;
+    actual[monthIdx][kind] += a.actual_cents;
+
+    let months = actualBySub.get(a.subcategory_id);
+    if (!months) {
+      months = Array(12).fill(0);
+      actualBySub.set(a.subcategory_id, months);
+    }
+    months[monthIdx] += a.actual_cents;
   }
 
   const rows: MonthRow[] = MONTH_NAMES.map((name, idx) => {
@@ -137,6 +156,39 @@ export default async function AnnualOverviewPage({
   const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
   const hasFuture = rows.some((r) => r.status === "future" && r.hasData);
 
+  // Category by Months: each subcategory as a row (actuals only), grouped by
+  // kind. Only include rows/groups that have at least one non-zero actual.
+  const subIdsByKind = new Map<CategoryKind, string[]>();
+  for (const s of subs ?? []) {
+    const kind = kindBySub.get(s.id);
+    if (!kind) continue;
+    const list = subIdsByKind.get(kind) ?? [];
+    list.push(s.id);
+    subIdsByKind.set(kind, list);
+  }
+
+  const categoryGroups: CatMonthGroup[] = CATEGORY_KINDS.flatMap((c) => {
+    const rows: CatMonthRow[] = (subIdsByKind.get(c.kind) ?? [])
+      .map((subId) => {
+        const months = actualBySub.get(subId) ?? Array(12).fill(0);
+        const total = months.reduce((sum, v) => sum + v, 0);
+        return { subId, name: nameBySub.get(subId) ?? "—", months, total };
+      })
+      // Any non-zero month keeps the row — checking total alone would hide a
+      // row whose entries offset to zero (e.g. a charge and its refund).
+      .filter((r) => r.months.some((v) => v !== 0));
+
+    if (!rows.length) return [];
+
+    const monthTotals = Array(12).fill(0);
+    for (const r of rows) for (let i = 0; i < 12; i++) monthTotals[i] += r.months[i];
+    const total = monthTotals.reduce((sum, v) => sum + v, 0);
+
+    return [{ kind: c.kind, label: c.name, rows, monthTotals, total }];
+  });
+
+  const monthLabels = MONTH_NAMES.map((m) => m.slice(0, 3));
+
   const currency = household.currency;
   const gridCols = "grid-cols-[6.5rem_repeat(6,minmax(5.5rem,1fr))]";
 
@@ -153,7 +205,18 @@ export default async function AnnualOverviewPage({
         {/* Year navigator */}
         <div className="flex items-center gap-1 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <YearArrow year={year - 1} dir="prev" />
-          <span className="min-w-[3.5rem] text-center text-sm font-bold">{year}</span>
+          {year === currentYear ? (
+            <span className="min-w-[3.5rem] text-center text-sm font-bold">{year}</span>
+          ) : (
+            // Off-year: the label doubles as a one-click jump back to today.
+            <Link
+              href="/annual"
+              title={`Back to ${currentYear}`}
+              className="min-w-[3.5rem] rounded-lg text-center text-sm font-bold text-brand hover:bg-brand-soft"
+            >
+              {year}
+            </Link>
+          )}
           <YearArrow year={year + 1} dir="next" />
         </div>
       </div>
@@ -165,7 +228,7 @@ export default async function AnnualOverviewPage({
           label="Outflow"
           value={OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0)}
           currency={currency}
-          tone="text-foreground"
+          tone="text-negative"
         />
         <Stat
           label="Net"
@@ -176,79 +239,22 @@ export default async function AnnualOverviewPage({
       </div>
 
       {/* Months table */}
-      <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-        <div className="overflow-x-auto">
-          <div className="min-w-[42rem]">
-            {/* Header */}
-            <div className={`grid ${gridCols} items-center gap-2 border-b border-line px-4 py-2.5`}>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Month</span>
-              {COLUMNS.map((c) => (
-                <span key={c.kind} className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
-                  {c.label}
-                </span>
-              ))}
-              <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">Net</span>
-            </div>
+      <MonthsTable
+        columns={COLUMNS}
+        rows={rows}
+        totals={totals}
+        totalNet={totalNet}
+        hasFuture={hasFuture}
+        currency={currency}
+        gridCols={gridCols}
+      />
 
-            <ul className="divide-y divide-line">
-              {rows.map((r) => (
-                <li
-                  key={r.idx}
-                  className={`grid ${gridCols} items-center gap-2 px-4 py-2 ${
-                    r.status === "current" ? "bg-brand-soft/40" : ""
-                  } ${r.status === "future" ? "text-muted" : ""}`}
-                >
-                  <span className="flex items-center gap-1.5 text-sm font-medium">
-                    {r.name.slice(0, 3)}
-                    {r.status === "current" ? (
-                      <span className="rounded bg-brand px-1 py-0.5 text-[9px] font-bold uppercase text-white">
-                        Now
-                      </span>
-                    ) : null}
-                  </span>
-                  {COLUMNS.map((c) => (
-                    <span key={c.kind} className="text-right text-sm tabular-nums">
-                      {r.hasData || r.values[c.kind] !== 0
-                        ? formatMoney(r.values[c.kind], currency)
-                        : "—"}
-                    </span>
-                  ))}
-                  <span
-                    className={`text-right text-sm font-semibold tabular-nums ${
-                      !r.hasData ? "" : r.net >= 0 ? "text-positive" : "text-negative"
-                    }`}
-                  >
-                    {r.hasData ? formatMoney(r.net, currency) : "—"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-
-            {/* Totals */}
-            <div className={`grid ${gridCols} items-center gap-2 border-t border-line px-4 py-2.5`}>
-              <span className="text-sm font-bold">Total</span>
-              {COLUMNS.map((c) => (
-                <span key={c.kind} className="text-right text-sm font-bold tabular-nums">
-                  {formatMoney(totals[c.kind], currency)}
-                </span>
-              ))}
-              <span
-                className={`text-right text-sm font-bold tabular-nums ${
-                  totalNet >= 0 ? "text-positive" : "text-negative"
-                }`}
-              >
-                {formatMoney(totalNet, currency)}
-              </span>
-            </div>
-          </div>
-        </div>
-        {hasFuture ? (
-          <p className="border-t border-line px-4 py-2 text-xs text-muted">
-            Grayed months haven&apos;t happened yet — their numbers are your plan (projected),
-            and they update automatically as you budget those months.
-          </p>
-        ) : null}
-      </section>
+      {/* Category by Months */}
+      <CategoryMonthsTable
+        groups={categoryGroups}
+        monthLabels={monthLabels}
+        currency={currency}
+      />
     </div>
   );
 }

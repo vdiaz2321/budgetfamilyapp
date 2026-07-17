@@ -64,7 +64,7 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
-export default function SidebarNav() {
+export default function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -77,7 +77,10 @@ export default function SidebarNav() {
             key={n.href}
             href={n.href}
             aria-current={active ? "page" : undefined}
+            title={collapsed ? n.label : undefined}
             className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              collapsed ? "justify-center px-0" : ""
+            } ${
               active
                 ? "bg-white/15 text-white"
                 : "text-white/65 hover:bg-white/10 hover:text-white"
@@ -97,7 +100,7 @@ export default function SidebarNav() {
             >
               {n.icon}
             </svg>
-            {n.label}
+            {collapsed ? null : n.label}
           </Link>
         );
       })}

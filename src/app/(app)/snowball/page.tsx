@@ -62,6 +62,21 @@ export default async function SnowballPage() {
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
 
+  // All-time total actually paid into each debt (every logged payment), so each
+  // card can show progress independent of the current balance.
+  const debtSubIds = (debts ?? []).map((d) => d.subcategory_id);
+  const paidBySub = new Map<string, number>();
+  if (debtSubIds.length) {
+    const { data: paidRows } = await supabase
+      .from("v_monthly_actuals")
+      .select("subcategory_id, actual_cents")
+      .eq("household_id", household.id)
+      .in("subcategory_id", debtSubIds);
+    for (const r of paidRows ?? []) {
+      paidBySub.set(r.subcategory_id, (paidBySub.get(r.subcategory_id) ?? 0) + r.actual_cents);
+    }
+  }
+
   const periods = (periodRows ?? []).map((p) => ({
     id: p.id as string,
     startMonth: p.start_month as string,
@@ -85,6 +100,7 @@ export default async function SnowballPage() {
     balanceCents: d.current_balance_cents,
     minCents: d.min_payment_cents,
     plannedCents: plannedBySub.get(d.subcategory_id) ?? 0,
+    paidCents: paidBySub.get(d.subcategory_id) ?? 0,
     apr: Number(d.apr),
     dueDay: d.due_day as number | null,
   }));
@@ -147,6 +163,7 @@ export default async function SnowballPage() {
           balanceCents: r.balanceCents,
           minCents: r.minCents,
           plannedCents: r.plannedCents,
+          paidCents: r.paidCents,
           apr: r.apr,
           dueDay: r.dueDay,
         }))}

@@ -30,6 +30,7 @@ type Row = {
   balanceCents: number;
   minCents: number;
   plannedCents: number;
+  paidCents: number;
   apr: number;
   dueDay: number | null;
 };
@@ -186,7 +187,8 @@ export function SnowballBoard({
                     </>
                   )}
                   <div className="mt-2 space-y-1 border-t border-line pt-2 text-xs">
-                    <CardRow label="Balance" value={formatMoney(r.balanceCents, currency)} />
+                    <CardRow label="Balance" value={formatMoney(Math.max(0, r.balanceCents), currency)} />
+                    <CardRow label="Paid so far" value={formatMoney(r.paidCents, currency)} />
                     <CardRow label="Min. Payment" value={formatMoney(r.minCents, currency)} />
                     <CardRow label="Interest Rate" value={r.apr ? `${r.apr}%` : "—"} />
                     <CardRow label="Planned/mo" value={formatMoney(r.plannedCents, currency)} />

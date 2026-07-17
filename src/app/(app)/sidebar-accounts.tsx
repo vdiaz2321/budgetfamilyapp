@@ -8,6 +8,8 @@ export type SidebarAccount = {
   id: string;
   name: string;
   balanceCents: number;
+  // false = listed but excluded from the Net Worth pill (kids' 529/UTMA).
+  inNetWorth?: boolean;
 };
 
 export type SidebarGroup = {
@@ -29,7 +31,10 @@ export function SidebarAccounts({ groups, currency }: Props) {
   // correct as groups are added (e.g. a future Real Estate group) without
   // needing to touch this calculation.
   const netWorthCents = groups.reduce(
-    (sum, g) => sum + (g.liability ? -1 : 1) * g.items.reduce((s, a) => s + a.balanceCents, 0),
+    (sum, g) =>
+      sum +
+      (g.liability ? -1 : 1) *
+        g.items.reduce((s, a) => s + (a.inNetWorth === false ? 0 : a.balanceCents), 0),
     0,
   );
 
@@ -69,7 +74,7 @@ export function SidebarAccounts({ groups, currency }: Props) {
 }
 
 function AccountGroup({ group, currency }: { group: SidebarGroup; currency: string }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const total = group.items.reduce((s, a) => s + a.balanceCents, 0);
   const sign = group.liability ? -1 : 1;
 
@@ -110,10 +115,7 @@ function AccountGroup({ group, currency }: { group: SidebarGroup; currency: stri
         <ul className="mt-0.5 space-y-0.5">
           {group.items.map((a) => (
             <li key={a.id}>
-              <Link
-                href={group.liability ? "/snowball" : "/accounts"}
-                className="flex items-center justify-between gap-2 rounded-md py-0.5 pl-5 pr-2 transition hover:bg-white/10"
-              >
+              <div className="flex items-center justify-between gap-2 rounded-md py-0.5 pl-5 pr-2">
                 <span className="min-w-0 flex-1 truncate text-[12px] text-white/85">{a.name}</span>
                 <span
                   className={`shrink-0 text-[10px] font-medium tabular-nums ${
@@ -122,7 +124,7 @@ function AccountGroup({ group, currency }: { group: SidebarGroup; currency: stri
                 >
                   {formatMoney(sign * a.balanceCents, currency)}
                 </span>
-              </Link>
+              </div>
             </li>
           ))}
         </ul>

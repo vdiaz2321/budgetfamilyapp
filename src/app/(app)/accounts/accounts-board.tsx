@@ -25,8 +25,11 @@ export type AccountData = {
   id: string;
   name: string;
   kind: string; // account_kind enum value
+  subtype: string | null; // free-text label, e.g. "Roth IRA", "Trump Account", "UTMA"
   holder: string | null;
   active: boolean;
+  // Kids Funding: tracked here, but always excluded from Assets / Net Worth.
+  isKidsAccount: boolean;
   balanceCents: number;
   buckets: BucketData[];
 };
@@ -39,16 +42,26 @@ export type BudgetDebt = {
   balanceCents: number;
 };
 
-// The plan's four account types, mapped onto the account_kind enum.
-// debt_loan is legacy/managed from Budget → shown only if rows exist.
+// The plan's account types, mapped onto the account_kind enum. debt_loan is
+// legacy/managed from Budget → shown only if rows exist. Kids Funding is its
+// own group by the is_kids_account flag, not by kind — it can hold checking,
+// savings, or investment accounts (Fidelity, Capital One, a Trump Account…).
 type Section = {
   key: string;
   label: string;
   dot: string;
-  kinds: string[];
   liability: boolean;
-  // Sub-kind choices offered by the add form (label per kind).
+  // Which accounts belong here.
+  match: (a: AccountData) => boolean;
+  // Sub-kind choices offered by the add form (label per kind). Omit for a
+  // single fixed kind (e.g. Kids Funding always creates a "checking" row —
+  // the kind doesn't matter once is_kids_account routes it here).
   kindLabels: Record<string, string>;
+  fixedKind?: string;
+  // Free-text "Type" field (e.g. Retirement, Roth IRA, 529, Trump Account).
+  offerSubtype?: boolean;
+  // New accounts in this section are flagged out of net worth.
+  kidsGroup?: boolean;
 };
 
 const SECTIONS: Section[] = [
@@ -56,32 +69,44 @@ const SECTIONS: Section[] = [
     key: "banking",
     label: "Banking",
     dot: "bg-brand",
-    kinds: ["checking", "savings_bucket"],
     liability: false,
+    match: (a) => !a.isKidsAccount && (a.kind === "checking" || a.kind === "savings_bucket"),
     kindLabels: { checking: "Checking", savings_bucket: "Savings" },
   },
   {
     key: "investments",
     label: "Investments & Brokerages",
     dot: "bg-sky-500",
-    kinds: ["investment"],
     liability: false,
+    match: (a) => !a.isKidsAccount && a.kind === "investment",
     kindLabels: { investment: "Investment" },
+    offerSubtype: true,
+  },
+  {
+    key: "kids",
+    label: "Kids Funding",
+    dot: "bg-violet-500",
+    liability: false,
+    match: (a) => a.isKidsAccount,
+    kindLabels: {},
+    fixedKind: "checking",
+    offerSubtype: true,
+    kidsGroup: true,
   },
   {
     key: "credit",
     label: "Credit Cards",
     dot: "bg-negative",
-    kinds: ["credit_card"],
     liability: true,
+    match: (a) => a.kind === "credit_card",
     kindLabels: { credit_card: "Credit card" },
   },
   {
     key: "loans",
     label: "Loans",
     dot: "bg-accent",
-    kinds: ["debt_loan"],
     liability: true,
+    match: (a) => a.kind === "debt_loan",
     kindLabels: { debt_loan: "Loan" },
   },
 ];
@@ -96,8 +121,10 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
   const active = accounts.filter((a) => a.active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
 
+  // Kids Funding is tracked here but excluded from Assets / Net Worth
+  // everywhere — it's the kids' money, not the household's.
   const assets = active
-    .filter((a) => !isLiability(a.kind))
+    .filter((a) => !isLiability(a.kind) && !a.isKidsAccount)
     .reduce((sum, a) => sum + a.balanceCents, 0);
   // Debts come from the Budget Debt group (single source of truth), not from
   // accounts. Any legacy credit-card/loan accounts are shown for cleanup but
@@ -110,16 +137,35 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
   // can delete them and move that debt into Budget.
   const assetSections = SECTIONS.filter((s) => !s.liability);
   const legacySections = SECTIONS.filter(
-    (s) => s.liability && accounts.some((a) => s.kinds.includes(a.kind)),
+    (s) => s.liability && accounts.some((a) => s.match(a)),
   );
+
+  // Every section's open/collapsed state, lifted here so one button can
+  // expand or collapse them all at once.
+  const sectionKeys = ["debts", ...assetSections.map((s) => s.key), ...legacySections.map((s) => s.key)];
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const allOpen = sectionKeys.every((k) => !collapsed[k]);
+  const toggleAll = () =>
+    setCollapsed(Object.fromEntries(sectionKeys.map((k) => [k, allOpen])));
+  const toggleSection = (key: string) =>
+    setCollapsed((c) => ({ ...c, [key]: !c[key] }));
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Accounts</h1>
-        <p className="text-sm text-muted">
-          Your asset accounts feed Net Worth. Debts live in Budget — enter each once, use it everywhere.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">Accounts</h1>
+          <p className="text-sm text-muted">
+            Your asset accounts feed Net Worth. Debts live in Budget — enter each once, use it everywhere.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={toggleAll}
+          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+        >
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
       </div>
 
       {/* Net worth summary */}
@@ -139,21 +185,30 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
           <AccountSection
             key={section.key}
             section={section}
-            accounts={accounts.filter((a) => section.kinds.includes(a.kind))}
+            accounts={accounts.filter((a) => section.match(a))}
             currency={currency}
+            open={!collapsed[section.key]}
+            onToggle={() => toggleSection(section.key)}
           />
         ))}
 
         {/* Debts, read-only, sourced from the Budget Debt group. */}
-        <BudgetDebtsSection debts={budgetDebts} currency={currency} />
+        <BudgetDebtsSection
+          debts={budgetDebts}
+          currency={currency}
+          open={!collapsed.debts}
+          onToggle={() => toggleSection("debts")}
+        />
 
         {/* Legacy credit-card/loan accounts — kept only so they can be deleted. */}
         {legacySections.map((section) => (
           <AccountSection
             key={section.key}
             section={section}
-            accounts={accounts.filter((a) => section.kinds.includes(a.kind))}
+            accounts={accounts.filter((a) => section.match(a))}
             currency={currency}
+            open={!collapsed[section.key]}
+            onToggle={() => toggleSection(section.key)}
             legacy
           />
         ))}
@@ -163,8 +218,17 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
 }
 
 // Read-only mirror of the Budget Debt group so you see debts alongside assets.
-function BudgetDebtsSection({ debts, currency }: { debts: BudgetDebt[]; currency: string }) {
-  const [open, setOpen] = useState(true);
+function BudgetDebtsSection({
+  debts,
+  currency,
+  open,
+  onToggle,
+}: {
+  debts: BudgetDebt[];
+  currency: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const total = debts.reduce((sum, d) => sum + d.balanceCents, 0);
 
   return (
@@ -172,7 +236,7 @@ function BudgetDebtsSection({ debts, currency }: { debts: BudgetDebt[]; currency
       <div className="grid grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={onToggle}
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
@@ -252,14 +316,17 @@ function AccountSection({
   section,
   accounts,
   currency,
+  open,
+  onToggle,
   legacy = false,
 }: {
   section: Section;
   accounts: AccountData[];
   currency: string;
+  open: boolean;
+  onToggle: () => void;
   legacy?: boolean;
 }) {
-  const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -273,7 +340,7 @@ function AccountSection({
       <div className="grid grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={onToggle}
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
@@ -359,7 +426,7 @@ function AccountRow({
   onToggleEdit: () => void;
 }) {
   const kindLabel = section.kindLabels[account.kind] ?? account.kind;
-  const showKind = section.kinds.length > 1;
+  const showKind = Object.keys(section.kindLabels).length > 1;
   // Buckets make sense for asset accounts (savings/investments/cash), not for
   // credit cards or loans.
   const allowBuckets = !section.liability;
@@ -392,14 +459,33 @@ function AccountRow({
         <button
           type="button"
           onClick={onToggleEdit}
-          className="flex min-w-0 items-baseline gap-2 text-left"
+          className="group/name relative inline-flex w-fit min-w-0 max-w-full items-baseline justify-self-start gap-2 text-left"
         >
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute -top-6 left-0 z-10 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background opacity-0 transition-opacity duration-75 group-hover/name:opacity-100"
+          >
+            Click to edit
+          </span>
           <span className={`truncate text-sm ${account.active ? "text-foreground" : "text-muted line-through"}`}>
             {account.name}
           </span>
           {account.holder ? (
             <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
               {account.holder}
+            </span>
+          ) : null}
+          {account.subtype ? (
+            <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+              {account.subtype}
+            </span>
+          ) : null}
+          {account.isKidsAccount ? (
+            <span
+              title="Tracked here, but not counted in Assets or Net Worth"
+              className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted dark:bg-white/10"
+            >
+              not in net worth
             </span>
           ) : null}
           {showKind ? <span className="shrink-0 text-[11px] text-muted">{kindLabel}</span> : null}
@@ -427,7 +513,7 @@ function AccountRow({
         <BucketDrawer account={account} currency={currency} />
       ) : null}
 
-      {editing ? <EditAccountForm account={account} onDone={onToggleEdit} /> : null}
+      {editing ? <EditAccountForm account={account} section={section} onDone={onToggleEdit} /> : null}
     </li>
   );
 }
@@ -682,7 +768,8 @@ function BalanceInput({
 function AddAccountForm({ section, onDone }: { section: Section; onDone: () => void }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const multiKind = section.kinds.length > 1;
+  const kindKeys = Object.keys(section.kindLabels);
+  const multiKind = kindKeys.length > 1;
 
   return (
     <div className="border-t border-line">
@@ -701,13 +788,21 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
             name="kind"
             className="rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
-            {section.kinds.map((k) => (
+            {kindKeys.map((k) => (
               <option key={k} value={k}>{section.kindLabels[k]}</option>
             ))}
           </select>
         ) : (
-          <input type="hidden" name="kind" value={section.kinds[0]} />
+          <input type="hidden" name="kind" value={section.fixedKind ?? kindKeys[0]} />
         )}
+        {section.kidsGroup ? <input type="hidden" name="kidsAccount" value="on" /> : null}
+        {section.offerSubtype ? (
+          <input
+            name="subtype"
+            placeholder="Type… (e.g. Retirement, Roth IRA, 529, Trump Account)"
+            className="w-56 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        ) : null}
         <input
           name="name"
           placeholder="Account name…"
@@ -752,7 +847,15 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
   );
 }
 
-function EditAccountForm({ account, onDone }: { account: AccountData; onDone: () => void }) {
+function EditAccountForm({
+  account,
+  section,
+  onDone,
+}: {
+  account: AccountData;
+  section: Section;
+  onDone: () => void;
+}) {
   const [savePending, startSave] = useTransition();
   const [delPending, startDel] = useTransition();
 
@@ -768,6 +871,7 @@ function EditAccountForm({ account, onDone }: { account: AccountData; onDone: ()
         className="flex flex-wrap items-center gap-2"
       >
         <input type="hidden" name="id" value={account.id} />
+        {section.kidsGroup ? <input type="hidden" name="kidsAccount" value="on" /> : null}
         <input
           name="name"
           defaultValue={account.name}
@@ -781,6 +885,14 @@ function EditAccountForm({ account, onDone }: { account: AccountData; onDone: ()
           title="Whose account? (e.g. V, J, Joint)"
           className="w-20 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
+        {section.offerSubtype ? (
+          <input
+            name="subtype"
+            defaultValue={account.subtype ?? ""}
+            placeholder="Type… (e.g. Retirement, Roth IRA, 529, Trump Account)"
+            className="w-56 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        ) : null}
         <label className="flex items-center gap-1.5 text-xs text-muted">
           <input
             type="checkbox"

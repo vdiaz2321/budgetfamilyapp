@@ -43,9 +43,21 @@ export function TransactionsPanel({
 
   return (
     <div className="relative flex max-h-[calc(100vh-6rem)] min-h-[320px] flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="border-b border-line px-4 py-3">
-        <h2 className="text-sm font-bold">Transactions</h2>
-        <p className="text-xs text-muted">{monthLabel}</p>
+      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
+        <div>
+          <h2 className="text-sm font-bold">Transactions</h2>
+          <p className="text-xs text-muted">{monthLabel}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setModal("new")}
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add Transaction
+        </button>
       </div>
 
       <div className="border-b border-line px-3 py-2.5">
@@ -76,7 +88,7 @@ export function TransactionsPanel({
               <>
                 No transactions yet this month.
                 <br />
-                Tap <span className="font-semibold text-brand">+</span> to log one.
+                Tap <span className="font-semibold text-brand">Add Transaction</span> to log one.
               </>
             ) : (
               "No transactions match your search."
@@ -90,17 +102,6 @@ export function TransactionsPanel({
           ))}
         </ul>
       )}
-
-      <button
-        type="button"
-        onClick={() => setModal("new")}
-        aria-label="Add transaction"
-        className="absolute bottom-4 right-4 flex h-[3.25rem] w-[3.25rem] items-center justify-center rounded-full bg-brand text-white shadow-lg transition hover:bg-brand-strong"
-      >
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-      </button>
 
       {modal ? (
         <TransactionModal

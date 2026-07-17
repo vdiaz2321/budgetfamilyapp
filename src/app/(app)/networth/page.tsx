@@ -61,7 +61,7 @@ export default async function NetworthPage() {
       .order("month"),
     supabase
       .from("accounts")
-      .select("id, name, kind")
+      .select("id, name, kind, is_kids_account")
       .eq("household_id", household.id),
     supabase
       .from("buckets")
@@ -84,8 +84,17 @@ export default async function NetworthPage() {
   const debtKindBySub = new Map((debtRows ?? []).map((d) => [d.subcategory_id, d.debt_kind as string | null]));
   const cashKinds = new Set(["checking", "savings_bucket"]);
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
-  const sectionForAccount = (accountId: string): GridRow["section"] =>
-    accountKindById.get(accountId) === "investment" ? "Investments" : "Budget";
+  const isKidsAccount = new Set(
+    (accountRows ?? []).filter((a) => a.is_kids_account).map((a) => a.id),
+  );
+  // Kids Funding: shown in the grid for tracking, but skipped in every
+  // total. Applied to history too — flipping the flag on Accounts
+  // re-includes/excludes past months, which is the point.
+  const excludedIds = isKidsAccount;
+  const sectionForAccount = (accountId: string): GridRow["section"] => {
+    if (isKidsAccount.has(accountId)) return "Kids Funding";
+    return accountKindById.get(accountId) === "investment" ? "Investments" : "Budget";
+  };
   const sectionForDebt = (subcategoryId: string): GridRow["section"] =>
     debtKindBySub.get(subcategoryId) === "credit_card" ? "Credit Cards" : "Loans";
 
@@ -103,6 +112,7 @@ export default async function NetworthPage() {
 
   for (const s of accSnaps ?? []) {
     if (LIABILITY_KINDS.includes(s.kind)) continue; // legacy debt account — ignore
+    if (excludedIds.has(s.account_id)) continue; // not in net worth — ignore
     entry(s.month).assets += s.balance_cents;
   }
   for (const s of debtSnaps ?? []) {
@@ -204,6 +214,7 @@ export default async function NetworthPage() {
       name: a.name,
       liability: false,
       linked: false,
+      excluded: excludedIds.has(a.id),
       section,
       balances: a.balances,
       hasChildren: buckets.length > 0,

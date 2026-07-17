@@ -18,7 +18,10 @@ const HEADER_ACCENT: Record<CategoryKind, string> = {
   savings: "bg-sky-500",
   bills: "bg-brand",
   expenses: "bg-accent",
-  debt: "bg-negative",
+  // A softer, desaturated coral-red rather than the hot negative token
+  // (red-600) used for figures — the solid header fill was reading too bright,
+  // while still keeping the white title/figure legible.
+  debt: "bg-[#e0625e]",
 };
 
 type Props = {
@@ -48,8 +51,29 @@ export function ItemPanel({
 }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
-  const headerLabel = isIncome ? "Received" : remaining < 0 ? "Overspent" : "Remaining";
-  const headerValue = isIncome ? row.spentCents : remaining;
+  const over = remaining < 0;
+  // Paying more toward a debt, or putting more into savings, than you planned
+  // isn't "overspending" — it's a good thing. Frame the overage as extra put in
+  // (a positive number) rather than a negative "Overspent". Bills/expenses keep
+  // the real over-budget warning.
+  const overIsGood = kind === "debt" || kind === "savings";
+  const verb = isIncome
+    ? "received"
+    : kind === "debt"
+      ? "paid"
+      : kind === "savings"
+        ? "saved"
+        : "spent";
+  const headerLabel = isIncome
+    ? "Received"
+    : over
+      ? overIsGood
+        ? kind === "debt"
+          ? "Extra paid"
+          : "Extra saved"
+        : "Overspent"
+      : "Remaining";
+  const headerValue = isIncome ? row.spentCents : over && overIsGood ? -remaining : remaining;
 
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -78,7 +102,7 @@ export function ItemPanel({
           </div>
         </div>
         <p className="mt-0.5 text-xs text-white/90 tabular-nums">
-          {formatMoney(row.spentCents, currency)} {isIncome ? "received" : "spent"} of{" "}
+          {formatMoney(row.spentCents, currency)} {verb} of{" "}
           {formatMoney(row.plannedCents, currency)}
         </p>
       </div>

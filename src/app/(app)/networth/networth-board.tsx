@@ -64,8 +64,10 @@ export type GridRow = {
   liability: boolean;
   // Account is linked to a Budget debt — shown but not counted (the debt row is).
   linked: boolean;
+  // Kids Funding — shown but not counted.
+  excluded?: boolean;
   // Same grouping as the sidebar, so the two views read as one system.
-  section: "Budget" | "Investments" | "Credit Cards" | "Loans";
+  section: "Budget" | "Investments" | "Kids Funding" | "Credit Cards" | "Loans";
   balances: (number | null)[]; // aligned to gridMonths
   // A bucket / "Unallocated" sub-row indented under its parent account.
   indent?: boolean;
@@ -79,7 +81,13 @@ export type GridRow = {
   parentId?: string;
 };
 
-const SECTION_ORDER: GridRow["section"][] = ["Budget", "Investments", "Credit Cards", "Loans"];
+const SECTION_ORDER: GridRow["section"][] = [
+  "Budget",
+  "Investments",
+  "Kids Funding",
+  "Credit Cards",
+  "Loans",
+];
 
 type Props = {
   points: MonthPoint[];
@@ -344,6 +352,9 @@ function BalanceGrid({
   // Per-section, per-month subtotal — top-level rows only, so bucket rows
   // and the Unallocated remainder (already inside their parent account's
   // balance) aren't counted twice.
+  // "excluded" (Kids Funding) rows still count toward their own section's
+  // subtotal here — only the grand "Net worth" row (from `points`, computed
+  // server-side) skips them.
   const sectionTotal = (g: (typeof sections)[number], i: number) => {
     let sum = 0;
     let any = false;
@@ -426,7 +437,6 @@ function BalanceGrid({
                         type="button"
                         onClick={() => toggle(g.section)}
                         aria-expanded={isOpen}
-                        title={isOpen ? "Collapse" : "Expand"}
                         className="flex w-full items-center gap-1.5 px-4 py-2 text-left transition hover:bg-brand-soft/70 dark:hover:bg-brand-soft/25"
                       >
                         <svg
@@ -469,7 +479,7 @@ function BalanceGrid({
                           return (
                             <tr
                               key={`${g.section}-${ri}-${r.name}`}
-                              className={`border-b border-line ${r.indent ? "bg-background/30" : ""} ${r.linked ? "opacity-50" : ""}`}
+                              className={`border-b border-line ${r.indent ? "bg-background/30" : ""} ${r.linked || r.excluded ? "opacity-50" : ""}`}
                             >
                               <td
                                 className={`${stickyCls} whitespace-nowrap ${
@@ -486,7 +496,6 @@ function BalanceGrid({
                                     type="button"
                                     onClick={() => toggleAccount(r.id!)}
                                     aria-expanded={accountOpen}
-                                    title={accountOpen ? "Collapse" : "Expand"}
                                     className="flex w-full items-center gap-1 px-4 py-2 text-left transition hover:bg-background/60"
                                   >
                                     <svg
@@ -498,6 +507,7 @@ function BalanceGrid({
                                       <path d="M9 6l6 6-6 6" />
                                     </svg>
                                     {r.name}
+                                    {r.excluded ? <ExcludedChip /> : null}
                                   </button>
                                 ) : (
                                   <>
@@ -507,6 +517,7 @@ function BalanceGrid({
                                         linked
                                       </span>
                                     ) : null}
+                                    {r.excluded ? <ExcludedChip /> : null}
                                   </>
                                 )}
                               </td>
@@ -543,7 +554,7 @@ function BalanceGrid({
           </tbody>
         </table>
       </div>
-      {hasUnallocated || rows.some((r) => r.linked) ? (
+      {hasUnallocated || rows.some((r) => r.linked || r.excluded) ? (
         <div className="space-y-1 border-t border-line px-4 py-2 text-xs text-muted">
           {hasUnallocated ? (
             <p>
@@ -555,9 +566,26 @@ function BalanceGrid({
           {rows.some((r) => r.linked) ? (
             <p>&ldquo;Linked&rdquo; accounts are counted through their Budget debt row, not twice.</p>
           ) : null}
+          {rows.some((r) => r.excluded) ? (
+            <p>
+              Kids Funding accounts are tracked here but excluded from every total —
+              it&apos;s the kids&apos; money, not the household&apos;s.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ExcludedChip() {
+  return (
+    <span
+      title="Kids Funding — tracked here, excluded from every total"
+      className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[9px] font-semibold uppercase text-muted dark:bg-white/10"
+    >
+      not counted
+    </span>
   );
 }
 
