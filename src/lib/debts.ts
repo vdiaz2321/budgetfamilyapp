@@ -20,15 +20,22 @@ export async function adjustDebtBalance(
 
   const { data: debt } = await supabase
     .from("debts")
-    .select("current_balance_cents")
+    .select("current_balance_cents, paid_off_at")
     .eq("subcategory_id", subcategoryId)
     .eq("household_id", householdId)
     .maybeSingle();
   if (!debt) return false;
 
+  const newBalance = (debt.current_balance_cents ?? 0) + deltaCents;
+  // Stamp the payoff date the moment the balance first reaches $0, and clear
+  // it if a payment gets undone and the balance rises back above $0 — keeps
+  // it in sync with whatever the balance actually is right now.
+  const paidOffAt =
+    newBalance <= 0 ? debt.paid_off_at ?? new Date().toISOString().slice(0, 10) : null;
+
   await supabase
     .from("debts")
-    .update({ current_balance_cents: (debt.current_balance_cents ?? 0) + deltaCents })
+    .update({ current_balance_cents: newBalance, paid_off_at: paidOffAt })
     .eq("subcategory_id", subcategoryId)
     .eq("household_id", householdId);
 

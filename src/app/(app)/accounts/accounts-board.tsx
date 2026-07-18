@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type Dispatch, type SetStateAction } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import {
   addAccount,
   addBucket,
   deleteAccount,
   deleteBucket,
+  reorderAccounts,
+  reorderBuckets,
   updateAccount,
   updateBalance,
   updateBucket,
@@ -30,6 +32,10 @@ export type AccountData = {
   active: boolean;
   // Kids Funding: tracked here, but always excluded from Assets / Net Worth.
   isKidsAccount: boolean;
+  // Banking accounts only: "savings" (long-term pile) vs "spending" (everyday).
+  // Splits the Net Worth analytics' Current Savings from Bank Accounts. null =
+  // spending. Ignored for investment / kids accounts.
+  bankGroup: "savings" | "spending" | null;
   balanceCents: number;
   buckets: BucketData[];
 };
@@ -113,6 +119,41 @@ const SECTIONS: Section[] = [
   },
 ];
 
+// Collapse state that resets to `initial` on a fresh login (new browser
+// session) but survives navigating around the app within that session.
+// The first render always uses `initial()` — matching the server — so there's
+// no hydration mismatch; the saved value (if any) is applied right after
+// mount, once we're client-only.
+function useSessionCollapse(
+  key: string,
+  initial: () => Record<string, boolean>,
+): [Record<string, boolean>, Dispatch<SetStateAction<Record<string, boolean>>>] {
+  const [state, setState] = useState<Record<string, boolean>>(initial);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(key);
+      if (saved) setState(JSON.parse(saved) as Record<string, boolean>);
+    } catch {
+      // sessionStorage unavailable (e.g. private mode) — falls back to `initial()`.
+    }
+    setHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.sessionStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // sessionStorage unavailable — collapse state just won't persist.
+    }
+  }, [key, state, hydrated]);
+
+  return [state, setState];
+}
+
 type Props = {
   accounts: AccountData[];
   budgetDebts: BudgetDebt[];
@@ -138,6 +179,11 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
   // (credit cards / loans) appear only if such accounts still exist, so you
   // can delete them and move that debt into Budget.
   const assetSections = SECTIONS.filter((s) => !s.liability);
+  // The household's own assets (feed Net Worth) vs. Kids Funding, which is
+  // tracked but excluded — pulled out so it renders in its own group at the
+  // very bottom, past the Debts line, so it reads as clearly separate.
+  const ownAssetSections = assetSections.filter((s) => !s.kidsGroup);
+  const kidsSections = assetSections.filter((s) => s.kidsGroup);
   const legacySections = SECTIONS.filter(
     (s) => s.liability && accounts.some((a) => s.match(a)),
   );
@@ -145,12 +191,28 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
   // Every section's open/collapsed state, lifted here so one button can
   // expand or collapse them all at once.
   const sectionKeys = ["debts", ...assetSections.map((s) => s.key), ...legacySections.map((s) => s.key)];
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Start every section collapsed on each visit — open only what you need.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(["debts", ...SECTIONS.map((s) => s.key)].map((k) => [k, true])),
+  );
   const allOpen = sectionKeys.every((k) => !collapsed[k]);
   const toggleAll = () =>
     setCollapsed(Object.fromEntries(sectionKeys.map((k) => [k, allOpen])));
   const toggleSection = (key: string) =>
     setCollapsed((c) => ({ ...c, [key]: !c[key] }));
+
+  // Each account's bucket-drawer open/closed state, keyed by account id —
+  // survives navigating to another page and back within the same browser
+  // session instead of resetting to its default every time this board
+  // remounts. See feedback: "Amex Savings keeps staying expanded... when I
+  // collapse it when moving to a different page."
+  const bucketCountById = new Map(accounts.map((a) => [a.id, a.buckets.length]));
+  const [bucketsOpen, setBucketsOpen] = useSessionCollapse("accounts-buckets-open", () =>
+    Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, true])),
+  );
+  const isBucketsOpen = (id: string) => bucketsOpen[id] ?? (bucketCountById.get(id) ?? 0) > 0;
+  const toggleBuckets = (id: string) =>
+    setBucketsOpen((c) => ({ ...c, [id]: !isBucketsOpen(id) }));
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4">
@@ -183,7 +245,7 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
       </div>
 
       <div className="space-y-3">
-        {assetSections.map((section) => (
+        {ownAssetSections.map((section) => (
           <AccountSection
             key={section.key}
             section={section}
@@ -191,6 +253,8 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
             currency={currency}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
+            isBucketsOpen={isBucketsOpen}
+            onToggleBuckets={toggleBuckets}
           />
         ))}
 
@@ -211,10 +275,37 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
             currency={currency}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
+            isBucketsOpen={isBucketsOpen}
+            onToggleBuckets={toggleBuckets}
             legacy
           />
         ))}
       </div>
+
+      {/* Kids Funding sits apart, below the household's own accounts and the
+          debts line, so it's visually clear this money isn't in Net Worth. */}
+      {kidsSections.length > 0 ? (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center gap-3 px-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Not counted in net worth
+            </span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          {kidsSections.map((section) => (
+            <AccountSection
+              key={section.key}
+              section={section}
+              accounts={accounts.filter((a) => section.match(a))}
+              currency={currency}
+              open={!collapsed[section.key]}
+              onToggle={() => toggleSection(section.key)}
+              isBucketsOpen={isBucketsOpen}
+              onToggleBuckets={toggleBuckets}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -320,6 +411,8 @@ function AccountSection({
   currency,
   open,
   onToggle,
+  isBucketsOpen,
+  onToggleBuckets,
   legacy = false,
 }: {
   section: Section;
@@ -327,14 +420,47 @@ function AccountSection({
   currency: string;
   open: boolean;
   onToggle: () => void;
+  isBucketsOpen: (id: string) => boolean;
+  onToggleBuckets: (id: string) => void;
   legacy?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [, startReorder] = useTransition();
 
-  const total = accounts
+  // Collapsing a section while a row's edit form is open shouldn't leave it
+  // silently open underneath — close it, so reopening the section shows the
+  // normal read view again.
+  useEffect(() => {
+    if (!open) setEditingId(null);
+  }, [open]);
+
+  // Reorder optimistically — reflect the new order the instant you click,
+  // instead of waiting on a full round trip to the server. `accounts` still
+  // wins once the server responds (revalidated data replaces this local copy).
+  const [localAccounts, setLocalAccounts] = useState(accounts);
+  useEffect(() => {
+    setLocalAccounts(accounts);
+  }, [accounts]);
+
+  const total = localAccounts
     .filter((a) => a.active)
     .reduce((sum, a) => sum + a.balanceCents, 0);
+
+  const moveAccount = (index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= localAccounts.length) return;
+    const next = [...localAccounts];
+    [next[index], next[j]] = [next[j], next[index]];
+    setLocalAccounts(next);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
+    startReorder(async () => {
+      const res = await reorderAccounts(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -366,13 +492,17 @@ function AccountSection({
         </span>
       </div>
 
+      {reorderError ? (
+        <p className="border-t border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
+      ) : null}
+
       {open ? (
         <div className="border-t border-line">
-          {accounts.length === 0 ? (
+          {localAccounts.length === 0 ? (
             <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — add one below.</p>
           ) : (
             <ul className="divide-y divide-line">
-              {accounts.map((a) => (
+              {localAccounts.map((a, i) => (
                 <AccountRow
                   key={a.id}
                   account={a}
@@ -382,6 +512,12 @@ function AccountSection({
                   onToggleEdit={() =>
                     setEditingId((id) => (id === a.id ? null : a.id))
                   }
+                  canMoveUp={i > 0}
+                  canMoveDown={i < localAccounts.length - 1}
+                  onMoveUp={() => moveAccount(i, -1)}
+                  onMoveDown={() => moveAccount(i, 1)}
+                  bucketsOpen={isBucketsOpen(a.id)}
+                  onToggleBuckets={() => onToggleBuckets(a.id)}
                 />
               ))}
             </ul>
@@ -420,28 +556,42 @@ function AccountRow({
   currency,
   editing,
   onToggleEdit,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+  bucketsOpen,
+  onToggleBuckets,
 }: {
   account: AccountData;
   section: Section;
   currency: string;
   editing: boolean;
   onToggleEdit: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  bucketsOpen: boolean;
+  onToggleBuckets: () => void;
 }) {
   const kindLabel = section.kindLabels[account.kind] ?? account.kind;
-  const showKind = Object.keys(section.kindLabels).length > 1;
+  // Banking rows already show a Savings/Checking chip (the Net Worth tag) —
+  // showing the structural kind label too just repeats the same word.
+  const showKind = section.key !== "banking" && Object.keys(section.kindLabels).length > 1;
   // Buckets make sense for asset accounts (savings/investments/cash), not for
   // credit cards or loans.
   const allowBuckets = !section.liability;
   const bucketCount = account.buckets.length;
-  const [bucketsOpen, setBucketsOpen] = useState(bucketCount > 0);
 
   return (
     <li className={editing ? "bg-brand-soft/30" : "hover:bg-brand-soft/25"}>
-      <div className="grid grid-cols-[1.25rem_minmax(0,1fr)_10rem] items-center gap-1.5 px-4 py-1.5">
+      <div className="grid grid-cols-[2.25rem_1.25rem_minmax(0,1fr)_10rem] items-center gap-1.5 px-4 py-1.5">
+        <ReorderButtons canMoveUp={canMoveUp} canMoveDown={canMoveDown} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
         {allowBuckets ? (
           <button
             type="button"
-            onClick={() => setBucketsOpen((v) => !v)}
+            onClick={onToggleBuckets}
             title={bucketsOpen ? "Hide buckets" : "Show buckets"}
             aria-expanded={bucketsOpen}
             className="flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand"
@@ -475,6 +625,18 @@ function AccountRow({
           {account.holder ? (
             <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
               {account.holder}
+            </span>
+          ) : null}
+          {section.key === "banking" && account.bankGroup ? (
+            <span
+              title="Net Worth splits Savings from everyday Checking"
+              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                account.bankGroup === "savings"
+                  ? "bg-positive/15 text-positive"
+                  : "bg-black/5 text-muted dark:bg-white/10"
+              }`}
+            >
+              {account.bankGroup === "savings" ? "Savings" : "Checking"}
             </span>
           ) : null}
           {account.subtype ? (
@@ -526,18 +688,49 @@ function AccountRow({
 // bucket (e.g. "Extra Cash").
 function BucketDrawer({ account, currency }: { account: AccountData; currency: string }) {
   const [adding, setAdding] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [, startReorder] = useTransition();
+
+  // Reorder optimistically, same reasoning as accounts above.
+  const [localBuckets, setLocalBuckets] = useState(account.buckets);
+  useEffect(() => {
+    setLocalBuckets(account.buckets);
+  }, [account.buckets]);
+
+  const moveBucket = (index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= localBuckets.length) return;
+    const next = [...localBuckets];
+    [next[index], next[j]] = [next[j], next[index]];
+    setLocalBuckets(next);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(next.map((b) => b.id)));
+    startReorder(async () => {
+      const res = await reorderBuckets(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
 
   return (
     <div className="border-t border-line bg-background/40 pl-11 pr-4 py-2">
-      {account.buckets.length === 0 ? (
+      {reorderError ? <p className="pb-1.5 text-xs font-medium text-negative">{reorderError}</p> : null}
+      {localBuckets.length === 0 ? (
         <p className="py-1 text-xs text-muted">
           No buckets yet — optional. Split this account into sinking funds (e.g. Emergency Fund,
           Vehicle, Real Estate). Leave empty for accounts you don&apos;t need to break down.
         </p>
       ) : (
         <ul className="divide-y divide-line/60">
-          {account.buckets.map((b) => (
-            <BucketRow key={b.id} bucket={b} currency={currency} />
+          {localBuckets.map((b, i) => (
+            <BucketRow
+              key={b.id}
+              bucket={b}
+              currency={currency}
+              canMoveUp={i > 0}
+              canMoveDown={i < localBuckets.length - 1}
+              onMoveUp={() => moveBucket(i, -1)}
+              onMoveDown={() => moveBucket(i, 1)}
+            />
           ))}
         </ul>
       )}
@@ -557,11 +750,26 @@ function BucketDrawer({ account, currency }: { account: AccountData; currency: s
   );
 }
 
-function BucketRow({ bucket, currency }: { bucket: BucketData; currency: string }) {
+function BucketRow({
+  bucket,
+  currency,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+}: {
+  bucket: BucketData;
+  currency: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
   const [delPending, startDel] = useTransition();
 
   return (
-    <li className="group grid grid-cols-[minmax(0,1fr)_10rem_1.25rem] items-center gap-1.5 py-1">
+    <li className="group grid grid-cols-[2.25rem_minmax(0,1fr)_10rem_1.25rem] items-center gap-1.5 py-1">
+      <ReorderButtons canMoveUp={canMoveUp} canMoveDown={canMoveDown} onMoveUp={onMoveUp} onMoveDown={onMoveDown} size="sm" />
       <BucketNameInput id={bucket.id} name={bucket.name} />
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
       <form
@@ -895,6 +1103,17 @@ function EditAccountForm({
             className="w-56 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         ) : null}
+        {section.key === "banking" ? (
+          <select
+            name="bankGroup"
+            defaultValue={account.bankGroup ?? "spending"}
+            title="Net Worth splits long-term Savings from everyday Bank Accounts"
+            className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          >
+            <option value="spending">Checking</option>
+            <option value="savings">Savings</option>
+          </select>
+        ) : null}
         <label className="flex items-center gap-1.5 text-xs text-muted">
           <input
             type="checkbox"
@@ -929,6 +1148,53 @@ function EditAccountForm({
           {delPending ? "Deleting…" : "Delete account"}
         </button>
       </form>
+    </div>
+  );
+}
+
+// Stacked up/down arrows for manually reordering a row within its list
+// (accounts within a section, buckets within an account).
+function ReorderButtons({
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+  size = "md",
+}: {
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  size?: "sm" | "md";
+}) {
+  const btnCls = size === "sm" ? "h-3 w-3.5" : "h-3.5 w-4";
+  const iconSize = size === "sm" ? 8 : 9;
+  return (
+    <div className="flex flex-col items-center justify-center gap-px">
+      <button
+        type="button"
+        onClick={onMoveUp}
+        disabled={!canMoveUp}
+        title="Move up"
+        aria-label="Move up"
+        className={`flex ${btnCls} items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand disabled:opacity-20 disabled:hover:bg-transparent`}
+      >
+        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M6 15l6-6 6 6" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={onMoveDown}
+        disabled={!canMoveDown}
+        title="Move down"
+        aria-label="Move down"
+        className={`flex ${btnCls} items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand disabled:opacity-20 disabled:hover:bg-transparent`}
+      >
+        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
     </div>
   );
 }

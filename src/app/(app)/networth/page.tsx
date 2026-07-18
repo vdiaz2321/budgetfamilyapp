@@ -43,6 +43,7 @@ export default async function NetworthPage() {
     { data: accountRows },
     { data: bucketRows },
     { data: subRows },
+    { data: historyRows },
   ] = await Promise.all([
     supabase
       .from("account_snapshots")
@@ -61,7 +62,7 @@ export default async function NetworthPage() {
       .order("month"),
     supabase
       .from("accounts")
-      .select("id, name, kind, is_kids_account")
+      .select("id, name, kind, is_kids_account, bank_group")
       .eq("household_id", household.id),
     supabase
       .from("buckets")
@@ -73,6 +74,11 @@ export default async function NetworthPage() {
       .from("subcategories")
       .select("id, name")
       .eq("household_id", household.id),
+    supabase
+      .from("networth_history")
+      .select("month, savings_cents, bank_cents, stocks_cents, debt_cents")
+      .eq("household_id", household.id)
+      .order("month"),
   ]);
 
   // Same grouping as the sidebar (Budget / Investments / Credit Cards / Loans)
@@ -82,8 +88,10 @@ export default async function NetworthPage() {
     .select("subcategory_id, debt_kind")
     .eq("household_id", household.id);
   const debtKindBySub = new Map((debtRows ?? []).map((d) => [d.subcategory_id, d.debt_kind as string | null]));
-  const cashKinds = new Set(["checking", "savings_bucket"]);
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
+  const bankGroupById = new Map(
+    (accountRows ?? []).map((a) => [a.id, (a as { bank_group?: string | null }).bank_group ?? null]),
+  );
   const isKidsAccount = new Set(
     (accountRows ?? []).filter((a) => a.is_kids_account).map((a) => a.id),
   );
@@ -98,38 +106,84 @@ export default async function NetworthPage() {
   const sectionForDebt = (subcategoryId: string): GridRow["section"] =>
     debtKindBySub.get(subcategoryId) === "credit_card" ? "Credit Cards" : "Loans";
 
-  // Aggregate per month: assets (asset-kind accounts) vs liabilities (Budget
-  // debts). Liability-kind account snapshots are skipped — debts live in Budget.
-  const byMonth = new Map<string, { assets: number; liabilities: number }>();
-  const entry = (month: string) => {
-    let e = byMonth.get(month);
-    if (!e) {
-      e = { assets: 0, liabilities: 0 };
-      byMonth.set(month, e);
-    }
-    return e;
+  // Which "bucket" of the four section totals does an asset account feed?
+  //  - investment kind → Stocks
+  //  - banking kind (checking/savings_bucket) tagged 'savings' → Savings
+  //  - banking kind otherwise → Bank
+  // Kids + liability-kind accounts feed none (excluded / handled as debt).
+  type Slice = "savings" | "bank" | "stocks";
+  const sliceForAccount = (accountId: string, kind: string): Slice | null => {
+    if (excludedIds.has(accountId)) return null;
+    if (LIABILITY_KINDS.includes(kind)) return null;
+    if (kind === "investment") return "stocks";
+    return bankGroupById.get(accountId) === "savings" ? "savings" : "bank";
   };
 
+  // ---- Per-month section totals ----
+  // For months that have per-account snapshots, derive the four slices from
+  // them. Months with none fall back to the networth_history table (the
+  // pre-per-account era: Victor's 2018–2025, or any user's early history).
+  type Totals = { savings: number; bank: number; stocks: number; debt: number };
+  const zero = (): Totals => ({ savings: 0, bank: 0, stocks: 0, debt: 0 });
+  const derived = new Map<string, Totals>();
+  const snapshotMonths = new Set<string>();
+
   for (const s of accSnaps ?? []) {
-    if (LIABILITY_KINDS.includes(s.kind)) continue; // legacy debt account — ignore
-    if (excludedIds.has(s.account_id)) continue; // not in net worth — ignore
-    entry(s.month).assets += s.balance_cents;
+    snapshotMonths.add(s.month);
+    const slice = sliceForAccount(s.account_id, s.kind);
+    if (!slice) continue;
+    const t = derived.get(s.month) ?? zero();
+    t[slice] += s.balance_cents;
+    derived.set(s.month, t);
   }
   for (const s of debtSnaps ?? []) {
-    entry(s.month).liabilities += s.balance_cents;
+    snapshotMonths.add(s.month);
+    const t = derived.get(s.month) ?? zero();
+    t.debt += s.balance_cents;
+    derived.set(s.month, t);
   }
 
-  const points: MonthPoint[] = [...byMonth.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, e]) => ({
-      month, // YYYY-MM-01
-      assets: e.assets,
-      liabilities: e.liabilities,
-      net: e.assets - e.liabilities,
-    }));
+  const history = new Map(
+    (historyRows ?? []).map((h) => [
+      h.month,
+      {
+        savings: h.savings_cents,
+        bank: h.bank_cents,
+        stocks: h.stocks_cents,
+        debt: h.debt_cents,
+      } as Totals,
+    ]),
+  );
 
-  // ---- Monthly balances grid (the sheet's MonthlyNetWorth tab) ----
-  const months = points.map((p) => p.month);
+  // Union of every month we know about, in order. Per-account era wins over the
+  // history fallback for any overlapping month.
+  const allMonths = [...new Set([...snapshotMonths, ...history.keys()])].sort((a, b) =>
+    a.localeCompare(b),
+  );
+
+  const points: MonthPoint[] = allMonths.map((month) => {
+    const fromHistory = !snapshotMonths.has(month);
+    const t = (fromHistory ? history.get(month) : derived.get(month)) ?? zero();
+    const assets = t.savings + t.bank + t.stocks;
+    return {
+      month,
+      savings: t.savings,
+      bank: t.bank,
+      stocks: t.stocks,
+      debt: t.debt,
+      assets,
+      liabilities: t.debt,
+      net: assets - t.debt,
+      nwWithoutInvest: t.savings + t.bank,
+      fromHistory,
+    };
+  });
+
+  // ---- Monthly balances grid (per-account era only) ----
+  // The detailed accounts×months grid only spans months that actually have
+  // per-account snapshots. Pre-per-account history shows in the analytics table,
+  // not here (there's no account-level detail to show).
+  const months = [...snapshotMonths].sort((a, b) => a.localeCompare(b));
   const monthIdx = new Map(months.map((m, i) => [m, i]));
   const accountName = new Map((accountRows ?? []).map((a) => [a.id, a.name]));
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
@@ -218,7 +272,12 @@ export default async function NetworthPage() {
       section,
       balances: a.balances,
       hasChildren: buckets.length > 0,
+      bucketCount: buckets.length,
       id: a.id,
+      accountId: a.id,
+      // A bucketed account's total is derived from its buckets, so its own row
+      // is read-only — you edit the buckets. Plain accounts are editable.
+      editable: buckets.length === 0,
     });
     if (buckets.length === 0) continue;
     for (const b of buckets) {
@@ -229,6 +288,8 @@ export default async function NetworthPage() {
         section,
         indent: true,
         parentId: a.id,
+        bucketId: b.id,
+        editable: true,
         balances: bucketBalances.get(b.id) ?? months.map(() => null),
       });
     }

@@ -36,8 +36,9 @@ export default async function AccountsPage() {
     await Promise.all([
       supabase
         .from("accounts")
-        .select("id, name, kind, subtype, holder, active, is_kids_account, current_balance_cents")
+        .select("id, name, kind, subtype, holder, active, is_kids_account, bank_group, current_balance_cents")
         .eq("household_id", household.id)
+        .order("sort_order")
         .order("name"),
       supabase
         .from("buckets")
@@ -70,6 +71,7 @@ export default async function AccountsPage() {
     holder: a.holder,
     active: a.active,
     isKidsAccount: a.is_kids_account ?? false,
+    bankGroup: (a.bank_group as "savings" | "spending" | null) ?? null,
     balanceCents: a.current_balance_cents ?? 0,
     buckets: (bucketRows ?? [])
       .filter((b) => b.account_id === a.id)

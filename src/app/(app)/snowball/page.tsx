@@ -43,7 +43,7 @@ export default async function SnowballPage() {
     await Promise.all([
       supabase
         .from("debts")
-        .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day")
+        .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day, paid_off_at")
         .eq("household_id", household.id),
       supabase
         .from("subcategories")
@@ -152,17 +152,26 @@ export default async function SnowballPage() {
     );
   const currentExtraCents = extraForMonth(month);
 
-  const rows = (debts ?? []).map((d) => ({
-    subId: d.subcategory_id,
-    name: nameBySub.get(d.subcategory_id) ?? "Debt",
-    balanceCents: d.current_balance_cents,
-    minCents: d.min_payment_cents,
-    plannedCents: plannedBySub.get(d.subcategory_id) ?? 0,
-    paidCents: paidBySub.get(d.subcategory_id) ?? 0,
-    paidThisMonthCents: paidThisMonthBySub.get(d.subcategory_id) ?? 0,
-    apr: Number(d.apr),
-    dueDay: d.due_day as number | null,
-  }));
+  // A paid-off debt keeps showing here through Dec 31 of the year it was
+  // paid off, then drops off once the calendar rolls into the next year —
+  // it never comes back on the Budget page either way.
+  const currentYear = new Date().getFullYear();
+  const rows = (debts ?? [])
+    .filter((d) => {
+      if (d.current_balance_cents > 0 || !d.paid_off_at) return true;
+      return new Date(d.paid_off_at).getFullYear() >= currentYear;
+    })
+    .map((d) => ({
+      subId: d.subcategory_id,
+      name: nameBySub.get(d.subcategory_id) ?? "Debt",
+      balanceCents: d.current_balance_cents,
+      minCents: d.min_payment_cents,
+      plannedCents: plannedBySub.get(d.subcategory_id) ?? 0,
+      paidCents: paidBySub.get(d.subcategory_id) ?? 0,
+      paidThisMonthCents: paidThisMonthBySub.get(d.subcategory_id) ?? 0,
+      apr: Number(d.apr),
+      dueDay: d.due_day as number | null,
+    }));
 
   // Card order: smallest balance first (used by both modes, purely for
   // display — "My Plan" doesn't attack in any particular order).

@@ -110,7 +110,7 @@ export function SnowballBoard({
       </p>
 
       {/* Summary */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard label="Total debt" value={formatMoney(totalBalanceCents, currency)} />
         <SummaryCard label="Minimums / mo" value={formatMoney(totalMinCents, currency)} />
         {mode === "planned" ? (
@@ -123,6 +123,10 @@ export function SnowballBoard({
             highlight
           />
         )}
+        <SummaryCard
+          label="Total paid / mo"
+          value={formatMoney(rows.reduce((sum, r) => sum + r.paidThisMonthCents, 0), currency)}
+        />
       </div>
 
       {/* Debt cards */}

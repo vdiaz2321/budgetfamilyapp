@@ -22,6 +22,9 @@ type Props = {
   monthKey: string; // YYYY-MM-01
   selectedSubId: string | null;
   onSelectRow: (row: RowData, kind: CategoryKind) => void;
+  // Open/collapsed is lifted to the board so one button can expand/collapse all.
+  open: boolean;
+  onToggle: () => void;
 };
 
 // name | Planned | Spent/Received | Remaining — all three shown at once, like
@@ -34,10 +37,10 @@ export function BudgetGroup({
   monthKey,
   selectedSubId,
   onSelectRow,
+  open,
+  onToggle,
 }: Props) {
-  const [open, setOpen] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [hidePaidOff, setHidePaidOff] = useState(false);
 
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
   const isDebt = group.kind === "debt";
@@ -45,8 +48,10 @@ export function BudgetGroup({
   // Income "receives" money; everything else "spends" it.
   const actualLabel = isIncome ? "Received" : "Spent";
 
+  // Paid-off debts always drop out of the Budget page — they still live on
+  // the Snowball page (through the end of the year they were paid off).
   const visibleRows = group.rows.filter((r) => {
-    if (isDebt && hidePaidOff && r.debt && r.debt.balanceCents <= 0) return false;
+    if (isDebt && r.debt && r.debt.balanceCents <= 0) return false;
     return true;
   });
 
@@ -58,7 +63,7 @@ export function BudgetGroup({
       <div className={`grid ${GRID} items-center gap-2 px-4 py-2.5`}>
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={onToggle}
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
@@ -142,18 +147,9 @@ export function BudgetGroup({
                 </button>
               ) : null}
               {isDebt ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setHidePaidOff((v) => !v)}
-                    className="text-xs text-muted hover:text-foreground"
-                  >
-                    {hidePaidOff ? "Show paid-off" : "Hide paid-off"}
-                  </button>
-                  <Link href="/snowball" className="text-xs font-medium text-brand hover:text-brand-strong">
-                    Snowball →
-                  </Link>
-                </>
+                <Link href="/snowball" className="text-xs font-medium text-brand hover:text-brand-strong">
+                  Snowball →
+                </Link>
               ) : null}
             </div>
             <span className="text-right text-sm font-bold tabular-nums">

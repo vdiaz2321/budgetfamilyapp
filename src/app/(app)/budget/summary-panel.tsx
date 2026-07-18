@@ -70,6 +70,21 @@ export function SummaryPanel({ groups, currency }: Props) {
   const [active, setActive] = useState<string | null>(null);
   const activeSeg = segments.find((s) => s.categoryId === active) ?? null;
 
+  // Clicking a legend row expands it to show that category's line items, valued
+  // by the current mode (spent vs remaining). Non-zero items only.
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const subRowsFor = (categoryId: string) => {
+    const group = groups.find((g) => g.categoryId === categoryId);
+    return (group?.rows ?? [])
+      .map((r) => ({
+        subId: r.subId,
+        name: r.name,
+        value: mode === "spent" ? r.spentCents : r.plannedCents - r.spentCents,
+      }))
+      .filter((r) => r.value !== 0)
+      .sort((a, b) => b.value - a.value);
+  };
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
@@ -149,12 +164,18 @@ export function SummaryPanel({ groups, currency }: Props) {
           <ul className="divide-y divide-line px-2 py-3">
             {segments.map((s) => {
               const pct = total > 0 ? Math.round((s.arcValue / total) * 100) : 0;
+              const isOpen = expanded === s.categoryId;
+              const subRows = isOpen ? subRowsFor(s.categoryId) : [];
               return (
                 <li key={s.categoryId}>
                   <button
                     type="button"
+                    onClick={() =>
+                      setExpanded((id) => (id === s.categoryId ? null : s.categoryId))
+                    }
                     onMouseEnter={() => setActive(s.categoryId)}
                     onMouseLeave={() => setActive(null)}
+                    aria-expanded={isOpen}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition ${
                       active === s.categoryId ? "bg-brand-soft/40" : "hover:bg-brand-soft/25"
                     }`}
@@ -170,7 +191,37 @@ export function SummaryPanel({ groups, currency }: Props) {
                     <span className="w-9 shrink-0 text-right text-xs text-muted tabular-nums">
                       {pct}%
                     </span>
+                    <svg
+                      width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                      className={`shrink-0 text-muted transition-transform ${isOpen ? "" : "-rotate-90"}`}
+                      aria-hidden
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
                   </button>
+
+                  {isOpen ? (
+                    <ul className="mb-1 ml-5 border-l border-line pl-3">
+                      {subRows.length === 0 ? (
+                        <li className="py-1 text-xs text-muted">
+                          {mode === "spent" ? "Nothing spent here yet." : "Nothing remaining here."}
+                        </li>
+                      ) : (
+                        subRows.map((r) => (
+                          <li
+                            key={r.subId}
+                            className="flex items-center gap-2 py-1"
+                          >
+                            <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
+                            <span className="shrink-0 text-xs tabular-nums">
+                              {formatMoney(r.value, currency)}
+                            </span>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  ) : null}
                 </li>
               );
             })}

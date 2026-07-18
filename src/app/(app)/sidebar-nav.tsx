@@ -77,8 +77,7 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
             key={n.href}
             href={n.href}
             aria-current={active ? "page" : undefined}
-            title={collapsed ? n.label : undefined}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+            className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
               collapsed ? "justify-center px-0" : ""
             } ${
               active
@@ -101,6 +100,14 @@ export default function SidebarNav({ collapsed = false }: { collapsed?: boolean 
               {n.icon}
             </svg>
             {collapsed ? null : n.label}
+            {collapsed ? (
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute left-full top-1/2 z-50 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity delay-150 duration-100 group-hover:opacity-100"
+              >
+                {n.label}
+              </span>
+            ) : null}
           </Link>
         );
       })}

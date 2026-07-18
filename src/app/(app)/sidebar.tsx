@@ -27,7 +27,12 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
 
   return (
     <aside
-      className={`relative hidden h-screen shrink-0 flex-col bg-sidebar px-3 py-5 text-white transition-[width] duration-200 md:sticky md:top-0 md:flex ${
+      // `z-30`: `position: sticky` makes this its own stacking context, so
+      // without an explicit z-index the collapsed-rail tooltip's z-50 (in
+      // SidebarNav) only wins against other elements *inside* this aside —
+      // main content rendered later in the DOM still paints over the whole
+      // sidebar on a tie. See feedback: hover tooltip showing behind cards.
+      className={`relative z-30 hidden h-screen shrink-0 flex-col bg-sidebar px-3 py-5 text-white transition-[width] duration-200 md:sticky md:top-0 md:flex ${
         collapsed ? "w-[4.5rem]" : "w-64"
       }`}
     >

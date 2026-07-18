@@ -60,6 +60,14 @@ export function BudgetBoard({
 }: Props) {
   const [railTab, setRailTab] = useState<"summary" | "transactions">("transactions");
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
+  // Each group's open/collapsed state, lifted here so one button can expand or
+  // collapse them all at once (groups default open).
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const allOpen = groups.every((g) => !collapsed[g.categoryId]);
+  const toggleAll = () =>
+    setCollapsed(Object.fromEntries(groups.map((g) => [g.categoryId, allOpen])));
+  const toggleGroup = (categoryId: string) =>
+    setCollapsed((c) => ({ ...c, [categoryId]: !c[categoryId] }));
   // Set from the item panel's "+ Add transaction" button so it doesn't
   // require switching to the Log tab first.
   const [quickAdd, setQuickAdd] = useState(false);
@@ -68,12 +76,9 @@ export function BudgetBoard({
   // then draws down the rolled-in buffer, and only once that's exhausted does
   // "left to budget" actually go negative. Keeps the two numbers split while
   // making the rollover real spendable money.
-  const rolledIn = rollover.inCents;
   const ownLeft = leftToBudget; // incomePlanned − outflowPlanned
-  const rolloverDrawn = Math.min(Math.max(0, -ownLeft), rolledIn);
-  const rolloverRemaining = rolledIn - rolloverDrawn;
+  const rolloverDrawn = Math.min(Math.max(0, -ownLeft), rollover.inCents);
   const displayLeft = ownLeft + rolloverDrawn; // 0 while the buffer covers it
-  const positive = displayLeft >= 0;
 
   // Actuals for the pill: what's actually been received vs actually spent so
   // far this month (income group's spent = money received).
@@ -109,69 +114,77 @@ export function BudgetBoard({
     ) : null;
 
   return (
-    <div className="mx-auto flex max-w-5xl items-start justify-center gap-6">
+    // `items-start` would leave the right rail (aside) exactly as tall as its
+    // own content — shorter than the budget column next to it — which caps
+    // how far its `sticky` child can travel before running out of room in
+    // its own container and getting dragged back up off-screen. Default
+    // (stretch) cross-axis sizing makes the aside match the row height so
+    // the sticky panel has the whole scroll range to stay pinned in.
+    // See feedback: item detail panel required scrolling up to reach.
+    <div className="mx-auto flex max-w-5xl justify-center gap-6">
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
         <MonthPicker monthKey={month.key} />
 
-        {/* Left-to-budget pill */}
-        <div className="rounded-2xl bg-surface px-6 py-3.5 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-          <p className="text-base">
-            <span className={`font-bold tabular-nums ${positive ? "text-positive" : "text-negative"}`}>
-              {formatMoney(displayLeft, currency)}
-            </span>{" "}
-            <span className="text-muted">left to budget planned</span>
-          </p>
-          <p className="text-base">
-            <span className={`font-bold tabular-nums ${actualLeft >= 0 ? "text-positive" : "text-negative"}`}>
-              {formatMoney(actualLeft, currency)}
-            </span>{" "}
-            <span className="text-muted">actual left to spend</span>
-          </p>
-          <p className="mt-0.5 text-xs text-muted tabular-nums">
-            {formatMoney(incomePlanned, currency)} income planned −{" "}
-            {formatMoney(outflowPlanned, currency)} planned expenses
-          </p>
-          <p className="text-xs text-muted tabular-nums">
-            {formatMoney(actualIncome, currency)} actual income received −{" "}
-            {formatMoney(actualSpent, currency)} actual spent
-          </p>
-          {rolledIn !== 0 ? (
-            <p className="mt-1.5 border-t border-line pt-1.5 text-xs text-muted tabular-nums">
-              <span className="font-semibold text-brand">
-                {formatMoney(rolloverRemaining, currency)}
-              </span>{" "}
-              {rolloverDrawn > 0 ? (
-                <>
-                  left of {formatMoney(rolledIn, currency)} rolled in from{" "}
-                  {rollover.prevMonthLabel}
-                </>
-              ) : (
-                <>rolled in from {rollover.prevMonthLabel}, available to spend</>
-              )}
-            </p>
-          ) : null}
-        </div>
-
-        {/* Rollover: include last month's leftover cash in this month */}
-        <RolloverBar
-          monthFirstOfMonth={month.firstOfMonth}
-          rollover={rollover}
+        {/* Left-to-budget hero card */}
+        <SummaryHeroCard
+          actualLeft={actualLeft}
+          displayLeft={displayLeft}
+          incomePlanned={incomePlanned}
+          outflowPlanned={outflowPlanned}
+          actualIncome={actualIncome}
+          actualSpent={actualSpent}
           currency={currency}
         />
 
-        {/* Groups */}
-        <div className="space-y-3">
-          {groups.map((group) => (
-            <BudgetGroup
-              key={group.categoryId}
-              group={group}
-              currency={currency}
-              monthKey={month.firstOfMonth}
-              selectedSubId={selected?.subId ?? null}
-              onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
-            />
-          ))}
+        {/* Wrapping this in `relative` gives the sticky footer bar below a
+            containing block that spans the whole rollover+groups list, so it
+            stays pinned to the top of the viewport for as long as that list
+            is in view, instead of unsticking the instant its own row scrolls
+            past — see feedback: "freeze on top when I scroll down". */}
+        <div className="relative space-y-4">
+          <StickyFooterBar
+            actualIncome={actualIncome}
+            actualSpent={actualSpent}
+            actualLeft={actualLeft}
+            displayLeft={displayLeft}
+            outflowPlanned={outflowPlanned}
+            currency={currency}
+          />
+
+          {/* Rollover: include last month's leftover cash in this month */}
+          <RolloverBar
+            monthFirstOfMonth={month.firstOfMonth}
+            rollover={rollover}
+            currency={currency}
+          />
+
+          {/* Expand / collapse all groups */}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+            >
+              {allOpen ? "Collapse all" : "Expand all"}
+            </button>
+          </div>
+
+          {/* Groups */}
+          <div className="space-y-3">
+            {groups.map((group) => (
+              <BudgetGroup
+                key={group.categoryId}
+                group={group}
+                currency={currency}
+                monthKey={month.firstOfMonth}
+                selectedSubId={selected?.subId ?? null}
+                onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
+                open={!collapsed[group.categoryId]}
+                onToggle={() => toggleGroup(group.categoryId)}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -255,6 +268,196 @@ export function BudgetBoard({
           onClose={() => setQuickAdd(false)}
         />
       ) : null}
+    </div>
+  );
+}
+
+type BudgetTone = "good" | "warn" | "bad";
+
+const TONE_CLASSES: Record<BudgetTone, { text: string; badge: string; icon: string }> = {
+  good: { text: "text-positive", badge: "bg-positive/15 text-positive", icon: "M5 12l4 4L19 6" },
+  warn: {
+    text: "text-warning",
+    badge: "bg-warning/15 text-warning",
+    icon: "M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z",
+  },
+  bad: {
+    text: "text-negative",
+    badge: "bg-negative/15 text-negative",
+    icon: "M12 9v4m0 4h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+  },
+};
+
+function getBudgetStatus(
+  actualLeft: number,
+  displayLeft: number,
+  actualSpent: number,
+  outflowPlanned: number,
+): { tone: BudgetTone; badgeText: string } {
+  const expenseRatio = outflowPlanned > 0 ? actualSpent / outflowPlanned : 0;
+  if (actualLeft < 0) return { tone: "bad", badgeText: "Over budget" };
+  if (expenseRatio >= 0.9 || actualLeft < displayLeft * 0.15) {
+    return { tone: "warn", badgeText: `Tight — ${Math.round(expenseRatio * 100)}% spent` };
+  }
+  return { tone: "good", badgeText: "On track" };
+}
+
+function ProgressBar({
+  label,
+  arrow,
+  actual,
+  planned,
+  fillClassName,
+  currency,
+}: {
+  label: string;
+  arrow: "up" | "down";
+  actual: number;
+  planned: number;
+  fillClassName: string;
+  currency: string;
+}) {
+  const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-sm">
+        <span className="flex items-center gap-1 text-muted">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d={arrow === "up" ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M5 12l7 7 7-7"} />
+          </svg>
+          {label}
+        </span>
+        <span className="tabular-nums">
+          <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
+          <span className="text-muted">/ {formatMoney(planned, currency)} planned</span>
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-line/60">
+        <div
+          className={`h-full rounded-full transition-[width] duration-400 ease-out ${fillClassName}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SummaryHeroCard({
+  actualLeft,
+  displayLeft,
+  incomePlanned,
+  outflowPlanned,
+  actualIncome,
+  actualSpent,
+  currency,
+}: {
+  actualLeft: number;
+  displayLeft: number;
+  incomePlanned: number;
+  outflowPlanned: number;
+  actualIncome: number;
+  actualSpent: number;
+  currency: string;
+}) {
+  const { tone, badgeText } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
+  const toneClasses = TONE_CLASSES[tone];
+
+  return (
+    <div className="rounded-2xl bg-surface px-6 py-6 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-medium text-muted">Remaining to spend</p>
+          <p className={`text-4xl font-medium tabular-nums ${toneClasses.text}`}>
+            {formatMoney(actualLeft, currency)}
+          </p>
+          <span
+            className={`mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${toneClasses.badge}`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d={toneClasses.icon} />
+            </svg>
+            {badgeText}
+          </span>
+        </div>
+        <div className="text-right">
+          <p className="text-xs font-medium text-muted">Budget planned</p>
+          <p className="text-2xl font-medium tabular-nums text-foreground">
+            {formatMoney(displayLeft, currency)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-4">
+        <ProgressBar
+          label="Income"
+          arrow="up"
+          actual={actualIncome}
+          planned={incomePlanned}
+          fillClassName="bg-positive"
+          currency={currency}
+        />
+        <ProgressBar
+          label="Expenses"
+          arrow="down"
+          actual={actualSpent}
+          planned={outflowPlanned}
+          fillClassName="bg-negative"
+          currency={currency}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Split out from SummaryHeroCard so it can be rendered as its own sticky
+// element — its containing block is the `relative` wrapper in BudgetBoard
+// that spans the rollover bar + group list, so it stays pinned to the top of
+// the viewport across that whole scroll region instead of unsticking after
+// only its own row height.
+function StickyFooterBar({
+  actualIncome,
+  actualSpent,
+  actualLeft,
+  displayLeft,
+  outflowPlanned,
+  currency,
+}: {
+  actualIncome: number;
+  actualSpent: number;
+  actualLeft: number;
+  displayLeft: number;
+  outflowPlanned: number;
+  currency: string;
+}) {
+  const { tone } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
+  const toneClasses = TONE_CLASSES[tone];
+
+  return (
+    // No explicit z-index here on purpose: giving a `position: sticky`
+    // element a z-index promotes it to its own stacking context, and in
+    // testing that made it paint ABOVE `position: fixed` modals (z-50)
+    // regardless of the z-index value. Leaving it `auto` still paints it
+    // above normal in-flow siblings (positioned elements paint after
+    // non-positioned ones), which is all that's needed for it to sit above
+    // the budget groups scrolling underneath — see feedback: sticky bar was
+    // covering the Add Transaction modal.
+    <div className="sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-6 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="text-center">
+        <p className="text-lg font-medium tabular-nums text-foreground">
+          {formatMoney(actualIncome, currency)}
+        </p>
+        <p className="text-xs text-muted">Received</p>
+      </div>
+      <div className="border-l border-line text-center">
+        <p className="text-lg font-medium tabular-nums text-foreground">
+          {formatMoney(actualSpent, currency)}
+        </p>
+        <p className="text-xs text-muted">Spent</p>
+      </div>
+      <div className={`border-l border-line text-center ${toneClasses.text}`}>
+        <p className="text-lg font-medium tabular-nums">{formatMoney(actualLeft, currency)}</p>
+        <p className="text-xs text-muted">Left</p>
+      </div>
     </div>
   );
 }

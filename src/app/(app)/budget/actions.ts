@@ -222,11 +222,23 @@ export async function upsertDebt(formData: FormData) {
     accountId = account?.id ?? null;
   }
 
+  // Manual balance edits stamp/clear paid_off_at the same way a payment does,
+  // so a debt zeroed out here still drops off the Snowball page next year.
+  const { data: existing } = await supabase
+    .from("debts")
+    .select("paid_off_at")
+    .eq("subcategory_id", subcategoryId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  const paidOffAt =
+    balanceCents <= 0 ? existing?.paid_off_at ?? new Date().toISOString().slice(0, 10) : null;
+
   await supabase.from("debts").upsert(
     {
       household_id: householdId,
       subcategory_id: subcategoryId,
       current_balance_cents: balanceCents,
+      paid_off_at: paidOffAt,
       min_payment_cents: minPaymentCents,
       apr: Number.isNaN(apr) ? 0 : apr,
       due_day: dueDay,

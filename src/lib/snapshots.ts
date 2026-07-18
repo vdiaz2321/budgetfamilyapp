@@ -11,6 +11,11 @@ export function currentMonthFirst(): string {
 // Upsert this month's snapshot rows from live balances. Idempotent — safe to
 // call on every balance change and every Networth load. Prior months are never
 // touched, so they freeze into history once the month rolls over.
+//
+// This coexists with the Net Worth grid's per-month editing (networth/actions.ts):
+// a current-month grid edit also writes the live balance, so the value re-derived
+// here matches what was typed (no clobber); past-month grid edits touch only the
+// snapshot row, which this never overwrites.
 export async function captureSnapshots(
   supabase: SupabaseClient,
   householdId: string,

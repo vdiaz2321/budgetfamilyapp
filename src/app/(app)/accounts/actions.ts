@@ -33,6 +33,8 @@ function revalidate() {
   revalidatePath("/accounts");
   // The transaction modal's account dropdown lives on /budget.
   revalidatePath("/budget");
+  // Net Worth mirrors account names/grouping in its grid.
+  revalidatePath("/networth");
   // The sidebar's account totals live in the shared (app) layout.
   revalidatePath("/", "layout");
 }
@@ -50,6 +52,15 @@ export async function addAccount(formData: FormData) {
   if (!name) return { error: "Account name is required." };
   if (!ALLOWED_KINDS.includes(kind)) return { error: "Invalid account type." };
 
+  const { data: maxRow } = await supabase
+    .from("accounts")
+    .select("sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const sortOrder = (maxRow?.sort_order ?? -1) + 1;
+
   const { error } = await supabase.from("accounts").insert({
     household_id: householdId,
     name,
@@ -59,6 +70,7 @@ export async function addAccount(formData: FormData) {
     is_kids_account: isKidsAccount,
     include_net_worth: !isKidsAccount,
     current_balance_cents: balanceCents,
+    sort_order: sortOrder,
   });
 
   if (error) {
@@ -84,21 +96,46 @@ export async function updateAccount(formData: FormData) {
   const active = formData.get("active") === "on";
   if (!id || !name) return;
 
+  // Only the Banking edit form submits bankGroup; leave it untouched otherwise.
+  const update: Record<string, unknown> = {
+    name,
+    holder,
+    subtype,
+    is_kids_account: isKidsAccount,
+    include_net_worth: !isKidsAccount,
+    active,
+    updated_at: new Date().toISOString(),
+  };
+  if (formData.has("bankGroup")) {
+    const bankGroup = String(formData.get("bankGroup") ?? "");
+    update.bank_group = bankGroup === "savings" ? "savings" : "spending";
+  }
+
   await supabase
     .from("accounts")
-    .update({
-      name,
-      holder,
-      subtype,
-      is_kids_account: isKidsAccount,
-      include_net_worth: !isKidsAccount,
-      active,
-      updated_at: new Date().toISOString(),
-    })
+    .update(update)
     .eq("id", id)
     .eq("household_id", householdId);
 
   await captureSnapshots(supabase, householdId);
+  revalidate();
+}
+
+// Rename-only, for inline editing from the Net Worth grid — unlike
+// updateAccount, this never touches holder/subtype/active/kidsAccount, so a
+// quick rename there can't accidentally clear those fields.
+export async function renameAccount(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  if (!id || !name) return;
+
+  await supabase
+    .from("accounts")
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
   revalidate();
 }
 
@@ -117,6 +154,32 @@ export async function updateBalance(formData: FormData) {
 
   await captureSnapshots(supabase, householdId);
   revalidate();
+}
+
+// Persist a manual drag/arrow reorder of a section's accounts. `orderedIds` is
+// that section's account ids in their new top-to-bottom order — only those
+// rows' sort_order changes, so other sections are untouched.
+export async function reorderAccounts(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const orderedIds = JSON.parse(String(formData.get("orderedIds") ?? "[]")) as string[];
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return { error: null };
+
+  const results = await Promise.all(
+    orderedIds.map((id, i) =>
+      supabase
+        .from("accounts")
+        .update({ sort_order: i })
+        .eq("id", id)
+        .eq("household_id", householdId),
+    ),
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    return { error: `Couldn't save the new order — ${failed.error.message}` };
+  }
+
+  revalidate();
+  return { error: null };
 }
 
 export async function deleteAccount(formData: FormData) {
@@ -146,11 +209,21 @@ export async function addBucket(formData: FormData) {
   if (!accountId) return { error: "Missing account." };
   if (!name) return { error: "Bucket name is required." };
 
+  const { data: maxRow } = await supabase
+    .from("buckets")
+    .select("sort_order")
+    .eq("account_id", accountId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const sortOrder = (maxRow?.sort_order ?? -1) + 1;
+
   const { error } = await supabase.from("buckets").insert({
     household_id: householdId,
     account_id: accountId,
     name,
     balance_cents: balanceCents,
+    sort_order: sortOrder,
   });
 
   if (error) {
@@ -185,6 +258,31 @@ export async function updateBucket(formData: FormData) {
         ? `This account already has a bucket named "${name}". Pick a different name.`
         : "Couldn't rename that bucket — please try again.",
     };
+  }
+
+  revalidate();
+  return { error: null };
+}
+
+// Persist a manual reorder of one account's buckets — `orderedIds` is that
+// account's bucket ids in their new top-to-bottom order.
+export async function reorderBuckets(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const orderedIds = JSON.parse(String(formData.get("orderedIds") ?? "[]")) as string[];
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return { error: null };
+
+  const results = await Promise.all(
+    orderedIds.map((id, i) =>
+      supabase
+        .from("buckets")
+        .update({ sort_order: i })
+        .eq("id", id)
+        .eq("household_id", householdId),
+    ),
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    return { error: `Couldn't save the new order — ${failed.error.message}` };
   }
 
   revalidate();

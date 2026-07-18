@@ -18,6 +18,7 @@
   --accent: #f59e0b; /* amber-500 */
   --positive: #16a34a; /* green-600 */
   --negative: #dc2626; /* red-600 */
+  --warning: #d97706; /* amber-600 */
 
   /* YNAB-style sidebar: deep indigo-navy in light mode, near-black navy in
      dark mode. White text lives on it in both themes. */
@@ -37,6 +38,7 @@
   --accent: #fbbf24; /* amber-400 */
   --positive: #22c55e;
   --negative: #f87171;
+  --warning: #fbbf24;
 
   --sidebar: #10182e; /* dark navy, a touch bluer than the canvas */
 }
@@ -57,6 +59,7 @@
   --color-accent: var(--accent);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
+  --color-warning: var(--warning);
   --font-sans: var(--font-app);
 
   /* Larger + tighter than Tailwind's defaults — EveryDollar reads bigger/denser
