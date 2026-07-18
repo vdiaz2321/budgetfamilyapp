@@ -49,6 +49,9 @@ export type RowData = {
   dueDay: number | null;
   plannedCents: number;
   spentCents: number;
+  // Up to the last 6 months of actuals for this subcategory, chronological,
+  // sparse (no zero-fill) — the row hides its sparkline below 2 points.
+  sparkline: number[];
   savings: SavingsDetail | null;
   debt: DebtDetail | null;
 };

@@ -19,6 +19,7 @@
   --positive: #16a34a; /* green-600 */
   --negative: #dc2626; /* red-600 */
   --warning: #d97706; /* amber-600 */
+  --chart-1: #2563eb; /* blue-600 — Savings accent */
 
   /* YNAB-style sidebar: deep indigo-navy in light mode, near-black navy in
      dark mode. White text lives on it in both themes. */
@@ -39,6 +40,7 @@
   --positive: #22c55e;
   --negative: #f87171;
   --warning: #fbbf24;
+  --chart-1: #60a5fa; /* blue-400 — lifts on dark */
 
   --sidebar: #10182e; /* dark navy, a touch bluer than the canvas */
 }
@@ -60,6 +62,7 @@
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --color-warning: var(--warning);
+  --color-chart-1: var(--chart-1);
   --font-sans: var(--font-app);
 
   /* Larger + tighter than Tailwind's defaults — EveryDollar reads bigger/denser

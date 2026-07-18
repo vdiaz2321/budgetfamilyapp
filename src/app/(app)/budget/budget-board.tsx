@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setRollover } from "./actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
@@ -60,14 +61,14 @@ export function BudgetBoard({
 }: Props) {
   const [railTab, setRailTab] = useState<"summary" | "transactions">("transactions");
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
-  // Each group's open/collapsed state, lifted here so one button can expand or
-  // collapse them all at once (groups default open).
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const allOpen = groups.every((g) => !collapsed[g.categoryId]);
-  const toggleAll = () =>
-    setCollapsed(Object.fromEntries(groups.map((g) => [g.categoryId, allOpen])));
+  // Each group's open/collapsed state, persisted per-session (survives
+  // navigating away and back, resets on a fresh login) — same pattern as
+  // Net Worth / Accounts. Groups default open.
+  const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
+    Object.fromEntries(groups.map((g) => [g.categoryId, true])),
+  );
   const toggleGroup = (categoryId: string) =>
-    setCollapsed((c) => ({ ...c, [categoryId]: !c[categoryId] }));
+    setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? true) }));
   // Set from the item panel's "+ Add transaction" button so it doesn't
   // require switching to the Log tab first.
   const [quickAdd, setQuickAdd] = useState(false);
@@ -159,17 +160,6 @@ export function BudgetBoard({
             currency={currency}
           />
 
-          {/* Expand / collapse all groups */}
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={toggleAll}
-              className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
-            >
-              {allOpen ? "Collapse all" : "Expand all"}
-            </button>
-          </div>
-
           {/* Groups */}
           <div className="space-y-3">
             {groups.map((group) => (
@@ -180,8 +170,9 @@ export function BudgetBoard({
                 monthKey={month.firstOfMonth}
                 selectedSubId={selected?.subId ?? null}
                 onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
-                open={!collapsed[group.categoryId]}
+                open={openGroups[group.categoryId] ?? true}
                 onToggle={() => toggleGroup(group.categoryId)}
+                snowballFocusSubId={snowballFocusSubId}
               />
             ))}
           </div>

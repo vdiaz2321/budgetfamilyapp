@@ -5,6 +5,26 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
+import { ACCENT, ROW_CLASSES, CategoryIcon, Sparkline } from "./category-icons";
+
+const ACTUAL_WORD: Record<CategoryKind, string> = {
+  income: "received",
+  savings: "saved",
+  bills: "spent",
+  expenses: "spent",
+  debt: "paid",
+};
+
+// Positive/warning/negative per the spec's remaining-amount rule, adapted so
+// income's "less remaining to receive" reads as good, not tight — the
+// generic (remaining/planned < 15%) rule only applies to money going out.
+function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
+  if (kind === "income") return remaining <= 0 ? "text-positive" : "text-foreground";
+  if (plannedCents <= 0) return remaining < 0 ? "text-negative" : "text-foreground";
+  if (remaining < 0) return "text-negative";
+  if (remaining / plannedCents < 0.15) return "text-warning";
+  return "text-positive";
+}
 
 type Props = {
   row: RowData;
@@ -12,10 +32,11 @@ type Props = {
   currency: string;
   monthKey: string; // YYYY-MM-01
   selected: boolean;
+  isSnowballFocus?: boolean;
   onSelect: () => void;
 };
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, onSelect }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballFocus, onSelect }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   // Only strike an *established* debt that's been paid down to zero — not a
@@ -24,16 +45,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, onSelect }:
   // min payment / interest (entered later, in the detail panel) count.
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
-  // Spent column: income received is good news (green). Remaining column: a red
-  // negative is reserved for over-spending an expense, never for income.
-  const spentClass = isIncome && row.spentCents > 0 ? "text-positive" : "text-foreground";
-  const remainingClass = !isIncome && remaining < 0 ? "text-negative" : "text-foreground";
 
-  // Progress line: green fill up to plan; red (full) once overspent.
-  // Income can't "overspend" — receiving more than planned is fine, so it
-  // stays green.
-  const overspent =
-    !isIncome && (row.plannedCents > 0 ? row.spentCents > row.plannedCents : row.spentCents > 0);
   const pct =
     row.plannedCents > 0
       ? Math.min(100, (row.spentCents / row.plannedCents) * 100)
@@ -41,50 +53,83 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, onSelect }:
         ? 100
         : 0;
 
+  const accent = ACCENT[kind];
+  const rowClasses = ROW_CLASSES[kind];
+
   return (
-    <li className={selected ? "bg-brand-soft/50" : "hover:bg-brand-soft/25"}>
-      <div className="grid grid-cols-[minmax(0,1fr)_6.5rem_5.5rem_5.5rem] items-center gap-2 px-4 py-1.5">
-        <button
-          type="button"
-          onClick={onSelect}
-          className="flex items-baseline gap-2 truncate text-left"
+    <li className={`group ${selected ? "bg-brand-soft/50" : "hover:bg-brand-soft/25"}`}>
+      <div className="flex items-start gap-3 px-4 py-2.5">
+        <span
+          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${rowClasses.iconBg} ${rowClasses.iconText}`}
         >
-          <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
-            {row.name}
-          </span>
-          {row.dueDay ? <span className="shrink-0 text-[11px] text-muted">due {row.dueDay}</span> : null}
-        </button>
+          <CategoryIcon kind={kind} className="h-4 w-4" />
+        </span>
 
-        <PlannedInput
-          subId={row.subId}
-          monthKey={monthKey}
-          plannedCents={row.plannedCents}
-          currency={currency}
-        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={onSelect}
+              className="flex min-w-0 items-baseline gap-2 truncate text-left"
+            >
+              <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
+                {row.name}
+              </span>
+              {row.dueDay ? <span className="shrink-0 text-[11px] text-muted">due {row.dueDay}</span> : null}
+              {isSnowballFocus ? (
+                <span className="shrink-0 rounded-md bg-negative/12 px-1.5 py-0.5 text-[10px] font-medium text-negative">
+                  next to pay
+                </span>
+              ) : null}
+            </button>
 
-        <button
-          type="button"
-          onClick={onSelect}
-          className={`text-right text-sm tabular-nums ${spentClass}`}
-        >
-          {formatMoney(row.spentCents, currency)}
-        </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Sparkline values={row.sparkline} accent={accent} />
+              <button
+                type="button"
+                onClick={onSelect}
+                className={`text-sm tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
+              >
+                {formatMoney(remaining, currency)}
+              </button>
+              <button
+                type="button"
+                onClick={onSelect}
+                aria-label={`Edit ${row.name}`}
+                className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                <svg
+                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  className="text-muted hover:text-foreground"
+                  aria-hidden
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </button>
+            </div>
+          </div>
 
-        <button
-          type="button"
-          onClick={onSelect}
-          className={`text-right text-sm tabular-nums ${remainingClass}`}
-        >
-          {formatMoney(remaining, currency)}
-        </button>
-      </div>
+          <div className={`mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60`}>
+            <div
+              className={`h-full rounded-full ${rowClasses.bar} transition-[width] duration-200`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
 
-      {/* Spent-vs-planned progress line */}
-      <div className="h-[3px] w-full bg-line/50">
-        <div
-          className={`h-full transition-all ${overspent ? "bg-negative" : "bg-positive"}`}
-          style={{ width: `${overspent ? 100 : pct}%` }}
-        />
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="text-[11px] text-muted">
+              {formatMoney(row.spentCents, currency)} {ACTUAL_WORD[kind]}
+            </span>
+            <PlannedInput
+              subId={row.subId}
+              monthKey={monthKey}
+              plannedCents={row.plannedCents}
+              currency={currency}
+            />
+          </div>
+        </div>
       </div>
     </li>
   );
@@ -109,11 +154,11 @@ function PlannedInput({
     <form
       ref={formRef}
       action={(fd) => start(() => upsertPlan(fd))}
-      className="flex items-center justify-end gap-0.5 justify-self-end"
+      className="flex items-center gap-0.5"
     >
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
-      <span className="pointer-events-none text-sm text-muted">
+      <span className="pointer-events-none text-[11px] text-muted">
         {currencySymbol(currency)}
       </span>
       <input
@@ -130,10 +175,11 @@ function PlannedInput({
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`min-w-0 rounded-md bg-transparent py-0.5 px-1 text-right text-[11px] text-muted tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
+      <span className="pointer-events-none text-[11px] text-muted">planned</span>
     </form>
   );
 }

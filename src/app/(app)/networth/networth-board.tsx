@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setAccountSnapshot, setBucketSnapshot, setNetworthHistory } from "./actions";
 import { reorderAccounts, reorderBuckets, renameAccount, updateBucket } from "../accounts/actions";
 
@@ -98,12 +99,15 @@ export type GridRow = {
   editable?: boolean;
 };
 
+// Kids Funding sits last, after the household's own asset and liability
+// sections — it's the kids' money, excluded from every total, so it reads as
+// a footnote below everything else (matches the Accounts page's layout).
 const SECTION_ORDER: GridRow["section"][] = [
   "Budget",
   "Investments",
-  "Kids Funding",
   "Credit Cards",
   "Loans",
+  "Kids Funding",
 ];
 
 type Props = {
@@ -133,7 +137,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
 
       {/* Current position */}
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="Assets" value={latest?.assets ?? 0} currency={currency} tone="text-positive" />
+        <Stat label="Assets / Cash O/H" value={latest?.assets ?? 0} currency={currency} tone="text-positive" />
         <Stat label="Debts" value={latest?.liabilities ?? 0} currency={currency} tone="text-negative" />
         <Stat
           label="Net worth"
@@ -396,41 +400,6 @@ function SnapshotCell({
   );
 }
 
-// Collapse state that resets to `initial` on a fresh login (new browser
-// session) but survives navigating around the app within that session.
-// The first render always uses `initial()` — matching the server — so there's
-// no hydration mismatch; the saved value (if any) is applied right after
-// mount, once we're client-only.
-function useSessionCollapse(
-  key: string,
-  initial: () => Record<string, boolean>,
-): [Record<string, boolean>, React.Dispatch<React.SetStateAction<Record<string, boolean>>>] {
-  const [state, setState] = useState<Record<string, boolean>>(initial);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    try {
-      const saved = window.sessionStorage.getItem(key);
-      if (saved) setState(JSON.parse(saved) as Record<string, boolean>);
-    } catch {
-      // sessionStorage unavailable (e.g. private mode) — falls back to `initial()`.
-    }
-    setHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      window.sessionStorage.setItem(key, JSON.stringify(state));
-    } catch {
-      // sessionStorage unavailable — collapse state just won't persist.
-    }
-  }, [key, state, hydrated]);
-
-  return [state, setState];
-}
-
 // Inline-editable account/bucket name — reads like text until clicked, saves
 // on blur. `rename` is renameAccount or updateBucket from the Accounts
 // actions, both of which take just {id, name} form fields.
@@ -447,12 +416,18 @@ function GridNameCell({
   const formRef = useRef<HTMLFormElement>(null);
 
   return (
-    <form ref={formRef} action={(fd) => start(() => void rename(fd))} className="flex min-w-0 flex-1">
+    // No `flex-1` — that stretched this to fill the whole name column,
+    // shoving the "N buckets" label and chips that follow it all the way to
+    // the right instead of sitting close to the name (see feedback:
+    // "buckets are far off to the right"). `size` sizes it to the name's own
+    // length instead, same trick BucketNameInput/BalanceInput use elsewhere.
+    <form ref={formRef} action={(fd) => start(() => void rename(fd))} className="flex min-w-0 shrink">
       <input type="hidden" name="id" value={id} />
       <input
         key={name}
         name="name"
         defaultValue={name}
+        size={Math.min(Math.max(name.length, 6), 28)}
         onBlur={(e) => {
           if (e.currentTarget.value.trim() && e.currentTarget.value !== name) {
             formRef.current?.requestSubmit();
@@ -460,7 +435,7 @@ function GridNameCell({
             e.currentTarget.value = name;
           }
         }}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${
+        className={`min-w-0 rounded-md bg-transparent px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -557,27 +532,23 @@ function BalanceGrid({
     });
   };
 
-  // Move an account (and its buckets/Unallocated row, as a block) to sit
-  // where another account in the same section was dropped.
-  const dropAccount = (section: GridRow["section"], targetAccountId: string) => {
-    const dragged = dragAccount.current;
-    dragAccount.current = null;
-    if (!dragged || dragged.section !== section || dragged.accountId === targetAccountId) return;
-
-    const sectionRows = localRows.filter((r) => r.section === section);
+  // Group a section's rows into per-account blocks (account row + its
+  // buckets/Unallocated row, in order) — shared by the drag drop and the
+  // click-to-reorder arrows below.
+  const getAccountBlocks = (section: GridRow["section"]) => {
     const blocks: { accountId?: string; rows: GridRow[] }[] = [];
-    for (const r of sectionRows) {
+    for (const r of localRows.filter((row) => row.section === section)) {
       if (!r.indent) blocks.push({ accountId: r.accountId, rows: [r] });
       else blocks[blocks.length - 1]?.rows.push(r);
     }
-    const fromIdx = blocks.findIndex((b) => b.accountId === dragged.accountId);
-    const toIdx = blocks.findIndex((b) => b.accountId === targetAccountId);
-    if (fromIdx === -1 || toIdx === -1) return;
-    const reordered = [...blocks];
-    const [moved] = reordered.splice(fromIdx, 1);
-    reordered.splice(toIdx, 0, moved);
-    const newSectionRows = reordered.flatMap((b) => b.rows);
+    return blocks;
+  };
 
+  const persistAccountOrder = (
+    section: GridRow["section"],
+    reordered: { accountId?: string; rows: GridRow[] }[],
+  ) => {
+    const newSectionRows = reordered.flatMap((b) => b.rows);
     setLocalRows((prev) => [...newSectionRows, ...prev.filter((r) => r.section !== section)]);
 
     const orderedIds = reordered.map((b) => b.accountId).filter((id): id is string => !!id);
@@ -585,6 +556,38 @@ function BalanceGrid({
     fd.set("orderedIds", JSON.stringify(orderedIds));
     startReorder(async () => {
       const res = await reorderAccounts(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
+
+  // Move an account (and its buckets/Unallocated row, as a block) to sit
+  // where another account in the same section was dropped.
+  const dropAccount = (section: GridRow["section"], targetAccountId: string) => {
+    const dragged = dragAccount.current;
+    dragAccount.current = null;
+    if (!dragged || dragged.section !== section || dragged.accountId === targetAccountId) return;
+
+    const blocks = getAccountBlocks(section);
+    const fromIdx = blocks.findIndex((b) => b.accountId === dragged.accountId);
+    const toIdx = blocks.findIndex((b) => b.accountId === targetAccountId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const reordered = [...blocks];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    persistAccountOrder(section, reordered);
+  };
+
+  const persistBucketOrder = (parentId: string, reordered: GridRow[]) => {
+    setLocalRows((prev) => {
+      let i = 0;
+      return prev.map((r) => (r.parentId === parentId && r.bucketId ? reordered[i++] : r));
+    });
+
+    const orderedIds = reordered.map((r) => r.bucketId).filter((id): id is string => !!id);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(orderedIds));
+    startReorder(async () => {
+      const res = await reorderBuckets(fd);
       setReorderError(res?.error ?? null);
     });
   };
@@ -603,19 +606,7 @@ function BalanceGrid({
     const reordered = [...bucketRows];
     const [moved] = reordered.splice(fromIdx, 1);
     reordered.splice(toIdx, 0, moved);
-
-    setLocalRows((prev) => {
-      let i = 0;
-      return prev.map((r) => (r.parentId === parentId && r.bucketId ? reordered[i++] : r));
-    });
-
-    const orderedIds = reordered.map((r) => r.bucketId).filter((id): id is string => !!id);
-    const fd = new FormData();
-    fd.set("orderedIds", JSON.stringify(orderedIds));
-    startReorder(async () => {
-      const res = await reorderBuckets(fd);
-      setReorderError(res?.error ?? null);
-    });
+    persistBucketOrder(parentId, reordered);
   };
 
   const sections = SECTION_ORDER.map((section) => ({
@@ -673,7 +664,14 @@ function BalanceGrid({
         ? "font-normal text-foreground"
         : "font-medium";
 
-  const stickyCls = "sticky left-0 bg-surface pr-3";
+  // Applied to the whole <tr> AND to the sticky name cell — the sticky cell
+  // needs its own opaque-enough background to mask month cells scrolling
+  // under it, so it can't just inherit the row's bg; it has to repeat it.
+  // A bucket row gets a subtle indent tint; no alternating zebra otherwise —
+  // it read as a distracting green wash (see feedback: "looks horrible").
+  const zebraBg = (r: GridRow) => (r.indent ? "bg-background/30" : "");
+
+  const stickyCls = "sticky left-0 pr-3";
   const hasUnallocated = localRows.some((r) => r.muted);
 
   // A handful of months fills the card width evenly (Account column gets the
@@ -716,7 +714,7 @@ function BalanceGrid({
           ) : null}
           <thead>
             <tr className="border-b border-line">
-              <th className={`${stickyCls} ${wideLayout ? "" : "min-w-[14rem]"} px-4 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted`}>
+              <th className={`${stickyCls} bg-surface ${wideLayout ? "" : "min-w-[14rem]"} px-4 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted`}>
                 Account
               </th>
               {months.map((m) => (
@@ -727,11 +725,25 @@ function BalanceGrid({
             </tr>
           </thead>
           <tbody>
-            {sections.map((g) => {
+            {sections.map((g, gi) => {
               const isOpen = !collapsed[g.section];
               const accountCount = g.rows.filter((r) => !r.indent).length;
+              // Kids Funding is the kids' money, excluded from every total —
+              // a divider row (matching the Accounts page) makes that visually
+              // clear instead of it just blending into the sections above it.
+              const prevSection = sections[gi - 1]?.section;
+              const showKidsDivider = g.section === "Kids Funding" && prevSection !== "Kids Funding";
               return (
                 <Fragment key={g.section}>
+                  {showKidsDivider ? (
+                    <tr>
+                      <td colSpan={months.length + 1} className="bg-background px-4 py-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                          Not counted in net worth
+                        </span>
+                      </td>
+                    </tr>
+                  ) : null}
                   <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
                     <td className="sticky left-0 z-10 bg-brand-soft/50 pr-3 p-0 dark:bg-brand-soft/15">
                       <button
@@ -786,18 +798,14 @@ function BalanceGrid({
                             <tr
                               key={`${g.section}-${ri}-${r.name}`}
                               data-drop-key={dropKey}
-                              className={`border-b border-line ${
-                                r.indent
-                                  ? "bg-background/30"
-                                  : ri % 2 === 1
-                                    ? "bg-positive/[0.06]" // soft-green zebra to track a value across the row
-                                    : ""
-                              } ${r.linked || r.excluded ? "opacity-50" : ""} ${
+                              className={`border-b border-line ${zebraBg(r)} ${
+                                r.linked || r.excluded ? "opacity-50" : ""
+                              } ${
                                 dropKey && dragOverKey === dropKey ? "outline outline-2 -outline-offset-2 outline-brand" : ""
                               }`}
                             >
                               <td
-                                className={`${stickyCls} whitespace-nowrap ${
+                                className={`${stickyCls} ${zebraBg(r) || "bg-surface"} whitespace-nowrap ${
                                   r.hasChildren
                                     ? "p-0"
                                     : r.indent
@@ -1013,7 +1021,7 @@ function SummaryBlock({
         return pn ? (p.net - pn) / pn : null;
       },
     },
-    { label: "NW w/out Invest", growth: true, cell: (p) => p.nwWithoutInvest },
+    { label: "NW w/out Invest & Savings", growth: true, cell: (p) => p.nwWithoutInvest },
   ];
 
   const growthOf = (r: Row): number | null => {
@@ -1087,10 +1095,9 @@ function SummaryBlock({
 // year-to-date % (vs. the prior December). Shares the year with SummaryBlock.
 type Metric = { key: "savings" | "nwWithoutInvest" | "stocks" | "assets"; label: string };
 const METRICS: Metric[] = [
-  { key: "savings", label: "Savings" },
-  { key: "nwWithoutInvest", label: "NW w/out Invest" },
+  { key: "nwWithoutInvest", label: "NW w/out Invest & Savings" },
   { key: "stocks", label: "Stocks" },
-  { key: "assets", label: "Total Assets" }, // gross assets (before debt)
+  { key: "assets", label: "Total NW w/out Debt" },
 ];
 
 function MonthlyAnalytics({

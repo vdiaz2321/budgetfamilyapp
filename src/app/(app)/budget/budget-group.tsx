@@ -25,6 +25,9 @@ type Props = {
   // Open/collapsed is lifted to the board so one button can expand/collapse all.
   open: boolean;
   onToggle: () => void;
+  // The debt currently getting the snowball's extra payment — badged
+  // "next to pay" on its row. Only meaningful for the debt group.
+  snowballFocusSubId: string | null;
 };
 
 // name | Planned | Spent/Received | Remaining — all three shown at once, like
@@ -39,6 +42,7 @@ export function BudgetGroup({
   onSelectRow,
   open,
   onToggle,
+  snowballFocusSubId,
 }: Props) {
   const [adding, setAdding] = useState(false);
 
@@ -109,7 +113,18 @@ export function BudgetGroup({
       {open ? (
         <div className="border-t border-line">
           {visibleRows.length === 0 ? (
-            <p className="px-4 py-2.5 text-sm text-muted">No items yet — add one below.</p>
+            <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
+              <svg
+                width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+                className="text-muted/60" aria-hidden
+              >
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+              </svg>
+              <p className="text-sm font-medium text-foreground">No {group.name.toLowerCase()} yet</p>
+              <p className="text-sm text-muted">Track your first item to see it here.</p>
+            </div>
           ) : (
             <ul>
               {visibleRows.map((row) => (
@@ -120,6 +135,9 @@ export function BudgetGroup({
                   currency={currency}
                   monthKey={monthKey}
                   selected={row.subId === selectedSubId}
+                  isSnowballFocus={
+                    isDebt && row.subId === snowballFocusSubId && (row.debt?.balanceCents ?? 0) > 0
+                  }
                   onSelect={() => onSelectRow(row, group.kind)}
                 />
               ))}

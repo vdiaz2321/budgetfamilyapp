@@ -61,6 +61,13 @@ export async function addAccount(formData: FormData) {
     .maybeSingle();
   const sortOrder = (maxRow?.sort_order ?? -1) + 1;
 
+  // Banking accounts get their Checking/Savings badge set immediately from
+  // the type picked in the add form, instead of staying null until someone
+  // opens Edit — that gap made the badge look like it needed a Holder value
+  // to "unlock" it, when the two were unrelated.
+  const bankGroup =
+    kind === "savings_bucket" ? "savings" : kind === "checking" ? "spending" : null;
+
   const { error } = await supabase.from("accounts").insert({
     household_id: householdId,
     name,
@@ -71,6 +78,7 @@ export async function addAccount(formData: FormData) {
     include_net_worth: !isKidsAccount,
     current_balance_cents: balanceCents,
     sort_order: sortOrder,
+    bank_group: bankGroup,
   });
 
   if (error) {
@@ -206,6 +214,8 @@ export async function addBucket(formData: FormData) {
   const accountId = String(formData.get("accountId") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
+  const bankGroupRaw = String(formData.get("bankGroup") ?? "");
+  const bankGroup = bankGroupRaw === "savings" || bankGroupRaw === "spending" ? bankGroupRaw : null;
   if (!accountId) return { error: "Missing account." };
   if (!name) return { error: "Bucket name is required." };
 
@@ -224,6 +234,7 @@ export async function addBucket(formData: FormData) {
     name,
     balance_cents: balanceCents,
     sort_order: sortOrder,
+    bank_group: bankGroup,
   });
 
   if (error) {
@@ -287,6 +298,26 @@ export async function reorderBuckets(formData: FormData) {
 
   revalidate();
   return { error: null };
+}
+
+// Lets one bucket carry its own Checking/Savings tag — e.g. an account with
+// both a "Checking" and a "Savings" bucket no longer has to force the whole
+// account into one type.
+export async function updateBucketBankGroup(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  const bankGroupRaw = String(formData.get("bankGroup") ?? "");
+  const bankGroup = bankGroupRaw === "savings" || bankGroupRaw === "spending" ? bankGroupRaw : null;
+
+  await supabase
+    .from("buckets")
+    .update({ bank_group: bankGroup, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  revalidate();
 }
 
 export async function updateBucketBalance(formData: FormData) {

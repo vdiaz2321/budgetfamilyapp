@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
   addAccount,
   addBucket,
@@ -14,6 +15,7 @@ import {
   updateBalance,
   updateBucket,
   updateBucketBalance,
+  updateBucketBankGroup,
 } from "./actions";
 
 export type BucketData = {
@@ -21,6 +23,10 @@ export type BucketData = {
   accountId: string;
   name: string;
   balanceCents: number;
+  // Its own Checking/Savings tag — accounts with a mix of both (e.g. a
+  // "Checking" bucket and a "Savings" bucket under one bank account) no
+  // longer have to force the whole account into one type.
+  bankGroup: "savings" | "spending" | null;
 };
 
 export type AccountData = {
@@ -119,41 +125,6 @@ const SECTIONS: Section[] = [
   },
 ];
 
-// Collapse state that resets to `initial` on a fresh login (new browser
-// session) but survives navigating around the app within that session.
-// The first render always uses `initial()` — matching the server — so there's
-// no hydration mismatch; the saved value (if any) is applied right after
-// mount, once we're client-only.
-function useSessionCollapse(
-  key: string,
-  initial: () => Record<string, boolean>,
-): [Record<string, boolean>, Dispatch<SetStateAction<Record<string, boolean>>>] {
-  const [state, setState] = useState<Record<string, boolean>>(initial);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    try {
-      const saved = window.sessionStorage.getItem(key);
-      if (saved) setState(JSON.parse(saved) as Record<string, boolean>);
-    } catch {
-      // sessionStorage unavailable (e.g. private mode) — falls back to `initial()`.
-    }
-    setHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      window.sessionStorage.setItem(key, JSON.stringify(state));
-    } catch {
-      // sessionStorage unavailable — collapse state just won't persist.
-    }
-  }, [key, state, hydrated]);
-
-  return [state, setState];
-}
-
 type Props = {
   accounts: AccountData[];
   budgetDebts: BudgetDebt[];
@@ -216,20 +187,11 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Accounts</h1>
-          <p className="text-sm text-muted">
-            Your asset accounts feed Net Worth. Debts live in Budget — enter each once, use it everywhere.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={toggleAll}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
-        >
-          {allOpen ? "Collapse all" : "Expand all"}
-        </button>
+      <div>
+        <h1 className="text-xl font-bold">Accounts</h1>
+        <p className="text-sm text-muted">
+          Your asset accounts feed Net Worth. Debts live in Budget — enter each once, use it everywhere.
+        </p>
       </div>
 
       {/* Net worth summary */}
@@ -242,6 +204,16 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
           currency={currency}
           tone={net >= 0 ? "text-foreground" : "text-negative"}
         />
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={toggleAll}
+          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+        >
+          {allOpen ? "Collapse all" : "Expand all"}
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -448,11 +420,15 @@ function AccountSection({
     .filter((a) => a.active)
     .reduce((sum, a) => sum + a.balanceCents, 0);
 
-  const moveAccount = (index: number, dir: -1 | 1) => {
-    const j = index + dir;
-    if (j < 0 || j >= localAccounts.length) return;
+  // Move the dragged account to sit where another account in this section was
+  // dropped, then persist the new order.
+  const reorder = (fromId: string, toId: string) => {
+    const fromIdx = localAccounts.findIndex((a) => a.id === fromId);
+    const toIdx = localAccounts.findIndex((a) => a.id === toId);
+    if (fromIdx === -1 || toIdx === -1) return;
     const next = [...localAccounts];
-    [next[index], next[j]] = [next[j], next[index]];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
     setLocalAccounts(next);
     const fd = new FormData();
     fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
@@ -461,6 +437,7 @@ function AccountSection({
       setReorderError(res?.error ?? null);
     });
   };
+  const { dragOverId, startDrag } = usePointerReorder("account", reorder);
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -502,7 +479,7 @@ function AccountSection({
             <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — add one below.</p>
           ) : (
             <ul className="divide-y divide-line">
-              {localAccounts.map((a, i) => (
+              {localAccounts.map((a) => (
                 <AccountRow
                   key={a.id}
                   account={a}
@@ -512,10 +489,8 @@ function AccountSection({
                   onToggleEdit={() =>
                     setEditingId((id) => (id === a.id ? null : a.id))
                   }
-                  canMoveUp={i > 0}
-                  canMoveDown={i < localAccounts.length - 1}
-                  onMoveUp={() => moveAccount(i, -1)}
-                  onMoveDown={() => moveAccount(i, 1)}
+                  onDragStart={() => startDrag(a.id)}
+                  isDragOver={dragOverId === a.id}
                   bucketsOpen={isBucketsOpen(a.id)}
                   onToggleBuckets={() => onToggleBuckets(a.id)}
                 />
@@ -556,10 +531,8 @@ function AccountRow({
   currency,
   editing,
   onToggleEdit,
-  canMoveUp,
-  canMoveDown,
-  onMoveUp,
-  onMoveDown,
+  onDragStart,
+  isDragOver,
   bucketsOpen,
   onToggleBuckets,
 }: {
@@ -568,10 +541,8 @@ function AccountRow({
   currency: string;
   editing: boolean;
   onToggleEdit: () => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onDragStart: () => void;
+  isDragOver: boolean;
   bucketsOpen: boolean;
   onToggleBuckets: () => void;
 }) {
@@ -584,10 +555,15 @@ function AccountRow({
   const allowBuckets = !section.liability;
   const bucketCount = account.buckets.length;
 
+  const rowBg = editing ? "bg-brand-soft/30" : "hover:bg-brand-soft/25";
+
   return (
-    <li className={editing ? "bg-brand-soft/30" : "hover:bg-brand-soft/25"}>
-      <div className="grid grid-cols-[2.25rem_1.25rem_minmax(0,1fr)_10rem] items-center gap-1.5 px-4 py-1.5">
-        <ReorderButtons canMoveUp={canMoveUp} canMoveDown={canMoveDown} onMoveUp={onMoveUp} onMoveDown={onMoveDown} />
+    <li
+      data-drop-key={`account:${account.id}`}
+      className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+    >
+      <div className="grid grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_10rem] items-center gap-1.5 px-4 py-1.5">
+        <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
             type="button"
@@ -627,7 +603,11 @@ function AccountRow({
               {account.holder}
             </span>
           ) : null}
-          {section.key === "banking" && account.bankGroup ? (
+          {/* With buckets, each one carries its own Checking/Savings tag
+              below (an account can hold both) — a single account-level tag
+              here would misrepresent a mixed account, so it only shows when
+              there's nothing underneath to tag instead. */}
+          {section.key === "banking" && account.bankGroup && bucketCount === 0 ? (
             <span
               title="Net Worth splits Savings from everyday Checking"
               className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
@@ -674,7 +654,7 @@ function AccountRow({
       </div>
 
       {allowBuckets && bucketsOpen ? (
-        <BucketDrawer account={account} currency={currency} />
+        <BucketDrawer account={account} currency={currency} showBankGroup={section.key === "banking"} />
       ) : null}
 
       {editing ? <EditAccountForm account={account} section={section} onDone={onToggleEdit} /> : null}
@@ -686,7 +666,15 @@ function AccountRow({
 // top-level balance is always the sum of these — there's no separate
 // "Unallocated" remainder to keep in sync; floating cash is just its own
 // bucket (e.g. "Extra Cash").
-function BucketDrawer({ account, currency }: { account: AccountData; currency: string }) {
+function BucketDrawer({
+  account,
+  currency,
+  showBankGroup,
+}: {
+  account: AccountData;
+  currency: string;
+  showBankGroup: boolean;
+}) {
   const [adding, setAdding] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
@@ -697,11 +685,13 @@ function BucketDrawer({ account, currency }: { account: AccountData; currency: s
     setLocalBuckets(account.buckets);
   }, [account.buckets]);
 
-  const moveBucket = (index: number, dir: -1 | 1) => {
-    const j = index + dir;
-    if (j < 0 || j >= localBuckets.length) return;
+  const reorder = (fromId: string, toId: string) => {
+    const fromIdx = localBuckets.findIndex((b) => b.id === fromId);
+    const toIdx = localBuckets.findIndex((b) => b.id === toId);
+    if (fromIdx === -1 || toIdx === -1) return;
     const next = [...localBuckets];
-    [next[index], next[j]] = [next[j], next[index]];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
     setLocalBuckets(next);
     const fd = new FormData();
     fd.set("orderedIds", JSON.stringify(next.map((b) => b.id)));
@@ -710,6 +700,7 @@ function BucketDrawer({ account, currency }: { account: AccountData; currency: s
       setReorderError(res?.error ?? null);
     });
   };
+  const { dragOverId, startDrag } = usePointerReorder("bucket", reorder);
 
   return (
     <div className="border-t border-line bg-background/40 pl-11 pr-4 py-2">
@@ -721,22 +712,21 @@ function BucketDrawer({ account, currency }: { account: AccountData; currency: s
         </p>
       ) : (
         <ul className="divide-y divide-line/60">
-          {localBuckets.map((b, i) => (
+          {localBuckets.map((b) => (
             <BucketRow
               key={b.id}
               bucket={b}
               currency={currency}
-              canMoveUp={i > 0}
-              canMoveDown={i < localBuckets.length - 1}
-              onMoveUp={() => moveBucket(i, -1)}
-              onMoveDown={() => moveBucket(i, 1)}
+              onDragStart={() => startDrag(b.id)}
+              isDragOver={dragOverId === b.id}
+              showBankGroup={showBankGroup}
             />
           ))}
         </ul>
       )}
 
       {adding ? (
-        <AddBucketForm accountId={account.id} onDone={() => setAdding(false)} />
+        <AddBucketForm accountId={account.id} onDone={() => setAdding(false)} showBankGroup={showBankGroup} />
       ) : (
         <button
           type="button"
@@ -753,24 +743,34 @@ function BucketDrawer({ account, currency }: { account: AccountData; currency: s
 function BucketRow({
   bucket,
   currency,
-  canMoveUp,
-  canMoveDown,
-  onMoveUp,
-  onMoveDown,
+  onDragStart,
+  isDragOver,
+  showBankGroup,
 }: {
   bucket: BucketData;
   currency: string;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onDragStart: () => void;
+  isDragOver: boolean;
+  showBankGroup: boolean;
 }) {
   const [delPending, startDel] = useTransition();
 
   return (
-    <li className="group grid grid-cols-[2.25rem_minmax(0,1fr)_10rem_1.25rem] items-center gap-1.5 py-1">
-      <ReorderButtons canMoveUp={canMoveUp} canMoveDown={canMoveDown} onMoveUp={onMoveUp} onMoveDown={onMoveDown} size="sm" />
+    <li
+      data-drop-key={`bucket:${bucket.id}`}
+      className={`group grid items-center gap-1.5 py-1 ${
+        isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""
+      } ${
+        showBankGroup
+          ? "grid-cols-[1.75rem_minmax(0,1fr)_5.5rem_10rem_1.25rem]"
+          : "grid-cols-[1.75rem_minmax(0,1fr)_10rem_1.25rem]"
+      }`}
+    >
+      <GripHandle onMouseDown={onDragStart} size="sm" />
       <BucketNameInput id={bucket.id} name={bucket.name} />
+      {showBankGroup ? (
+        <BucketBankGroupSelect id={bucket.id} bankGroup={bucket.bankGroup} />
+      ) : null}
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
       <form
         action={(fd) => startDel(() => deleteBucket(fd))}
@@ -795,6 +795,39 @@ function BucketRow({
         </button>
       </form>
     </li>
+  );
+}
+
+// Compact Checking/Savings picker for one bucket — saves immediately on
+// change, same as the balance/name fields, no separate edit mode needed.
+function BucketBankGroupSelect({
+  id,
+  bankGroup,
+}: {
+  id: string;
+  bankGroup: "savings" | "spending" | null;
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  return (
+    <form ref={formRef} action={(fd) => start(() => updateBucketBankGroup(fd))}>
+      <input type="hidden" name="id" value={id} />
+      <select
+        key={bankGroup ?? ""}
+        name="bankGroup"
+        defaultValue={bankGroup ?? ""}
+        onChange={() => formRef.current?.requestSubmit()}
+        title="Checking or Savings — Net Worth splits on this"
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-[11px] font-semibold uppercase transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+          pending ? "ring-2 ring-brand" : "focus:ring-brand"
+        } ${bankGroup === "savings" ? "text-positive" : "text-muted"}`}
+      >
+        <option value="">—</option>
+        <option value="spending">Checking</option>
+        <option value="savings">Savings</option>
+      </select>
+    </form>
   );
 }
 
@@ -862,7 +895,15 @@ function BucketBalanceInput({
   );
 }
 
-function AddBucketForm({ accountId, onDone }: { accountId: string; onDone: () => void }) {
+function AddBucketForm({
+  accountId,
+  onDone,
+  showBankGroup,
+}: {
+  accountId: string;
+  onDone: () => void;
+  showBankGroup: boolean;
+}) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -887,6 +928,18 @@ function AddBucketForm({ accountId, onDone }: { accountId: string; onDone: () =>
           onChange={() => setError(null)}
           className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
+        {showBankGroup ? (
+          <select
+            name="bankGroup"
+            defaultValue=""
+            title="Checking or Savings — Net Worth splits on this"
+            className="rounded-md bg-surface px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          >
+            <option value="">—</option>
+            <option value="spending">Checking</option>
+            <option value="savings">Savings</option>
+          </select>
+        ) : null}
         <input
           name="balance"
           type="text"
@@ -1152,49 +1205,59 @@ function EditAccountForm({
   );
 }
 
-// Stacked up/down arrows for manually reordering a row within its list
-// (accounts within a section, buckets within an account).
-function ReorderButtons({
-  canMoveUp,
-  canMoveDown,
-  onMoveUp,
-  onMoveDown,
-  size = "md",
-}: {
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  size?: "sm" | "md";
-}) {
-  const btnCls = size === "sm" ? "h-3 w-3.5" : "h-3.5 w-4";
-  const iconSize = size === "sm" ? 8 : 9;
+// Grab handle for drag-to-reorder — mirrors the Net Worth grid's handle so
+// both boards reorder the same way (Victor prefers grab-and-drag over arrows).
+function GripHandle({ onMouseDown, size = "md" }: { onMouseDown: () => void; size?: "sm" | "md" }) {
+  const px = size === "sm" ? 11 : 13;
   return (
-    <div className="flex flex-col items-center justify-center gap-px">
-      <button
-        type="button"
-        onClick={onMoveUp}
-        disabled={!canMoveUp}
-        title="Move up"
-        aria-label="Move up"
-        className={`flex ${btnCls} items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand disabled:opacity-20 disabled:hover:bg-transparent`}
-      >
-        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M6 15l6-6 6 6" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        onClick={onMoveDown}
-        disabled={!canMoveDown}
-        title="Move down"
-        aria-label="Move down"
-        className={`flex ${btnCls} items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand disabled:opacity-20 disabled:hover:bg-transparent`}
-      >
-        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-    </div>
+    <span
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onMouseDown();
+      }}
+      title="Drag to reorder"
+      className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+    >
+      <svg width={px} height={px} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+    </span>
   );
+}
+
+// Pointer-based row reordering shared by both drag contexts on this page
+// (accounts within a section, buckets within an account). Rows carry a
+// data-drop-key="<kind>:<id>"; grabbing a handle starts the drag, releasing
+// over another row of the same kind fires onReorder(fromId, toId). Same
+// approach as the Net Worth grid.
+function usePointerReorder(kind: string, onReorder: (fromId: string, toId: string) => void) {
+  const dragId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const keyUnder = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    const rowEl = el?.closest<HTMLElement>("[data-drop-key]");
+    const key = rowEl?.getAttribute("data-drop-key");
+    return key && key.startsWith(`${kind}:`) ? key.slice(kind.length + 1) : null;
+  };
+
+  const startDrag = (id: string) => {
+    dragId.current = id;
+    document.body.style.cursor = "grabbing";
+    const onMove = (e: MouseEvent) => setDragOverId(keyUnder(e.clientX, e.clientY));
+    const onUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      setDragOverId(null);
+      const from = dragId.current;
+      dragId.current = null;
+      const to = keyUnder(e.clientX, e.clientY);
+      if (from && to && from !== to) onReorder(from, to);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  return { dragOverId, startDrag };
 }

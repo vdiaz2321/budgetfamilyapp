@@ -62,8 +62,10 @@ export default async function NetworthPage() {
       .order("month"),
     supabase
       .from("accounts")
-      .select("id, name, kind, is_kids_account, bank_group")
-      .eq("household_id", household.id),
+      .select("id, name, kind, is_kids_account, bank_group, sort_order")
+      .eq("household_id", household.id)
+      .order("sort_order")
+      .order("name"),
     supabase
       .from("buckets")
       .select("id, account_id, name, sort_order")
@@ -252,10 +254,19 @@ export default async function NetworthPage() {
   }
 
   // Assemble: asset accounts first (each followed by its buckets + an auto
-  // "Unallocated" remainder), then Budget debts.
-  const assetAccounts = [...accountGrid.values()].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  // "Unallocated" remainder), then Budget debts. accountGrid's own Map order
+  // just reflects whichever account a snapshot scan happened to hit first —
+  // meaningless for display — so order explicitly by the same sort_order the
+  // Accounts page's reorder arrows write to, name as the tiebreaker. Sorting
+  // by name alone here (the previous behavior) silently discarded every
+  // reorder — dragging or clicking Move up/down wrote sort_order correctly,
+  // but this page never read it back, so the list always snapped back to
+  // A-Z. See feedback: Net Worth reordering "does not work well".
+  const accountSortOrder = new Map((accountRows ?? []).map((a) => [a.id, a.sort_order ?? 0]));
+  const assetAccounts = [...accountGrid.values()].sort((a, b) => {
+    const diff = (accountSortOrder.get(a.id) ?? 0) - (accountSortOrder.get(b.id) ?? 0);
+    return diff !== 0 ? diff : a.name.localeCompare(b.name);
+  });
   const liabilityRows: GridRow[] = [...debtGrid.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   );

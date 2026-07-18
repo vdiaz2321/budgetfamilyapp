@@ -43,6 +43,11 @@ export default async function BudgetPage({
 
   const categories = await ensureCategories(supabase, household.id);
 
+  // 6-month lookback window for the row sparklines (this month inclusive).
+  const [sparkYear, sparkMonth1] = month.firstOfMonth.split("-").map(Number);
+  const sparkStart = new Date(Date.UTC(sparkYear, sparkMonth1 - 1 - 5, 1));
+  const sparkStartKey = `${sparkStart.getUTCFullYear()}-${String(sparkStart.getUTCMonth() + 1).padStart(2, "0")}-01`;
+
   const [
     { data: subs },
     { data: plans },
@@ -53,6 +58,7 @@ export default async function BudgetPage({
     { data: payees },
     { data: accounts },
     { data: buckets },
+    { data: sparkRows },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -104,6 +110,14 @@ export default async function BudgetPage({
       .select("id, account_id, name")
       .eq("household_id", household.id)
       .order("name"),
+    // Last 6 months of actuals per subcategory, for the row sparklines.
+    supabase
+      .from("v_monthly_actuals")
+      .select("month, subcategory_id, actual_cents")
+      .eq("household_id", household.id)
+      .gte("month", sparkStartKey)
+      .lte("month", month.firstOfMonth)
+      .order("month"),
   ]);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
@@ -120,6 +134,12 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null]),
   );
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  const sparklineBySub = new Map<string, number[]>();
+  for (const s of sparkRows ?? []) {
+    const list = sparklineBySub.get(s.subcategory_id) ?? [];
+    list.push(s.actual_cents);
+    sparklineBySub.set(s.subcategory_id, list);
+  }
 
   const groups: GroupData[] = categories.map((cat) => {
     const kind = cat.kind as CategoryKind;
@@ -136,6 +156,7 @@ export default async function BudgetPage({
           dueDay: s.due_day,
           plannedCents,
           spentCents,
+          sparkline: sparklineBySub.get(s.id) ?? [],
           savings:
             kind === "savings"
               ? {

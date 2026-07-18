@@ -42,7 +42,7 @@ export default async function AccountsPage() {
         .order("name"),
       supabase
         .from("buckets")
-        .select("id, account_id, name, balance_cents")
+        .select("id, account_id, name, balance_cents, bank_group")
         .eq("household_id", household.id)
         .order("sort_order")
         .order("name"),
@@ -80,6 +80,7 @@ export default async function AccountsPage() {
         accountId: b.account_id,
         name: b.name,
         balanceCents: b.balance_cents ?? 0,
+        bankGroup: (b.bank_group as "savings" | "spending" | null) ?? null,
       })),
   }));
 
