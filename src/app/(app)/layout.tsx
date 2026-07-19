@@ -104,7 +104,12 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* Sidebar — YNAB-style navy in both themes */}
-      <Sidebar groups={groups} currency={currency} userEmail={user.email ?? ""} />
+      <Sidebar
+        groups={groups}
+        currency={currency}
+        userEmail={user.email ?? ""}
+        badges={debtItems.length > 0 ? { "/snowball": debtItems.length } : undefined}
+      />
 
       {/* Mobile top bar */}
       <div className="flex min-w-0 flex-1 flex-col">

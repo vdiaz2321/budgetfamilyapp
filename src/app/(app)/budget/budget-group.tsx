@@ -5,16 +5,9 @@ import { useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { addSubcategory } from "./actions";
-import { BudgetRow } from "./budget-row";
+import { BudgetRow, remainingColorClass } from "./budget-row";
+import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
-
-const ACCENT: Record<CategoryKind, string> = {
-  income: "bg-positive",
-  savings: "bg-sky-500",
-  bills: "bg-brand",
-  expenses: "bg-accent",
-  debt: "bg-negative",
-};
 
 type Props = {
   group: GroupData;
@@ -29,10 +22,6 @@ type Props = {
   // "next to pay" on its row. Only meaningful for the debt group.
   snowballFocusSubId: string | null;
 };
-
-// name | Planned | Spent/Received | Remaining — all three shown at once, like
-// the source spreadsheet (no toggle).
-const GRID = "grid-cols-[minmax(0,1fr)_6.5rem_5.5rem_5.5rem]";
 
 export function BudgetGroup({
   group,
@@ -64,14 +53,14 @@ export function BudgetGroup({
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header row */}
-      <div className={`grid ${GRID} items-center gap-2 px-4 py-2.5`}>
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
         <button
           type="button"
           onClick={onToggle}
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${ACCENT[group.kind]}`} />
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
           <span className="font-semibold">{group.name}</span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -83,31 +72,15 @@ export function BudgetGroup({
           </svg>
         </button>
 
-        {open ? (
-          <>
-            <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
-              Planned
-            </span>
-            <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
-              {actualLabel}
-            </span>
-            <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">
-              Remaining
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(group.plannedTotal, currency)}
-            </span>
-            <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(group.spentTotal, currency)}
-            </span>
-            <span className="text-right text-sm font-bold tabular-nums">
+        {!open ? (
+          <div className="flex items-center gap-3 text-sm font-bold tabular-nums">
+            <span className="text-muted">{formatMoney(group.plannedTotal, currency)}</span>
+            <span>{formatMoney(group.spentTotal, currency)}</span>
+            <span className={remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}>
               {formatMoney(remainingTotal, currency)}
             </span>
-          </>
-        )}
+          </div>
+        ) : null}
       </div>
 
       {open ? (
@@ -153,7 +126,7 @@ export function BudgetGroup({
           ) : null}
 
           {/* Footer: add link + totals */}
-          <div className={`grid ${GRID} items-center gap-2 border-t border-line px-4 py-2`}>
+          <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2">
             <div className="flex items-center gap-3">
               {!adding ? (
                 <button
@@ -170,15 +143,19 @@ export function BudgetGroup({
                 </Link>
               ) : null}
             </div>
-            <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(group.plannedTotal, currency)}
-            </span>
-            <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(group.spentTotal, currency)}
-            </span>
-            <span className="text-right text-sm font-bold tabular-nums">
-              {formatMoney(remainingTotal, currency)}
-            </span>
+            <div className="flex items-center gap-3 text-xs tabular-nums">
+              <span className="text-muted">
+                <span className="font-bold">{formatMoney(group.plannedTotal, currency)}</span> planned
+              </span>
+              <span className="text-foreground">
+                <span className="font-bold">{formatMoney(group.spentTotal, currency)}</span>{" "}
+                <span className="text-muted">{actualLabel.toLowerCase()}</span>
+              </span>
+              <span className={remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}>
+                <span className="font-bold">{formatMoney(remainingTotal, currency)}</span>{" "}
+                <span className="text-muted">remaining</span>
+              </span>
+            </div>
           </div>
         </div>
       ) : null}

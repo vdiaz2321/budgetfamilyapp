@@ -21,8 +21,8 @@
   --warning: #d97706; /* amber-600 */
   --chart-1: #2563eb; /* blue-600 — Savings accent */
 
-  /* YNAB-style sidebar: deep indigo-navy in light mode, near-black navy in
-     dark mode. White text lives on it in both themes. */
+  /* YNAB-style sidebar: deep indigo-navy in light mode. White text lives
+     on it in both themes. */
   --sidebar: #303c6b;
 }
 
@@ -42,7 +42,7 @@
   --warning: #fbbf24;
   --chart-1: #60a5fa; /* blue-400 — lifts on dark */
 
-  --sidebar: #10182e; /* dark navy, a touch bluer than the canvas */
+  --sidebar: #1a1a1a;
 }
 
 @theme inline {

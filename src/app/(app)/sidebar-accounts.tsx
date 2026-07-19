@@ -24,6 +24,23 @@ type Props = {
   currency: string;
 };
 
+// Fixed palette so each account name always hashes to the same dot color —
+// a quick visual anchor when scanning ("the blue dot is always Schwab").
+const DOT_COLORS = [
+  "#60a5fa", // blue-400
+  "#c084fc", // purple-400
+  "#4ade80", // green-400
+  "#fb923c", // orange-400
+  "#facc15", // yellow-400
+  "#f472b6", // pink-400
+  "#22d3ee", // cyan-400
+];
+function dotColorFor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return DOT_COLORS[Math.abs(h) % DOT_COLORS.length];
+}
+
 // YNAB-style account list under the nav: collapsible sections with a group
 // total in the header and per-account balances, plus Add Account at the foot.
 export function SidebarAccounts({ groups, currency }: Props) {
@@ -40,19 +57,8 @@ export function SidebarAccounts({ groups, currency }: Props) {
 
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col">
-      <div className="mb-3 flex items-center justify-between rounded-lg bg-white/10 px-3 py-2">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-white/70">
-          Net Worth
-        </span>
-        <span
-          className={`text-sm font-bold tabular-nums ${
-            netWorthCents < 0 ? "text-red-300" : "text-green-300"
-          }`}
-        >
-          {formatMoney(netWorthCents, currency)}
-        </span>
-      </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+      <div className="px-4 pb-1 text-[11px] font-semibold text-slate-500">Accounts</div>
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pr-2">
         {groups
           .filter((g) => g.items.length > 0)
           .map((g) => (
@@ -60,14 +66,21 @@ export function SidebarAccounts({ groups, currency }: Props) {
           ))}
       </div>
 
+      <div className="mx-4 my-2 flex flex-col gap-0.5 rounded-lg bg-white/[0.04] px-3 py-2.5">
+        <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Net worth</div>
+        <div className={`text-base font-medium tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
+          {formatMoney(netWorthCents, currency)}
+        </div>
+      </div>
+
       <Link
         href="/accounts"
-        className="mt-3 flex items-center justify-center gap-1.5 rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/20"
+        className="mx-4 mb-1 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-2 text-[13px] font-medium text-slate-400 transition hover:border-white/30 hover:bg-white/[0.05] hover:text-white"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
           <path d="M12 5v14M5 12h14" />
         </svg>
-        Add Account
+        Add account
       </Link>
     </div>
   );
@@ -83,28 +96,28 @@ function AccountGroup({ group, currency }: { group: SidebarGroup; currency: stri
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition hover:bg-white/10"
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition hover:bg-white/[0.04]"
       >
         <svg
-          width="10"
-          height="10"
+          width="12"
+          height="12"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="3"
+          strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={`shrink-0 text-white/50 transition-transform ${open ? "rotate-90" : ""}`}
+          className={`shrink-0 text-slate-500 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
           aria-hidden
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wider text-white/60">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-400">
           {group.label}
         </span>
         <span
-          className={`shrink-0 text-[11px] font-semibold tabular-nums ${
-            sign * total < 0 ? "text-red-300" : "text-white/80"
+          className={`shrink-0 text-[13px] font-medium tabular-nums ${
+            sign * total < 0 ? "text-red-400" : "text-slate-400"
           }`}
         >
           {formatMoney(sign * total, currency)}
@@ -112,14 +125,19 @@ function AccountGroup({ group, currency }: { group: SidebarGroup; currency: stri
       </button>
 
       {open ? (
-        <ul className="mt-0.5 space-y-0.5">
+        <ul className="space-y-0.5">
           {group.items.map((a) => (
             <li key={a.id}>
-              <div className="flex items-center justify-between gap-2 rounded-md py-0.5 pl-5 pr-2">
-                <span className="min-w-0 flex-1 truncate text-[12px] text-white/85">{a.name}</span>
+              <div className="flex items-center gap-2 rounded-md py-[5px] pl-7 pr-2 transition hover:bg-white/[0.04]">
                 <span
-                  className={`shrink-0 text-[10px] font-medium tabular-nums ${
-                    sign * a.balanceCents < 0 ? "text-red-300" : "text-white/70"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: dotColorFor(a.name) }}
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-slate-400">{a.name}</span>
+                <span
+                  className={`shrink-0 text-[13px] tabular-nums ${
+                    sign * a.balanceCents < 0 ? "text-red-400" : "text-slate-400"
                   }`}
                 >
                   {formatMoney(sign * a.balanceCents, currency)}

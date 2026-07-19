@@ -1,27 +1,28 @@
 import type { ReactElement } from "react";
 import type { CategoryKind } from "@/lib/categories";
 
-// One accent token per category kind — drives icon tint, progress-bar fill,
-// sparkline stroke, and badge color everywhere a row needs to read as "this
-// kind of money." Expenses and Debt intentionally share --negative (both
-// mean "money leaving"), matching the design spec's own color table.
-export const ACCENT: Record<CategoryKind, string> = {
-  income: "positive",
-  savings: "chart-1",
-  bills: "warning",
-  expenses: "negative",
-  debt: "negative",
+// Tailwind's scanner needs literal class strings, not runtime
+// `bg-${accent}` interpolation — so the icon-tint classes per kind are
+// spelled out in full here rather than built from ACCENT at render time.
+export const ROW_CLASSES: Record<CategoryKind, { iconBg: string; iconText: string }> = {
+  income: { iconBg: "bg-positive/12", iconText: "text-positive" },
+  savings: { iconBg: "bg-chart-1/12", iconText: "text-chart-1" },
+  bills: { iconBg: "bg-warning/12", iconText: "text-warning" },
+  expenses: { iconBg: "bg-negative/12", iconText: "text-negative" },
+  debt: { iconBg: "bg-negative/12", iconText: "text-negative" },
 };
 
-// Tailwind's scanner needs literal class strings, not runtime
-// `bg-${accent}` interpolation — so the icon-tint/bar classes per kind are
-// spelled out in full here rather than built from ACCENT at render time.
-export const ROW_CLASSES: Record<CategoryKind, { iconBg: string; iconText: string; bar: string }> = {
-  income: { iconBg: "bg-positive/12", iconText: "text-positive", bar: "bg-positive" },
-  savings: { iconBg: "bg-chart-1/12", iconText: "text-chart-1", bar: "bg-chart-1" },
-  bills: { iconBg: "bg-warning/12", iconText: "text-warning", bar: "bg-warning" },
-  expenses: { iconBg: "bg-negative/12", iconText: "text-negative", bar: "bg-negative" },
-  debt: { iconBg: "bg-negative/12", iconText: "text-negative", bar: "bg-negative" },
+// Solid category dot — matches the group-header dot color used on the
+// Budget page and the register page, so a category reads as the same color
+// everywhere. (Deliberately not the same palette as ROW_CLASSES above: those
+// tints are semantic — good/warning/danger — while this is the category's
+// own identity color.)
+export const DOT: Record<CategoryKind, string> = {
+  income: "bg-positive",
+  savings: "bg-sky-500",
+  bills: "bg-brand",
+  expenses: "bg-accent",
+  debt: "bg-negative",
 };
 
 const SVG_PROPS = {

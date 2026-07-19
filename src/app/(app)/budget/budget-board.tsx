@@ -38,6 +38,7 @@ type Props = {
   accountOptions: AccountOption[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
+  payeeOptions: string[];
   snowballExtraCents: number;
   snowballFocusSubId: string | null;
   transactions: TxData[];
@@ -55,6 +56,7 @@ export function BudgetBoard({
   accountOptions,
   debtAccountOptions,
   bucketOptions,
+  payeeOptions,
   snowballExtraCents,
   snowballFocusSubId,
   transactions,
@@ -113,6 +115,26 @@ export function BudgetBoard({
         onAddTransaction={() => setQuickAdd(true)}
       />
     ) : null;
+
+  // Quick-add (from the item panel's "+ Add transaction") takes over the
+  // same right-rail slot as the item panel — anchored where the budget list
+  // stays visible, instead of a centered overlay.
+  const railContent =
+    quickAdd && selected ? (
+      <TransactionModal
+        editTx={null}
+        monthKey={month.key}
+        firstOfMonth={month.firstOfMonth}
+        subOptions={subOptions}
+        accountOptions={accountOptions}
+        payeeOptions={payeeOptions}
+        initialKind={selected.kind}
+        initialSubId={selected.subId}
+        onClose={() => setQuickAdd(false)}
+      />
+    ) : (
+      itemPanel
+    );
 
   return (
     // `items-start` would leave the right rail (aside) exactly as tall as its
@@ -182,7 +204,7 @@ export function BudgetBoard({
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
       <aside className="hidden w-[360px] shrink-0 lg:block">
         <div className="sticky top-20 space-y-3">
-          {itemPanel ?? (
+          {railContent ?? (
             <>
               {/* Summary | Transactions toggle */}
               <div className="grid grid-cols-2 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -225,6 +247,7 @@ export function BudgetBoard({
                   transactions={transactions}
                   subOptions={subOptions}
                   accountOptions={accountOptions}
+                  payeeOptions={payeeOptions}
                 />
               )}
             </>
@@ -232,32 +255,19 @@ export function BudgetBoard({
         </div>
       </aside>
 
-      {/* Mobile: item detail slides over */}
-      {itemPanel ? (
+      {/* Mobile: item detail / quick-add slides over */}
+      {railContent ? (
         <div className="lg:hidden">
           <button
             type="button"
             aria-label="Close panel"
-            onClick={() => setSelected(null)}
+            onClick={() => (quickAdd ? setQuickAdd(false) : setSelected(null))}
             className="fixed inset-0 z-40 bg-black/30"
           />
           <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[380px] overflow-y-auto bg-background p-2">
-            {itemPanel}
+            {railContent}
           </div>
         </div>
-      ) : null}
-
-      {quickAdd && selected ? (
-        <TransactionModal
-          editTx={null}
-          monthKey={month.key}
-          firstOfMonth={month.firstOfMonth}
-          subOptions={subOptions}
-          accountOptions={accountOptions}
-          initialKind={selected.kind}
-          initialSubId={selected.subId}
-          onClose={() => setQuickAdd(false)}
-        />
       ) : null}
     </div>
   );

@@ -10,11 +10,12 @@ type Props = {
   groups: SidebarGroup[];
   currency: string;
   userEmail: string;
+  badges?: Record<string, number>;
 };
 
 const STORAGE_KEY = "capitall-sidebar-collapsed";
 
-export function Sidebar({ groups, currency, userEmail }: Props) {
+export function Sidebar({ groups, currency, userEmail, badges }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -32,8 +33,8 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
       // SidebarNav) only wins against other elements *inside* this aside —
       // main content rendered later in the DOM still paints over the whole
       // sidebar on a tie. See feedback: hover tooltip showing behind cards.
-      className={`relative z-30 hidden h-screen shrink-0 flex-col bg-sidebar px-3 py-5 text-white transition-[width] duration-200 md:sticky md:top-0 md:flex ${
-        collapsed ? "w-[4.5rem]" : "w-64"
+      className={`relative z-30 hidden h-screen shrink-0 flex-col bg-sidebar pt-4 pb-3 text-white transition-[width] duration-200 md:sticky md:top-0 md:flex ${
+        collapsed ? "w-[4.5rem] px-3" : "w-[16.25rem] px-0"
       }`}
     >
       <button
@@ -53,8 +54,8 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
         </svg>
       </button>
 
-      <div className={`mb-5 flex items-center gap-2 ${collapsed ? "justify-center" : "px-1"}`}>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/15 text-base font-bold text-white">
+      <div className={`mb-5 flex items-center gap-2 ${collapsed ? "justify-center" : "px-4"}`}>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-base font-bold text-white">
           C
         </span>
         {collapsed ? null : (
@@ -62,7 +63,7 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
         )}
       </div>
 
-      <SidebarNav collapsed={collapsed} />
+      <SidebarNav collapsed={collapsed} badges={badges} />
 
       {collapsed ? (
         <div className="flex-1" />
@@ -70,7 +71,7 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
         <SidebarAccounts groups={groups} currency={currency} />
       )}
 
-      <div className="mt-4 border-t border-white/15 pt-3">
+      <div className="mx-4 mt-3 border-t border-white/[0.06] pt-3">
         {collapsed ? (
           <div className="flex flex-col items-center gap-2">
             <SignOutButton iconOnly />
@@ -78,7 +79,7 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
               href="/household"
               title="Share"
               aria-label="Share"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-white/60 hover:text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:text-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <circle cx="18" cy="5" r="3" />
@@ -89,29 +90,33 @@ export function Sidebar({ groups, currency, userEmail }: Props) {
             </Link>
           </div>
         ) : (
-          <>
-            <p className="truncate px-2 text-xs text-white/50" title={userEmail}>
-              {userEmail}
-            </p>
-            <div className="mt-1 flex items-center justify-between px-1">
-              <SignOutButton />
-              <Link
-                href="/household"
-                className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-white/60 hover:text-white"
-              >
-                <svg
-                  width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden
-                >
-                  <circle cx="18" cy="5" r="3" />
-                  <circle cx="6" cy="12" r="3" />
-                  <circle cx="18" cy="19" r="3" />
-                  <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
-                </svg>
-                Share
-              </Link>
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">
+              {(userEmail[0] ?? "?").toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-medium text-white" title={userEmail}>
+                {userEmail.split("@")[0]}
+              </p>
+              <p className="truncate text-[11px] text-slate-500" title={userEmail}>
+                {userEmail}
+              </p>
             </div>
-          </>
+            <Link
+              href="/household"
+              title="Share"
+              aria-label="Share"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white/[0.05] hover:text-white"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
+              </svg>
+            </Link>
+            <SignOutButton iconOnly />
+          </div>
         )}
       </div>
     </aside>

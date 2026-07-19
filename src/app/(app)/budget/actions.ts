@@ -7,6 +7,7 @@ import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
 import { adjustBucketBalance } from "@/lib/buckets";
 import { adjustDebtBalance } from "@/lib/debts";
+import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 
 // The bucket a Savings subcategory contributes to, if any linked — null when
 // not a savings item or not linked, so callers can skip the bucket math.
@@ -345,6 +346,16 @@ export async function addTransaction(formData: FormData) {
     revalidatePath("/snowball");
   }
 
+  // Post to the chosen account's running ledger (income adds, everything
+  // else spends out) — skipped for investment/bucketed accounts, which stay
+  // manual.
+  if (accountId) {
+    const kind = await categoryKindOf(supabase, sub.category_id);
+    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(kind, amountCents))) {
+      await captureSnapshots(supabase, householdId);
+    }
+  }
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
@@ -366,7 +377,7 @@ export async function updateTransaction(formData: FormData) {
   // the old subcategory/amount/direction may differ from the new ones.
   const { data: prevTx } = await supabase
     .from("transactions")
-    .select("subcategory_id, amount_cents, is_withdrawal")
+    .select("subcategory_id, category_id, account_id, amount_cents, is_withdrawal")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -448,6 +459,23 @@ export async function updateTransaction(formData: FormData) {
     revalidatePath("/snowball");
   }
 
+  // Undo the old posting to its account (may be a different account than the
+  // new one, or none), then post the new one.
+  let touchedAccount = false;
+  if (prevTx?.account_id) {
+    const prevKind = prevTx.category_id ? await categoryKindOf(supabase, prevTx.category_id) : null;
+    if (await adjustAccountLedger(supabase, householdId, prevTx.account_id, -ledgerDelta(prevKind, prevTx.amount_cents))) {
+      touchedAccount = true;
+    }
+  }
+  if (accountId) {
+    const kind = await categoryKindOf(supabase, sub.category_id);
+    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(kind, amountCents))) {
+      touchedAccount = true;
+    }
+  }
+  if (touchedAccount) await captureSnapshots(supabase, householdId);
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
@@ -460,7 +488,7 @@ export async function deleteTransaction(formData: FormData) {
 
   const { data: tx } = await supabase
     .from("transactions")
-    .select("subcategory_id, amount_cents, is_withdrawal")
+    .select("subcategory_id, category_id, account_id, amount_cents, is_withdrawal")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -486,9 +514,25 @@ export async function deleteTransaction(formData: FormData) {
     }
   }
 
+  if (tx?.account_id) {
+    const kind = tx.category_id ? await categoryKindOf(supabase, tx.category_id) : null;
+    if (await adjustAccountLedger(supabase, householdId, tx.account_id, -ledgerDelta(kind, tx.amount_cents))) {
+      await captureSnapshots(supabase, householdId);
+    }
+  }
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+}
+
+export async function deleteTransactions(ids: string[]) {
+  if (!ids.length) return;
+  for (const id of ids) {
+    const fd = new FormData();
+    fd.set("id", id);
+    await deleteTransaction(fd);
+  }
 }
 
 // The Log tab's Clear column: checked = verified against the bank/card app.

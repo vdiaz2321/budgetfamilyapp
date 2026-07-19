@@ -167,8 +167,6 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
     Object.fromEntries(["debts", ...SECTIONS.map((s) => s.key)].map((k) => [k, true])),
   );
   const allOpen = sectionKeys.every((k) => !collapsed[k]);
-  const toggleAll = () =>
-    setCollapsed(Object.fromEntries(sectionKeys.map((k) => [k, allOpen])));
   const toggleSection = (key: string) =>
     setCollapsed((c) => ({ ...c, [key]: !c[key] }));
 
@@ -179,11 +177,19 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
   // collapse it when moving to a different page."
   const bucketCountById = new Map(accounts.map((a) => [a.id, a.buckets.length]));
   const [bucketsOpen, setBucketsOpen] = useSessionCollapse("accounts-buckets-open", () =>
-    Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, true])),
+    Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, false])),
   );
-  const isBucketsOpen = (id: string) => bucketsOpen[id] ?? (bucketCountById.get(id) ?? 0) > 0;
+  const isBucketsOpen = (id: string) => bucketsOpen[id] ?? false;
   const toggleBuckets = (id: string) =>
     setBucketsOpen((c) => ({ ...c, [id]: !isBucketsOpen(id) }));
+
+  // Expand/collapse all — sections and every account's bucket drawer together.
+  const toggleAll = () => {
+    setCollapsed(Object.fromEntries(sectionKeys.map((k) => [k, allOpen])));
+    setBucketsOpen(
+      Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, !allOpen])),
+    );
+  };
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4">

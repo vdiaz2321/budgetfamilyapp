@@ -4,9 +4,10 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { deleteTransaction, toggleCleared } from "../budget/actions";
+import { deleteTransaction, deleteTransactions, toggleCleared } from "../budget/actions";
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
+import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, SubOption, TxData } from "../budget/types";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
@@ -16,16 +17,8 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   expenses: "Expenses",
   debt: "Debt",
 };
-// Same accent dots as the budget groups — the tabs stay visually connected.
-const KIND_DOT: Record<CategoryKind, string> = {
-  income: "bg-positive",
-  savings: "bg-sky-500",
-  bills: "bg-brand",
-  expenses: "bg-accent",
-  debt: "bg-negative",
-};
 
-const GRID = "grid-cols-[2.25rem_5.5rem_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_7rem_2rem]";
+const GRID = "grid-cols-[1.75rem_2.25rem_5.5rem_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_7rem_2rem]";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -33,6 +26,7 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  payeeOptions?: string[];
   dateRange: { from: string | null; to: string | null };
 };
 
@@ -42,11 +36,14 @@ export function TransactionsTable({
   transactions,
   subOptions,
   accountOptions,
+  payeeOptions = [],
   dateRange,
 }: Props) {
   const router = useRouter();
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPending, startBulk] = useTransition();
   const [query, setQuery] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
@@ -68,6 +65,28 @@ export function TransactionsTable({
   }
 
   const accountName = new Map(accountOptions.map((a) => [a.id, a.name]));
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selected.size === filtered.length && filtered.length > 0) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((t) => t.id)));
+    }
+  }
+
+  function deleteSelected() {
+    const ids = [...selected];
+    setSelected(new Set());
+    startBulk(() => deleteTransactions(ids));
+  }
 
   const q = query.trim().toLowerCase();
   const filtered = transactions.filter((t) => {
@@ -192,19 +211,58 @@ export function TransactionsTable({
         ) : null}
       </div>
 
+      {/* Bulk-delete bar — shown when rows are selected */}
+      {selected.size > 0 ? (
+        <div className="flex items-center justify-between rounded-xl bg-negative/10 px-4 py-2.5 ring-1 ring-negative/20">
+          <span className="text-sm font-medium text-negative">
+            {selected.size} {selected.size === 1 ? "transaction" : "transactions"} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={bulkPending}
+              onClick={deleteSelected}
+              className="flex items-center gap-1.5 rounded-lg bg-negative px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+              </svg>
+              Delete {selected.size}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Register */}
       <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <div className="overflow-x-auto">
           <div className="min-w-[52rem]">
             {/* Header */}
             <div className={`grid ${GRID} items-center gap-2 border-b border-line px-4 py-2.5`}>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Date</span>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Memo</span>
-              <span className="text-right text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
+              <span className="flex justify-center">
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && selected.size === filtered.length}
+                  ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < filtered.length; }}
+                  onChange={toggleSelectAll}
+                  aria-label="Select all"
+                  className="h-4 w-4 rounded accent-[var(--brand)]"
+                />
+              </span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Date</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Memo</span>
               <span />
             </div>
 
@@ -223,6 +281,8 @@ export function TransactionsTable({
                     currency={currency}
                     accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
                     onEdit={() => setModal(t)}
+                    selected={selected.has(t.id)}
+                    onSelect={() => toggleSelect(t.id)}
                   />
                 ))}
               </ul>
@@ -230,10 +290,10 @@ export function TransactionsTable({
 
             {/* Totals — same grid as the rows so the net sits under the Amount column */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-              <span className="col-span-3 whitespace-nowrap text-sm font-bold">
+              <span className="col-span-4 whitespace-nowrap text-sm font-bold">
                 {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
               </span>
-              <span className="col-span-3 truncate text-right text-xs font-medium uppercase tracking-wide text-muted">
+              <span className="col-span-2 truncate text-right text-xs font-medium uppercase tracking-wide text-muted">
                 Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
               </span>
               <span
@@ -243,7 +303,7 @@ export function TransactionsTable({
               >
                 {formatMoney(incomeTotal - outflowTotal, currency)}
               </span>
-              <span />
+              <span className="col-span-2" />
             </div>
           </div>
         </div>
@@ -256,6 +316,7 @@ export function TransactionsTable({
           firstOfMonth={month.firstOfMonth}
           subOptions={subOptions}
           accountOptions={accountOptions}
+          payeeOptions={payeeOptions}
           onClose={() => setModal(null)}
         />
       ) : null}
@@ -268,11 +329,15 @@ function TxLine({
   currency,
   accountName,
   onEdit,
+  selected,
+  onSelect,
 }: {
   tx: TxData;
   currency: string;
   accountName: string;
   onEdit: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const [clearPending, startClear] = useTransition();
   const [delPending, startDel] = useTransition();
@@ -290,9 +355,18 @@ function TxLine({
       onDoubleClick={onEdit}
       title="Double-click to edit"
       className={`group grid ${GRID} cursor-default select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
-        tx.cleared ? "opacity-60" : ""
-      }`}
+        selected ? "bg-brand-soft/20" : ""
+      } ${tx.cleared ? "opacity-60" : ""}`}
     >
+      <span onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onSelect}
+          aria-label="Select transaction"
+          className="h-4 w-4 rounded accent-[var(--brand)]"
+        />
+      </span>
       <span onDoubleClick={(e) => e.stopPropagation()}>
         <input
           type="checkbox"
@@ -315,7 +389,6 @@ function TxLine({
         <span className="truncate text-sm">{tx.subName}</span>
       </button>
       <span className="truncate text-sm text-muted">{accountName}</span>
-      <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
       <button
         type="button"
         onClick={onEdit}
@@ -326,6 +399,7 @@ function TxLine({
         {isIncome ? "+" : "−"}
         {formatMoney(tx.amountCents, currency)}
       </button>
+      <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
       <form
         action={(fd) => startDel(() => deleteTransaction(fd))}
         onDoubleClick={(e) => e.stopPropagation()}

@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, updateTransaction } from "./actions";
+import { addTransaction, updateTransaction, deleteTransaction } from "./actions";
 import type { AccountOption, SubOption, TxData } from "./types";
 
 // Header title (verbose) vs. button label (short), plus tab labels.
@@ -65,6 +65,7 @@ export function TransactionModal({
   firstOfMonth,
   subOptions,
   accountOptions,
+  payeeOptions = [],
   initialKind,
   initialSubId,
   onClose,
@@ -74,6 +75,9 @@ export function TransactionModal({
   firstOfMonth: string;
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  // Previously-used payee names, offered as suggestions below the payee
+  // field as you type — not a picker, just a memory aid.
+  payeeOptions?: string[];
   // Preselects the type + budget item when opened from an item's own panel
   // (e.g. its "+ Add transaction" button) instead of the general Log tab.
   initialKind?: CategoryKind;
@@ -90,12 +94,9 @@ export function TransactionModal({
   const options = subOptions.filter((s) => s.kind === txType);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/50" />
-
-      <div className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-surface shadow-2xl">
-        {/* Header — tinted by category */}
-        <div className={`relative px-6 py-4 text-center transition-colors ${HEADER_TINT[txType]}`}>
+    <div className="flex max-h-[calc(100vh-6rem)] w-full flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      {/* Header — tinted by category */}
+        <div className={`relative px-5 py-3.5 text-center transition-colors ${HEADER_TINT[txType]}`}>
           <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
             {isEdit ? "Edit" : "Add"} {KIND_TITLE[txType]}
           </h2>
@@ -111,15 +112,17 @@ export function TransactionModal({
           </button>
         </div>
 
-        <div className="overflow-y-auto px-6 py-5">
-          {/* Five type tabs */}
-          <div className="grid grid-cols-5 rounded-xl bg-background p-1 ring-1 ring-line">
+        <div className="overflow-y-auto px-5 py-4">
+          {/* Five type tabs — flex-wrap so each pill sizes to its own label
+              instead of being squashed into an equal-width grid column that
+              doesn't fit "Expenses"/"Savings" at the rail's narrower width. */}
+          <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
             {CATEGORY_KINDS.map(({ kind }) => (
               <button
                 key={kind}
                 type="button"
                 onClick={() => setTxType(kind)}
-                className={`rounded-lg py-2 text-xs font-semibold transition ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
                   txType === kind
                     ? `bg-surface shadow-sm ring-1 ring-line ${TAB_ACTIVE_TEXT[kind]}`
                     : "text-muted hover:text-foreground"
@@ -167,23 +170,25 @@ export function TransactionModal({
               />
             </div>
 
-            {/* Date + payee */}
-            <div className="grid grid-cols-[10rem_1fr] gap-3">
-              <input
-                name="date"
-                type="date"
-                required
-                defaultValue={defaultDate}
-                className="rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-              <input
-                name="payee"
-                type="text"
-                placeholder={PAYEE_PLACEHOLDER[txType]}
-                defaultValue={editTx?.payee ?? ""}
-                className="min-w-0 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-            </div>
+            {/* Date */}
+            <input
+              name="date"
+              type="date"
+              required
+              defaultValue={defaultDate}
+              className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+
+            {/* Payee — its own row so the placeholder isn't squeezed next to
+                the date. Suggests payees used before (e.g. "Fidelity",
+                "Walmart") directly below the field — not a fixed brand list,
+                and not the browser's native <datalist> popup, whose position
+                we can't control (it was showing up to the left). */}
+            <PayeeField
+              placeholder={PAYEE_PLACEHOLDER[txType]}
+              defaultValue={editTx?.payee ?? ""}
+              payeeOptions={payeeOptions}
+            />
 
             {/* Account */}
             <select
@@ -224,7 +229,21 @@ export function TransactionModal({
             {/* Footer */}
             <div className="flex items-center justify-between gap-3 pt-2">
               {isEdit ? (
-                <span />
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    start(async () => {
+                      const fd = new FormData();
+                      fd.set("id", editTx.id);
+                      await deleteTransaction(fd);
+                      onClose();
+                    })
+                  }
+                  className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
+                >
+                  Delete
+                </button>
               ) : (
                 <label className="flex items-center gap-2 text-sm text-muted">
                   <input type="checkbox" name="createAnother" className="h-4 w-4 rounded accent-[var(--brand)]" />
@@ -232,7 +251,7 @@ export function TransactionModal({
                 </label>
               )}
               <div className="flex items-center gap-2">
-                <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand hover:text-brand-strong">
+                <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
                   Cancel
                 </button>
                 <button
@@ -245,8 +264,67 @@ export function TransactionModal({
               </div>
             </div>
           </form>
-        </div>
       </div>
+    </div>
+  );
+}
+
+// A plain text input (still submits as `name="payee"`) with a self-positioned
+// suggestion list anchored directly below it, filtered against payees used
+// before. `onMouseDown` + `preventDefault` on each suggestion keeps the input
+// focused through the click so `onBlur` doesn't close the list first.
+function PayeeField({
+  placeholder,
+  defaultValue,
+  payeeOptions,
+}: {
+  placeholder: string;
+  defaultValue: string;
+  payeeOptions: string[];
+}) {
+  const [value, setValue] = useState(defaultValue);
+  const [open, setOpen] = useState(false);
+
+  const q = value.trim().toLowerCase();
+  const matches = q
+    ? payeeOptions.filter((p) => p.toLowerCase() !== q && p.toLowerCase().includes(q)).slice(0, 6)
+    : payeeOptions.slice(0, 6);
+
+  return (
+    <div className="relative">
+      <input
+        name="payee"
+        type="text"
+        autoComplete="off"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+      {open && matches.length > 0 ? (
+        <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
+          {matches.map((name) => (
+            <li key={name}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setValue(name);
+                  setOpen(false);
+                }}
+                className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-brand-soft/40"
+              >
+                {name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

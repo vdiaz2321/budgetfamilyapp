@@ -954,18 +954,48 @@ function YearPicker({
   year: string;
   onYearChange: (y: string) => void;
 }) {
+  // years is sorted newest-first; "all" sits at the end.
+  // Left (‹) = older = higher index; Right (›) = newer = lower index.
+  const allOptions = [...years, "all"];
+  const idx = allOptions.indexOf(year);
+  const canOlder = idx < allOptions.length - 1;
+  const canNewer = idx > 0;
   return (
-    <select
-      aria-label="Year"
-      value={year}
-      onChange={(e) => onYearChange(e.target.value)}
-      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-    >
-      {years.map((y) => (
-        <option key={y} value={y}>{y}</option>
-      ))}
-      <option value="all">All</option>
-    </select>
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        aria-label="Older year"
+        disabled={!canOlder}
+        onClick={() => canOlder && onYearChange(allOptions[idx + 1])}
+        className="rounded-md p-1 text-muted transition hover:bg-fill disabled:opacity-30"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+      <select
+        aria-label="Year"
+        value={year}
+        onChange={(e) => onYearChange(e.target.value)}
+        className="cursor-pointer rounded-lg bg-background px-2 py-1 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      >
+        {years.map((y) => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+        <option value="all">All</option>
+      </select>
+      <button
+        type="button"
+        aria-label="Newer year"
+        disabled={!canNewer}
+        onClick={() => canNewer && onYearChange(allOptions[idx - 1])}
+        className="rounded-md p-1 text-muted transition hover:bg-fill disabled:opacity-30"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M6 12l4-4-4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -985,6 +1015,9 @@ function SummaryBlock({
   year: string;
   onYearChange: (y: string) => void;
 }) {
+  const [summaryState, setSummaryState] = useSessionCollapse("networth-summary-block", () => ({ v: false }));
+  const collapsed = !!summaryState.v;
+  const setCollapsed = (fn: (v: boolean) => boolean) => setSummaryState((s) => ({ v: fn(!!s.v) }));
   const idxByMonth = new Map(points.map((p, i) => [p.month, i]));
   const cols = points.filter((p) => year === "all" || p.month.slice(0, 4) === year);
   const prevNet = (m: string) => {
@@ -1035,11 +1068,23 @@ function SummaryBlock({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
-        <h2 className="font-semibold">Net worth by month</h2>
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-2 text-left"
+        >
+          <svg
+            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
+            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          >
+            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <h2 className="font-semibold">Net worth by month</h2>
+        </button>
         <YearPicker years={years} year={year} onYearChange={onYearChange} />
       </div>
-      <div className="overflow-x-auto">
+      {!collapsed && <div className="border-t border-line overflow-x-auto">
         <table className="w-full border-collapse whitespace-nowrap text-xs">
           <thead>
             <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
@@ -1085,7 +1130,7 @@ function SummaryBlock({
             })}
           </tbody>
         </table>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1110,6 +1155,9 @@ function MonthlyAnalytics({
   year: string;
 }) {
   const [showChanges, setShowChanges] = useState(true);
+  const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: false }));
+  const collapsed = !!monthlyState.v;
+  const setCollapsed = (fn: (v: boolean) => boolean) => setMonthlyState((s) => ({ v: fn(!!s.v) }));
 
   const byMonth = new Map(points.map((p) => [p.month, p]));
   const val = (p: MonthPoint | undefined, k: Metric["key"]) => (p ? p[k] : null);
@@ -1147,17 +1195,31 @@ function MonthlyAnalytics({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
-        <h2 className="font-semibold">Monthly Net Worth</h2>
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <button
           type="button"
-          onClick={() => setShowChanges((v) => !v)}
-          className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-2 text-left"
         >
-          {showChanges ? "Hide changes" : "Show changes"}
+          <svg
+            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
+            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          >
+            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <h2 className="font-semibold">Monthly Net Worth</h2>
         </button>
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={() => setShowChanges((v) => !v)}
+            className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+          >
+            {showChanges ? "Hide changes" : "Show changes"}
+          </button>
+        )}
       </div>
-      <div className="overflow-x-auto">
+      {!collapsed && <div className="border-t border-line overflow-x-auto">
         <table className="w-full border-collapse whitespace-nowrap text-xs">
           <thead>
             {/* Grouped metric names, centered over their columns */}
@@ -1236,7 +1298,7 @@ function MonthlyAnalytics({
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1346,21 +1408,40 @@ function HistoricalEntry({ currency }: { currency: string }) {
 }
 
 function YearTable({ points, currency }: { points: MonthPoint[]; currency: string }) {
+  const [yearState, setYearState] = useSessionCollapse("networth-year-table", () => ({ v: false }));
+  const collapsed = !!yearState.v;
+  const setCollapsed = (fn: (v: boolean) => boolean) => setYearState((s) => ({ v: fn(!!s.v) }));
   // Last snapshot of each year = that year's closing position.
   const byYear = new Map<string, MonthPoint>();
   for (const p of points) byYear.set(p.month.slice(0, 4), p);
-  const years = [...byYear.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const years = [...byYear.entries()].sort(([a], [b]) => b.localeCompare(a));
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="grid grid-cols-[4rem_1fr_8rem_8rem] items-center gap-2 border-b border-line px-4 py-2.5">
-        <h2 className="col-span-2 font-semibold">Year by year</h2>
-        <span className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">Net worth</span>
-        <span className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">Change</span>
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-2 text-left"
+        >
+          <svg
+            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
+            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          >
+            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <h2 className="font-semibold">Year by year</h2>
+        </button>
+        {!collapsed && (
+          <>
+            <span className="ml-auto w-32 text-center text-[11px] font-medium uppercase tracking-wide text-muted">Net worth</span>
+            <span className="w-32 text-center text-[11px] font-medium uppercase tracking-wide text-muted">Change</span>
+          </>
+        )}
       </div>
-      <ul className="divide-y divide-line">
+      {!collapsed && <ul className="divide-y divide-line border-t border-line">
         {years.map(([year, p], i) => {
-          const prev = i > 0 ? years[i - 1][1] : null;
+          const prev = i < years.length - 1 ? years[i + 1][1] : null;
           const delta = prev ? p.net - prev.net : null;
           return (
             <li key={year} className="grid grid-cols-[4rem_1fr_8rem_8rem] items-center gap-2 px-4 py-2">
@@ -1380,7 +1461,7 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
             </li>
           );
         })}
-      </ul>
+      </ul>}
     </section>
   );
 }

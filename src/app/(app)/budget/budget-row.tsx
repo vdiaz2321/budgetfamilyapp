@@ -5,7 +5,7 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
-import { ACCENT, ROW_CLASSES, CategoryIcon, Sparkline } from "./category-icons";
+import { ROW_CLASSES, CategoryIcon, Sparkline } from "./category-icons";
 
 const ACTUAL_WORD: Record<CategoryKind, string> = {
   income: "received",
@@ -18,8 +18,9 @@ const ACTUAL_WORD: Record<CategoryKind, string> = {
 // Positive/warning/negative per the spec's remaining-amount rule, adapted so
 // income's "less remaining to receive" reads as good, not tight — the
 // generic (remaining/planned < 15%) rule only applies to money going out.
-function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
-  if (kind === "income") return remaining <= 0 ? "text-positive" : "text-foreground";
+export function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
+  // Income "remaining" is just what's left to receive — never a bad thing.
+  if (kind === "income") return "text-positive";
   if (plannedCents <= 0) return remaining < 0 ? "text-negative" : "text-foreground";
   if (remaining < 0) return "text-negative";
   if (remaining / plannedCents < 0.15) return "text-warning";
@@ -53,8 +54,13 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballF
         ? 100
         : 0;
 
-  const accent = ACCENT[kind];
   const rowClasses = ROW_CLASSES[kind];
+  // Progress bar + sparkline are blue by default across every category, red
+  // only when over budget — income has no "overspent" concept, so it's
+  // always blue.
+  const overBudget = !isIncome && row.plannedCents > 0 && row.spentCents > row.plannedCents;
+  const sparklineAccent = overBudget ? "negative" : "chart-1";
+  const barClass = overBudget ? "bg-negative" : "bg-chart-1";
 
   return (
     <li className={`group ${selected ? "bg-brand-soft/50" : "hover:bg-brand-soft/25"}`}>
@@ -84,7 +90,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballF
             </button>
 
             <div className="flex shrink-0 items-center gap-2">
-              <Sparkline values={row.sparkline} accent={accent} />
+              <Sparkline values={row.sparkline} accent={sparklineAccent} />
               <button
                 type="button"
                 onClick={onSelect}
@@ -113,7 +119,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballF
 
           <div className={`mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60`}>
             <div
-              className={`h-full rounded-full ${rowClasses.bar} transition-[width] duration-200`}
+              className={`h-full rounded-full ${barClass} transition-[width] duration-200`}
               style={{ width: `${pct}%` }}
             />
           </div>

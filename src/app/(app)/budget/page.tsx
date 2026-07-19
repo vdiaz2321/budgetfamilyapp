@@ -101,7 +101,7 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("accounts")
-      .select("id, name, kind")
+      .select("id, name, kind, holder")
       .eq("household_id", household.id)
       .eq("active", true)
       .order("name"),
@@ -260,9 +260,16 @@ export default async function BudgetPage({
     linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
   }));
 
+  // Disambiguate same-named accounts (e.g. two "Fidelity" accounts, one in
+  // Investments and one in Kids Funding) with their holder initial.
+  const nameCounts = new Map<string, number>();
+  for (const a of accounts ?? []) nameCounts.set(a.name, (nameCounts.get(a.name) ?? 0) + 1);
   const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
     id: a.id,
-    name: a.name,
+    name:
+      (nameCounts.get(a.name) ?? 0) > 1 && a.holder
+        ? `${a.name} (${a.holder})`
+        : a.name,
   }));
 
   // Liability accounts a Budget debt can link to (credit cards, loans).
@@ -318,6 +325,7 @@ export default async function BudgetPage({
       accountOptions={accountOptions}
       debtAccountOptions={debtAccountOptions}
       bucketOptions={bucketOptions}
+      payeeOptions={(payees ?? []).map((p) => p.name)}
       snowballExtraCents={snowballExtraCents}
       snowballFocusSubId={snowballFocusSubId}
       transactions={transactions}

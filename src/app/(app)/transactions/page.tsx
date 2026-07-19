@@ -124,6 +124,7 @@ export default async function TransactionsPage({
       transactions={transactions}
       subOptions={subOptions}
       accountOptions={accountOptions}
+      payeeOptions={(payees ?? []).map((p) => p.name)}
       dateRange={{ from: from ?? null, to: to ?? null }}
     />
   );
