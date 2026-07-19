@@ -189,6 +189,39 @@ export async function setNetworthHistory(formData: FormData) {
   return { error: null };
 }
 
+// Saves a single year-end (December) net worth total to networth_history.
+// For years where only the total is known (no section breakdown), the full
+// amount is stored in bank_cents so net = bank_cents = total.
+export async function upsertNetworthYear(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const year = Number(formData.get("year"));
+  const nowYear = new Date().getFullYear();
+  if (!Number.isInteger(year) || year < 1990 || year >= nowYear) {
+    return { error: "Enter a valid past year." };
+  }
+  const totalCents = displayToCents(String(formData.get("total") ?? "0"));
+  const month = `${year}-12-01`;
+
+  const { error } = await supabase
+    .from("networth_history")
+    .upsert(
+      {
+        household_id: householdId,
+        month,
+        bank_cents: totalCents,
+        savings_cents: 0,
+        stocks_cents: 0,
+        debt_cents: 0,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "household_id,month" },
+    );
+  if (error) return { error: "Couldn't save — try again." };
+
+  revalidatePath("/networth");
+  return { error: null };
+}
+
 export async function deleteNetworthHistory(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const month = String(formData.get("month") ?? "");

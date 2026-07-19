@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { setInvestmentYear } from "./actions";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 
 export type YearCell = {
   year: number;
@@ -108,13 +109,275 @@ export function InvestBoard({ accounts, years, currency }: Props) {
         </div>
       ) : (
         <>
-          <PerfTable title="My Investments" accounts={mine} year={year} currency={currency} />
+          <PerformanceChart accounts={accounts} years={years} currency={currency} />
+          <PerfTable title="Investments" accounts={mine} year={year} currency={currency} />
           {kids.length > 0 ? (
             <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} />
           ) : null}
           <YearByYear accounts={accounts} years={years} currency={currency} />
         </>
       )}
+    </div>
+  );
+}
+
+// ─── Performance chart ───────────────────────────────────────────────────────
+
+function PerformanceChart({
+  accounts,
+  years,
+  currency,
+}: {
+  accounts: InvestAccount[];
+  years: number[];
+  currency: string;
+}) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const asc = useMemo(() => [...years].sort((a, b) => a - b), [years]);
+
+  // Aggregate contributed + gain per year across all accounts.
+  const bars = useMemo(
+    () =>
+      asc.map((y) => {
+        let contrib = 0;
+        let gain = 0;
+        let endBal = 0;
+        let endAny = false;
+        for (const a of accounts) {
+          const c = a.cells[y];
+          if (!c) continue;
+          contrib += c.contributedCents;
+          gain += c.accruedCents;
+          if (c.endBalanceCents != null) { endBal += c.endBalanceCents; endAny = true; }
+        }
+        return { year: y, contrib, gain, endBal: endAny ? endBal : null };
+      }),
+    [asc, accounts],
+  );
+
+  // Chart geometry (viewBox coords).
+  const W = 600;
+  const H = 200;
+  const PAD = { top: 16, right: 16, bottom: 32, left: 56 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  const maxBar = Math.max(...bars.map((b) => b.contrib + Math.max(b.gain, 0)), 1);
+  // Round up to a "nice" ceiling so the top bar doesn't clip the axis label.
+  const niceCeil = Math.ceil(maxBar / 10000) * 10000;
+  const scale = (cents: number) => (cents / niceCeil) * chartH;
+
+  const barW = Math.min(40, (chartW / bars.length) * 0.55);
+  const slotW = chartW / bars.length;
+
+  // Y-axis ticks (4 steps).
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(niceCeil * f));
+
+  // End-balance line path.
+  const linePts = bars
+    .map((b, i) => {
+      if (b.endBal == null) return null;
+      const x = PAD.left + slotW * i + slotW / 2;
+      const y = PAD.top + chartH - scale(b.endBal);
+      return `${x},${y}`;
+    })
+    .filter(Boolean);
+  const linePath = linePts.length > 1 ? `M ${linePts.join(" L ")}` : null;
+
+  return (
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="px-4 pt-4 pb-2">
+        <h2 className="text-sm font-bold">Performance</h2>
+        <p className="text-xs text-muted">Total contributed vs. unrealized gains per year</p>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 px-4 pb-2 text-xs text-muted">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-brand, #6366f1)" }} />
+          Contributed
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-positive, #22c55e)" }} />
+          Gain
+        </span>
+        {linePath && (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: "var(--color-foreground, #e2e8f0)", opacity: 0.5 }} />
+            End balance
+          </span>
+        )}
+      </div>
+
+      {/* SVG chart */}
+      <div className="relative px-2 pb-4">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full"
+          style={{ height: "clamp(140px, 22vw, 200px)" }}
+          aria-label="Investment performance chart"
+        >
+          {/* Y-axis grid + labels */}
+          {ticks.map((t) => {
+            const y = PAD.top + chartH - scale(t);
+            return (
+              <g key={t}>
+                <line
+                  x1={PAD.left} y1={y} x2={W - PAD.right} y2={y}
+                  stroke="currentColor" strokeWidth="0.5" opacity="0.12"
+                />
+                <text
+                  x={PAD.left - 6} y={y + 4}
+                  textAnchor="end" fontSize="9" fill="currentColor" opacity="0.4"
+                >
+                  {t >= 1000 ? `$${(t / 1000).toFixed(0)}k` : `$${t}`}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Bars */}
+          {bars.map((b, i) => {
+            const cx = PAD.left + slotW * i + slotW / 2;
+            const bx = cx - barW / 2;
+            const contribH = scale(b.contrib);
+            const gainH = scale(Math.max(b.gain, 0));
+            const isHovered = hovered === i;
+
+            return (
+              <g key={b.year}>
+                {/* Hover hit area */}
+                <rect
+                  x={PAD.left + slotW * i}
+                  y={PAD.top}
+                  width={slotW}
+                  height={chartH}
+                  fill="transparent"
+                  onMouseEnter={() => setHovered(i)}
+                  onMouseLeave={() => setHovered(null)}
+                  style={{ cursor: "default" }}
+                />
+                {/* Hover highlight */}
+                {isHovered && (
+                  <rect
+                    x={PAD.left + slotW * i}
+                    y={PAD.top}
+                    width={slotW}
+                    height={chartH}
+                    fill="currentColor"
+                    opacity="0.04"
+                    rx="2"
+                  />
+                )}
+                {/* Contributed bar */}
+                <rect
+                  x={bx} y={PAD.top + chartH - contribH}
+                  width={barW} height={contribH}
+                  rx="3" ry="3"
+                  fill="var(--color-brand, #6366f1)"
+                  opacity={isHovered ? 1 : 0.8}
+                />
+                {/* Gain bar (stacked on top) */}
+                {gainH > 0 && (
+                  <rect
+                    x={bx} y={PAD.top + chartH - contribH - gainH}
+                    width={barW} height={gainH}
+                    rx="3" ry="3"
+                    fill="var(--color-positive, #22c55e)"
+                    opacity={isHovered ? 1 : 0.8}
+                  />
+                )}
+                {/* Negative gain bar (below baseline) */}
+                {b.gain < 0 && (
+                  <rect
+                    x={bx} y={PAD.top + chartH - contribH}
+                    width={barW} height={scale(Math.abs(b.gain))}
+                    rx="3" ry="3"
+                    fill="var(--color-negative, #ef4444)"
+                    opacity={isHovered ? 1 : 0.8}
+                  />
+                )}
+                {/* X-axis label */}
+                <text
+                  x={cx} y={PAD.top + chartH + 14}
+                  textAnchor="middle" fontSize="10" fill="currentColor" opacity="0.45"
+                >
+                  {b.year}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* End-balance line */}
+          {linePath && (
+            <>
+              <path
+                d={linePath}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.35"
+                strokeDasharray="4 3"
+              />
+              {bars.map((b, i) => {
+                if (b.endBal == null) return null;
+                const x = PAD.left + slotW * i + slotW / 2;
+                const y = PAD.top + chartH - scale(b.endBal);
+                return (
+                  <circle key={b.year} cx={x} cy={y} r="2.5"
+                    fill="var(--color-surface, #1e293b)"
+                    stroke="currentColor" strokeWidth="1.5" opacity="0.5"
+                  />
+                );
+              })}
+            </>
+          )}
+        </svg>
+
+        {hovered !== null && bars[hovered] ? (
+          <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ChartTooltip({
+  b,
+  hovered,
+  total,
+  currency,
+}: {
+  b: { year: number; contrib: number; gain: number; endBal: number | null };
+  hovered: number;
+  total: number;
+  currency: string;
+}) {
+  const slotPct = ((hovered + 0.5) / total) * 100;
+  return (
+    <div
+      className="pointer-events-none absolute top-2 rounded-xl bg-surface px-3 py-2 text-xs shadow-lg ring-1 ring-black/10 dark:ring-white/15"
+      style={{
+        left: `${slotPct}%`,
+        transform: slotPct > 60 ? "translateX(-100%)" : "translateX(0)",
+        zIndex: 10,
+      }}
+    >
+      <div className="mb-1 font-semibold">{b.year}</div>
+      <div className="space-y-0.5 text-muted">
+        <div>Contributed <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
+        <div>
+          Gain{" "}
+          <span className={`font-medium ${b.gain >= 0 ? "text-positive" : "text-negative"}`}>
+            {formatMoney(b.gain, currency)}
+          </span>
+        </div>
+        {b.endBal != null && (
+          <div>End balance <span className="font-medium text-foreground">{formatMoney(b.endBal, currency)}</span></div>
+        )}
+      </div>
     </div>
   );
 }
@@ -131,6 +394,10 @@ function PerfTable({
   currency: string;
 }) {
   if (accounts.length === 0) return null;
+  const key = `invest-table-${title.toLowerCase().replace(/\s+/g, "-")}`;
+  const [collapseState, setCollapseState] = useSessionCollapse(key, () => ({ v: true }));
+  const collapsed = collapseState.v;
+  const toggle = () => setCollapseState((s) => ({ ...s, v: !s.v }));
 
   // Group totals for the selected year.
   let startSum = 0;
@@ -153,19 +420,38 @@ function PerfTable({
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="border-b border-line px-4 py-3">
-        <h2 className="text-sm font-bold">{title}</h2>
-      </div>
-      <div className="overflow-x-auto">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center gap-2 border-b border-line px-4 py-3 text-left hover:bg-brand-soft/20"
+      >
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-muted transition-transform duration-200 ${collapsed ? "" : "rotate-90"}`}
+          aria-hidden
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+        <h2 className="flex-1 text-sm font-bold">{title}</h2>
+        {collapsed && (
+          <div className="flex items-center gap-4 text-xs tabular-nums text-muted">
+            <span>Contributed <span className="font-semibold text-foreground">{formatMoney(contribSum, currency)}</span></span>
+            <span>Gain <span className={`font-semibold ${gainTone(accruedSum)}`}>{formatMoney(accruedSum, currency)}</span></span>
+            {endAny && <span>End <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
+          </div>
+        )}
+      </button>
+      {collapsed ? null : <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-muted">
               <th className="px-4 py-2 text-left font-semibold">Account</th>
-              <th className="px-3 py-2 text-right font-semibold">Start</th>
-              <th className="px-3 py-2 text-right font-semibold">Contributed</th>
-              <th className="px-3 py-2 text-right font-semibold">Unrealized Gain</th>
-              <th className="px-3 py-2 text-right font-semibold">End</th>
-              <th className="px-4 py-2 text-right font-semibold">Return</th>
+              <th className="px-3 py-2 text-center font-semibold">Start of Year</th>
+              <th className="px-3 py-2 text-center font-semibold">Contributed</th>
+              <th className="px-3 py-2 text-center font-semibold">Unrealized Gain</th>
+              <th className="px-3 py-2 text-center font-semibold">End of Year</th>
+              <th className="px-4 py-2 text-center font-semibold">Return</th>
             </tr>
           </thead>
           <tbody>
@@ -191,19 +477,19 @@ function PerfTable({
                       ) : null}
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">
-                    {start == null ? "—" : formatMoney(start, currency)}
+                  <td className="px-1 py-1">
+                    <EditCell accountId={a.id} year={year} field="start" cents={start ?? 0} placeholder={start == null} currency={currency} tone="text-muted" />
                   </td>
-                  <td className="px-1 py-1 text-right">
+                  <td className="px-1 py-1">
                     <EditCell accountId={a.id} year={year} field="contributed" cents={contributed} currency={currency} tone="" />
                   </td>
-                  <td className="px-1 py-1 text-right">
+                  <td className="px-1 py-1">
                     <EditCell accountId={a.id} year={year} field="accrued" cents={accrued} currency={currency} tone={gainTone(accrued)} />
                   </td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums">
-                    {end == null ? "—" : formatMoney(end, currency)}
+                  <td className="px-1 py-1">
+                    <EditCell accountId={a.id} year={year} field="end" cents={end ?? 0} placeholder={end == null} currency={currency} tone="font-medium" />
                   </td>
-                  <td className={`px-4 py-2 text-right tabular-nums ${ret == null ? "text-muted" : gainTone(accrued)}`}>
+                  <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? "text-muted" : gainTone(accrued)}`}>
                     {ret == null ? "—" : `${ret > 0 ? "+" : ""}${ret.toFixed(1)}%`}
                   </td>
                 </tr>
@@ -213,23 +499,23 @@ function PerfTable({
           <tfoot>
             <tr className="border-t-2 border-line bg-background/40 font-semibold">
               <td className="px-4 py-2">Total</td>
-              <td className="px-3 py-2 text-right tabular-nums text-muted">
+              <td className="px-3 py-2 text-center tabular-nums text-muted">
                 {startAny ? formatMoney(startSum, currency) : "—"}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums">{formatMoney(contribSum, currency)}</td>
-              <td className={`px-3 py-2 text-right tabular-nums ${gainTone(accruedSum)}`}>
+              <td className="px-3 py-2 text-center tabular-nums">{formatMoney(contribSum, currency)}</td>
+              <td className={`px-3 py-2 text-center tabular-nums ${gainTone(accruedSum)}`}>
                 {formatMoney(accruedSum, currency)}
               </td>
-              <td className="px-3 py-2 text-right tabular-nums">
+              <td className="px-3 py-2 text-center tabular-nums font-medium">
                 {endAny ? formatMoney(endSum, currency) : "—"}
               </td>
-              <td className={`px-4 py-2 text-right tabular-nums ${totalReturn == null ? "text-muted" : gainTone(accruedSum)}`}>
+              <td className={`px-4 py-2 text-center tabular-nums ${totalReturn == null ? "text-muted" : gainTone(accruedSum)}`}>
                 {totalReturn == null ? "—" : `${totalReturn > 0 ? "+" : ""}${totalReturn.toFixed(1)}%`}
               </td>
             </tr>
           </tfoot>
         </table>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -242,25 +528,27 @@ function EditCell({
   year,
   field,
   cents,
+  placeholder: showDash,
   currency,
   tone,
 }: {
   accountId: string;
   year: number;
-  field: "contributed" | "accrued";
+  field: "contributed" | "accrued" | "start" | "end";
   cents: number;
+  placeholder?: boolean;
   currency: string;
   tone: string;
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = centsToDisplay(cents);
+  const initial = showDash ? "" : centsToDisplay(cents);
 
   return (
     <form
       ref={formRef}
       action={(fd) => start(() => setInvestmentYear(fd))}
-      className="flex items-center justify-end gap-0.5"
+      className="flex items-center justify-center gap-0.5"
     >
       <input type="hidden" name="accountId" value={accountId} />
       <input type="hidden" name="year" value={year} />
@@ -298,7 +586,11 @@ function YearByYear({
   currency: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [mineCollapsed, setMineCollapsed] = useState(false);
+  const [kidsCollapsed, setKidsCollapsed] = useState(false);
   const asc = useMemo(() => [...years].sort((a, b) => a - b), [years]);
+  const mine = accounts.filter((a) => !a.isKids);
+  const kids = accounts.filter((a) => a.isKids);
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -326,18 +618,36 @@ function YearByYear({
                 <th className="px-4 py-2 text-left font-semibold">Account</th>
                 <th className="px-3 py-2 text-left font-semibold">Metric</th>
                 {asc.map((y) => (
-                  <th key={y} className="px-3 py-2 text-right font-semibold">{y}</th>
+                  <th key={y} className="px-3 py-2 text-center font-semibold">{y}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {accounts.map((a) => (
+              <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setMineCollapsed((c) => !c)}>
+                <td className="bg-background/60 px-4 py-1.5">
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${mineCollapsed ? "" : "rotate-90"}`} aria-hidden><path d="M9 6l6 6-6 6" /></svg>
+                    Investments
+                  </span>
+                </td>
+                <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">{mineCollapsed ? "Contributed + Gain" : ""}</td>
+                {asc.map((y) => {
+                  const contrib = mine.reduce((s, a) => s + (a.cells[y]?.contributedCents ?? 0), 0);
+                  const gain = mine.reduce((s, a) => s + (a.cells[y]?.accruedCents ?? 0), 0);
+                  return (
+                    <td key={y} className="bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
+                      {mineCollapsed ? <><span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span></> : ""}
+                    </td>
+                  );
+                })}
+              </tr>
+              {!mineCollapsed && mine.map((a) => (
                 <Fragment key={a.id}>
                   <tr className="border-t border-line/70">
                     <td rowSpan={2} className="px-4 py-2 align-top font-medium">{a.name}</td>
                     <td className="px-3 py-1.5 text-muted">Contributed</td>
                     {asc.map((y) => (
-                      <td key={y} className="px-3 py-1.5 text-right tabular-nums">
+                      <td key={y} className="px-3 py-1.5 text-center tabular-nums">
                         {formatMoney(a.cells[y]?.contributedCents ?? 0, currency)}
                       </td>
                     ))}
@@ -347,7 +657,51 @@ function YearByYear({
                     {asc.map((y) => {
                       const g = a.cells[y]?.accruedCents ?? 0;
                       return (
-                        <td key={y} className={`px-3 py-1.5 text-right tabular-nums ${gainTone(g)}`}>
+                        <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
+                          {formatMoney(g, currency)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </Fragment>
+              ))}
+              {kids.length > 0 && (
+                <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setKidsCollapsed((c) => !c)}>
+                  <td className="border-t-2 border-line bg-background/60 px-4 py-1.5">
+                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${kidsCollapsed ? "" : "rotate-90"}`} aria-hidden><path d="M9 6l6 6-6 6" /></svg>
+                      Kids Funding
+                    </span>
+                  </td>
+                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">{kidsCollapsed ? "Contributed + Gain" : ""}</td>
+                  {asc.map((y) => {
+                    const contrib = kids.reduce((s, a) => s + (a.cells[y]?.contributedCents ?? 0), 0);
+                    const gain = kids.reduce((s, a) => s + (a.cells[y]?.accruedCents ?? 0), 0);
+                    return (
+                      <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
+                        {kidsCollapsed ? <><span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span></> : ""}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
+              {!kidsCollapsed && kids.map((a) => (
+                <Fragment key={a.id}>
+                  <tr className="border-t border-line/70">
+                    <td rowSpan={2} className="px-4 py-2 align-top font-medium">{a.name}</td>
+                    <td className="px-3 py-1.5 text-muted">Contributed</td>
+                    {asc.map((y) => (
+                      <td key={y} className="px-3 py-1.5 text-center tabular-nums">
+                        {formatMoney(a.cells[y]?.contributedCents ?? 0, currency)}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-1.5 text-muted">Gain</td>
+                    {asc.map((y) => {
+                      const g = a.cells[y]?.accruedCents ?? 0;
+                      return (
+                        <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
                           {formatMoney(g, currency)}
                         </td>
                       );

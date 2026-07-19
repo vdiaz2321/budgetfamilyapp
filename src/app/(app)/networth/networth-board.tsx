@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { setAccountSnapshot, setBucketSnapshot, setNetworthHistory } from "./actions";
+import { setAccountSnapshot, setBucketSnapshot, setNetworthHistory, upsertNetworthYear } from "./actions";
 import { reorderAccounts, reorderBuckets, renameAccount, updateBucket } from "../accounts/actions";
 
 export type MonthPoint = {
@@ -1461,7 +1461,89 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
             </li>
           );
         })}
+        <li className="border-t border-line px-4 py-2">
+          <AddPastYear currency={currency} />
+        </li>
       </ul>}
     </section>
+  );
+}
+
+function AddPastYear({ currency }: { currency: string }) {
+  const [pending, startT] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const yearRef = useRef<HTMLInputElement>(null);
+  const totalRef = useRef<HTMLInputElement>(null);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget as HTMLFormElement);
+    setError(null);
+    startT(async () => {
+      const res = await upsertNetworthYear(fd);
+      if (res?.error) { setError(res.error); return; }
+      setOpen(false);
+      if (yearRef.current) yearRef.current.value = "";
+      if (totalRef.current) totalRef.current.value = "";
+    });
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 text-xs text-muted transition hover:text-foreground"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add past year
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2">
+      <input
+        ref={yearRef}
+        name="year"
+        type="number"
+        placeholder="Year"
+        min={1990}
+        max={new Date().getFullYear() - 1}
+        required
+        className="w-20 rounded-md bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+      <span className="text-xs text-muted">Net worth</span>
+      <div className="flex items-center gap-0.5">
+        <span className="text-xs text-muted">{currencySymbol(currency)}</span>
+        <input
+          ref={totalRef}
+          name="total"
+          type="text"
+          inputMode="decimal"
+          placeholder="0.00"
+          required
+          className="w-28 rounded-md bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+      </div>
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md bg-brand px-3 py-1 text-xs font-medium text-white hover:bg-brand-strong disabled:opacity-60"
+      >
+        {pending ? "Saving…" : "Save"}
+      </button>
+      <button
+        type="button"
+        onClick={() => { setOpen(false); setError(null); }}
+        className="text-xs text-muted hover:text-foreground"
+      >
+        Cancel
+      </button>
+      {error && <span className="w-full text-xs text-negative">{error}</span>}
+    </form>
   );
 }

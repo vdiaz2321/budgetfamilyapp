@@ -10,6 +10,10 @@ import {
   type CatMonthGroup,
   type CatMonthRow,
 } from "./category-months-table";
+import {
+  AnnualBreakdownHistory,
+  type BreakdownKind,
+} from "./annual-breakdown-history";
 
 export const metadata = { title: "Annual Overview · Capitall" };
 
@@ -79,25 +83,33 @@ export default async function AnnualOverviewPage({
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-01`;
 
-  const [{ data: subs }, { data: plans }, { data: actuals }] = await Promise.all([
-    supabase
-      .from("subcategories")
-      .select("id, category_id, name, sort_order")
-      .eq("household_id", household.id)
-      .order("sort_order"),
-    supabase
-      .from("budget_plans")
-      .select("subcategory_id, planned_cents, month")
-      .eq("household_id", household.id)
-      .gte("month", yearStart)
-      .lte("month", yearEnd),
-    supabase
-      .from("v_monthly_actuals")
-      .select("subcategory_id, actual_cents, month")
-      .eq("household_id", household.id)
-      .gte("month", yearStart)
-      .lte("month", yearEnd),
-  ]);
+  const [{ data: subs }, { data: plans }, { data: actuals }, { data: breakdownRows }] =
+    await Promise.all([
+      supabase
+        .from("subcategories")
+        .select("id, category_id, name, sort_order")
+        .eq("household_id", household.id)
+        .order("sort_order"),
+      supabase
+        .from("budget_plans")
+        .select("subcategory_id, planned_cents, month")
+        .eq("household_id", household.id)
+        .gte("month", yearStart)
+        .lte("month", yearEnd),
+      supabase
+        .from("v_monthly_actuals")
+        .select("subcategory_id, actual_cents, month")
+        .eq("household_id", household.id)
+        .gte("month", yearStart)
+        .lte("month", yearEnd),
+      // Year-independent: the whole seeded Annual Breakdown history (2018–2025).
+      supabase
+        .from("annual_breakdown_history")
+        .select("kind, group_label, line_label, year, amount_cents, group_sort, line_sort")
+        .eq("household_id", household.id)
+        .order("group_sort")
+        .order("line_sort"),
+    ]);
 
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
@@ -190,6 +202,18 @@ export default async function AnnualOverviewPage({
 
   const monthLabels = MONTH_NAMES.map((m) => m.slice(0, 3));
 
+  // Annual Breakdown history (2018–2025): pivot the seeded leaf rows into
+  // kind → group → line, each carrying a per-year map, plus subtotals/totals.
+  const breakdownKinds = buildBreakdown(breakdownRows ?? []);
+  const breakdownYears = [
+    ...new Set((breakdownRows ?? []).map((r) => r.year)),
+  ].sort((a, b) => b - a); // newest-first
+  const netByYear: Record<number, number> = {};
+  for (const y of breakdownYears) {
+    const get = (k: string) => breakdownKinds.find((bk) => bk.kind === k)?.totalByYear[y] ?? 0;
+    netByYear[y] = get("income") - get("expenses") - get("savings") - get("investment");
+  }
+
   const currency = household.currency;
   const gridCols = "grid-cols-[6.5rem_repeat(6,minmax(5.5rem,1fr))]";
 
@@ -245,8 +269,95 @@ export default async function AnnualOverviewPage({
         monthLabels={monthLabels}
         currency={currency}
       />
+
+      {/* Annual Breakdown history (multi-year, seeded 2018–2025) */}
+      <AnnualBreakdownHistory
+        kinds={breakdownKinds}
+        years={breakdownYears}
+        netByYear={netByYear}
+        currency={currency}
+      />
     </div>
   );
+}
+
+// Pivot seeded annual_breakdown_history leaf rows into the nested shape the
+// AnnualBreakdownHistory component renders. Rows arrive ordered by group_sort,
+// line_sort; kind order follows the sheet (income → expenses → savings → invest).
+type BreakdownRow = {
+  kind: string;
+  group_label: string;
+  line_label: string;
+  year: number;
+  amount_cents: number;
+  group_sort: number;
+  line_sort: number;
+};
+
+const KIND_ORDER: BreakdownKind["kind"][] = ["income", "expenses", "savings", "investment"];
+const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
+  income: "Income",
+  expenses: "Expenses",
+  savings: "Savings",
+  investment: "Investment",
+};
+
+function buildBreakdown(rows: BreakdownRow[]): BreakdownKind[] {
+  // kind -> group_label -> line_label -> { byYear, total, lineSort } (+ groupSort)
+  const kinds = new Map<
+    string,
+    Map<
+      string,
+      { groupSort: number; lines: Map<string, { byYear: Record<number, number>; total: number; lineSort: number }> }
+    >
+  >();
+
+  for (const r of rows) {
+    if (!kinds.has(r.kind)) kinds.set(r.kind, new Map());
+    const groups = kinds.get(r.kind)!;
+    if (!groups.has(r.group_label)) groups.set(r.group_label, { groupSort: r.group_sort, lines: new Map() });
+    const group = groups.get(r.group_label)!;
+    if (!group.lines.has(r.line_label)) group.lines.set(r.line_label, { byYear: {}, total: 0, lineSort: r.line_sort });
+    const line = group.lines.get(r.line_label)!;
+    line.byYear[r.year] = (line.byYear[r.year] ?? 0) + r.amount_cents;
+    line.total += r.amount_cents;
+  }
+
+  const result: BreakdownKind[] = [];
+  for (const kind of KIND_ORDER) {
+    const groups = kinds.get(kind);
+    if (!groups) continue;
+
+    const groupList = [...groups.entries()]
+      .sort((a, b) => a[1].groupSort - b[1].groupSort)
+      .map(([label, g]) => {
+        const lines = [...g.lines.entries()]
+          .sort((a, b) => a[1].lineSort - b[1].lineSort)
+          .map(([lineLabel, l]) => ({ label: lineLabel, byYear: l.byYear, total: l.total }));
+
+        const subtotalByYear: Record<number, number> = {};
+        let total = 0;
+        for (const l of lines) {
+          for (const [y, v] of Object.entries(l.byYear)) {
+            subtotalByYear[Number(y)] = (subtotalByYear[Number(y)] ?? 0) + v;
+          }
+          total += l.total;
+        }
+        return { label, lines, subtotalByYear, total };
+      });
+
+    const totalByYear: Record<number, number> = {};
+    let total = 0;
+    for (const g of groupList) {
+      for (const [y, v] of Object.entries(g.subtotalByYear)) {
+        totalByYear[Number(y)] = (totalByYear[Number(y)] ?? 0) + v;
+      }
+      total += g.total;
+    }
+
+    result.push({ kind, label: KIND_LABEL[kind], groups: groupList, totalByYear, total });
+  }
+  return result;
 }
 
 function Stat({

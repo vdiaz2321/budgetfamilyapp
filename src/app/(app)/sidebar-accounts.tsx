@@ -57,6 +57,15 @@ export function SidebarAccounts({ groups, currency }: Props) {
 
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col">
+      <div className="mx-4 mb-2 border-t border-white/[0.06] pt-2">
+        <div className="flex flex-col gap-0.5 rounded-lg bg-white/[0.04] px-3 py-2.5">
+          <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Net worth</div>
+          <div className={`text-base font-medium tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
+            {formatMoney(netWorthCents, currency)}
+          </div>
+        </div>
+      </div>
+
       <div className="px-4 pb-1 text-[11px] font-semibold text-slate-500">Accounts</div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pr-2">
         {groups
@@ -64,13 +73,6 @@ export function SidebarAccounts({ groups, currency }: Props) {
           .map((g) => (
             <AccountGroup key={g.label} group={g} currency={currency} />
           ))}
-      </div>
-
-      <div className="mx-4 my-2 flex flex-col gap-0.5 rounded-lg bg-white/[0.04] px-3 py-2.5">
-        <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Net worth</div>
-        <div className={`text-base font-medium tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
-          {formatMoney(netWorthCents, currency)}
-        </div>
       </div>
 
       <Link

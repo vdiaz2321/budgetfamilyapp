@@ -33,7 +33,7 @@ export async function setInvestmentYear(formData: FormData) {
   const year = Number(formData.get("year"));
   const field = String(formData.get("field") ?? "");
   if (!accountId || !Number.isInteger(year) || year < 2000 || year > 2100) return;
-  if (field !== "contributed" && field !== "accrued") return;
+  if (!["contributed", "accrued", "start", "end"].includes(field)) return;
 
   const valueCents = displayToCents(String(formData.get("value") ?? "0"));
 
@@ -46,10 +46,10 @@ export async function setInvestmentYear(formData: FormData) {
     .maybeSingle();
   if (!account) return;
 
-  // Preserve the sibling column when it already exists.
+  // Preserve sibling columns when a row already exists.
   const { data: existing } = await supabase
     .from("investment_years")
-    .select("contributed_cents, accrued_cents, est_contribute_cents")
+    .select("contributed_cents, accrued_cents, est_contribute_cents, start_cents, end_cents")
     .eq("household_id", householdId)
     .eq("account_id", accountId)
     .eq("year", year)
@@ -63,6 +63,8 @@ export async function setInvestmentYear(formData: FormData) {
       field === "contributed" ? valueCents : existing?.contributed_cents ?? 0,
     accrued_cents: field === "accrued" ? valueCents : existing?.accrued_cents ?? 0,
     est_contribute_cents: existing?.est_contribute_cents ?? 0,
+    start_cents: field === "start" ? valueCents : (existing?.start_cents ?? null),
+    end_cents: field === "end" ? valueCents : (existing?.end_cents ?? null),
     updated_at: new Date().toISOString(),
   };
 

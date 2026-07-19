@@ -58,7 +58,7 @@ export default async function InvestPage() {
       .eq("household_id", household.id),
     supabase
       .from("investment_years")
-      .select("account_id, year, contributed_cents, accrued_cents")
+      .select("account_id, year, contributed_cents, accrued_cents, start_cents, end_cents")
       .eq("household_id", household.id),
   ]);
 
@@ -83,11 +83,13 @@ export default async function InvestPage() {
   }
 
   // Stored/reviewed rows win over derivation.
-  const storedBy = new Map<string, { contributed: number; accrued: number }>();
+  const storedBy = new Map<string, { contributed: number; accrued: number; start: number | null; end: number | null }>();
   for (const r of yearRows ?? []) {
     storedBy.set(`${r.account_id}:${r.year}`, {
       contributed: r.contributed_cents ?? 0,
       accrued: r.accrued_cents ?? 0,
+      start: r.start_cents ?? null,
+      end: r.end_cents ?? null,
     });
   }
 
@@ -106,9 +108,10 @@ export default async function InvestPage() {
   const data: InvestAccount[] = accounts.map((a) => {
     const cells: Record<number, YearCell> = {};
     for (const year of years) {
-      const start = endBalance.get(`${a.id}:${year - 1}`) ?? null;
-      const end = endBalance.get(`${a.id}:${year}`) ?? null;
       const stored = storedBy.get(`${a.id}:${year}`);
+      // Prefer explicitly stored balances; fall back to account_snapshots.
+      const start = stored?.start ?? endBalance.get(`${a.id}:${year - 1}`) ?? null;
+      const end = stored?.end ?? endBalance.get(`${a.id}:${year}`) ?? null;
 
       let contributed: number;
       let accrued: number;
