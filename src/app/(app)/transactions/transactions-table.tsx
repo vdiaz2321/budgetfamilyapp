@@ -163,9 +163,22 @@ export function TransactionsTable({
           className="rounded-xl bg-surface px-3 py-2 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
         >
           <option value="">All accounts</option>
-          {accountOptions.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
+          {(() => {
+            const groups: string[] = [];
+            const byGroup = new Map<string, typeof accountOptions>();
+            for (const a of accountOptions) {
+              const g = a.group ?? "Other";
+              if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
+              byGroup.get(g)!.push(a);
+            }
+            return groups.map((g) => (
+              <optgroup key={g} label={g}>
+                {byGroup.get(g)!.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </optgroup>
+            ));
+          })()}
         </select>
       </div>
 
@@ -292,16 +305,16 @@ export function TransactionsTable({
 
             {/* Totals — same grid as the rows so the net sits under the Amount column */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-              <span className="col-span-3 whitespace-nowrap text-sm font-bold">
+              <span className="col-span-3 whitespace-nowrap text-xs font-medium text-muted">
                 {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
               </span>
               <span className="col-span-2 truncate text-right text-xs font-medium text-muted">
                 Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
               </span>
-              <span className={`text-center text-sm font-bold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-                {formatMoney(incomeTotal - outflowTotal, currency)} <span className="text-xs font-normal text-muted">left</span>
+              <span className={`col-span-2 whitespace-nowrap text-center text-xs font-medium tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+                {formatMoney(incomeTotal - outflowTotal, currency)} <span className="font-normal text-muted">left</span>
               </span>
-              <span className="col-span-3" />
+              <span className="col-span-2" />
             </div>
           </div>
         </div>

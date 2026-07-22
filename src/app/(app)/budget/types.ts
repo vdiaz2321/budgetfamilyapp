@@ -17,6 +17,7 @@ export type BucketOption = {
   id: string;
   name: string;
   accountName: string;
+  isKids?: boolean;
 };
 
 export const DEBT_KINDS = [
@@ -89,6 +90,7 @@ export type SubOption = {
 export type AccountOption = {
   id: string;
   name: string;
+  group?: string;
 };
 
 // A managed Subscription or Irregular Bill, offered in the transaction

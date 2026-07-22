@@ -341,11 +341,32 @@ function SavingsForm({ row, bucketOptions }: { row: RowData; bucketOptions: Buck
               className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Not linked</option>
-              {bucketOptions.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.accountName} → {b.name}
-                </option>
-              ))}
+              {(() => {
+                const family = bucketOptions.filter((b) => !b.isKids);
+                const kids = bucketOptions.filter((b) => b.isKids);
+                const groups: { label: string; items: typeof bucketOptions; disabled?: boolean }[] = [];
+                const addSection = (items: typeof bucketOptions, suffix: string) => {
+                  const seen: string[] = [];
+                  const byAcct = new Map<string, typeof bucketOptions>();
+                  for (const b of items) {
+                    if (!byAcct.has(b.accountName)) { seen.push(b.accountName); byAcct.set(b.accountName, []); }
+                    byAcct.get(b.accountName)!.push(b);
+                  }
+                  for (const acct of seen) groups.push({ label: acct + suffix, items: byAcct.get(acct)! });
+                };
+                addSection(family, "");
+                if (kids.length > 0) {
+                  groups.push({ label: "── Kids Funding ──", items: [], disabled: true });
+                  addSection(kids, " (Kids)");
+                }
+                return groups.map((g) =>
+                  g.disabled
+                    ? <optgroup key={g.label} label={g.label} disabled />
+                    : <optgroup key={g.label} label={g.label}>
+                        {g.items.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </optgroup>
+                );
+              })()}
             </select>
             <span className="mt-0.5 block text-[10px] text-muted">
               Once linked, transactions logged under this item add to (or, marked as a

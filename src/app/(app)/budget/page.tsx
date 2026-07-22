@@ -104,14 +104,16 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("accounts")
-      .select("id, name, kind, holder")
+      .select("id, name, kind, holder, is_kids_account, sort_order")
       .eq("household_id", household.id)
       .eq("active", true)
+      .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name")
+      .select("id, account_id, name, sort_order")
       .eq("household_id", household.id)
+      .order("sort_order")
       .order("name"),
     // Last 6 months of actuals per subcategory, for the row sparklines.
     supabase
@@ -279,12 +281,21 @@ export default async function BudgetPage({
   // Investments and one in Kids Funding) with their holder initial.
   const nameCounts = new Map<string, number>();
   for (const a of accounts ?? []) nameCounts.set(a.name, (nameCounts.get(a.name) ?? 0) + 1);
+  const accountGroupFor = (a: { kind: string; is_kids_account?: boolean }) => {
+    if (a.is_kids_account) return "Kids Funding";
+    if (a.kind === "checking" || a.kind === "savings_bucket") return "Banking";
+    if (a.kind === "investment") return "Investments";
+    if (a.kind === "credit_card") return "Credit Cards";
+    if (a.kind === "debt_loan") return "Loans";
+    return "Other";
+  };
   const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
     id: a.id,
     name:
       (nameCounts.get(a.name) ?? 0) > 1 && a.holder
         ? `${a.name} (${a.holder})`
         : a.name,
+    group: accountGroupFor(a),
   }));
 
   // Liability accounts a Budget debt can link to (credit cards, loans).
@@ -294,11 +305,16 @@ export default async function BudgetPage({
 
   // Buckets a Savings item can link to, so its contributions/withdrawals
   // flow straight into the Accounts balance.
-  const bucketOptions: BucketOption[] = (buckets ?? []).map((b) => ({
-    id: b.id,
-    name: b.name,
-    accountName: accountNameById.get(b.account_id) ?? "Account",
-  }));
+  const accountSortById = new Map((accounts ?? []).map((a) => [a.id, a.sort_order ?? 0]));
+  const isKidsAccountById = new Map((accounts ?? []).map((a) => [a.id, a.is_kids_account ?? false]));
+  const bucketOptions: BucketOption[] = (buckets ?? [])
+    .sort((a, b) => (accountSortById.get(a.account_id) ?? 0) - (accountSortById.get(b.account_id) ?? 0))
+    .map((b) => ({
+      id: b.id,
+      name: b.name,
+      accountName: accountNameById.get(b.account_id) ?? "Account",
+      isKids: isKidsAccountById.get(b.account_id) ?? false,
+    }));
 
   const transactions: TxData[] = (txRows ?? []).map((t) => ({
     id: t.id,

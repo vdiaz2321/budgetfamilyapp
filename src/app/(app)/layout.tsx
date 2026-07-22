@@ -74,30 +74,33 @@ export default async function AppLayout({
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  const byBalanceDesc = (a: { balanceCents: number }, b: { balanceCents: number }) =>
+    b.balanceCents - a.balanceCents;
+
   const groups: SidebarGroup[] = [
     {
       label: "Banking",
-      items: active.filter((a) => !a.is_kids_account && cashKinds.has(a.kind)).map(toItem),
+      items: active.filter((a) => !a.is_kids_account && cashKinds.has(a.kind)).map(toItem).sort(byBalanceDesc),
     },
     {
       label: "Investments",
-      items: active.filter((a) => !a.is_kids_account && a.kind === "investment").map(toItem),
+      items: active.filter((a) => !a.is_kids_account && a.kind === "investment").map(toItem).sort(byBalanceDesc),
     },
     {
       label: "Credit Cards",
-      items: debtItems.filter((d) => d.kind === "credit_card"),
+      items: debtItems.filter((d) => d.kind === "credit_card").sort(byBalanceDesc),
       liability: true,
     },
     {
       label: "Loans",
-      items: debtItems.filter((d) => d.kind !== "credit_card"),
+      items: debtItems.filter((d) => d.kind !== "credit_card").sort(byBalanceDesc),
       liability: true,
     },
     // Kids Funding sits at the bottom — it's the kids' money, excluded from the
     // Net Worth pill, so it reads as a footnote to the household's own accounts.
     {
       label: "Kids Funding",
-      items: active.filter((a) => a.is_kids_account).map(toItem),
+      items: active.filter((a) => a.is_kids_account).map(toItem).sort(byBalanceDesc),
     },
   ];
 

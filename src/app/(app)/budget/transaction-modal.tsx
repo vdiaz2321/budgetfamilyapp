@@ -221,9 +221,22 @@ export function TransactionModal({
               className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Choose Account (optional)</option>
-              {accountOptions.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
+              {(() => {
+                const groups: string[] = [];
+                const byGroup = new Map<string, typeof accountOptions>();
+                for (const a of accountOptions) {
+                  const g = a.group ?? "Other";
+                  if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
+                  byGroup.get(g)!.push(a);
+                }
+                return groups.map((g) => (
+                  <optgroup key={g} label={g}>
+                    {byGroup.get(g)!.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </optgroup>
+                ));
+              })()}
             </select>
 
             {/* Budget item */}

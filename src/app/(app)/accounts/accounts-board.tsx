@@ -780,11 +780,6 @@ function BucketRow({
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
       <form
         action={(fd) => startDel(() => deleteBucket(fd))}
-        onSubmit={(e) => {
-          if (!confirm(`Delete bucket "${bucket.name}"? Its monthly history is removed too.`)) {
-            e.preventDefault();
-          }
-        }}
         className="justify-self-end"
       >
         <input type="hidden" name="id" value={bucket.id} />
@@ -1127,6 +1122,7 @@ function EditAccountForm({
 }) {
   const [savePending, startSave] = useTransition();
   const [delPending, startDel] = useTransition();
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div className="space-y-2 border-t border-line bg-background/60 px-4 py-3">
@@ -1190,23 +1186,36 @@ function EditAccountForm({
           {savePending ? "Saving…" : "Save"}
         </button>
       </form>
-      <form
-        action={(fd) => startDel(() => deleteAccount(fd))}
-        onSubmit={(e) => {
-          if (!confirm(`Delete "${account.name}"? Past transactions keep their history but lose the account link.`)) {
-            e.preventDefault();
-          }
-        }}
-      >
-        <input type="hidden" name="id" value={account.id} />
+      {confirmDelete ? (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">Delete &quot;{account.name}&quot;?</span>
+          <form action={(fd) => startDel(() => deleteAccount(fd))}>
+            <input type="hidden" name="id" value={account.id} />
+            <button
+              type="submit"
+              disabled={delPending}
+              className="text-xs font-bold text-negative hover:underline disabled:opacity-60"
+            >
+              {delPending ? "Deleting…" : "Yes, delete"}
+            </button>
+          </form>
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(false)}
+            className="text-xs text-muted hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
         <button
-          type="submit"
-          disabled={delPending}
-          className="text-xs font-medium text-negative hover:underline disabled:opacity-60"
+          type="button"
+          onClick={() => setConfirmDelete(true)}
+          className="text-xs font-medium text-negative hover:underline"
         >
-          {delPending ? "Deleting…" : "Delete account"}
+          Delete account
         </button>
-      </form>
+      )}
     </div>
   );
 }

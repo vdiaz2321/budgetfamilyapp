@@ -73,9 +73,10 @@ export default async function TransactionsPage({
         .eq("household_id", household.id),
       supabase
         .from("accounts")
-        .select("id, name")
+        .select("id, name, kind, is_kids_account, sort_order")
         .eq("household_id", household.id)
         .eq("active", true)
+        .order("sort_order")
         .order("name"),
       // Managed items for the transaction Payee autocomplete's auto-fill.
       supabase
@@ -102,9 +103,18 @@ export default async function TransactionsPage({
     linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
   }));
 
+  const accountGroupFor = (a: { kind: string; is_kids_account?: boolean }) => {
+    if (a.is_kids_account) return "Kids Funding";
+    if (a.kind === "checking" || a.kind === "savings_bucket") return "Banking";
+    if (a.kind === "investment") return "Investments";
+    if (a.kind === "credit_card") return "Credit Cards";
+    if (a.kind === "debt_loan") return "Loans";
+    return "Other";
+  };
   const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
     id: a.id,
     name: a.name,
+    group: accountGroupFor(a),
   }));
 
   const transactions: TxData[] = (txRows ?? []).map((t) => ({

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { SignOutButton } from "./sign-out-button";
 import SidebarNav from "./sidebar-nav";
 import { SidebarAccounts, type SidebarGroup } from "./sidebar-accounts";
+import ThemeToggle from "@/app/theme-toggle";
 
 type Props = {
   groups: SidebarGroup[];
@@ -74,6 +75,7 @@ export function Sidebar({ groups, currency, userEmail, badges }: Props) {
       <div className="mx-4 mt-3 border-t border-white/[0.06] pt-3">
         {collapsed ? (
           <div className="flex flex-col items-center gap-2">
+            <ThemeToggle />
             <SignOutButton iconOnly />
             <Link
               href="/household"
@@ -115,6 +117,7 @@ export function Sidebar({ groups, currency, userEmail, badges }: Props) {
                 <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
               </svg>
             </Link>
+            <ThemeToggle />
             <SignOutButton iconOnly />
           </div>
         )}
