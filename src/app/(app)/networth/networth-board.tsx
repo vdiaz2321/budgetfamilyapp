@@ -78,7 +78,7 @@ export type GridRow = {
   // Kids Funding — shown but not counted.
   excluded?: boolean;
   // Same grouping as the sidebar, so the two views read as one system.
-  section: "Budget" | "Investments" | "Kids Funding" | "Credit Cards" | "Loans";
+  section: "Banking" | "Investments" | "Kids Funding" | "Credit Cards" | "Loans";
   balances: (number | null)[]; // aligned to gridMonths
   // A bucket / "Unallocated" sub-row indented under its parent account.
   indent?: boolean;
@@ -103,7 +103,7 @@ export type GridRow = {
 // sections — it's the kids' money, excluded from every total, so it reads as
 // a footnote below everything else (matches the Accounts page's layout).
 const SECTION_ORDER: GridRow["section"][] = [
-  "Budget",
+  "Banking",
   "Investments",
   "Credit Cards",
   "Loans",

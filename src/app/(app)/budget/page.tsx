@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
-import type { AccountOption, BucketOption, GroupData, SubOption, TxData } from "./types";
+import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
+import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -59,6 +60,8 @@ export default async function BudgetPage({
     { data: accounts },
     { data: buckets },
     { data: sparkRows },
+    { data: subscriptions },
+    { data: irregularBills },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -118,6 +121,18 @@ export default async function BudgetPage({
       .gte("month", sparkStartKey)
       .lte("month", month.firstOfMonth)
       .order("month"),
+    // Managed items — power both the transaction Payee autocomplete's
+    // auto-fill AND the Subscriptions & Irregular Bills section below Debt.
+    supabase
+      .from("subscriptions")
+      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, notes")
+      .eq("household_id", household.id)
+      .order("name"),
+    supabase
+      .from("irregular_bills")
+      .select("id, name, typical_amount_cents, subcategory_id, notes")
+      .eq("household_id", household.id)
+      .order("name"),
   ]);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
@@ -301,6 +316,42 @@ export default async function BudgetPage({
     isWithdrawal: t.is_withdrawal ?? false,
   }));
 
+  const payeeLineItems: PayeeLineItem[] = [
+    ...(subscriptions ?? [])
+      .filter((s) => s.is_active)
+      .map((s) => ({
+        name: s.name,
+        amountCents: s.amount_cents,
+        subcategoryId: s.subcategory_id,
+        kind: "subscription" as const,
+      })),
+    ...(irregularBills ?? []).map((b) => ({
+      name: b.name,
+      amountCents: null,
+      subcategoryId: b.subcategory_id,
+      kind: "irregular" as const,
+    })),
+  ];
+
+  const subscriptionRows: SubscriptionRow[] = (subscriptions ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    amountCents: s.amount_cents,
+    billingCycle: s.billing_cycle,
+    nextRenewalDate: s.next_renewal_date,
+    isActive: s.is_active,
+    subcategoryId: s.subcategory_id,
+    notes: s.notes,
+  }));
+
+  const irregularBillRows: IrregularBillRow[] = (irregularBills ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    typicalAmountCents: b.typical_amount_cents,
+    subcategoryId: b.subcategory_id,
+    notes: b.notes,
+  }));
+
   return (
     <BudgetBoard
       month={{
@@ -326,9 +377,12 @@ export default async function BudgetPage({
       debtAccountOptions={debtAccountOptions}
       bucketOptions={bucketOptions}
       payeeOptions={(payees ?? []).map((p) => p.name)}
+      payeeLineItems={payeeLineItems}
       snowballExtraCents={snowballExtraCents}
       snowballFocusSubId={snowballFocusSubId}
       transactions={transactions}
+      subscriptions={subscriptionRows}
+      irregularBills={irregularBillRows}
     />
   );
 }

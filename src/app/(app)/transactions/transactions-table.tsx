@@ -8,7 +8,7 @@ import { deleteTransaction, deleteTransactions, toggleCleared } from "../budget/
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { DOT as KIND_DOT } from "../budget/category-icons";
-import type { AccountOption, SubOption, TxData } from "../budget/types";
+import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
   income: "Income",
@@ -18,7 +18,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[1.75rem_2.25rem_5.5rem_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_7rem_2rem]";
+const GRID = "grid-cols-[1.75rem_5.5rem_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_7rem_2.25rem_2rem]";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -27,6 +27,7 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   payeeOptions?: string[];
+  payeeLineItems?: PayeeLineItem[];
   dateRange: { from: string | null; to: string | null };
 };
 
@@ -37,6 +38,7 @@ export function TransactionsTable({
   subOptions,
   accountOptions,
   payeeOptions = [],
+  payeeLineItems = [],
   dateRange,
 }: Props) {
   const router = useRouter();
@@ -256,13 +258,13 @@ export function TransactionsTable({
                   className="h-4 w-4 rounded accent-[var(--brand)]"
                 />
               </span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Date</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Memo</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
               <span />
             </div>
 
@@ -290,20 +292,16 @@ export function TransactionsTable({
 
             {/* Totals — same grid as the rows so the net sits under the Amount column */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-              <span className="col-span-4 whitespace-nowrap text-sm font-bold">
+              <span className="col-span-3 whitespace-nowrap text-sm font-bold">
                 {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
               </span>
-              <span className="col-span-2 truncate text-right text-xs font-medium uppercase tracking-wide text-muted">
+              <span className="col-span-2 truncate text-right text-xs font-medium text-muted">
                 Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
               </span>
-              <span
-                className={`whitespace-nowrap text-right text-sm font-bold tabular-nums ${
-                  incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"
-                }`}
-              >
-                {formatMoney(incomeTotal - outflowTotal, currency)}
+              <span className={`text-center text-sm font-bold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+                {formatMoney(incomeTotal - outflowTotal, currency)} <span className="text-xs font-normal text-muted">left</span>
               </span>
-              <span className="col-span-2" />
+              <span className="col-span-3" />
             </div>
           </div>
         </div>
@@ -317,6 +315,7 @@ export function TransactionsTable({
           subOptions={subOptions}
           accountOptions={accountOptions}
           payeeOptions={payeeOptions}
+          payeeLineItems={payeeLineItems}
           onClose={() => setModal(null)}
         />
       ) : null}
@@ -367,17 +366,6 @@ function TxLine({
           className="h-4 w-4 rounded accent-[var(--brand)]"
         />
       </span>
-      <span onDoubleClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={tx.cleared}
-          disabled={clearPending}
-          onChange={(e) => onToggle(e.target.checked)}
-          title="Cleared — verified against your bank / card app"
-          aria-label="Cleared"
-          className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
-        />
-      </span>
       <button type="button" onClick={onEdit} className="text-left text-sm tabular-nums">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>
@@ -392,7 +380,7 @@ function TxLine({
       <button
         type="button"
         onClick={onEdit}
-        className={`text-right text-sm font-semibold tabular-nums ${
+        className={`text-center text-sm font-semibold tabular-nums ${
           isIncome ? "text-positive" : "text-foreground"
         }`}
       >
@@ -400,6 +388,17 @@ function TxLine({
         {formatMoney(tx.amountCents, currency)}
       </button>
       <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
+      <span onDoubleClick={(e) => e.stopPropagation()} className="flex justify-center">
+        <input
+          type="checkbox"
+          checked={tx.cleared}
+          disabled={clearPending}
+          onChange={(e) => onToggle(e.target.checked)}
+          title="Cleared — verified against your bank / card app"
+          aria-label="Cleared"
+          className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
+        />
+      </span>
       <form
         action={(fd) => startDel(() => deleteTransaction(fd))}
         onDoubleClick={(e) => e.stopPropagation()}

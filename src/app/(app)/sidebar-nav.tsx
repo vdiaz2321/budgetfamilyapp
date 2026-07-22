@@ -46,11 +46,6 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    href: "/networth",
-    label: "Net Worth",
-    icon: <path d="M3 17l6-6 4 4 8-8M21 7v6M21 7h-6" />,
-  },
-  {
     href: "/invest",
     label: "Invest",
     icon: (
@@ -59,6 +54,11 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
         <path d="M7 14l3-3 3 3 5-6" />
       </>
     ),
+  },
+  {
+    href: "/networth",
+    label: "Net Worth",
+    icon: <path d="M3 17l6-6 4 4 8-8M21 7v6M21 7h-6" />,
   },
   {
     href: "/annual",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState, useRef, type CSSProperties, type RefObject } from "react";
 import { formatMoney } from "@/lib/money";
 
 export type BreakdownLine = {
@@ -17,7 +17,7 @@ export type BreakdownGroup = {
 };
 
 export type BreakdownKind = {
-  kind: "income" | "expenses" | "savings" | "investment";
+  kind: "income" | "expenses" | "bills" | "debt" | "savings" | "investment";
   label: string;
   groups: BreakdownGroup[];
   totalByYear: Record<number, number>;
@@ -33,18 +33,29 @@ type Props = {
 
 export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Props) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const searchLower = search.toLowerCase();
+
+  // All overflow-x-auto scroll containers (summary + each kind body) share one
+  // scroll position so horizontal scrolling moves everything together.
+  const scrollersRef = useRef<Set<HTMLDivElement>>(new Set());
+  function syncScrollX(scrollLeft: number) {
+    scrollersRef.current.forEach((el) => {
+      if (el.scrollLeft !== scrollLeft) el.scrollLeft = scrollLeft;
+    });
+  }
 
   if (!kinds.length) return null;
 
   // Dynamic column count (label + N years + Total) → inline style, since Tailwind's
   // JIT can't see a computed grid-cols-[…] arbitrary value.
   const gridStyle: CSSProperties = {
-    gridTemplateColumns: `12rem repeat(${years.length + 1}, minmax(5.5rem, 1fr))`,
+    gridTemplateColumns: `12rem repeat(${years.length + 1}, minmax(7rem, 1fr))`,
   };
-  const minW = `${13 + (years.length + 1) * 5.75}rem`;
+  const minW = `${13 + (years.length + 1) * 7.25}rem`;
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -60,9 +71,21 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
 
       {open ? (
         <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
-          {/* Summary strip */}
-          <div className="overflow-hidden rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10">
-            <div className="overflow-x-auto">
+          {/* Search */}
+          <input
+            type="search"
+            placeholder="Search line items…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-brand/50"
+          />
+          {/* Summary strip — sticky so year columns stay visible while scrolling into detail */}
+          <div className="sticky top-0 z-30 rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
+            <div
+              ref={(el) => { if (el) scrollersRef.current.add(el); }}
+              onScroll={(e) => syncScrollX(e.currentTarget.scrollLeft)}
+              className="overflow-x-auto"
+            >
               <div style={{ minWidth: minW }}>
                 <div className="grid items-center gap-2 border-b border-line pr-4 py-2" style={gridStyle}>
                   <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-bold uppercase tracking-wide">
@@ -108,7 +131,17 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
 
           {/* Per-kind detail */}
           {kinds.map((k) => (
-            <KindBlock key={k.kind} kind={k} years={years} gridStyle={gridStyle} minW={minW} currency={currency} />
+            <KindBlock
+              key={k.kind}
+              kind={k}
+              years={years}
+              gridStyle={gridStyle}
+              minW={minW}
+              currency={currency}
+              search={searchLower}
+              scrollersRef={scrollersRef}
+              syncScrollX={syncScrollX}
+            />
           ))}
         </div>
       ) : null}
@@ -124,7 +157,7 @@ function SummaryRow({
 }) {
   return (
     <div className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
-      <span className="sticky left-0 z-10 bg-surface pl-4 text-sm font-medium">{label}</span>
+      <span className="sticky left-0 z-10 bg-surface pl-4 text-sm font-semibold">{label}</span>
       {years.map((y) => {
         const v = byYear[y] ?? 0;
         return (
@@ -133,61 +166,96 @@ function SummaryRow({
           </span>
         );
       })}
-      <span className="text-center text-xs font-semibold tabular-nums">{formatMoney(total, currency)}</span>
+      <span className="text-center text-xs font-bold tabular-nums">{formatMoney(total, currency)}</span>
     </div>
   );
 }
 
 function KindBlock({
-  kind, years, gridStyle, minW, currency,
+  kind, years, gridStyle, minW, currency, search, scrollersRef, syncScrollX,
 }: {
-  kind: BreakdownKind; years: number[]; gridStyle: CSSProperties; minW: string; currency: string;
+  kind: BreakdownKind; years: number[]; gridStyle: CSSProperties; minW: string; currency: string; search: string;
+  scrollersRef: RefObject<Set<HTMLDivElement>>; syncScrollX: (x: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  function syncHeader() {
+    if (headerRef.current && bodyRef.current) {
+      headerRef.current.scrollLeft = bodyRef.current.scrollLeft;
+    }
+  }
+
+  // When searching, filter to groups/lines that match; auto-expand if there are hits.
+  const filteredGroups = search
+    ? kind.groups
+        .map((g) => ({ ...g, lines: g.lines.filter((l) => l.label.toLowerCase().includes(search)) }))
+        .filter((g) => g.lines.length > 0)
+    : kind.groups;
+  const effectiveOpen = open || (search.length > 0 && filteredGroups.length > 0);
 
   return (
-    <div className="overflow-hidden rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10">
+    <div className="rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
+        aria-expanded={effectiveOpen}
         className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
       >
-        <Chevron open={open} small />
+        <Chevron open={effectiveOpen} small />
         <span className="text-[11px] font-bold uppercase tracking-wide">{kind.label}</span>
-        <span className="ml-auto text-sm font-semibold tabular-nums text-muted">
-          {formatMoney(kind.total, currency)}
-        </span>
       </button>
 
-      {open ? (
-        <div className="overflow-x-auto">
-          <div style={{ minWidth: minW }}>
-            {/* Header */}
-            <div className="grid items-center gap-2 border-y border-line pr-4 py-2" style={gridStyle}>
-              <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted">
-                Line item
-              </span>
-              {years.map((y) => (
-                <span key={y} className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
-                  {y}
+      {effectiveOpen ? (
+        <>
+          {/* Sticky column header — overflow hidden so no scrollbar; JS-synced to body scroll */}
+          <div
+            ref={headerRef}
+            className="sticky top-0 z-20 border-y border-line bg-surface"
+            style={{ overflowX: "hidden" }}
+          >
+            <div style={{ minWidth: minW }}>
+              <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle}>
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted">
+                  Line item
                 </span>
-              ))}
-              <span className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">Total</span>
+                {years.map((y) => (
+                  <span key={y} className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
+                    {y}
+                  </span>
+                ))}
+                <span className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">Total</span>
+              </div>
             </div>
-
-            {kind.groups.map((g) => (
-              <Group
-                key={g.label}
-                group={g}
-                years={years}
-                gridStyle={gridStyle}
-                currency={currency}
-                singleGroup={kind.groups.length === 1}
-              />
-            ))}
           </div>
-        </div>
+
+          {/* Scrollable body — syncs header locally and summary/sibling blocks globally */}
+          <div
+            ref={(el) => {
+              bodyRef.current = el;
+              if (el) scrollersRef.current.add(el);
+            }}
+            onScroll={(e) => {
+              syncHeader();
+              syncScrollX(e.currentTarget.scrollLeft);
+            }}
+            className="overflow-x-auto"
+          >
+            <div style={{ minWidth: minW }}>
+              {filteredGroups.map((g) => (
+                <Group
+                  key={g.label}
+                  group={g}
+                  years={years}
+                  gridStyle={gridStyle}
+                  currency={currency}
+                  singleGroup={kind.groups.length === 1}
+                />
+              ))}
+            </div>
+          </div>
+        </>
       ) : null}
     </div>
   );
@@ -210,12 +278,12 @@ function Group({
           {years.map((y) => {
             const v = group.subtotalByYear[y] ?? 0;
             return (
-              <span key={y} className="text-center text-[11px] font-semibold tabular-nums text-muted">
+              <span key={y} className="text-center text-xs font-semibold tabular-nums text-muted">
                 {v !== 0 ? formatMoney(v, currency) : "—"}
               </span>
             );
           })}
-          <span className="text-center text-[11px] font-semibold tabular-nums text-muted">
+          <span className="text-center text-xs font-semibold tabular-nums text-muted">
             {formatMoney(group.total, currency)}
           </span>
         </div>
@@ -225,7 +293,7 @@ function Group({
         {group.lines.map((l) => (
           <li key={l.label} className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
             <span
-              className={`sticky left-0 z-10 truncate bg-surface text-sm ${singleGroup ? "pl-4" : "pl-7"}`}
+              className={`sticky left-0 z-10 truncate bg-surface text-xs ${singleGroup ? "pl-4" : "pl-7"}`}
               title={l.label}
             >
               {l.label}
@@ -233,12 +301,12 @@ function Group({
             {years.map((y) => {
               const v = l.byYear[y] ?? 0;
               return (
-                <span key={y} className="text-center text-xs tabular-nums">
+                <span key={y} className="text-center text-[11px] tabular-nums">
                   {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                 </span>
               );
             })}
-            <span className="text-center text-xs font-semibold tabular-nums">{formatMoney(l.total, currency)}</span>
+            <span className="text-center text-[11px] font-semibold tabular-nums">{formatMoney(l.total, currency)}</span>
           </li>
         ))}
       </ul>

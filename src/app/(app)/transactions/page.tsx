@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { resolveMonth } from "@/lib/month";
-import type { AccountOption, SubOption, TxData } from "../budget/types";
+import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { TransactionsTable } from "./transactions-table";
 
 export const metadata = { title: "Transactions · Capitall" };
@@ -59,7 +59,7 @@ export default async function TransactionsPage({
   }
   txQuery = txQuery.order("occurred_on", { ascending: false }).order("created_at", { ascending: false });
 
-  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }] =
+  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: subscriptions }, { data: irregularBills }] =
     await Promise.all([
       supabase
         .from("subcategories")
@@ -77,6 +77,16 @@ export default async function TransactionsPage({
         .eq("household_id", household.id)
         .eq("active", true)
         .order("name"),
+      // Managed items for the transaction Payee autocomplete's auto-fill.
+      supabase
+        .from("subscriptions")
+        .select("name, amount_cents, subcategory_id")
+        .eq("household_id", household.id)
+        .eq("is_active", true),
+      supabase
+        .from("irregular_bills")
+        .select("name, subcategory_id")
+        .eq("household_id", household.id),
     ]);
 
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
@@ -113,6 +123,21 @@ export default async function TransactionsPage({
     isWithdrawal: t.is_withdrawal ?? false,
   }));
 
+  const payeeLineItems: PayeeLineItem[] = [
+    ...(subscriptions ?? []).map((s) => ({
+      name: s.name,
+      amountCents: s.amount_cents,
+      subcategoryId: s.subcategory_id,
+      kind: "subscription" as const,
+    })),
+    ...(irregularBills ?? []).map((b) => ({
+      name: b.name,
+      amountCents: null,
+      subcategoryId: b.subcategory_id,
+      kind: "irregular" as const,
+    })),
+  ];
+
   return (
     <TransactionsTable
       month={{
@@ -125,6 +150,7 @@ export default async function TransactionsPage({
       subOptions={subOptions}
       accountOptions={accountOptions}
       payeeOptions={(payees ?? []).map((p) => p.name)}
+      payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}
     />
   );

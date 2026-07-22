@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, updateTransaction, deleteTransaction } from "./actions";
-import type { AccountOption, SubOption, TxData } from "./types";
+import type { AccountOption, PayeeLineItem, SubOption, TxData } from "./types";
 
 // Header title (verbose) vs. button label (short), plus tab labels.
 const KIND_TITLE: Record<CategoryKind, string> = {
@@ -66,6 +66,7 @@ export function TransactionModal({
   subOptions,
   accountOptions,
   payeeOptions = [],
+  payeeLineItems = [],
   initialKind,
   initialSubId,
   onClose,
@@ -78,6 +79,10 @@ export function TransactionModal({
   // Previously-used payee names, offered as suggestions below the payee
   // field as you type — not a picker, just a memory aid.
   payeeOptions?: string[];
+  // Managed subscriptions/irregular bills — selecting one of these from the
+  // payee suggestions auto-fills its linked budget item (and, for
+  // subscriptions, its amount) instead of requiring manual mapping.
+  payeeLineItems?: PayeeLineItem[];
   // Preselects the type + budget item when opened from an item's own panel
   // (e.g. its "+ Add transaction" button) instead of the general Log tab.
   initialKind?: CategoryKind;
@@ -88,6 +93,22 @@ export function TransactionModal({
   const isEdit = editTx != null;
   const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
   const formRef = useRef<HTMLFormElement>(null);
+  const amountRef = useRef<HTMLInputElement>(null);
+  // Set when a payee suggestion matching a managed subscription/irregular
+  // bill is selected — forces the Budget Item field to remount with the
+  // matched subcategory preselected (see the `key` below).
+  const [autoFillSubId, setAutoFillSubId] = useState<string | null>(null);
+
+  function handlePayeeMatch(item: PayeeLineItem) {
+    if (item.subcategoryId) {
+      const kind = subOptions.find((s) => s.id === item.subcategoryId)?.kind;
+      if (kind) setTxType(kind);
+      setAutoFillSubId(item.subcategoryId);
+    }
+    if (item.amountCents != null && amountRef.current) {
+      amountRef.current.value = centsToDisplay(item.amountCents);
+    }
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const defaultDate = editTx?.date ?? (today.startsWith(monthKey) ? today : firstOfMonth);
@@ -158,6 +179,7 @@ export function TransactionModal({
             <div className="relative">
               <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-lg font-semibold text-muted">$</span>
               <input
+                ref={amountRef}
                 name="amount"
                 type="number"
                 step="0.01"
@@ -188,6 +210,8 @@ export function TransactionModal({
               placeholder={PAYEE_PLACEHOLDER[txType]}
               defaultValue={editTx?.payee ?? ""}
               payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onMatch={handlePayeeMatch}
             />
 
             {/* Account */}
@@ -204,15 +228,16 @@ export function TransactionModal({
 
             {/* Budget item */}
             <BudgetItemField
-              key={txType}
+              key={`${txType}-${autoFillSubId ?? ""}`}
               kindLabel={KIND_TAB[txType]}
               options={options}
               defaultValue={
-                editTx && editTx.kind === txType
+                autoFillSubId ??
+                (editTx && editTx.kind === txType
                   ? editTx.subId ?? ""
                   : !isEdit && initialKind === txType
                     ? initialSubId ?? ""
-                    : ""
+                    : "")
               }
               defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
             />
@@ -277,18 +302,39 @@ function PayeeField({
   placeholder,
   defaultValue,
   payeeOptions,
+  payeeLineItems = [],
+  onMatch,
 }: {
   placeholder: string;
   defaultValue: string;
   payeeOptions: string[];
+  payeeLineItems?: PayeeLineItem[];
+  onMatch?: (item: PayeeLineItem) => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
 
   const q = value.trim().toLowerCase();
-  const matches = q
-    ? payeeOptions.filter((p) => p.toLowerCase() !== q && p.toLowerCase().includes(q)).slice(0, 6)
-    : payeeOptions.slice(0, 6);
+  // Managed subscriptions/irregular bills surface first (they carry a
+  // category match), followed by plain previously-used payee names that
+  // aren't already covered by a managed item.
+  const lineItemNames = new Set(payeeLineItems.map((i) => i.name.toLowerCase()));
+  const lineMatches = q
+    ? payeeLineItems.filter((i) => i.name.toLowerCase() !== q && i.name.toLowerCase().includes(q))
+    : payeeLineItems;
+  const plainMatches = (
+    q
+      ? payeeOptions.filter((p) => p.toLowerCase() !== q && p.toLowerCase().includes(q))
+      : payeeOptions
+  ).filter((p) => !lineItemNames.has(p.toLowerCase()));
+  const matches = [...lineMatches.slice(0, 6), ...plainMatches.slice(0, 6 - Math.min(6, lineMatches.length))];
+
+  function select(name: string) {
+    setValue(name);
+    setOpen(false);
+    const item = payeeLineItems.find((i) => i.name.toLowerCase() === name.toLowerCase());
+    if (item) onMatch?.(item);
+  }
 
   return (
     <div className="relative">
@@ -308,21 +354,27 @@ function PayeeField({
       />
       {open && matches.length > 0 ? (
         <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
-          {matches.map((name) => (
-            <li key={name}>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setValue(name);
-                  setOpen(false);
-                }}
-                className="block w-full truncate px-3 py-2 text-left text-sm hover:bg-brand-soft/40"
-              >
-                {name}
-              </button>
-            </li>
-          ))}
+          {matches.map((entry) => {
+            const name = typeof entry === "string" ? entry : entry.name;
+            const isLineItem = typeof entry !== "string";
+            return (
+              <li key={name}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => select(name)}
+                  className="flex w-full items-center justify-between gap-2 truncate px-3 py-2 text-left text-sm hover:bg-brand-soft/40"
+                >
+                  <span className="truncate">{name}</span>
+                  {isLineItem ? (
+                    <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand">
+                      {entry.kind === "subscription" ? "Sub" : "Irregular"}
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>

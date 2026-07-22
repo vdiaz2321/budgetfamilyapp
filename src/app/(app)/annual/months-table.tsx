@@ -24,7 +24,7 @@ type Props = {
 };
 
 export function MonthsTable({ columns, rows, totals, totalNet, hasFuture, currency, gridCols }: Props) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">

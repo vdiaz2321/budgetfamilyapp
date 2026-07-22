@@ -91,6 +91,16 @@ export type AccountOption = {
   name: string;
 };
 
+// A managed Subscription or Irregular Bill, offered in the transaction
+// Payee autocomplete. Selecting one auto-fills the linked budget item (and,
+// for subscriptions, the amount) so nothing has to be mapped by hand.
+export type PayeeLineItem = {
+  name: string;
+  amountCents: number | null; // null for irregular bills (only a hint exists)
+  subcategoryId: string | null;
+  kind: "subscription" | "irregular";
+};
+
 // A transaction shown in the right-rail Log and the Transactions page.
 export type TxData = {
   id: string;

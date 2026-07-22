@@ -5,7 +5,7 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
-import { ROW_CLASSES, CategoryIcon, Sparkline } from "./category-icons";
+import { Sparkline } from "./category-icons";
 
 const ACTUAL_WORD: Record<CategoryKind, string> = {
   income: "received",
@@ -33,17 +33,16 @@ type Props = {
   currency: string;
   monthKey: string; // YYYY-MM-01
   selected: boolean;
+  isEven: boolean;
   isSnowballFocus?: boolean;
+  isDragOver?: boolean;
   onSelect: () => void;
+  onDragStart: () => void;
 };
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballFocus, onSelect }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isSnowballFocus, isDragOver, onSelect, onDragStart }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
-  // Only strike an *established* debt that's been paid down to zero — not a
-  // brand-new debt whose balance hasn't been entered yet. dueDay is set at
-  // add-time (before the balance), so it's NOT a signal of "set up" — only
-  // min payment / interest (entered later, in the detail panel) count.
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
 
@@ -54,40 +53,55 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballF
         ? 100
         : 0;
 
-  const rowClasses = ROW_CLASSES[kind];
-  // Progress bar + sparkline are blue by default across every category, red
-  // only when over budget — income has no "overspent" concept, so it's
-  // always blue.
   const overBudget = !isIncome && row.plannedCents > 0 && row.spentCents > row.plannedCents;
   const sparklineAccent = overBudget ? "negative" : "chart-1";
   const barClass = overBudget ? "bg-negative" : "bg-chart-1";
 
+  const baseClass = selected
+    ? "bg-brand-soft/50"
+    : isDragOver
+      ? "bg-brand-soft/40 ring-1 ring-inset ring-brand/40"
+      : isEven
+        ? "bg-black/[0.018] dark:bg-white/[0.03] hover:bg-brand-soft/20"
+        : "hover:bg-brand-soft/25";
+
   return (
-    <li className={`group ${selected ? "bg-brand-soft/50" : "hover:bg-brand-soft/25"}`}>
-      <div className="flex items-start gap-3 px-4 py-2.5">
+    <li
+      data-drop-key={`subcat:${row.subId}`}
+      className={`group ${baseClass}`}
+    >
+      <div className="flex items-center gap-3 px-3 py-2.5">
+        {/* Grip handle — replaces the category icon. Isolated in its own
+            wider hit-area with a visible gap from the clickable content so
+            an imprecise click on a dense list (e.g. after bulk-add) can't
+            graze it and silently swallow the click — see feedback: Bills
+            rows needing a second click after bulk-adding many items. */}
         <span
-          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${rowClasses.iconBg} ${rowClasses.iconText}`}
+          onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
+          title="Drag to reorder"
+          className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
         >
-          <CategoryIcon kind={kind} className="h-4 w-4" />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
         </span>
 
-        <div className="min-w-0 flex-1">
+        {/* The whole content column (name row + progress bar) is clickable,
+            not just the thin name button, so aim doesn't matter. */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={onSelect}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+          className="min-w-0 flex-1 cursor-pointer text-left"
+        >
           <div className="flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={onSelect}
-              className="flex min-w-0 items-baseline gap-2 truncate text-left"
-            >
+            <span className="flex min-w-0 items-baseline gap-2 truncate">
               <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
                 {row.name}
               </span>
               {row.dueDay ? <span className="shrink-0 text-[11px] text-muted">due {row.dueDay}</span> : null}
-              {isSnowballFocus ? (
-                <span className="shrink-0 rounded-md bg-negative/12 px-1.5 py-0.5 text-[10px] font-medium text-negative">
-                  next to pay
-                </span>
-              ) : null}
-            </button>
+            </span>
 
             <div className="flex shrink-0 items-center gap-2">
               <Sparkline values={row.sparkline} accent={sparklineAccent} />
@@ -117,7 +131,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isSnowballF
             </div>
           </div>
 
-          <div className={`mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60`}>
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
             <div
               className={`h-full rounded-full ${barClass} transition-[width] duration-200`}
               style={{ width: `${pct}%` }}

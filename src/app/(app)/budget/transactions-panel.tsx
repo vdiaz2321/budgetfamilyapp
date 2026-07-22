@@ -6,7 +6,7 @@ import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction } from "./actions";
 import { TransactionModal } from "./transaction-modal";
 import { DOT } from "./category-icons";
-import type { AccountOption, SubOption, TxData } from "./types";
+import type { AccountOption, PayeeLineItem, SubOption, TxData } from "./types";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
   income: "Income",
@@ -27,8 +27,7 @@ function dateLabel(dateStr: string): string {
   const diffDays = Math.round((today.getTime() - tx.getTime()) / 86400000);
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
-  if (diffDays > 1 && diffDays < 7) return tx.toLocaleDateString("en-US", { weekday: "long" });
-  return tx.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return tx.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase();
 }
 
 type Props = {
@@ -40,6 +39,7 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   payeeOptions?: string[];
+  payeeLineItems?: PayeeLineItem[];
   // Optional overrides so the same panel can be reused elsewhere (e.g. a
   // "Debt Payments" list on the Snowball page). Default to the Budget wording.
   title?: string;
@@ -57,6 +57,7 @@ export function TransactionsPanel({
   subOptions,
   accountOptions,
   payeeOptions = [],
+  payeeLineItems = [],
   title = "Transactions",
   subtitle,
   addLabel = "Add",
@@ -96,6 +97,7 @@ export function TransactionsPanel({
         subOptions={subOptions}
         accountOptions={accountOptions}
         payeeOptions={payeeOptions}
+        payeeLineItems={payeeLineItems}
         initialKind={modal === "new" ? initialKind : undefined}
         onClose={() => setModal(null)}
       />

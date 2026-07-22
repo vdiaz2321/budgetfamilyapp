@@ -14,6 +14,7 @@ import {
   AnnualBreakdownHistory,
   type BreakdownKind,
 } from "./annual-breakdown-history";
+import { ScrollToTop } from "@/components/scroll-to-top";
 
 export const metadata = { title: "Annual Overview · Capitall" };
 
@@ -83,33 +84,52 @@ export default async function AnnualOverviewPage({
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-01`;
 
-  const [{ data: subs }, { data: plans }, { data: actuals }, { data: breakdownRows }] =
-    await Promise.all([
-      supabase
-        .from("subcategories")
-        .select("id, category_id, name, sort_order")
-        .eq("household_id", household.id)
-        .order("sort_order"),
-      supabase
-        .from("budget_plans")
-        .select("subcategory_id, planned_cents, month")
-        .eq("household_id", household.id)
-        .gte("month", yearStart)
-        .lte("month", yearEnd),
-      supabase
-        .from("v_monthly_actuals")
-        .select("subcategory_id, actual_cents, month")
-        .eq("household_id", household.id)
-        .gte("month", yearStart)
-        .lte("month", yearEnd),
-      // Year-independent: the whole seeded Annual Breakdown history (2018–2025).
-      supabase
-        .from("annual_breakdown_history")
-        .select("kind, group_label, line_label, year, amount_cents, group_sort, line_sort")
-        .eq("household_id", household.id)
-        .order("group_sort")
-        .order("line_sort"),
-    ]);
+  // Live 2026+ range for the Annual Breakdown card — queried straight from
+  // `transactions` (not `v_monthly_actuals`) so we can honor Victor's
+  // "deposits only, no withdrawals" rule for Savings/Investment. See
+  // buildBreakdown() for the merge logic and kind mapping.
+  const liveRangeStart = "2026-01-01";
+  const liveRangeEnd = `${currentYear}-12-31`;
+
+  const [
+    { data: subs },
+    { data: plans },
+    { data: actuals },
+    { data: breakdownRows },
+    { data: liveTxRows },
+  ] = await Promise.all([
+    supabase
+      .from("subcategories")
+      .select("id, category_id, name, sort_order")
+      .eq("household_id", household.id)
+      .order("sort_order"),
+    supabase
+      .from("budget_plans")
+      .select("subcategory_id, planned_cents, month")
+      .eq("household_id", household.id)
+      .gte("month", yearStart)
+      .lte("month", yearEnd),
+    supabase
+      .from("v_monthly_actuals")
+      .select("subcategory_id, actual_cents, month")
+      .eq("household_id", household.id)
+      .gte("month", yearStart)
+      .lte("month", yearEnd),
+    // Year-independent: the whole seeded Annual Breakdown history (2018–2025).
+    supabase
+      .from("annual_breakdown_history")
+      .select("kind, group_label, line_label, year, amount_cents, group_sort, line_sort")
+      .eq("household_id", household.id)
+      .order("group_sort")
+      .order("line_sort"),
+    supabase
+      .from("transactions")
+      .select("subcategory_id, amount_cents, occurred_on, is_withdrawal")
+      .eq("household_id", household.id)
+      .gte("occurred_on", liveRangeStart)
+      .lte("occurred_on", liveRangeEnd)
+      .not("subcategory_id", "is", null),
+  ]);
 
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
@@ -202,16 +222,46 @@ export default async function AnnualOverviewPage({
 
   const monthLabels = MONTH_NAMES.map((m) => m.slice(0, 3));
 
-  // Annual Breakdown history (2018–2025): pivot the seeded leaf rows into
-  // kind → group → line, each carrying a per-year map, plus subtotals/totals.
-  const breakdownKinds = buildBreakdown(breakdownRows ?? []);
-  const breakdownYears = [
-    ...new Set((breakdownRows ?? []).map((r) => r.year)),
-  ].sort((a, b) => b - a); // newest-first
+  // Aggregate 2026+ transactions per subcategory per year for the Annual
+  // Breakdown card. Savings-kind Budget subs skip withdrawals (Victor tracks
+  // "how much I paid in"); every other kind takes all rows.
+  const liveDepositsBySub = new Map<string, Map<number, number>>();
+  for (const t of liveTxRows ?? []) {
+    if (!t.subcategory_id) continue;
+    const kind = kindBySub.get(t.subcategory_id);
+    if (!kind) continue;
+    if (kind === "savings" && t.is_withdrawal) continue;
+    const y = parseInt(t.occurred_on.slice(0, 4), 10);
+    let byYear = liveDepositsBySub.get(t.subcategory_id);
+    if (!byYear) {
+      byYear = new Map();
+      liveDepositsBySub.set(t.subcategory_id, byYear);
+    }
+    byYear.set(y, (byYear.get(y) ?? 0) + t.amount_cents);
+  }
+
+  const budgetSubsForLive: LiveBudgetSub[] = [];
+  for (const s of subs ?? []) {
+    const kind = kindBySub.get(s.id);
+    if (!kind) continue;
+    const byYear = liveDepositsBySub.get(s.id);
+    if (!byYear || byYear.size === 0) continue;
+    budgetSubsForLive.push({ id: s.id, name: s.name, kind, byYear });
+  }
+
+  // Annual Breakdown: pivot the seeded leaf rows (2018–2025) into kind → group
+  // → line, then overlay 2026+ live totals from Budget transactions.
+  const breakdownKinds = buildBreakdown(breakdownRows ?? [], budgetSubsForLive);
+  const seedYears = new Set((breakdownRows ?? []).map((r) => r.year));
+  const liveYears = new Set<number>();
+  for (let y = 2026; y <= currentYear; y++) liveYears.add(y);
+  const breakdownYears = [...new Set([...seedYears, ...liveYears])].sort(
+    (a, b) => b - a,
+  ); // newest-first
   const netByYear: Record<number, number> = {};
   for (const y of breakdownYears) {
     const get = (k: string) => breakdownKinds.find((bk) => bk.kind === k)?.totalByYear[y] ?? 0;
-    netByYear[y] = get("income") - get("expenses") - get("savings") - get("investment");
+    netByYear[y] = get("income") - get("bills") - get("expenses") - get("debt") - get("savings") - get("investment");
   }
 
   const currency = household.currency;
@@ -277,6 +327,8 @@ export default async function AnnualOverviewPage({
         netByYear={netByYear}
         currency={currency}
       />
+
+      <ScrollToTop />
     </div>
   );
 }
@@ -294,15 +346,37 @@ type BreakdownRow = {
   line_sort: number;
 };
 
-const KIND_ORDER: BreakdownKind["kind"][] = ["income", "expenses", "savings", "investment"];
+const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "savings", "investment"];
 const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
   income: "Income",
+  bills: "Bills",
   expenses: "Expenses",
+  debt: "Debt",
   savings: "Savings",
   investment: "Investment",
 };
 
-function buildBreakdown(rows: BreakdownRow[]): BreakdownKind[] {
+// Budget's 5 kinds fold into the sheet's 4 kinds. Savings is special-cased
+// below (name lookup against Investment first), so it's not in this table.
+const BUDGET_TO_SHEET_KIND: Record<CategoryKind, BreakdownKind["kind"] | null> = {
+  income: "income",
+  bills: "bills",
+  expenses: "expenses",
+  debt: "debt",
+  savings: null,
+};
+
+type LiveBudgetSub = {
+  id: string;
+  name: string;
+  kind: CategoryKind;
+  byYear: Map<number, number>;
+};
+
+function buildBreakdown(
+  rows: BreakdownRow[],
+  liveBudgetSubs: LiveBudgetSub[] = [],
+): BreakdownKind[] {
   // kind -> group_label -> line_label -> { byYear, total, lineSort } (+ groupSort)
   const kinds = new Map<
     string,
@@ -322,6 +396,72 @@ function buildBreakdown(rows: BreakdownRow[]): BreakdownKind[] {
     line.byYear[r.year] = (line.byYear[r.year] ?? 0) + r.amount_cents;
     line.total += r.amount_cents;
   }
+
+  // ---- Overlay live Budget data (2026+) --------------------------------
+  // Precompute a lowercase label → line pointer index per kind, so we can
+  // fold Budget subs onto the seeded row whose name matches (case-insensitive).
+  type LineRef = { byYear: Record<number, number>; total: number; lineSort: number };
+  const lineIndex = new Map<string, Map<string, LineRef>>(); // kind → nameLower → line
+  for (const [kind, groups] of kinds) {
+    const idx = new Map<string, LineRef>();
+    for (const [, g] of groups) {
+      for (const [label, l] of g.lines) idx.set(label.toLowerCase(), l);
+    }
+    lineIndex.set(kind, idx);
+  }
+
+  const FROM_BUDGET = "From Budget";
+  const fromBudgetSort = 9_999_999; // ensure this synthetic group sinks to the end
+  const ensureFromBudgetGroup = (sheetKind: string) => {
+    if (!kinds.has(sheetKind)) kinds.set(sheetKind, new Map());
+    const groups = kinds.get(sheetKind)!;
+    if (!groups.has(FROM_BUDGET)) {
+      groups.set(FROM_BUDGET, { groupSort: fromBudgetSort, lines: new Map() });
+    }
+    return groups.get(FROM_BUDGET)!;
+  };
+
+  const resolveSheetKind = (sub: LiveBudgetSub): BreakdownKind["kind"] => {
+    if (sub.kind !== "savings") {
+      // income/bills/expenses/debt map directly; the table has no null values for them.
+      return BUDGET_TO_SHEET_KIND[sub.kind]!;
+    }
+    // Budget "savings" is ambiguous — could be sheet Savings OR Investment.
+    // Prefer Investment when the name matches a seeded investment line (e.g.
+    // "Fidelity 401k", "TSP"); otherwise fall back to Savings.
+    const nameLower = sub.name.toLowerCase();
+    if (lineIndex.get("investment")?.has(nameLower)) return "investment";
+    return "savings";
+  };
+
+  let unmatchedSort = 0;
+  for (const sub of liveBudgetSubs) {
+    const sheetKind = resolveSheetKind(sub);
+    const idx = lineIndex.get(sheetKind);
+    const match = idx?.get(sub.name.toLowerCase());
+    if (match) {
+      for (const [y, v] of sub.byYear) {
+        match.byYear[y] = (match.byYear[y] ?? 0) + v;
+        match.total += v;
+      }
+    } else {
+      const group = ensureFromBudgetGroup(sheetKind);
+      // If a Budget sub already produced a "From Budget" line in a prior call
+      // (shouldn't happen here — this only runs once per request — but keep
+      // the accumulate semantics for safety).
+      const existing = group.lines.get(sub.name);
+      const line = existing ?? { byYear: {}, total: 0, lineSort: unmatchedSort++ };
+      for (const [y, v] of sub.byYear) {
+        line.byYear[y] = (line.byYear[y] ?? 0) + v;
+        line.total += v;
+      }
+      if (!existing) group.lines.set(sub.name, line);
+      // Also register in the index so a future duplicate sub with the same
+      // lowercased name folds into the same "From Budget" row.
+      lineIndex.get(sheetKind)?.set(sub.name.toLowerCase(), line);
+    }
+  }
+  // ----------------------------------------------------------------------
 
   const result: BreakdownKind[] = [];
   for (const kind of KIND_ORDER) {

@@ -11,15 +11,19 @@ import { ItemPanel } from "./item-panel";
 import { TransactionsPanel } from "./transactions-panel";
 import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
+import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
+import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import type {
   AccountOption,
   BucketOption,
   GroupData,
   MonthNav,
+  PayeeLineItem,
   RowData,
   SubOption,
   TxData,
 } from "./types";
+import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 
 type Props = {
   month: MonthNav;
@@ -39,9 +43,12 @@ type Props = {
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
   payeeOptions: string[];
+  payeeLineItems?: PayeeLineItem[];
   snowballExtraCents: number;
   snowballFocusSubId: string | null;
   transactions: TxData[];
+  subscriptions: SubscriptionRow[];
+  irregularBills: IrregularBillRow[];
 };
 
 export function BudgetBoard({
@@ -57,9 +64,12 @@ export function BudgetBoard({
   debtAccountOptions,
   bucketOptions,
   payeeOptions,
+  payeeLineItems = [],
   snowballExtraCents,
   snowballFocusSubId,
   transactions,
+  subscriptions,
+  irregularBills,
 }: Props) {
   const [railTab, setRailTab] = useState<"summary" | "transactions">("transactions");
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
@@ -67,7 +77,7 @@ export function BudgetBoard({
   // navigating away and back, resets on a fresh login) — same pattern as
   // Net Worth / Accounts. Groups default open.
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
-    Object.fromEntries(groups.map((g) => [g.categoryId, true])),
+    Object.fromEntries([...groups.map((g) => [g.categoryId, true]), ["subscriptions", true], ["irregularBills", true]]),
   );
   const toggleGroup = (categoryId: string) =>
     setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? true) }));
@@ -128,6 +138,7 @@ export function BudgetBoard({
         subOptions={subOptions}
         accountOptions={accountOptions}
         payeeOptions={payeeOptions}
+        payeeLineItems={payeeLineItems}
         initialKind={selected.kind}
         initialSubId={selected.subId}
         onClose={() => setQuickAdd(false)}
@@ -182,6 +193,10 @@ export function BudgetBoard({
             currency={currency}
           />
 
+          <div className="flex justify-end">
+            <BulkAddSubcategories groups={groups} />
+          </div>
+
           {/* Groups */}
           <div className="space-y-3">
             {groups.map((group) => (
@@ -197,6 +212,22 @@ export function BudgetBoard({
                 snowballFocusSubId={snowballFocusSubId}
               />
             ))}
+
+            <SubscriptionsSummaryCard
+              currency={currency}
+              subscriptions={subscriptions}
+              irregularBills={irregularBills}
+              open={openGroups["subscriptions"] ?? true}
+              onToggle={() => toggleGroup("subscriptions")}
+            />
+
+            <IrregularBillsSummaryCard
+              currency={currency}
+              subscriptions={subscriptions}
+              irregularBills={irregularBills}
+              open={openGroups["irregularBills"] ?? true}
+              onToggle={() => toggleGroup("irregularBills")}
+            />
           </div>
         </div>
       </div>
@@ -248,6 +279,7 @@ export function BudgetBoard({
                   subOptions={subOptions}
                   accountOptions={accountOptions}
                   payeeOptions={payeeOptions}
+                  payeeLineItems={payeeLineItems}
                 />
               )}
             </>
@@ -381,8 +413,8 @@ function SummaryHeroCard({
           </span>
         </div>
         <div className="text-right">
-          <p className="text-xs font-medium text-muted">Budget planned</p>
-          <p className="text-2xl font-medium tabular-nums text-foreground">
+          <p className="text-xs font-medium text-muted">Left to budget</p>
+          <p className={`text-2xl font-medium tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
             {formatMoney(displayLeft, currency)}
           </p>
         </div>
@@ -442,7 +474,7 @@ function StickyFooterBar({
     // non-positioned ones), which is all that's needed for it to sit above
     // the budget groups scrolling underneath — see feedback: sticky bar was
     // covering the Add Transaction modal.
-    <div className="sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-6 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <div className="pointer-events-none sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-6 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="text-center">
         <p className="text-lg font-medium tabular-nums text-foreground">
           {formatMoney(actualIncome, currency)}

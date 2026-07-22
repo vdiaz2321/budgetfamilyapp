@@ -67,6 +67,23 @@ export async function upsertPlan(formData: FormData) {
 
 // ---------- Subcategories (the budget rows) ----------
 
+export async function reorderSubcategories(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const orderedIds = JSON.parse(String(formData.get("orderedIds") ?? "[]")) as string[];
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return;
+
+  await Promise.all(
+    orderedIds.map((id, i) =>
+      supabase
+        .from("subcategories")
+        .update({ sort_order: i })
+        .eq("id", id)
+        .eq("household_id", householdId),
+    ),
+  );
+  revalidatePath("/budget");
+}
+
 export async function addSubcategory(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const categoryId = String(formData.get("categoryId") ?? "");
@@ -95,6 +112,52 @@ export async function addSubcategory(formData: FormData) {
   });
 
   revalidatePath("/budget");
+}
+
+// Creates one subcategory per non-empty pasted line, skipping names that
+// already exist in that category (case-insensitive) — a paste-a-list
+// accelerator for entering many items at once instead of one at a time.
+export async function addSubcategoriesBulk(
+  formData: FormData,
+): Promise<{ added: number; skipped: number }> {
+  const { supabase, householdId } = await requireHousehold();
+  const categoryId = String(formData.get("categoryId") ?? "");
+  const raw = String(formData.get("names") ?? "");
+  const names = raw
+    .split("\n")
+    .map((n) => n.trim())
+    .filter(Boolean);
+  if (!categoryId || names.length === 0) return { added: 0, skipped: 0 };
+
+  const { data: existing } = await supabase
+    .from("subcategories")
+    .select("name, sort_order")
+    .eq("household_id", householdId)
+    .eq("category_id", categoryId)
+    .order("sort_order", { ascending: false });
+
+  const existingLower = new Set((existing ?? []).map((s) => s.name.toLowerCase()));
+  let nextSort = (existing?.[0]?.sort_order ?? -1) + 1;
+
+  const rows: { household_id: string; category_id: string; name: string; sort_order: number }[] = [];
+  const seenThisBatch = new Set<string>();
+  let skipped = 0;
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (existingLower.has(key) || seenThisBatch.has(key)) {
+      skipped++;
+      continue;
+    }
+    seenThisBatch.add(key);
+    rows.push({ household_id: householdId, category_id: categoryId, name, sort_order: nextSort++ });
+  }
+
+  if (rows.length > 0) {
+    await supabase.from("subcategories").insert(rows);
+  }
+
+  revalidatePath("/budget");
+  return { added: rows.length, skipped };
 }
 
 export async function updateSubcategory(formData: FormData) {

@@ -103,7 +103,7 @@ export default async function NetworthPage() {
   const excludedIds = isKidsAccount;
   const sectionForAccount = (accountId: string): GridRow["section"] => {
     if (isKidsAccount.has(accountId)) return "Kids Funding";
-    return accountKindById.get(accountId) === "investment" ? "Investments" : "Budget";
+    return accountKindById.get(accountId) === "investment" ? "Investments" : "Banking";
   };
   const sectionForDebt = (subcategoryId: string): GridRow["section"] =>
     debtKindBySub.get(subcategoryId) === "credit_card" ? "Credit Cards" : "Loans";

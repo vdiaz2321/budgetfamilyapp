@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
-import { addSubcategory } from "./actions";
+import { addSubcategory, reorderSubcategories } from "./actions";
 import { BudgetRow, remainingColorClass } from "./budget-row";
 import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
@@ -23,6 +23,50 @@ type Props = {
   snowballFocusSubId: string | null;
 };
 
+function usePointerReorder(categoryId: string, rows: RowData[]) {
+  const dragId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
+
+  const keyUnder = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    const rowEl = el?.closest<HTMLElement>("[data-drop-key]");
+    const key = rowEl?.getAttribute("data-drop-key");
+    return key && key.startsWith("subcat:") ? key.slice(7) : null;
+  };
+
+  const startDrag = (id: string) => {
+    dragId.current = id;
+    document.body.style.cursor = "grabbing";
+    const onMove = (e: MouseEvent) => setDragOverId(keyUnder(e.clientX, e.clientY));
+    const onUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      setDragOverId(null);
+      const from = dragId.current;
+      dragId.current = null;
+      const to = keyUnder(e.clientX, e.clientY);
+      if (!from || !to || from === to) return;
+      const ids = (optimisticOrder ?? rows.map((r) => r.subId));
+      const fromIdx = ids.indexOf(from);
+      const toIdx = ids.indexOf(to);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const next = [...ids];
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, from);
+      setOptimisticOrder(next);
+      const fd = new FormData();
+      fd.set("orderedIds", JSON.stringify(next));
+      reorderSubcategories(fd);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  return { dragOverId, startDrag, optimisticOrder };
+}
+
 export function BudgetGroup({
   group,
   currency,
@@ -34,6 +78,7 @@ export function BudgetGroup({
   snowballFocusSubId,
 }: Props) {
   const [adding, setAdding] = useState(false);
+  const { dragOverId, startDrag, optimisticOrder } = usePointerReorder(group.categoryId, group.rows);
 
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
   const isDebt = group.kind === "debt";
@@ -41,9 +86,11 @@ export function BudgetGroup({
   // Income "receives" money; everything else "spends" it.
   const actualLabel = isIncome ? "Received" : "Spent";
 
-  // Paid-off debts always drop out of the Budget page — they still live on
-  // the Snowball page (through the end of the year they were paid off).
-  const visibleRows = group.rows.filter((r) => {
+  // Apply optimistic drag order, then filter paid-off debts.
+  const orderedRows = optimisticOrder
+    ? optimisticOrder.map((id) => group.rows.find((r) => r.subId === id)).filter(Boolean) as RowData[]
+    : group.rows;
+  const visibleRows = orderedRows.filter((r) => {
     if (isDebt && r.debt && r.debt.balanceCents <= 0) return false;
     return true;
   });
@@ -73,11 +120,20 @@ export function BudgetGroup({
         </button>
 
         {!open ? (
-          <div className="flex items-center gap-3 text-sm font-bold tabular-nums">
-            <span className="text-muted">{formatMoney(group.plannedTotal, currency)}</span>
-            <span>{formatMoney(group.spentTotal, currency)}</span>
-            <span className={remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}>
-              {formatMoney(remainingTotal, currency)}
+          <div className="flex items-start gap-4 text-xs tabular-nums">
+            <span className="flex flex-col items-end">
+              <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
+              <span className="text-muted">planned</span>
+            </span>
+            <span className="flex flex-col items-end">
+              <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
+              <span className="text-muted">{actualLabel.toLowerCase()}</span>
+            </span>
+            <span className="flex flex-col items-end">
+              <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                {formatMoney(remainingTotal, currency)}
+              </span>
+              <span className="text-muted">remaining</span>
             </span>
           </div>
         ) : null}
@@ -100,7 +156,7 @@ export function BudgetGroup({
             </div>
           ) : (
             <ul>
-              {visibleRows.map((row) => (
+              {visibleRows.map((row, i) => (
                 <BudgetRow
                   key={row.subId}
                   row={row}
@@ -108,10 +164,13 @@ export function BudgetGroup({
                   currency={currency}
                   monthKey={monthKey}
                   selected={row.subId === selectedSubId}
+                  isEven={i % 2 === 1}
+                  isDragOver={dragOverId === row.subId}
                   isSnowballFocus={
                     isDebt && row.subId === snowballFocusSubId && (row.debt?.balanceCents ?? 0) > 0
                   }
                   onSelect={() => onSelectRow(row, group.kind)}
+                  onDragStart={() => startDrag(row.subId)}
                 />
               ))}
             </ul>
