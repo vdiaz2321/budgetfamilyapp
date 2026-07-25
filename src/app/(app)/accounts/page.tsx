@@ -61,7 +61,7 @@ export default async function AccountsPage() {
       .eq("household_id", household.id),
     supabase
       .from("credit_card_details")
-      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id")
+      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id")
       .eq("household_id", household.id),
   ]);
 
@@ -86,6 +86,8 @@ export default async function AccountsPage() {
       feesPaidCents: d.fees_paid_cents ?? 0,
       freeNightCreditCents: d.free_night_credit_cents ?? null,
       freeNightExpiresOn: d.free_night_expires_on ?? null,
+      freeNightPointsLimit: d.free_night_points_limit ?? null,
+      benefitUsedOn: d.benefit_used_on ?? null,
       spendingLimitCents: d.spending_limit_cents ?? null,
       remarks: d.remarks ?? null,
       isRevolvingDebt: d.is_revolving_debt ?? false,

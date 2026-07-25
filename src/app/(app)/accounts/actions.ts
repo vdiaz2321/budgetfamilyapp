@@ -308,10 +308,10 @@ export async function upsertCardDetails(formData: FormData) {
     fees_paid_cents: optCents("feesPaid") ?? 0,
     free_night_credit_cents: optCents("freeNightCredit"),
     free_night_expires_on: optDate("freeNightExpires"),
+    free_night_points_limit: optInt("freeNightPointsLimit") || null,
+    benefit_used_on: optDate("benefitUsedOn"),
     spending_limit_cents: optCents("spendingLimit"),
     remarks: optText("remarks"),
-    is_revolving_debt: formData.get("isRevolvingDebt") === "on",
-    debt_subcategory_id: optText("debtSubcategoryId"),
     updated_at: new Date().toISOString(),
   };
 

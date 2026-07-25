@@ -35,17 +35,28 @@ export function SavingsBoard({ cards, currency }: Props) {
     }),
     { goal: 0, monthly: 0, saved: 0 },
   );
-  const leftToSave = totals.goal - totals.saved;
+  const leftToSave = Math.max(0, totals.goal - totals.saved);
+  const remainingPct = totals.goal > 0 ? (leftToSave / totals.goal) * 100 : 0;
+  const withGoal = cards.filter((c) => c.goalCents > 0);
+  const onTrack = withGoal.filter((c) => c.pace === "on_track" || c.pace === "reached").length;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Savings</h1>
-        <p className="text-sm text-muted">
-          Every savings goal, tracked toward its target — set one in a Savings item&apos;s panel
-          on Budget.
-        </p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
+      {/* Header — hero total on the right */}
+      <header className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Savings goals</h1>
+          <p className="mt-1 text-sm text-muted">
+            Track every goal toward its target. Set one in Budget.
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Total saved</p>
+          <p className="text-2xl font-semibold text-positive tabular-nums">
+            {formatMoney(totals.saved, currency)}
+          </p>
+        </div>
+      </header>
 
       {cards.length === 0 ? (
         <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -56,19 +67,26 @@ export function SavingsBoard({ cards, currency }: Props) {
         </section>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <SummaryTile label="Total goal" value={totals.goal} currency={currency} />
-            <SummaryTile label="Total monthly" value={totals.monthly} currency={currency} />
-            <SummaryTile label="Total saved" value={totals.saved} currency={currency} tone="text-positive" />
-            <SummaryTile
+          {/* Connected stats bar */}
+          <div className="flex overflow-hidden rounded-2xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
+            <Stat label="Total goal" amount={formatMoney(totals.goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
+            <Stat label="Monthly contribution" amount={formatMoney(totals.monthly, currency)} sub="auto-deposits" />
+            <Stat
               label="Left to save"
-              value={leftToSave}
-              currency={currency}
-              tone={leftToSave <= 0 ? "text-positive" : "text-negative"}
+              amount={formatMoney(leftToSave, currency)}
+              amountTone={leftToSave > 0 ? "text-negative" : "text-positive"}
+              sub={totals.goal > 0 ? `${remainingPct.toFixed(1)}% remaining` : "—"}
             />
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          {/* Section header */}
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Active goals</h2>
+            <span className="text-xs text-muted">{cards.length} goal{cards.length === 1 ? "" : "s"}</span>
+          </div>
+
+          {/* Goal cards */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {cards.map((c) => (
               <SavingsGoalCard key={c.id} card={c} currency={currency} />
             ))}
@@ -79,114 +97,169 @@ export function SavingsBoard({ cards, currency }: Props) {
   );
 }
 
-function SummaryTile({
+function Stat({
   label,
-  value,
-  currency,
-  tone,
+  amount,
+  sub,
+  amountTone,
 }: {
   label: string;
-  value: number;
-  currency: string;
-  tone?: string;
+  amount: string;
+  sub: string;
+  amountTone?: string;
 }) {
   return (
-    <div className="rounded-2xl bg-surface px-4 py-3 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone ?? ""}`}>
-        {formatMoney(value, currency)}
-      </p>
+    <div className="relative flex-1 px-4 py-4 text-center [&:not(:last-child)]:border-r [&:not(:last-child)]:border-line/70">
+      <p className="text-[11px] font-medium text-muted">{label}</p>
+      <p className={`mt-1 text-xl font-semibold tabular-nums ${amountTone ?? ""}`}>{amount}</p>
+      <p className="mt-0.5 text-[11px] text-muted/80">{sub}</p>
     </div>
   );
 }
-
-const PACE_BADGE: Record<SavingsCardData["pace"], { label: string; className: string } | null> = {
-  none: null,
-  reached: { label: "🎉 Reached", className: "bg-positive/15 text-positive" },
-  on_track: { label: "✅ On track", className: "bg-positive/15 text-positive" },
-  behind: { label: "⚠️ Behind pace", className: "bg-negative/15 text-negative" },
-  overdue: { label: "⚠️ Past target date", className: "bg-negative/15 text-negative" },
-};
 
 function SavingsGoalCard({ card, currency }: { card: SavingsCardData; currency: string }) {
   const hasGoal = card.goalCents > 0;
   const percent = hasGoal ? Math.min(100, Math.max(0, (card.savedCents / card.goalCents) * 100)) : 0;
   const reached = card.pace === "reached";
-  const badge = PACE_BADGE[card.pace];
 
   return (
-    <div className="w-[200px] shrink-0 overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-3 pt-3 pb-1 text-center">
-        <p className="truncate text-xs font-bold">{card.name}</p>
+    <div className="group relative flex flex-col rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-black/5 transition duration-200 hover:shadow-lg dark:ring-white/10">
+      {/* Header — name + three-dot menu */}
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{card.name}</h3>
+        <button
+          type="button"
+          aria-label="Card actions"
+          className="rounded-md p-1 text-muted opacity-0 transition hover:bg-brand-soft hover:text-foreground group-hover:opacity-100"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="12" cy="5" r="1.5" />
+            <circle cx="12" cy="12" r="1.5" />
+            <circle cx="12" cy="19" r="1.5" />
+          </svg>
+        </button>
       </div>
-      <div className="flex justify-center py-2">
-        <Ring percent={percent} label={formatMoney(card.savedCents, currency)} reached={reached} />
+
+      {/* Ring + amounts */}
+      <div className="mb-3 flex items-center gap-3">
+        <Ring percent={percent} hasGoal={hasGoal} reached={reached} />
+        <div className="min-w-0 flex-1">
+          {hasGoal ? (
+            <>
+              <p className="truncate text-lg font-semibold tabular-nums">
+                {formatMoney(card.savedCents, currency)}
+              </p>
+              <p className="truncate text-[11px] text-muted">
+                of {formatMoney(card.goalCents, currency)} goal
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-semibold text-muted">—</p>
+              <p className="text-[11px] text-muted">No goal set</p>
+            </>
+          )}
+        </div>
       </div>
-      {badge ? (
-        <div className="flex justify-center pb-1">
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${badge.className}`}>
-            {badge.label}
-          </span>
+
+      {/* Horizontal progress bar */}
+      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-line/60">
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ${reached ? "bg-positive" : hasGoal ? "bg-brand" : "bg-transparent"}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+
+      {/* Status + ETA row */}
+      <div className="mb-3 flex items-center justify-between">
+        <StatusBadge pace={card.pace} hasGoal={hasGoal} />
+        <span className="text-[11px] text-muted">
+          {card.targetDate ? monthLabel(card.targetDate) : hasGoal ? "No date" : ""}
+        </span>
+      </div>
+
+      {/* Condensed details */}
+      {hasGoal ? (
+        <dl className="space-y-1 border-t border-line/70 pt-3 text-xs">
+          <Row label="Start" value={formatMoney(card.startCents, currency)} />
+          <Row label="Monthly" value={formatMoney(card.monthlyCents, currency)} />
+          <Row label="Left" value={formatMoney(Math.max(0, card.leftToSaveCents), currency)} />
+        </dl>
+      ) : (
+        <dl className="space-y-1 border-t border-line/70 pt-3 text-xs opacity-60">
+          <Row label="Start" value={formatMoney(card.startCents, currency)} />
+          <Row label="Monthly" value={formatMoney(card.monthlyCents, currency)} />
+          <Row label="Left" value="—" />
+        </dl>
+      )}
+
+      {/* Behind / overdue hint */}
+      {card.pace === "behind" && card.requiredMonthlyCents != null ? (
+        <div className="mt-3 rounded-lg bg-negative/[0.06] px-2.5 py-1.5 text-center text-[11px] font-medium text-negative">
+          Need {formatMoney(card.requiredMonthlyCents, currency)}/mo to hit target
         </div>
       ) : null}
-      <dl className="space-y-1 border-t border-line px-3 py-2 text-xs">
-        <Row label="Goal" value={hasGoal ? formatMoney(card.goalCents, currency) : "Not set"} />
-        <Row label="Start" value={formatMoney(card.startCents, currency)} />
-        <Row label="Saved" value={formatMoney(card.savedCents, currency)} />
-        <Row
-          label="Left to save"
-          value={hasGoal ? formatMoney(Math.max(0, card.leftToSaveCents), currency) : "—"}
-        />
-        <Row label="Monthly" value={formatMoney(card.monthlyCents, currency)} />
-        <Row label="Target" value={card.targetDate ? monthLabel(card.targetDate) : "Not set"} />
-      </dl>
-      {card.pace === "behind" && card.requiredMonthlyCents != null ? (
-        <p className="border-t border-line px-3 py-1.5 text-[10px] text-negative">
-          Need {formatMoney(card.requiredMonthlyCents, currency)}/mo to hit it in time.
-        </p>
-      ) : null}
       {card.pace === "overdue" ? (
-        <p className="border-t border-line px-3 py-1.5 text-[10px] text-negative">
-          Target date has passed — {formatMoney(Math.max(0, card.leftToSaveCents), currency)} still
-          needed.
-        </p>
+        <div className="mt-3 rounded-lg bg-negative/[0.06] px-2.5 py-1.5 text-center text-[11px] font-medium text-negative">
+          Past target — {formatMoney(Math.max(0, card.leftToSaveCents), currency)} still needed
+        </div>
       ) : null}
     </div>
   );
 }
 
-function Ring({ percent, label, reached }: { percent: number; label: string; reached: boolean }) {
-  const R = 34;
-  const STROKE = 7;
+function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal: boolean }) {
+  if (!hasGoal) {
+    return (
+      <span className="rounded-md bg-muted/10 px-2 py-0.5 text-[11px] font-medium text-muted">
+        No goal
+      </span>
+    );
+  }
+  const map: Record<SavingsCardData["pace"], { label: string; className: string } | null> = {
+    none: null,
+    reached: { label: "🎉 Reached", className: "bg-positive/12 text-positive" },
+    on_track: { label: "✓ On track", className: "bg-positive/12 text-positive" },
+    behind: { label: "! Behind pace", className: "bg-negative/12 text-negative" },
+    overdue: { label: "! Overdue", className: "bg-negative/12 text-negative" },
+  };
+  const b = map[pace];
+  if (!b) return <span />;
+  return (
+    <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${b.className}`}>
+      {b.label}
+    </span>
+  );
+}
+
+function Ring({ percent, hasGoal, reached }: { percent: number; hasGoal: boolean; reached: boolean }) {
+  const R = 26;
+  const STROKE = 5;
   const C = 2 * Math.PI * R;
-  // Gauge-style arc with a gap at the bottom, like a speedometer, instead of
-  // a full ring — the track spans (360 - GAP_DEG) degrees, centered so the
-  // opening sits at 6 o'clock.
-  const GAP_DEG = 70;
-  const trackLen = ((360 - GAP_DEG) / 360) * C;
-  const progressLen = (percent / 100) * trackLen;
-  const rotate = 90 + GAP_DEG / 2;
+  const dash = (percent / 100) * C;
 
   return (
-    <div className="relative h-[84px] w-[84px]">
-      <svg viewBox="0 0 84 84" className="h-full w-full" style={{ transform: `rotate(${rotate}deg)` }}>
+    <div className="relative h-16 w-16 shrink-0">
+      <svg viewBox="0 0 64 64" className="h-full w-full -rotate-90">
         <circle
-          cx="42" cy="42" r={R} fill="none"
+          cx="32" cy="32" r={R} fill="none"
           strokeWidth={STROKE}
-          strokeLinecap="round"
-          strokeDasharray={`${trackLen} ${C - trackLen}`}
           className="stroke-line/60"
         />
-        <circle
-          cx="42" cy="42" r={R} fill="none"
-          strokeWidth={STROKE}
-          strokeLinecap="round"
-          strokeDasharray={`${progressLen} ${C - progressLen}`}
-          className={reached ? "stroke-positive" : "stroke-brand"}
-        />
+        {hasGoal ? (
+          <circle
+            cx="32" cy="32" r={R} fill="none"
+            strokeWidth={STROKE}
+            strokeLinecap="round"
+            strokeDasharray={`${dash} ${C - dash}`}
+            className={reached ? "stroke-positive" : "stroke-brand"}
+          />
+        ) : null}
       </svg>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-2">
-        <span className="text-center text-[10px] font-bold leading-tight tabular-nums">{label}</span>
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <span className={`text-[13px] font-bold tabular-nums ${hasGoal ? "" : "text-muted"}`}>
+          {hasGoal ? `${Math.round(percent)}%` : "—"}
+        </span>
       </div>
     </div>
   );

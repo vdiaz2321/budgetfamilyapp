@@ -32,71 +32,99 @@ type Props = {
 const gainTone = (cents: number) =>
   cents > 0 ? "text-positive" : cents < 0 ? "text-negative" : "text-foreground";
 
-// gain ÷ (start balance + contributions) — the money at work that produced it.
-// Undefined without a starting balance (seeded historical years).
+// Return in DOLLARS (cents): gains − contributions. Positive when investments made
+// more than the year's deposits, negative when they didn't. Shown green / red.
+// Returns null when neither contributed nor gained (nothing to compare).
 function returnPct(cell: {
   startBalanceCents: number | null;
   contributedCents: number;
   accruedCents: number;
-}): number | null {
-  if (cell.startBalanceCents == null) return null;
-  const base = cell.startBalanceCents + cell.contributedCents;
-  if (base <= 0) return null;
-  return (cell.accruedCents / base) * 100;
+}, _priorEndCents?: number | null): number | null {
+  if (cell.contributedCents === 0 && cell.accruedCents === 0) return null;
+  return cell.accruedCents - cell.contributedCents;
 }
 
 export function InvestBoard({ accounts, years, currency }: Props) {
   const [year, setYear] = useState<number>(years[0] ?? new Date().getFullYear());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const mine = accounts.filter((a) => !a.isKids);
   const kids = accounts.filter((a) => a.isKids);
+  const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
+  const chartAccounts = selectedAccount ? [selectedAccount] : mine;
 
   const yearIdx = years.indexOf(year);
   const goPrev = () => yearIdx < years.length - 1 && setYear(years[yearIdx + 1]);
   const goNext = () => yearIdx > 0 && setYear(years[yearIdx - 1]);
 
+  // Summary totals for the selected year (used in hero + stats bar).
+  const summary = useMemo(() => {
+    let contributed = 0;
+    let gains = 0;
+    let current = 0;
+    for (const a of mine) {
+      const c = a.cells[year];
+      if (!c) continue;
+      contributed += c.contributedCents;
+      gains += c.accruedCents;
+      if (c.endBalanceCents != null) current += c.endBalanceCents;
+    }
+    return { contributed, gains, current, accountCount: mine.length };
+  }, [mine, year]);
+
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5 px-4 py-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      {/* Header: title + hero total return + year nav */}
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Invest</h1>
           <p className="text-sm text-muted">
             Contributions vs. unrealized gains, per account, per year.
           </p>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={goPrev}
-            disabled={yearIdx >= years.length - 1}
-            aria-label="Previous year"
-            className="flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-          <select
-            aria-label="Year"
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="cursor-pointer rounded-lg bg-background px-3 py-1.5 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={yearIdx <= 0}
-            aria-label="Next year"
-            className="flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
+        <div className="flex items-end gap-4">
+          <div className="text-right">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+              Total return ({year})
+            </p>
+            <p className={`text-xl font-semibold tabular-nums ${summary.gains >= 0 ? "text-positive" : "text-negative"}`}>
+              {summary.gains >= 0 ? "+" : ""}{formatMoney(summary.gains, currency)}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 self-center">
+            <button
+              type="button"
+              onClick={goPrev}
+              disabled={yearIdx >= years.length - 1}
+              aria-label="Previous year"
+              className="flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <select
+              aria-label="Year"
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="cursor-pointer rounded-lg bg-background px-3 py-1.5 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              {years.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={goNext}
+              disabled={yearIdx <= 0}
+              aria-label="Next year"
+              className="flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -109,10 +137,22 @@ export function InvestBoard({ accounts, years, currency }: Props) {
         </div>
       ) : (
         <>
-          <PerformanceChart accounts={accounts} years={years} currency={currency} />
-          <PerfTable title="Investments" accounts={mine} year={year} currency={currency} />
+          {/* Summary stats bar */}
+          <div className="flex overflow-hidden rounded-2xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
+            <SummaryStat label="Total contributed" value={formatMoney(summary.contributed, currency)} />
+            <SummaryStat
+              label="Unrealized gains"
+              value={formatMoney(summary.gains, currency)}
+              tone={summary.gains >= 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"}
+            />
+            <SummaryStat label="Current value" value={formatMoney(summary.current, currency)} />
+            <SummaryStat label="Accounts" value={String(summary.accountCount)} />
+          </div>
+
+          <PerformanceChart accounts={chartAccounts} years={years} currency={currency} selectedName={selectedAccount?.name ?? null} onClear={() => setSelectedId(null)} />
+          <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} />
           {kids.length > 0 ? (
-            <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} />
+            <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} />
           ) : null}
           <YearByYear accounts={accounts} years={years} currency={currency} />
         </>
@@ -121,26 +161,42 @@ export function InvestBoard({ accounts, years, currency }: Props) {
   );
 }
 
+function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="relative flex-1 px-4 py-4 text-center [&:not(:last-child)]:border-r [&:not(:last-child)]:border-line/70">
+      <p className="text-[11px] font-medium text-muted">{label}</p>
+      <p className={`mt-1 text-xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
+    </div>
+  );
+}
+
 // ─── Performance chart ───────────────────────────────────────────────────────
+
+type ChartMode = "stacked" | "grouped" | "return";
 
 function PerformanceChart({
   accounts,
   years,
   currency,
+  selectedName,
+  onClear,
 }: {
   accounts: InvestAccount[];
   years: number[];
   currency: string;
+  selectedName: string | null;
+  onClear: () => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const asc = useMemo(() => [...years].sort((a, b) => a - b), [years]);
+  const [mode, setMode] = useState<ChartMode>("stacked");
+  const desc = useMemo(() => [...years].sort((a, b) => b - a), [years]);
 
-  // Aggregate contributed + gain per year across all accounts.
   const bars = useMemo(
     () =>
-      asc.map((y) => {
+      desc.map((y) => {
         let contrib = 0;
         let gain = 0;
+        let start = 0;
         let endBal = 0;
         let endAny = false;
         for (const a of accounts) {
@@ -148,63 +204,113 @@ function PerformanceChart({
           if (!c) continue;
           contrib += c.contributedCents;
           gain += c.accruedCents;
+          if (c.startBalanceCents != null) start += c.startBalanceCents;
           if (c.endBalanceCents != null) { endBal += c.endBalanceCents; endAny = true; }
         }
-        return { year: y, contrib, gain, endBal: endAny ? endBal : null };
+        // Simple return: gains ÷ contributions × 100.
+        const returnPctVal = contrib > 0 ? (gain / contrib) * 100 : 0;
+        return { year: y, contrib, gain, endBal: endAny ? endBal : null, returnPct: returnPctVal };
       }),
-    [asc, accounts],
+    [desc, accounts],
   );
 
-  // Chart geometry (viewBox coords).
   const W = 600;
-  const H = 200;
-  const PAD = { top: 16, right: 16, bottom: 32, left: 56 };
+  const H = 220;
+  const PAD = { top: 32, right: 16, bottom: 32, left: 56 };
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
-  const maxBar = Math.max(...bars.map((b) => b.contrib + Math.max(b.gain, 0)), 1);
-  // Round up to a "nice" ceiling so the top bar doesn't clip the axis label.
-  const niceCeil = Math.ceil(maxBar / 10000) * 10000;
-  const scale = (cents: number) => (cents / niceCeil) * chartH;
+  // Max depends on mode: stacked sums, grouped is max of either, return is %.
+  const maxBar = useMemo(() => {
+    if (mode === "return") {
+      const m = Math.max(...bars.map((b) => Math.abs(b.returnPct)), 1);
+      return Math.ceil(m / 5) * 5;
+    }
+    if (mode === "grouped") {
+      return Math.max(...bars.map((b) => Math.max(b.contrib, Math.max(b.gain, 0))), 1);
+    }
+    return Math.max(...bars.map((b) => b.contrib + Math.max(b.gain, 0)), 1);
+  }, [bars, mode]);
 
-  const barW = Math.min(40, (chartW / bars.length) * 0.55);
+  const niceCeil = mode === "return" ? maxBar : Math.ceil(maxBar / 10000) * 10000;
+  const scale = (v: number) => (v / niceCeil) * chartH;
+
   const slotW = chartW / bars.length;
+  const barW = mode === "grouped"
+    ? Math.min(20, (chartW / bars.length) * 0.28)
+    : Math.min(40, (chartW / bars.length) * 0.55);
 
-  // Y-axis ticks (4 steps).
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(niceCeil * f));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => (mode === "return" ? +(niceCeil * f).toFixed(1) : Math.round(niceCeil * f)));
 
-  // End-balance line path.
-  const linePts = bars
-    .map((b, i) => {
-      if (b.endBal == null) return null;
-      const x = PAD.left + slotW * i + slotW / 2;
-      const y = PAD.top + chartH - scale(b.endBal);
-      return `${x},${y}`;
-    })
-    .filter(Boolean);
-  const linePath = linePts.length > 1 ? `M ${linePts.join(" L ")}` : null;
+  // Compact money formatter: input is CENTS, output uses $k for anything >= $1,000.
+  const compactMoney = (cents: number) => {
+    const dollars = Math.abs(cents) / 100;
+    const sign = cents < 0 ? "-" : "";
+    if (dollars >= 1000) return `${sign}$${(dollars / 1000).toFixed(dollars >= 10000 ? 0 : 1)}k`;
+    return `${sign}$${dollars.toFixed(0)}`;
+  };
+
+  const fmtTick = (t: number) => (mode === "return" ? `${t}%` : compactMoney(t));
+
+  const fmtBarTotal = (b: typeof bars[number]) => {
+    if (mode === "return") return `${b.returnPct >= 0 ? "+" : ""}${b.returnPct.toFixed(1)}%`;
+    const total = mode === "stacked" ? b.contrib + Math.max(b.gain, 0) : Math.max(b.contrib, b.gain);
+    return compactMoney(total);
+  };
 
   return (
-    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-4 pt-4 pb-2">
-        <h2 className="text-sm font-bold">Performance</h2>
-        <p className="text-xs text-muted">Total contributed vs. unrealized gains per year</p>
+    <section className="overflow-visible rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
+        <div>
+          <h2 className="text-sm font-bold">
+            Performance by year
+            {selectedName ? <span className="ml-1.5 font-medium text-brand">· {selectedName}</span> : null}
+          </h2>
+          <p className="text-xs text-muted">
+            {mode === "stacked" ? "Stacked: contributions + gains" : mode === "grouped" ? "Grouped: side-by-side comparison" : "% Return: gain vs. base each year"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Mode toggle */}
+          <div className="flex overflow-hidden rounded-lg ring-1 ring-line text-[11px]">
+            {(["stacked", "grouped", "return"] as ChartMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`px-2.5 py-1 font-medium capitalize transition ${mode === m ? "bg-brand-soft text-brand" : "text-muted hover:bg-brand-soft/40 hover:text-foreground"}`}
+              >
+                {m === "return" ? "% Return" : m}
+              </button>
+            ))}
+          </div>
+          {selectedName ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="rounded-md px-2 py-1 text-[11px] font-medium text-muted ring-1 ring-line hover:bg-brand-soft hover:text-foreground"
+            >
+              ✕ Clear filter
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Legend */}
       <div className="flex items-center gap-4 px-4 pb-2 text-xs text-muted">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-brand, #6366f1)" }} />
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-chart-1, #2563eb)" }} />
           Contributed
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-positive, #22c55e)" }} />
-          Gain
-        </span>
-        {linePath && (
+        {mode !== "return" ? (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: "var(--color-foreground, #e2e8f0)", opacity: 0.5 }} />
-            End balance
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-chart-5, #0891b2)" }} />
+            Unrealized gains
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-chart-5, #0891b2)" }} />
+            Annual return %
           </span>
         )}
       </div>
@@ -214,7 +320,7 @@ function PerformanceChart({
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="w-full"
-          style={{ height: "clamp(140px, 22vw, 200px)" }}
+          style={{ height: "clamp(160px, 24vw, 220px)" }}
           aria-label="Investment performance chart"
         >
           {/* Y-axis grid + labels */}
@@ -230,7 +336,7 @@ function PerformanceChart({
                   x={PAD.left - 6} y={y + 4}
                   textAnchor="end" fontSize="9" fill="currentColor" opacity="0.4"
                 >
-                  {t >= 1000 ? `$${(t / 1000).toFixed(0)}k` : `$${t}`}
+                  {fmtTick(t)}
                 </text>
               </g>
             );
@@ -239,10 +345,50 @@ function PerformanceChart({
           {/* Bars */}
           {bars.map((b, i) => {
             const cx = PAD.left + slotW * i + slotW / 2;
-            const bx = cx - barW / 2;
-            const contribH = scale(b.contrib);
-            const gainH = scale(Math.max(b.gain, 0));
             const isHovered = hovered === i;
+
+            // Compute per-mode bar rects.
+            const rects: { x: number; y: number; w: number; h: number; fill: string }[] = [];
+            let totalTopY = PAD.top + chartH; // default: baseline (no bar)
+
+            if (mode === "stacked") {
+              const contribH = scale(b.contrib);
+              const gainH = scale(Math.max(b.gain, 0));
+              const bx = cx - barW / 2;
+              if (contribH > 0) {
+                rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: contribH, fill: "var(--color-chart-1, #2563eb)" });
+              }
+              if (gainH > 0) {
+                rects.push({ x: bx, y: PAD.top + chartH - contribH - gainH, w: barW, h: gainH, fill: "var(--color-chart-5, #0891b2)" });
+              }
+              if (b.gain < 0) {
+                rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--color-negative, #ef4444)" });
+              }
+              totalTopY = PAD.top + chartH - contribH - gainH;
+            } else if (mode === "grouped") {
+              const contribH = scale(b.contrib);
+              const gainH = scale(Math.max(b.gain, 0));
+              const gap = 2;
+              const bxL = cx - barW - gap / 2;
+              const bxR = cx + gap / 2;
+              if (contribH > 0) {
+                rects.push({ x: bxL, y: PAD.top + chartH - contribH, w: barW, h: contribH, fill: "var(--color-chart-1, #2563eb)" });
+              }
+              if (gainH > 0) {
+                rects.push({ x: bxR, y: PAD.top + chartH - gainH, w: barW, h: gainH, fill: "var(--color-chart-5, #0891b2)" });
+              }
+              if (b.gain < 0) {
+                rects.push({ x: bxR, y: PAD.top + chartH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--color-negative, #ef4444)" });
+              }
+              totalTopY = PAD.top + chartH - Math.max(contribH, gainH);
+            } else {
+              // return: single bar for return pct
+              const h = scale(Math.abs(b.returnPct));
+              const bx = cx - barW / 2;
+              const fill = b.returnPct >= 0 ? "var(--color-chart-5, #0891b2)" : "var(--color-negative, #ef4444)";
+              rects.push({ x: bx, y: PAD.top + chartH - h, w: barW, h, fill });
+              totalTopY = PAD.top + chartH - h;
+            }
 
             return (
               <g key={b.year}>
@@ -255,9 +401,7 @@ function PerformanceChart({
                   fill="transparent"
                   onMouseEnter={() => setHovered(i)}
                   onMouseLeave={() => setHovered(null)}
-                  style={{ cursor: "default" }}
                 />
-                {/* Hover highlight */}
                 {isHovered && (
                   <rect
                     x={PAD.left + slotW * i}
@@ -267,36 +411,29 @@ function PerformanceChart({
                     fill="currentColor"
                     opacity="0.04"
                     rx="2"
+                    pointerEvents="none"
                   />
                 )}
-                {/* Contributed bar */}
-                <rect
-                  x={bx} y={PAD.top + chartH - contribH}
-                  width={barW} height={contribH}
-                  rx="3" ry="3"
-                  fill="var(--color-brand, #6366f1)"
-                  opacity={isHovered ? 1 : 0.8}
-                />
-                {/* Gain bar (stacked on top) */}
-                {gainH > 0 && (
+                {rects.map((r, ri) => (
                   <rect
-                    x={bx} y={PAD.top + chartH - contribH - gainH}
-                    width={barW} height={gainH}
+                    key={ri}
+                    x={r.x} y={r.y} width={r.w} height={r.h}
                     rx="3" ry="3"
-                    fill="var(--color-positive, #22c55e)"
-                    opacity={isHovered ? 1 : 0.8}
+                    fill={r.fill}
+                    opacity={isHovered ? 1 : 0.85}
+                    pointerEvents="none"
                   />
-                )}
-                {/* Negative gain bar (below baseline) */}
-                {b.gain < 0 && (
-                  <rect
-                    x={bx} y={PAD.top + chartH - contribH}
-                    width={barW} height={scale(Math.abs(b.gain))}
-                    rx="3" ry="3"
-                    fill="var(--color-negative, #ef4444)"
-                    opacity={isHovered ? 1 : 0.8}
-                  />
-                )}
+                ))}
+                {/* Bar total label above */}
+                {rects.length > 0 ? (
+                  <text
+                    x={cx} y={totalTopY - 4}
+                    textAnchor="middle" fontSize="9.5" fontWeight="600"
+                    fill="currentColor" opacity="0.7" pointerEvents="none"
+                  >
+                    {fmtBarTotal(b)}
+                  </text>
+                ) : null}
                 {/* X-axis label */}
                 <text
                   x={cx} y={PAD.top + chartH + 14}
@@ -307,37 +444,10 @@ function PerformanceChart({
               </g>
             );
           })}
-
-          {/* End-balance line */}
-          {linePath && (
-            <>
-              <path
-                d={linePath}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.35"
-                strokeDasharray="4 3"
-              />
-              {bars.map((b, i) => {
-                if (b.endBal == null) return null;
-                const x = PAD.left + slotW * i + slotW / 2;
-                const y = PAD.top + chartH - scale(b.endBal);
-                return (
-                  <circle key={b.year} cx={x} cy={y} r="2.5"
-                    fill="var(--color-surface, #1e293b)"
-                    stroke="currentColor" strokeWidth="1.5" opacity="0.5"
-                  />
-                );
-              })}
-            </>
-          )}
         </svg>
 
         {hovered !== null && bars[hovered] ? (
-          <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} />
+          <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} mode={mode} />
         ) : null}
       </div>
     </section>
@@ -349,11 +459,13 @@ function ChartTooltip({
   hovered,
   total,
   currency,
+  mode,
 }: {
-  b: { year: number; contrib: number; gain: number; endBal: number | null };
+  b: { year: number; contrib: number; gain: number; endBal: number | null; returnPct: number };
   hovered: number;
   total: number;
   currency: string;
+  mode: ChartMode;
 }) {
   const slotPct = ((hovered + 0.5) / total) * 100;
   return (
@@ -369,11 +481,14 @@ function ChartTooltip({
       <div className="space-y-0.5 text-muted">
         <div>Contributed <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
         <div>
-          Gain{" "}
-          <span className={`font-medium ${b.gain >= 0 ? "text-positive" : "text-negative"}`}>
+          Unrealized gains{" "}
+          <span className="font-medium" style={{ color: b.gain >= 0 ? "var(--color-chart-5, #0891b2)" : "var(--color-negative)" }}>
             {formatMoney(b.gain, currency)}
           </span>
         </div>
+        {mode === "return" ? (
+          <div>Return <span className={`font-medium ${b.returnPct >= 0 ? "text-positive" : "text-negative"}`}>{b.returnPct >= 0 ? "+" : ""}{b.returnPct.toFixed(1)}%</span></div>
+        ) : null}
         {b.endBal != null && (
           <div>End balance <span className="font-medium text-foreground">{formatMoney(b.endBal, currency)}</span></div>
         )}
@@ -387,11 +502,15 @@ function PerfTable({
   accounts,
   year,
   currency,
+  selectedId,
+  onSelect,
 }: {
   title: string;
   accounts: InvestAccount[];
   year: number;
   currency: string;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
   if (accounts.length === 0) return null;
   const key = `invest-table-${title.toLowerCase().replace(/\s+/g, "-")}`;
@@ -399,9 +518,11 @@ function PerfTable({
   const collapsed = collapseState.v;
   const toggle = () => setCollapseState((s) => ({ ...s, v: !s.v }));
 
-  // Group totals for the selected year.
+  // Group totals for the selected year. Effective start uses prior-year end as fallback.
   let startSum = 0;
   let startAny = false;
+  let effStartSum = 0;
+  let effStartAny = false;
   let endSum = 0;
   let endAny = false;
   let contribSum = 0;
@@ -410,13 +531,30 @@ function PerfTable({
     const c = a.cells[year];
     if (!c) continue;
     if (c.startBalanceCents != null) { startSum += c.startBalanceCents; startAny = true; }
+    const eff = c.startBalanceCents ?? a.cells[year - 1]?.endBalanceCents ?? null;
+    if (eff != null) { effStartSum += eff; effStartAny = true; }
     if (c.endBalanceCents != null) { endSum += c.endBalanceCents; endAny = true; }
     contribSum += c.contributedCents;
     accruedSum += c.accruedCents;
   }
-  const totalReturn = startAny
-    ? returnPct({ startBalanceCents: startSum, contributedCents: contribSum, accruedCents: accruedSum })
-    : null;
+  const totalReturn = returnPct(
+    { startBalanceCents: effStartAny ? effStartSum : null, contributedCents: contribSum, accruedCents: accruedSum },
+  );
+
+  // Sort accounts by current value (End of Year) descending so biggest holdings surface first.
+  const sortedAccounts = useMemo(
+    () =>
+      [...accounts].sort((a, b) => {
+        const av = a.cells[year]?.endBalanceCents ?? 0;
+        const bv = b.cells[year]?.endBalanceCents ?? 0;
+        return bv - av;
+      }),
+    [accounts, year],
+  );
+
+  // Hide "Start" column when every account has a null/zero start for the year — reduces noise.
+  const showStart = startAny && startSum > 0;
+  const zeroCls = "text-muted/50";
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -433,40 +571,50 @@ function PerfTable({
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <h2 className="flex-1 text-sm font-bold">{title}</h2>
+        <h2 className="flex-1 text-sm font-bold">
+          {title}
+          <span className="ml-2 text-xs font-normal text-muted">{accounts.length} account{accounts.length === 1 ? "" : "s"}</span>
+        </h2>
         {collapsed && (
           <div className="flex items-center gap-4 text-xs tabular-nums text-muted">
-            <span>Contributed <span className="font-semibold text-foreground">{formatMoney(contribSum, currency)}</span></span>
-            <span>Gain <span className={`font-semibold ${gainTone(accruedSum)}`}>{formatMoney(accruedSum, currency)}</span></span>
-            {endAny && <span>End <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
+            <span>Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
+            <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--color-chart-5, #0891b2)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
+            {endAny && <span>Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
           </div>
         )}
       </button>
       {collapsed ? null : <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-[11px] uppercase tracking-wide text-muted">
-              <th className="px-4 py-2 text-left font-semibold">Account</th>
-              <th className="px-3 py-2 text-center font-semibold">Start of Year</th>
-              <th className="px-3 py-2 text-center font-semibold">Contributed</th>
-              <th className="px-3 py-2 text-center font-semibold">Unrealized Gain</th>
-              <th className="px-3 py-2 text-center font-semibold">End of Year</th>
-              <th className="px-4 py-2 text-center font-semibold">Return</th>
+            <tr className="text-[11px] font-medium text-muted">
+              <th className="px-4 py-2 text-left">Account</th>
+              {showStart ? <th className="px-3 py-2 text-center">Start</th> : null}
+              <th className="px-3 py-2 text-center">Contrib</th>
+              <th className="px-3 py-2 text-center">Gains</th>
+              <th className="px-3 py-2 text-center">Current</th>
+              <th className="px-4 py-2 text-center">Return</th>
             </tr>
           </thead>
           <tbody>
-            {accounts.map((a) => {
+            {sortedAccounts.map((a) => {
               const c = a.cells[year];
               const start = c?.startBalanceCents ?? null;
               const end = c?.endBalanceCents ?? null;
               const contributed = c?.contributedCents ?? 0;
               const accrued = c?.accruedCents ?? 0;
-              const ret = c ? returnPct(c) : null;
+              const priorEnd = a.cells[year - 1]?.endBalanceCents ?? null;
+              const ret = c ? returnPct(c, priorEnd) : null;
+              const isSelected = selectedId === a.id;
               return (
-                <tr key={a.id} className="border-t border-line/70">
+                <tr key={a.id} className={`border-t border-line/70 transition ${isSelected ? "bg-brand-soft/40" : "hover:bg-brand-soft/10"}`}>
                   <td className="px-4 py-2">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="font-medium">{a.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(a.id)}
+                      className="flex items-baseline gap-1.5 text-left"
+                      title={isSelected ? "Click to clear filter" : "Filter chart to this account"}
+                    >
+                      <span className={`font-medium ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
                       {a.subtype ? (
                         <span className="text-[11px] text-muted">{a.subtype}</span>
                       ) : null}
@@ -475,22 +623,24 @@ function PerfTable({
                           {a.holder}
                         </span>
                       ) : null}
-                    </div>
+                    </button>
+                  </td>
+                  {showStart ? (
+                    <td className="px-1 py-1">
+                      <EditCell accountId={a.id} year={year} field="start" cents={start ?? 0} placeholder={start == null} currency={currency} tone={(start ?? 0) === 0 ? zeroCls : "text-muted"} />
+                    </td>
+                  ) : null}
+                  <td className="px-1 py-1">
+                    <EditCell accountId={a.id} year={year} field="contributed" cents={contributed} currency={currency} tone={contributed === 0 ? zeroCls : ""} />
                   </td>
                   <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="start" cents={start ?? 0} placeholder={start == null} currency={currency} tone="text-muted" />
+                    <EditCell accountId={a.id} year={year} field="accrued" cents={accrued} currency={currency} tone={accrued === 0 ? zeroCls : accrued > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
                   </td>
                   <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="contributed" cents={contributed} currency={currency} tone="" />
+                    <EditCell accountId={a.id} year={year} field="end" cents={end ?? 0} placeholder={end == null} currency={currency} tone={(end ?? 0) === 0 ? zeroCls : "font-medium"} />
                   </td>
-                  <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="accrued" cents={accrued} currency={currency} tone={gainTone(accrued)} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="end" cents={end ?? 0} placeholder={end == null} currency={currency} tone="font-medium" />
-                  </td>
-                  <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? "text-muted" : gainTone(accrued)}`}>
-                    {ret == null ? "—" : `${ret > 0 ? "+" : ""}${ret.toFixed(1)}%`}
+                  <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
+                    {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
                   </td>
                 </tr>
               );
@@ -499,18 +649,23 @@ function PerfTable({
           <tfoot>
             <tr className="border-t-2 border-line bg-background/40 font-semibold">
               <td className="px-4 py-2">Total</td>
-              <td className="px-3 py-2 text-center tabular-nums text-muted">
-                {startAny ? formatMoney(startSum, currency) : "—"}
-              </td>
-              <td className="px-3 py-2 text-center tabular-nums">{formatMoney(contribSum, currency)}</td>
-              <td className={`px-3 py-2 text-center tabular-nums ${gainTone(accruedSum)}`}>
+              {showStart ? (
+                <td className={`px-3 py-2 text-center tabular-nums ${startAny ? "text-muted" : zeroCls}`}>
+                  {startAny ? formatMoney(startSum, currency) : "—"}
+                </td>
+              ) : null}
+              <td className={`px-3 py-2 text-center tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
+              <td
+                className={`px-3 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
+                style={accruedSum > 0 ? { color: "var(--color-chart-5, #0891b2)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
+              >
                 {formatMoney(accruedSum, currency)}
               </td>
-              <td className="px-3 py-2 text-center tabular-nums font-medium">
+              <td className={`px-3 py-2 text-center tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
                 {endAny ? formatMoney(endSum, currency) : "—"}
               </td>
-              <td className={`px-4 py-2 text-center tabular-nums ${totalReturn == null ? "text-muted" : gainTone(accruedSum)}`}>
-                {totalReturn == null ? "—" : `${totalReturn > 0 ? "+" : ""}${totalReturn.toFixed(1)}%`}
+              <td className={`px-4 py-2 text-center tabular-nums ${totalReturn == null ? zeroCls : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : zeroCls}`}>
+                {totalReturn == null ? "—" : `${totalReturn > 0 ? "+" : ""}${formatMoney(totalReturn, currency)}`}
               </td>
             </tr>
           </tfoot>
@@ -585,10 +740,14 @@ function YearByYear({
   years: number[];
   currency: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [mineCollapsed, setMineCollapsed] = useState(false);
-  const [kidsCollapsed, setKidsCollapsed] = useState(false);
-  const asc = useMemo(() => [...years].sort((a, b) => a - b), [years]);
+  const [collapseState, setCollapseState] = useSessionCollapse("invest-yby", () => ({ open: false, mine: true, kids: true }));
+  const open = collapseState.open;
+  const setOpen = (v: boolean | ((p: boolean) => boolean)) => setCollapseState((s) => ({ ...s, open: typeof v === "function" ? v(s.open) : v }));
+  const mineCollapsed = collapseState.mine;
+  const setMineCollapsed = (v: boolean | ((p: boolean) => boolean)) => setCollapseState((s) => ({ ...s, mine: typeof v === "function" ? v(s.mine) : v }));
+  const kidsCollapsed = collapseState.kids;
+  const setKidsCollapsed = (v: boolean | ((p: boolean) => boolean)) => setCollapseState((s) => ({ ...s, kids: typeof v === "function" ? v(s.kids) : v }));
+  const desc = useMemo(() => [...years].sort((a, b) => b - a), [years]);
   const mine = accounts.filter((a) => !a.isKids);
   const kids = accounts.filter((a) => a.isKids);
 
@@ -617,7 +776,7 @@ function YearByYear({
               <tr className="text-[11px] uppercase tracking-wide text-muted">
                 <th className="px-4 py-2 text-left font-semibold">Account</th>
                 <th className="px-3 py-2 text-left font-semibold">Metric</th>
-                {asc.map((y) => (
+                {desc.map((y) => (
                   <th key={y} className="px-3 py-2 text-center font-semibold">{y}</th>
                 ))}
               </tr>
@@ -631,7 +790,7 @@ function YearByYear({
                   </span>
                 </td>
                 <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">{mineCollapsed ? "Contributed + Gain" : ""}</td>
-                {asc.map((y) => {
+                {desc.map((y) => {
                   const contrib = mine.reduce((s, a) => s + (a.cells[y]?.contributedCents ?? 0), 0);
                   const gain = mine.reduce((s, a) => s + (a.cells[y]?.accruedCents ?? 0), 0);
                   return (
@@ -646,7 +805,7 @@ function YearByYear({
                   <tr className="border-t border-line/70">
                     <td rowSpan={2} className="px-4 py-2 align-top font-medium">{a.name}</td>
                     <td className="px-3 py-1.5 text-muted">Contributed</td>
-                    {asc.map((y) => (
+                    {desc.map((y) => (
                       <td key={y} className="px-3 py-1.5 text-center tabular-nums">
                         {formatMoney(a.cells[y]?.contributedCents ?? 0, currency)}
                       </td>
@@ -654,7 +813,7 @@ function YearByYear({
                   </tr>
                   <tr>
                     <td className="px-3 py-1.5 text-muted">Gain</td>
-                    {asc.map((y) => {
+                    {desc.map((y) => {
                       const g = a.cells[y]?.accruedCents ?? 0;
                       return (
                         <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
@@ -674,7 +833,7 @@ function YearByYear({
                     </span>
                   </td>
                   <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">{kidsCollapsed ? "Contributed + Gain" : ""}</td>
-                  {asc.map((y) => {
+                  {desc.map((y) => {
                     const contrib = kids.reduce((s, a) => s + (a.cells[y]?.contributedCents ?? 0), 0);
                     const gain = kids.reduce((s, a) => s + (a.cells[y]?.accruedCents ?? 0), 0);
                     return (
@@ -690,7 +849,7 @@ function YearByYear({
                   <tr className="border-t border-line/70">
                     <td rowSpan={2} className="px-4 py-2 align-top font-medium">{a.name}</td>
                     <td className="px-3 py-1.5 text-muted">Contributed</td>
-                    {asc.map((y) => (
+                    {desc.map((y) => (
                       <td key={y} className="px-3 py-1.5 text-center tabular-nums">
                         {formatMoney(a.cells[y]?.contributedCents ?? 0, currency)}
                       </td>
@@ -698,7 +857,7 @@ function YearByYear({
                   </tr>
                   <tr>
                     <td className="px-3 py-1.5 text-muted">Gain</td>
-                    {asc.map((y) => {
+                    {desc.map((y) => {
                       const g = a.cells[y]?.accruedCents ?? 0;
                       return (
                         <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>

@@ -45,6 +45,8 @@ export type CardDetails = {
   feesPaidCents: number;
   freeNightCreditCents: number | null;
   freeNightExpiresOn: string | null;
+  freeNightPointsLimit: number | null;
+  benefitUsedOn: string | null;
   spendingLimitCents: number | null;
   remarks: string | null;
   isRevolvingDebt: boolean;
@@ -662,16 +664,6 @@ function CreditCardPanel({
                 {bank}
               </span>
             ) : null}
-            {d?.authUser ? (
-              <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
-                Auth: {d.authUser}
-              </span>
-            ) : null}
-            {d?.isRevolvingDebt ? (
-              <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-                0% APR debt
-              </span>
-            ) : null}
             {card.dateClosed ? (
               <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
                 Closed {card.dateClosed}
@@ -729,11 +721,18 @@ function CreditCardPanel({
             <DetailRow
               label="Free night"
               value={
-                d?.freeNightCreditCents || d?.freeNightExpiresOn
-                  ? `${d.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : ""}${d.freeNightExpiresOn ? ` · expires ${d.freeNightExpiresOn}` : ""}`
+                d?.freeNightCreditCents || d?.freeNightExpiresOn || d?.freeNightPointsLimit
+                  ? [
+                      d.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : null,
+                      d.freeNightPointsLimit ? `${d.freeNightPointsLimit.toLocaleString()} pts` : null,
+                      d.freeNightExpiresOn ? `expires ${d.freeNightExpiresOn}` : null,
+                    ].filter(Boolean).join(" · ")
                   : "—"
               }
             />
+            {d?.benefitUsedOn ? (
+              <DetailRow label="Used / scheduled" value={d.benefitUsedOn} />
+            ) : null}
             <DetailRow label="Closed" value={card.dateClosed ?? "—"} />
             <DetailRow
               label="Spending limit"
@@ -845,7 +844,6 @@ function EditCreditCardForm({
   const [saveDetailsPending, startSaveDetails] = useTransition();
   const [delPending, startDel] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [isRevolving, setIsRevolving] = useState(card.cardDetails?.isRevolvingDebt ?? false);
   const d = card.cardDetails;
 
   return (
@@ -884,13 +882,20 @@ function EditCreditCardForm({
         {/* keep subtype for legacy back-compat, hidden — bank is edited in the details form */}
         <input type="hidden" name="subtype" value={card.subtype ?? ""} />
         <input type="hidden" name="active" value={card.active ? "on" : ""} />
-        <div className="sm:col-span-2">
+        <div className="flex items-center gap-2 sm:col-span-2">
           <button
             type="submit"
             disabled={saveAcctPending}
             className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70 disabled:opacity-60"
           >
             {saveAcctPending ? "Saving…" : "Save card basics"}
+          </button>
+          <button
+            type="button"
+            onClick={onDone}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
+          >
+            Cancel
           </button>
         </div>
       </form>
@@ -907,7 +912,7 @@ function EditCreditCardForm({
       >
         <input type="hidden" name="accountId" value={card.id} />
         <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
-        <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="Johana" />
+        <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
         <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
         <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
         <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
@@ -922,9 +927,11 @@ function EditCreditCardForm({
           />
           Bonus earned
         </label>
-        <LabeledInput label="Free-night credit" name="freeNightCredit" type="number" step="0.01" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} placeholder="100" />
+        <LabeledInput label="Free-night credit ($)" name="freeNightCredit" type="number" step="0.01" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
         <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-        <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} placeholder="7000" />
+        <LabeledInput label="Free night (pts limit)" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
+        <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
+        <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
         <LabeledInput label="Fees paid this year" name="feesPaid" type="number" step="0.01" defaultValue={d?.feesPaidCents ? centsToDisplay(d.feesPaidCents) : ""} />
         <div className="sm:col-span-2">
           <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -933,50 +940,27 @@ function EditCreditCardForm({
           <input
             name="remarks"
             defaultValue={d?.remarks ?? ""}
-            placeholder="Booked for 6JUL26, etc."
+            placeholder=""
             className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
-        <div className="sm:col-span-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted">
-            <input
-              type="checkbox"
-              name="isRevolvingDebt"
-              checked={isRevolving}
-              onChange={(e) => setIsRevolving(e.target.checked)}
-              className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
-            />
-            Treat as revolving debt (0% APR promo — charges count toward Net Worth)
-          </label>
-        </div>
-        {isRevolving ? (
-          <div className="sm:col-span-2">
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-              Linked debt subcategory
-            </label>
-            <select
-              name="debtSubcategoryId"
-              defaultValue={d?.debtSubcategoryId ?? ""}
-              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Not linked</option>
-              {debtSubcategories.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <p className="mt-0.5 text-[10px] text-muted">
-              Payments will also decrement this debt in the Budget so Net Worth stays in sync.
-            </p>
-          </div>
-        ) : null}
         <div className="sm:col-span-2 flex items-center justify-between gap-2 pt-1">
-          <button
-            type="submit"
-            disabled={saveDetailsPending}
-            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
-          >
-            {saveDetailsPending ? "Saving…" : "Save rewards details"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={saveDetailsPending}
+              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+            >
+              {saveDetailsPending ? "Saving…" : "Save rewards details"}
+            </button>
+            <button
+              type="button"
+              onClick={onDone}
+              className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
+            >
+              Cancel
+            </button>
+          </div>
           {confirmDelete ? (
             <span className="flex items-center gap-2">
               <span className="text-xs text-muted">Delete &quot;{card.name}&quot;?</span>
