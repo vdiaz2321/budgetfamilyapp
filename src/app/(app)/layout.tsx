@@ -29,7 +29,7 @@ export default async function AppLayout({
   // Sidebar account list (YNAB-style): cash + investment accounts from
   // Accounts, debts from Budget (single source of truth), split like YNAB's
   // "Credit Card / Loans" sections.
-  const [{ data: household }, { data: accounts }, { data: debts }, { data: subs }] =
+  const [{ data: household }, { data: accounts }, { data: buckets }, { data: debts }, { data: subs }] =
     await Promise.all([
       supabase.from("households").select("currency").eq("id", profile.household_id).single(),
       supabase
@@ -37,6 +37,10 @@ export default async function AppLayout({
         .select("id, name, kind, active, is_kids_account, current_balance_cents")
         .eq("household_id", profile.household_id)
         .order("name"),
+      supabase
+        .from("buckets")
+        .select("id, account_id, name, balance_cents")
+        .eq("household_id", profile.household_id),
       supabase
         .from("debts")
         .select("subcategory_id, current_balance_cents, debt_kind")
@@ -52,17 +56,42 @@ export default async function AppLayout({
   // always excluded from the Net Worth pill — it's their money, not the
   // household's.
   const active = (accounts ?? []).filter((a) => a.active !== false);
-  const toItem = (a: {
+
+  // Group buckets by their parent account so we can swap accounts-with-buckets
+  // out for their individual buckets in the sidebar list.
+  const bucketsByAccount = new Map<string, { id: string; name: string; balance_cents: number }[]>();
+  for (const b of buckets ?? []) {
+    const list = bucketsByAccount.get(b.account_id) ?? [];
+    list.push(b);
+    bucketsByAccount.set(b.account_id, list);
+  }
+
+  type SidebarItem = { id: string; name: string; balanceCents: number; inNetWorth?: boolean };
+
+  const expandAccount = (a: {
     id: string;
     name: string;
     is_kids_account?: boolean | null;
     current_balance_cents: number | null;
-  }) => ({
-    id: a.id,
-    name: a.name,
-    balanceCents: a.current_balance_cents ?? 0,
-    inNetWorth: !a.is_kids_account,
-  });
+  }): SidebarItem[] => {
+    const bs = bucketsByAccount.get(a.id);
+    if (bs && bs.length > 0) {
+      return bs.map((b) => ({
+        id: b.id,
+        name: b.name,
+        balanceCents: b.balance_cents ?? 0,
+        inNetWorth: !a.is_kids_account,
+      }));
+    }
+    return [
+      {
+        id: a.id,
+        name: a.name,
+        balanceCents: a.current_balance_cents ?? 0,
+        inNetWorth: !a.is_kids_account,
+      },
+    ];
+  };
 
   const debtItems = (debts ?? [])
     .filter((d) => (d.current_balance_cents ?? 0) > 0)
@@ -77,31 +106,52 @@ export default async function AppLayout({
   const byBalanceDesc = (a: { balanceCents: number }, b: { balanceCents: number }) =>
     b.balanceCents - a.balanceCents;
 
+  // Build a group from the raw accounts list (used for totals) plus the
+  // expanded items (buckets when they exist) shown in the UI.
+  const buildGroup = (
+    label: string,
+    accountsInGroup: typeof active,
+    opts: { liability?: boolean } = {},
+  ): SidebarGroup => {
+    const totalCents = accountsInGroup.reduce((s, a) => s + (a.current_balance_cents ?? 0), 0);
+    const netWorthCents = accountsInGroup.reduce(
+      (s, a) => s + (a.is_kids_account ? 0 : a.current_balance_cents ?? 0),
+      0,
+    );
+    return {
+      label,
+      items: accountsInGroup.flatMap(expandAccount).sort(byBalanceDesc),
+      totalCents,
+      netWorthCents,
+      ...opts,
+    };
+  };
+
+  const debtTotal = (items: typeof debtItems) => items.reduce((s, d) => s + d.balanceCents, 0);
+
+  const ccItems = debtItems.filter((d) => d.kind === "credit_card").sort(byBalanceDesc);
+  const loanItems = debtItems.filter((d) => d.kind !== "credit_card").sort(byBalanceDesc);
+
   const groups: SidebarGroup[] = [
+    buildGroup("Banking", active.filter((a) => !a.is_kids_account && cashKinds.has(a.kind))),
+    buildGroup("Investments", active.filter((a) => !a.is_kids_account && a.kind === "investment")),
     {
-      label: "Banking",
-      items: active.filter((a) => !a.is_kids_account && cashKinds.has(a.kind)).map(toItem).sort(byBalanceDesc),
-    },
-    {
-      label: "Investments",
-      items: active.filter((a) => !a.is_kids_account && a.kind === "investment").map(toItem).sort(byBalanceDesc),
-    },
-    {
-      label: "Credit Cards",
-      items: debtItems.filter((d) => d.kind === "credit_card").sort(byBalanceDesc),
+      label: "Debt",
+      items: ccItems,
       liability: true,
+      totalCents: debtTotal(ccItems),
+      netWorthCents: debtTotal(ccItems),
     },
     {
       label: "Loans",
-      items: debtItems.filter((d) => d.kind !== "credit_card").sort(byBalanceDesc),
+      items: loanItems,
       liability: true,
+      totalCents: debtTotal(loanItems),
+      netWorthCents: debtTotal(loanItems),
     },
     // Kids Funding sits at the bottom — it's the kids' money, excluded from the
     // Net Worth pill, so it reads as a footnote to the household's own accounts.
-    {
-      label: "Kids Funding",
-      items: active.filter((a) => a.is_kids_account).map(toItem).sort(byBalanceDesc),
-    },
+    buildGroup("Kids Funding", active.filter((a) => a.is_kids_account)),
   ];
 
   return (

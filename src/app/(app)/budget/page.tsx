@@ -127,12 +127,12 @@ export default async function BudgetPage({
     // auto-fill AND the Subscriptions & Irregular Bills section below Debt.
     supabase
       .from("subscriptions")
-      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, notes")
+      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, account_id, notes")
       .eq("household_id", household.id)
       .order("name"),
     supabase
       .from("irregular_bills")
-      .select("id, name, typical_amount_cents, subcategory_id, notes")
+      .select("id, name, typical_amount_cents, subcategory_id, account_id, notes")
       .eq("household_id", household.id)
       .order("name"),
   ]);
@@ -179,6 +179,7 @@ export default async function BudgetPage({
               ? {
                   goalCents: g?.goal_cents ?? 0,
                   startCents: g?.start_cents ?? 0,
+
                   monthlyCents: g?.monthly_contribution_cents ?? 0,
                   targetDate: g?.target_date ?? null,
                   linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
@@ -195,6 +196,7 @@ export default async function BudgetPage({
                   notes: d?.notes ?? null,
                   promoAprEndsOn: d?.promo_apr_ends_on ?? null,
                   accountId: d?.account_id ?? null,
+                  linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
                 }
               : null,
         };
@@ -357,6 +359,7 @@ export default async function BudgetPage({
     nextRenewalDate: s.next_renewal_date,
     isActive: s.is_active,
     subcategoryId: s.subcategory_id,
+    accountId: s.account_id ?? null,
     notes: s.notes,
   }));
 
@@ -365,8 +368,13 @@ export default async function BudgetPage({
     name: b.name,
     typicalAmountCents: b.typical_amount_cents,
     subcategoryId: b.subcategory_id,
+    accountId: b.account_id ?? null,
     notes: b.notes,
   }));
+
+  const creditCards = (accounts ?? [])
+    .filter((a) => a.kind === "credit_card")
+    .map((a) => ({ id: a.id, name: a.name }));
 
   return (
     <BudgetBoard
@@ -399,6 +407,7 @@ export default async function BudgetPage({
       transactions={transactions}
       subscriptions={subscriptionRows}
       irregularBills={irregularBillRows}
+      creditCards={creditCards}
     />
   );
 }

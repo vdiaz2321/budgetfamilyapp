@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -23,6 +23,7 @@ import type {
   SubOption,
   TxData,
 } from "./types";
+import type { CreditCardOption } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 
 type Props = {
@@ -49,6 +50,7 @@ type Props = {
   transactions: TxData[];
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
+  creditCards?: CreditCardOption[];
 };
 
 export function BudgetBoard({
@@ -70,17 +72,25 @@ export function BudgetBoard({
   transactions,
   subscriptions,
   irregularBills,
+  creditCards,
 }: Props) {
-  const [railTab, setRailTab] = useState<"summary" | "transactions">("transactions");
+  const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
+  useEffect(() => {
+    const saved = sessionStorage.getItem("budget-rail-tab");
+    if (saved === "summary" || saved === "transactions") setRailTab(saved);
+  }, []);
+  useEffect(() => {
+    sessionStorage.setItem("budget-rail-tab", railTab);
+  }, [railTab]);
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
   // Each group's open/collapsed state, persisted per-session (survives
   // navigating away and back, resets on a fresh login) — same pattern as
   // Net Worth / Accounts. Groups default open.
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
-    Object.fromEntries([...groups.map((g) => [g.categoryId, true]), ["subscriptions", true], ["irregularBills", true]]),
+    Object.fromEntries([...groups.map((g) => [g.categoryId, false]), ["subscriptions", false], ["irregularBills", false]]),
   );
   const toggleGroup = (categoryId: string) =>
-    setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? true) }));
+    setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? false) }));
   // Set from the item panel's "+ Add transaction" button so it doesn't
   // require switching to the Log tab first.
   const [quickAdd, setQuickAdd] = useState(false);
@@ -101,6 +111,15 @@ export function BudgetBoard({
   const actualSpent = groups
     .filter((g) => g.kind !== "income")
     .reduce((sum, g) => sum + g.spentTotal, 0);
+
+  const kindTotals = (kinds: string[]) => ({
+    planned: groups.filter((g) => kinds.includes(g.kind)).reduce((s, g) => s + g.plannedTotal, 0),
+    spent: groups.filter((g) => kinds.includes(g.kind)).reduce((s, g) => s + g.spentTotal, 0),
+  });
+  const billsExpenses = kindTotals(["bills", "expenses"]);
+  const savings = kindTotals(["savings"]);
+  const debt = kindTotals(["debt"]);
+
   // What's really left of the cash you've actually received this month.
   const actualLeft = actualIncome - actualSpent;
 
@@ -168,6 +187,9 @@ export function BudgetBoard({
           outflowPlanned={outflowPlanned}
           actualIncome={actualIncome}
           actualSpent={actualSpent}
+          billsExpenses={billsExpenses}
+          savings={savings}
+          debt={debt}
           currency={currency}
         />
 
@@ -207,7 +229,7 @@ export function BudgetBoard({
                 monthKey={month.firstOfMonth}
                 selectedSubId={selected?.subId ?? null}
                 onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
-                open={openGroups[group.categoryId] ?? true}
+                open={openGroups[group.categoryId] ?? false}
                 onToggle={() => toggleGroup(group.categoryId)}
                 snowballFocusSubId={snowballFocusSubId}
               />
@@ -217,7 +239,8 @@ export function BudgetBoard({
               currency={currency}
               subscriptions={subscriptions}
               irregularBills={irregularBills}
-              open={openGroups["subscriptions"] ?? true}
+              creditCards={creditCards}
+              open={openGroups["subscriptions"] ?? false}
               onToggle={() => toggleGroup("subscriptions")}
             />
 
@@ -225,7 +248,8 @@ export function BudgetBoard({
               currency={currency}
               subscriptions={subscriptions}
               irregularBills={irregularBills}
-              open={openGroups["irregularBills"] ?? true}
+              creditCards={creditCards}
+              open={openGroups["irregularBills"] ?? false}
               onToggle={() => toggleGroup("irregularBills")}
             />
           </div>
@@ -354,12 +378,7 @@ function ProgressBar({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-sm">
-        <span className="flex items-center gap-1 text-muted">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d={arrow === "up" ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M5 12l7 7 7-7"} />
-          </svg>
-          {label}
-        </span>
+        <span className="text-muted">{label}</span>
         <span className="tabular-nums">
           <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
           <span className="text-muted">/ {formatMoney(planned, currency)} planned</span>
@@ -382,6 +401,9 @@ function SummaryHeroCard({
   outflowPlanned,
   actualIncome,
   actualSpent,
+  billsExpenses,
+  savings,
+  debt,
   currency,
 }: {
   actualLeft: number;
@@ -390,6 +412,9 @@ function SummaryHeroCard({
   outflowPlanned: number;
   actualIncome: number;
   actualSpent: number;
+  billsExpenses: { planned: number; spent: number };
+  savings: { planned: number; spent: number };
+  debt: { planned: number; spent: number };
   currency: string;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
@@ -420,23 +445,11 @@ function SummaryHeroCard({
         </div>
       </div>
 
-      <div className="mt-5 flex flex-col gap-4">
-        <ProgressBar
-          label="Income"
-          arrow="up"
-          actual={actualIncome}
-          planned={incomePlanned}
-          fillClassName="bg-positive"
-          currency={currency}
-        />
-        <ProgressBar
-          label="Expenses"
-          arrow="down"
-          actual={actualSpent}
-          planned={outflowPlanned}
-          fillClassName="bg-negative"
-          currency={currency}
-        />
+      <div className="mt-5 flex flex-col gap-3">
+        <ProgressBar label="Income" arrow="up" actual={actualIncome} planned={incomePlanned} fillClassName="bg-positive" currency={currency} />
+        <ProgressBar label="Bills & Expenses" arrow="down" actual={billsExpenses.spent} planned={billsExpenses.planned} fillClassName="bg-negative" currency={currency} />
+        <ProgressBar label="Savings" arrow="down" actual={savings.spent} planned={savings.planned} fillClassName="bg-[#6366f1]" currency={currency} />
+        <ProgressBar label="Debt" arrow="down" actual={debt.spent} planned={debt.planned} fillClassName="bg-[#f59e0b]" currency={currency} />
       </div>
     </div>
   );

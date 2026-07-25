@@ -1,18 +1,20 @@
 "use client";
 
 import { ModalShell } from "@/components/modal-shell";
-import { SubscriptionsBoard } from "./subscriptions-board";
+import { SubscriptionsBoard, type CreditCardOption } from "./subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "./types";
 
 export function SubscriptionsModal({
   currency,
   subscriptions,
   irregularBills,
+  creditCards,
   onClose,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
+  creditCards?: CreditCardOption[];
   onClose: () => void;
 }) {
   return (
@@ -21,6 +23,7 @@ export function SubscriptionsModal({
         currency={currency}
         subscriptions={subscriptions}
         irregularBills={irregularBills}
+        creditCards={creditCards}
       />
     </ModalShell>
   );

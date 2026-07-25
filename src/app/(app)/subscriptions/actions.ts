@@ -110,6 +110,7 @@ export async function upsertSubscription(formData: FormData) {
   const nextRenewalDate = String(formData.get("nextRenewalDate") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const isActive = formData.get("isActive") === "on";
+  const accountId = String(formData.get("accountId") ?? "").trim() || null;
   if (!name) return { error: "Name is required." };
 
   const subcategoryId = await findOrCreateBillsSubcategory(supabase, householdId, "Subscriptions");
@@ -121,6 +122,7 @@ export async function upsertSubscription(formData: FormData) {
     billing_cycle: billingCycle,
     next_renewal_date: nextRenewalDate,
     subcategory_id: subcategoryId,
+    account_id: accountId,
     notes,
     is_active: isActive,
     updated_at: new Date().toISOString(),
@@ -150,6 +152,7 @@ export async function upsertIrregularBill(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const typicalAmountCents = displayToCents(String(formData.get("typicalAmount") ?? "0"));
   const notes = String(formData.get("notes") ?? "").trim() || null;
+  const accountId = String(formData.get("accountId") ?? "").trim() || null;
   if (!name) return { error: "Name is required." };
 
   const subcategoryId = await findOrCreateBillsSubcategory(supabase, householdId, "Irregular Bills");
@@ -159,6 +162,7 @@ export async function upsertIrregularBill(formData: FormData) {
     name,
     typical_amount_cents: typicalAmountCents,
     subcategory_id: subcategoryId,
+    account_id: accountId,
     notes,
     updated_at: new Date().toISOString(),
   };

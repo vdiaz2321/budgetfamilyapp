@@ -6,6 +6,7 @@ export type SubscriptionRow = {
   nextRenewalDate: string | null; // YYYY-MM-DD
   isActive: boolean;
   subcategoryId: string | null;
+  accountId: string | null;
   notes: string | null;
 };
 
@@ -14,5 +15,6 @@ export type IrregularBillRow = {
   name: string;
   typicalAmountCents: number;
   subcategoryId: string | null;
+  accountId: string | null;
   notes: string | null;
 };

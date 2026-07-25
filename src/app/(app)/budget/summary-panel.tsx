@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import type { GroupData, ViewMode } from "./types";
 
@@ -28,6 +28,17 @@ export function SummaryPanel({ groups, currency }: Props) {
   // The donut has its own Spent/Remaining view now that the budget rows show
   // both columns at once.
   const [mode, setMode] = useState<ViewMode>("spent");
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem("budget-summary-mode") as ViewMode | null;
+    if (saved === "spent" || saved === "remaining") setMode(saved);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (hydrated) sessionStorage.setItem("budget-summary-mode", mode);
+  }, [mode, hydrated]);
   // The donut mirrors EveryDollar: outflow only (income has its own line up
   // top). Each segment's size uses the current shared mode value.
   const outflow = groups.filter((g) => g.kind !== "income");
@@ -51,7 +62,7 @@ export function SummaryPanel({ groups, currency }: Props) {
   });
 
   const total = base.reduce((sum, s) => sum + s.arcValue, 0);
-  const modeLabel = mode === "spent" ? "Spent" : "Remaining";
+  const modeLabel = mode === "spent" ? "Spent" : "Planned";
 
   // Precompute each arc's dash length + offset via prefix sums so the render
   // body never mutates a running accumulator (React-compiler-safe).

@@ -214,30 +214,47 @@ export function TransactionModal({
               onMatch={handlePayeeMatch}
             />
 
-            {/* Account */}
-            <select
-              name="accountId"
-              defaultValue={editTx?.accountId ?? ""}
-              className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Choose Account (optional)</option>
-              {(() => {
-                const groups: string[] = [];
-                const byGroup = new Map<string, typeof accountOptions>();
-                for (const a of accountOptions) {
-                  const g = a.group ?? "Other";
-                  if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
-                  byGroup.get(g)!.push(a);
-                }
-                return groups.map((g) => (
-                  <optgroup key={g} label={g}>
-                    {byGroup.get(g)!.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </optgroup>
-                ));
-              })()}
-            </select>
+            {/* Account — label + hint change based on tab so it's clear what
+                "account" means. Income deposits INTO an account; Expenses/Bills
+                are charged from (or to a credit card). Debt payments should
+                really use the Pay Card modal on the Accounts page, but the
+                dropdown stays available for revolving-card manual entries. */}
+            <div>
+              <select
+                name="accountId"
+                defaultValue={editTx?.accountId ?? ""}
+                className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">
+                  {txType === "income"
+                    ? "Deposit to account (optional)"
+                    : txType === "debt"
+                      ? "Paid from account (optional)"
+                      : "Charged to / paid from account (optional)"}
+                </option>
+                {(() => {
+                  const groups: string[] = [];
+                  const byGroup = new Map<string, typeof accountOptions>();
+                  for (const a of accountOptions) {
+                    const g = a.group ?? "Other";
+                    if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
+                    byGroup.get(g)!.push(a);
+                  }
+                  return groups.map((g) => (
+                    <optgroup key={g} label={g}>
+                      {byGroup.get(g)!.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </optgroup>
+                  ));
+                })()}
+              </select>
+              {txType === "debt" ? (
+                <p className="mt-1 px-1 text-[11px] text-muted">
+                  Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page — it debits your bank and clears the card&apos;s Owed in one step.
+                </p>
+              ) : null}
+            </div>
 
             {/* Budget item */}
             <BudgetItemField

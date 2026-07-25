@@ -42,6 +42,10 @@ export type DebtDetail = {
   // Linked account (e.g. the credit card this debt represents) — Networth
   // skips the account's balance so it isn't counted twice.
   accountId: string | null;
+  // Linked bucket (e.g. "Sapphire Payments" bucket on Amex Savings) — payments
+  // hit that specific bucket instead of the whole account, so sinking-fund
+  // tracking stays accurate. Reused from the savings-goal mechanism.
+  linkedBucketId: string | null;
 };
 
 export type RowData = {

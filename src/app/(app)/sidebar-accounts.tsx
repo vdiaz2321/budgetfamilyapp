@@ -17,6 +17,12 @@ export type SidebarGroup = {
   items: SidebarAccount[];
   /** Render balances as liabilities (red, shown negative). */
   liability?: boolean;
+  /** Group total from account balances — kept separate from item sums so that
+   *  showing buckets (whose totals may not equal the parent account) doesn't
+   *  shift the Net Worth pill. */
+  totalCents: number;
+  /** Portion of totalCents that counts toward Net Worth (excludes kids). */
+  netWorthCents: number;
 };
 
 type Props = {
@@ -54,10 +60,7 @@ export function SidebarAccounts({ groups, currency }: Props) {
   // correct as groups are added (e.g. a future Real Estate group) without
   // needing to touch this calculation.
   const netWorthCents = groups.reduce(
-    (sum, g) =>
-      sum +
-      (g.liability ? -1 : 1) *
-        g.items.reduce((s, a) => s + (a.inNetWorth === false ? 0 : a.balanceCents), 0),
+    (sum, g) => sum + (g.liability ? -1 : 1) * g.netWorthCents,
     0,
   );
 
@@ -89,7 +92,7 @@ export function SidebarAccounts({ groups, currency }: Props) {
 
 function AccountGroup({ group, currency, showDivider }: { group: SidebarGroup; currency: string; showDivider?: boolean }) {
   const [open, setOpen] = useState(false);
-  const total = group.items.reduce((s, a) => s + a.balanceCents, 0);
+  const total = group.totalCents;
   const sign = group.liability ? -1 : 1;
 
   return (
@@ -130,7 +133,12 @@ function AccountGroup({ group, currency, showDivider }: { group: SidebarGroup; c
         <ul className="space-y-0.5">
           {group.items.map((a) => (
             <li key={a.id}>
-              <div className="flex items-center gap-2 rounded-md py-[5px] pl-7 pr-2 transition hover:bg-white/[0.04]">
+              <div className="group/tip relative flex cursor-default items-center gap-2 rounded-md py-[5px] pl-7 pr-2 transition hover:bg-white/[0.04]">
+                <span
+                  className="pointer-events-none absolute bottom-full left-7 z-50 mb-1 hidden whitespace-nowrap rounded bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg group-hover/tip:block"
+                >
+                  {a.name}
+                </span>
                 <span
                   className="h-1.5 w-1.5 shrink-0 rounded-full"
                   style={{ backgroundColor: dotColorFor(a.name) }}

@@ -7,15 +7,19 @@ import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
   addAccount,
   addBucket,
+  closeCard,
   deleteAccount,
   deleteBucket,
+  payCard,
   reorderAccounts,
   reorderBuckets,
+  reopenCard,
   updateAccount,
   updateBalance,
   updateBucket,
   updateBucketBalance,
   updateBucketBankGroup,
+  upsertCardDetails,
 } from "./actions";
 
 export type BucketData = {
@@ -29,6 +33,24 @@ export type BucketData = {
   bankGroup: "savings" | "spending" | null;
 };
 
+export type CardDetails = {
+  bank: string | null;
+  authUser: string | null;
+  charging: string | null;
+  bonusInfo: string | null;
+  bonusSpendCents: number | null;
+  bonusSpendDeadline: string | null;
+  bonusEarned: boolean;
+  currentPoints: number;
+  feesPaidCents: number;
+  freeNightCreditCents: number | null;
+  freeNightExpiresOn: string | null;
+  spendingLimitCents: number | null;
+  remarks: string | null;
+  isRevolvingDebt: boolean;
+  debtSubcategoryId: string | null;
+};
+
 export type AccountData = {
   id: string;
   name: string;
@@ -36,15 +58,29 @@ export type AccountData = {
   subtype: string | null; // free-text label, e.g. "Roth IRA", "Trump Account", "UTMA"
   holder: string | null;
   active: boolean;
-  // Kids Funding: tracked here, but always excluded from Assets / Net Worth.
   isKidsAccount: boolean;
-  // Banking accounts only: "savings" (long-term pile) vs "spending" (everyday).
-  // Splits the Net Worth analytics' Current Savings from Bank Accounts. null =
-  // spending. Ignored for investment / kids accounts.
   bankGroup: "savings" | "spending" | null;
   balanceCents: number;
+  annualFeeCents: number | null;
+  feeWaived: boolean;
+  dateOpened: string | null;
+  dateClosed: string | null;
+  // Credit-card only. Auto-computed on the server for CCs.
+  cardDetails?: CardDetails | null;
+  owedCents?: number;
+  monthSpendCents?: number;
   buckets: BucketData[];
 };
+
+// Non-CC accounts, passed in for the Pay Card modal's "From" dropdown.
+export type NonCardAccount = {
+  id: string;
+  name: string;
+  kind: string;
+  hasBuckets: boolean;
+};
+
+export type DebtSubcategoryOption = { id: string; name: string };
 
 // A debt from the Budget Debt group — shown here read-only (Budget is the
 // single source of truth for debts).
@@ -72,8 +108,8 @@ type Section = {
   fixedKind?: string;
   // Free-text "Type" field (e.g. Retirement, Roth IRA, 529, Trump Account).
   offerSubtype?: boolean;
-  // New accounts in this section are flagged out of net worth.
   kidsGroup?: boolean;
+  creditCard?: boolean;
 };
 
 const SECTIONS: Section[] = [
@@ -98,9 +134,39 @@ const SECTIONS: Section[] = [
     key: "credit",
     label: "Credit Cards",
     dot: "bg-negative",
-    liability: true,
-    match: (a) => a.kind === "credit_card",
+    liability: false,
+    match: (a) => a.kind === "credit_card" && !a.dateClosed,
     kindLabels: { credit_card: "Credit card" },
+    offerSubtype: true,
+    creditCard: true,
+  },
+  {
+    key: "credit_closed",
+    label: "Credit Cards",
+    dot: "bg-negative",
+    liability: false,
+    match: (a) => {
+      if (a.kind !== "credit_card" || !a.dateClosed) return false;
+      const closedYear = new Date(a.dateClosed).getFullYear();
+      return closedYear === new Date().getFullYear();
+    },
+    kindLabels: { credit_card: "Credit card" },
+    offerSubtype: true,
+    creditCard: true,
+  },
+  {
+    key: "credit_archived",
+    label: "Archived Cards",
+    dot: "bg-muted",
+    liability: false,
+    match: (a) => {
+      if (a.kind !== "credit_card" || !a.dateClosed) return false;
+      const closedYear = new Date(a.dateClosed).getFullYear();
+      return closedYear < new Date().getFullYear();
+    },
+    kindLabels: { credit_card: "Credit card" },
+    offerSubtype: true,
+    creditCard: true,
   },
   {
     key: "loans",
@@ -129,40 +195,40 @@ type Props = {
   accounts: AccountData[];
   budgetDebts: BudgetDebt[];
   currency: string;
+  nonCardAccounts?: NonCardAccount[];
+  debtSubcategories?: DebtSubcategoryOption[];
 };
 
-export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
+export function AccountsBoard({
+  accounts,
+  budgetDebts,
+  currency,
+  nonCardAccounts = [],
+  debtSubcategories = [],
+}: Props) {
   const active = accounts.filter((a) => a.active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
 
-  // Kids Funding is tracked here but excluded from Assets / Net Worth
-  // everywhere — it's the kids' money, not the household's.
   const assets = active
     .filter((a) => !isLiability(a.kind) && !a.isKidsAccount)
     .reduce((sum, a) => sum + a.balanceCents, 0);
-  // Debts come from the Budget Debt group (single source of truth), not from
-  // accounts. Any legacy credit-card/loan accounts are shown for cleanup but
-  // NOT counted here (they'd double-count against the Budget debt).
   const debtsTotal = budgetDebts.reduce((sum, d) => sum + d.balanceCents, 0);
   const net = assets - debtsTotal;
 
-  // Asset sections are always shown + editable. Legacy liability sections
-  // (credit cards / loans) appear only if such accounts still exist, so you
-  // can delete them and move that debt into Budget.
-  const assetSections = SECTIONS.filter((s) => !s.liability);
-  // The household's own assets (feed Net Worth) vs. Kids Funding, which is
-  // tracked but excluded — pulled out so it renders in its own group at the
-  // very bottom, past the Debts line, so it reads as clearly separate.
-  const ownAssetSections = assetSections.filter((s) => !s.kidsGroup);
-  const kidsSections = assetSections.filter((s) => s.kidsGroup);
+  const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
+  const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
+  const creditSections = SECTIONS.filter((s) => s.creditCard);
   const legacySections = SECTIONS.filter(
     (s) => s.liability && accounts.some((a) => s.match(a)),
   );
+  const excludedSections = [...kidsSections, ...creditSections];
 
-  // Every section's open/collapsed state, lifted here so one button can
-  // expand or collapse them all at once.
-  const sectionKeys = ["debts", ...assetSections.map((s) => s.key), ...legacySections.map((s) => s.key)];
-  // Start every section collapsed on each visit — open only what you need.
+  const sectionKeys = [
+    "debts",
+    ...assetSections.map((s) => s.key),
+    ...excludedSections.map((s) => s.key),
+    ...legacySections.map((s) => s.key),
+  ];
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(["debts", ...SECTIONS.map((s) => s.key)].map((k) => [k, true])),
   );
@@ -223,7 +289,7 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
       </div>
 
       <div className="space-y-3">
-        {ownAssetSections.map((section) => (
+        {assetSections.map((section) => (
           <AccountSection
             key={section.key}
             section={section}
@@ -236,7 +302,6 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
           />
         ))}
 
-        {/* Debts, read-only, sourced from the Budget Debt group. */}
         <BudgetDebtsSection
           debts={budgetDebts}
           currency={currency}
@@ -244,7 +309,6 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
           onToggle={() => toggleSection("debts")}
         />
 
-        {/* Legacy credit-card/loan accounts — kept only so they can be deleted. */}
         {legacySections.map((section) => (
           <AccountSection
             key={section.key}
@@ -260,30 +324,840 @@ export function AccountsBoard({ accounts, budgetDebts, currency }: Props) {
         ))}
       </div>
 
-      {/* Kids Funding sits apart, below the household's own accounts and the
-          debts line, so it's visually clear this money isn't in Net Worth. */}
-      {kidsSections.length > 0 ? (
-        <div className="space-y-3 pt-2">
-          <div className="flex items-center gap-3 px-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Not counted in net worth
-            </span>
-            <span className="h-px flex-1 bg-line" />
-          </div>
-          {kidsSections.map((section) => (
+      {/* Kids Funding + Credit Cards sit apart — not counted in Net Worth. */}
+      <div className="space-y-3 pt-2">
+        <div className="flex items-center gap-3 px-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Not counted in net worth
+          </span>
+          <span className="h-px flex-1 bg-line" />
+        </div>
+        {kidsSections.map((section) => {
+          const sectionAccounts = accounts.filter((a) => section.match(a));
+          if (sectionAccounts.length === 0 && section.key !== "kids") return null;
+          return (
             <AccountSection
               key={section.key}
               section={section}
-              accounts={accounts.filter((a) => section.match(a))}
+              accounts={sectionAccounts}
               currency={currency}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
               isBucketsOpen={isBucketsOpen}
               onToggleBuckets={toggleBuckets}
             />
-          ))}
+          );
+        })}
+        {creditSections.map((section) => {
+          const sectionAccounts = accounts.filter((a) => section.match(a));
+          if (sectionAccounts.length === 0 && section.key !== "credit") return null;
+          return (
+            <CreditCardSection
+              key={section.key}
+              section={section}
+              accounts={sectionAccounts}
+              allCreditCards={accounts.filter((a) => a.kind === "credit_card")}
+              currency={currency}
+              nonCardAccounts={nonCardAccounts}
+              debtSubcategories={debtSubcategories}
+              allBuckets={accounts.flatMap((a) => a.buckets)}
+              open={!collapsed[section.key]}
+              onToggle={() => toggleSection(section.key)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---- Credit Card section: expandable panels, holder grouping, Pay Card modal ----
+
+function CreditCardSection({
+  section,
+  accounts,
+  allCreditCards,
+  currency,
+  nonCardAccounts,
+  debtSubcategories,
+  allBuckets,
+  open,
+  onToggle,
+}: {
+  section: Section;
+  accounts: AccountData[];
+  allCreditCards: AccountData[];
+  currency: string;
+  nonCardAccounts: NonCardAccount[];
+  debtSubcategories: DebtSubcategoryOption[];
+  allBuckets: BucketData[];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const isArchived = section.key === "credit_archived";
+  const isMain = section.key === "credit";
+
+  // Fee summary considers ALL open cards (across every sub-section) so numbers
+  // read the same on the main and closed-this-year sub-groups.
+  const openCards = allCreditCards.filter((a) => !a.dateClosed);
+  const feesPaid = openCards
+    .filter((a) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0)
+    .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
+  const feesWaived = openCards
+    .filter((a) => a.feeWaived && (a.annualFeeCents ?? 0) > 0)
+    .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
+  const feesAll = feesPaid + feesWaived;
+  const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
+
+  // Group cards by holder (Vic / Johana / …). Cards without a holder land in
+  // an "Unassigned" bucket. Sub-groups only render when there's >1 group.
+  const holderGroups = groupByHolder(accounts);
+
+  return (
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-2.5 text-left"
+          aria-expanded={open}
+        >
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
+          <span className="font-semibold">{section.label}</span>
+          <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+            {accounts.length} card{accounts.length !== 1 ? "s" : ""}
+          </span>
+          <svg
+            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        {!open && totalOwed > 0 ? (
+          <span className="text-sm font-semibold tabular-nums text-negative">
+            {formatMoney(totalOwed, currency)} owed
+          </span>
+        ) : null}
+      </div>
+
+      {/* Summary strip — only on the main section, hidden when empty */}
+      {open && isMain && (feesAll > 0 || totalOwed > 0) ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-xs text-muted">
+          {totalOwed !== 0 ? (
+            <span>
+              <span className="font-semibold">Owed:</span>{" "}
+              <span className={`font-semibold tabular-nums ${totalOwed > 0 ? "text-negative" : "text-positive"}`}>
+                {formatMoney(totalOwed, currency)}
+              </span>{" "}
+              across {accounts.length} card{accounts.length !== 1 ? "s" : ""}
+            </span>
+          ) : null}
+          {feesAll > 0 ? (
+            <span>
+              <span className="font-semibold">Annual fees:</span>{" "}
+              <span className="font-semibold text-foreground">{formatMoney(feesPaid, currency)}</span> paid
+              {feesWaived > 0 ? (
+                <>
+                  {" · "}
+                  <span className="font-semibold text-positive">{formatMoney(feesWaived, currency)}</span> waived
+                </>
+              ) : null}
+              {" · "}
+              <span className="font-semibold text-foreground">{formatMoney(feesAll, currency)}</span> if all applied
+            </span>
+          ) : null}
         </div>
       ) : null}
+
+      {open ? (
+        <div className="border-t border-line">
+          {accounts.length === 0 ? (
+            <p className="px-4 py-2.5 text-sm text-muted">
+              {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
+            </p>
+          ) : holderGroups.length > 1 ? (
+            <ul className="divide-y divide-line">
+              {holderGroups.map((g) => (
+                <HolderGroup
+                  key={g.holder}
+                  holder={g.holder}
+                  cards={g.cards}
+                  currency={currency}
+                  nonCardAccounts={nonCardAccounts}
+                  debtSubcategories={debtSubcategories}
+                  allBuckets={allBuckets}
+                  isArchived={isArchived}
+                />
+              ))}
+            </ul>
+          ) : (
+            <ul className="divide-y divide-line">
+              {accounts.map((a) => (
+                <CreditCardPanel
+                  key={a.id}
+                  card={a}
+                  currency={currency}
+                  nonCardAccounts={nonCardAccounts}
+                  debtSubcategories={debtSubcategories}
+                  allBuckets={allBuckets}
+                  isArchived={isArchived}
+                />
+              ))}
+            </ul>
+          )}
+
+          {!isArchived && (
+            adding ? (
+              <AddAccountForm section={section} onDone={() => setAdding(false)} />
+            ) : (
+              <div className="border-t border-line px-4 py-2">
+                <button
+                  type="button"
+                  onClick={() => setAdding(true)}
+                  className="text-sm font-medium text-brand hover:text-brand-strong"
+                >
+                  + Add credit card
+                </button>
+              </div>
+            )
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function groupByHolder(cards: AccountData[]): { holder: string; cards: AccountData[] }[] {
+  const map = new Map<string, AccountData[]>();
+  const order: string[] = [];
+  for (const c of cards) {
+    const h = c.holder?.trim() || "Unassigned";
+    if (!map.has(h)) { order.push(h); map.set(h, []); }
+    map.get(h)!.push(c);
+  }
+  return order.map((h) => ({ holder: h, cards: map.get(h)! }));
+}
+
+function HolderGroup({
+  holder,
+  cards,
+  currency,
+  nonCardAccounts,
+  debtSubcategories,
+  allBuckets,
+  isArchived,
+}: {
+  holder: string;
+  cards: AccountData[];
+  currency: string;
+  nonCardAccounts: NonCardAccount[];
+  debtSubcategories: DebtSubcategoryOption[];
+  allBuckets: BucketData[];
+  isArchived: boolean;
+}) {
+  const [open, setOpen] = useSessionCollapse(`accounts-cc-holder-${holder}`, () => ({ [holder]: true }));
+  const isOpen = open[holder] ?? true;
+  const toggle = () => setOpen((s) => ({ ...s, [holder]: !isOpen }));
+  const holderOwed = cards.reduce((s, c) => s + (c.owedCents ?? 0), 0);
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center gap-2 bg-background/40 px-4 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted hover:bg-brand-soft/25"
+        aria-expanded={isOpen}
+      >
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`transition-transform ${isOpen ? "" : "-rotate-90"}`}
+          aria-hidden
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+        <span>{holder}</span>
+        <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold dark:bg-white/10">
+          {cards.length} card{cards.length !== 1 ? "s" : ""}
+        </span>
+        {holderOwed > 0 ? (
+          <span className="ml-auto text-[11px] font-semibold tabular-nums text-negative normal-case tracking-normal">
+            {formatMoney(holderOwed, currency)} owed
+          </span>
+        ) : null}
+      </button>
+      {isOpen ? (
+        <ul className="divide-y divide-line">
+          {cards.map((c) => (
+            <CreditCardPanel
+              key={c.id}
+              card={c}
+              currency={currency}
+              nonCardAccounts={nonCardAccounts}
+              debtSubcategories={debtSubcategories}
+              allBuckets={allBuckets}
+              isArchived={isArchived}
+            />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+// One card panel — collapsed row of glance-info, expanded 2-column grid for the
+// full rewards details plus [Edit] [Pay Card] [Close] action bar.
+function CreditCardPanel({
+  card,
+  currency,
+  nonCardAccounts,
+  debtSubcategories,
+  allBuckets,
+  isArchived,
+}: {
+  card: AccountData;
+  currency: string;
+  nonCardAccounts: NonCardAccount[];
+  debtSubcategories: DebtSubcategoryOption[];
+  allBuckets: BucketData[];
+  isArchived: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [closePending, startClose] = useTransition();
+  const [reopenPending, startReopen] = useTransition();
+
+  const d = card.cardDetails;
+  const owed = card.owedCents ?? 0;
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthLabel = monthNames[new Date().getMonth()];
+  const monthSpend = card.monthSpendCents ?? 0;
+
+  const bank = d?.bank ?? card.subtype ?? null;
+
+  return (
+    <li className={expanded ? "bg-brand-soft/15" : "hover:bg-brand-soft/25"}>
+      {/* Collapsed row */}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-2 text-left"
+        aria-expanded={expanded}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-1.5">
+            <span className="truncate text-sm font-medium">{card.name}</span>
+            {card.holder ? (
+              <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                {card.holder}
+              </span>
+            ) : null}
+            {bank ? (
+              <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+                {bank}
+              </span>
+            ) : null}
+            {d?.authUser ? (
+              <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+                Auth: {d.authUser}
+              </span>
+            ) : null}
+            {d?.isRevolvingDebt ? (
+              <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                0% APR debt
+              </span>
+            ) : null}
+            {card.dateClosed ? (
+              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
+                Closed {card.dateClosed}
+              </span>
+            ) : null}
+          </span>
+        </span>
+        {d && d.currentPoints > 0 ? (
+          <span className="hidden text-xs tabular-nums text-muted sm:inline">
+            {d.currentPoints.toLocaleString()} pts
+          </span>
+        ) : null}
+        <span className={`w-24 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
+          {owed !== 0 ? formatMoney(owed, currency) : "—"}
+        </span>
+        <svg
+          width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-muted transition-transform ${expanded ? "" : "-rotate-90"}`}
+          aria-hidden
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {expanded ? (
+        <div className="space-y-3 border-t border-line bg-background/40 px-4 py-3">
+          {/* Two-column detail grid */}
+          <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
+            <DetailRow label="Bank" value={bank} />
+            <DetailRow label="Points" value={d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : "—"} />
+            <DetailRow label="Auth user" value={d?.authUser ?? "—"} />
+            <DetailRow
+              label="Bonus"
+              value={
+                d?.bonusInfo
+                  ? d.bonusEarned
+                    ? `${d.bonusInfo} ✓ met`
+                    : d.bonusSpendCents
+                      ? `${d.bonusInfo} · ${formatMoney(d.bonusSpendCents, currency)} spend${d.bonusSpendDeadline ? ` by ${d.bonusSpendDeadline}` : ""}`
+                      : d.bonusInfo
+                  : "—"
+              }
+            />
+            <DetailRow label="Charging" value={d?.charging ?? "—"} />
+            <DetailRow
+              label="Annual fee"
+              value={
+                card.annualFeeCents
+                  ? `${formatMoney(card.annualFeeCents, currency)}${card.feeWaived ? " (waived)" : ""}${d && d.feesPaidCents > 0 ? ` · ${formatMoney(d.feesPaidCents, currency)} paid` : ""}`
+                  : "—"
+              }
+            />
+            <DetailRow label="Opened" value={card.dateOpened ?? "—"} />
+            <DetailRow
+              label="Free night"
+              value={
+                d?.freeNightCreditCents || d?.freeNightExpiresOn
+                  ? `${d.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : ""}${d.freeNightExpiresOn ? ` · expires ${d.freeNightExpiresOn}` : ""}`
+                  : "—"
+              }
+            />
+            <DetailRow label="Closed" value={card.dateClosed ?? "—"} />
+            <DetailRow
+              label="Spending limit"
+              value={d?.spendingLimitCents ? formatMoney(d.spendingLimitCents, currency) : "—"}
+            />
+            {monthSpend !== 0 && !isArchived ? (
+              <DetailRow label={`${monthLabel} spent`} value={formatMoney(monthSpend, currency)} />
+            ) : null}
+          </div>
+
+          {d?.remarks ? (
+            <p className="text-xs text-muted">
+              <span className="font-semibold">Remarks:</span> {d.remarks}
+            </p>
+          ) : null}
+
+          {/* Action bar */}
+          <div className="flex flex-wrap items-center gap-2">
+            {!editing && !paying ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70"
+                >
+                  Edit details
+                </button>
+                {!isArchived && !card.dateClosed ? (
+                  <button
+                    type="button"
+                    onClick={() => setPaying(true)}
+                    className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong"
+                  >
+                    Pay Card
+                  </button>
+                ) : null}
+                {!isArchived && !card.dateClosed ? (
+                  <form action={(fd) => startClose(() => closeCard(fd))}>
+                    <input type="hidden" name="id" value={card.id} />
+                    <button
+                      type="submit"
+                      disabled={closePending}
+                      className="rounded-md px-3 py-1.5 text-xs font-medium text-negative hover:bg-negative/10 disabled:opacity-60"
+                    >
+                      {closePending ? "Closing…" : "Close Card"}
+                    </button>
+                  </form>
+                ) : null}
+                {(isArchived || card.dateClosed) ? (
+                  <form action={(fd) => startReopen(() => reopenCard(fd))}>
+                    <input type="hidden" name="id" value={card.id} />
+                    <button
+                      type="submit"
+                      disabled={reopenPending}
+                      className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70 disabled:opacity-60"
+                    >
+                      {reopenPending ? "Reopening…" : "Reopen"}
+                    </button>
+                  </form>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+
+          {editing ? (
+            <EditCreditCardForm
+              card={card}
+              debtSubcategories={debtSubcategories}
+              onDone={() => setEditing(false)}
+            />
+          ) : null}
+
+          {paying ? (
+            <PayCardModal
+              card={card}
+              currency={currency}
+              nonCardAccounts={nonCardAccounts}
+              allBuckets={allBuckets}
+              onClose={() => setPaying(false)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="min-w-[6.5rem] shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {label}
+      </span>
+      <span className="min-w-0 text-sm text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function EditCreditCardForm({
+  card,
+  debtSubcategories,
+  onDone,
+}: {
+  card: AccountData;
+  debtSubcategories: DebtSubcategoryOption[];
+  onDone: () => void;
+}) {
+  const [saveAcctPending, startSaveAcct] = useTransition();
+  const [saveDetailsPending, startSaveDetails] = useTransition();
+  const [delPending, startDel] = useTransition();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isRevolving, setIsRevolving] = useState(card.cardDetails?.isRevolvingDebt ?? false);
+  const d = card.cardDetails;
+
+  return (
+    <div className="space-y-4 rounded-md border border-line bg-surface p-3">
+      {/* Account-level fields (name, holder, annual fee, dates, active) */}
+      <form
+        action={(fd) =>
+          startSaveAcct(async () => {
+            await updateAccount(fd);
+          })
+        }
+        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      >
+        <input type="hidden" name="id" value={card.id} />
+        <input type="hidden" name="isCreditCard" value="on" />
+        <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
+        <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
+        <LabeledInput
+          label="Annual fee"
+          name="annualFee"
+          type="number"
+          step="0.01"
+          defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""}
+        />
+        <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+          <input
+            type="checkbox"
+            name="feeWaived"
+            defaultChecked={card.feeWaived}
+            className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
+          />
+          Fee waived (e.g. military benefit)
+        </label>
+        <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
+        <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
+        {/* keep subtype for legacy back-compat, hidden — bank is edited in the details form */}
+        <input type="hidden" name="subtype" value={card.subtype ?? ""} />
+        <input type="hidden" name="active" value={card.active ? "on" : ""} />
+        <div className="sm:col-span-2">
+          <button
+            type="submit"
+            disabled={saveAcctPending}
+            className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70 disabled:opacity-60"
+          >
+            {saveAcctPending ? "Saving…" : "Save card basics"}
+          </button>
+        </div>
+      </form>
+
+      {/* Rewards details */}
+      <form
+        action={(fd) =>
+          startSaveDetails(async () => {
+            await upsertCardDetails(fd);
+            onDone();
+          })
+        }
+        className="grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2"
+      >
+        <input type="hidden" name="accountId" value={card.id} />
+        <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
+        <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="Johana" />
+        <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
+        <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
+        <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
+        <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
+        <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
+        <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+          <input
+            type="checkbox"
+            name="bonusEarned"
+            defaultChecked={d?.bonusEarned ?? false}
+            className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
+          />
+          Bonus earned
+        </label>
+        <LabeledInput label="Free-night credit" name="freeNightCredit" type="number" step="0.01" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} placeholder="100" />
+        <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+        <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} placeholder="7000" />
+        <LabeledInput label="Fees paid this year" name="feesPaid" type="number" step="0.01" defaultValue={d?.feesPaidCents ? centsToDisplay(d.feesPaidCents) : ""} />
+        <div className="sm:col-span-2">
+          <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+            Remarks
+          </label>
+          <input
+            name="remarks"
+            defaultValue={d?.remarks ?? ""}
+            placeholder="Booked for 6JUL26, etc."
+            className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            <input
+              type="checkbox"
+              name="isRevolvingDebt"
+              checked={isRevolving}
+              onChange={(e) => setIsRevolving(e.target.checked)}
+              className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
+            />
+            Treat as revolving debt (0% APR promo — charges count toward Net Worth)
+          </label>
+        </div>
+        {isRevolving ? (
+          <div className="sm:col-span-2">
+            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Linked debt subcategory
+            </label>
+            <select
+              name="debtSubcategoryId"
+              defaultValue={d?.debtSubcategoryId ?? ""}
+              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Not linked</option>
+              {debtSubcategories.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <p className="mt-0.5 text-[10px] text-muted">
+              Payments will also decrement this debt in the Budget so Net Worth stays in sync.
+            </p>
+          </div>
+        ) : null}
+        <div className="sm:col-span-2 flex items-center justify-between gap-2 pt-1">
+          <button
+            type="submit"
+            disabled={saveDetailsPending}
+            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+          >
+            {saveDetailsPending ? "Saving…" : "Save rewards details"}
+          </button>
+          {confirmDelete ? (
+            <span className="flex items-center gap-2">
+              <span className="text-xs text-muted">Delete &quot;{card.name}&quot;?</span>
+              <form action={(fd) => startDel(() => deleteAccount(fd))}>
+                <input type="hidden" name="id" value={card.id} />
+                <button
+                  type="submit"
+                  disabled={delPending}
+                  className="text-xs font-bold text-negative hover:underline disabled:opacity-60"
+                >
+                  {delPending ? "Deleting…" : "Yes, delete"}
+                </button>
+              </form>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="text-xs text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="text-xs font-medium text-negative hover:underline"
+            >
+              Delete card
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function LabeledInput({
+  label,
+  ...inputProps
+}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="block">
+      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {label}
+      </span>
+      <input
+        {...inputProps}
+        className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+    </label>
+  );
+}
+
+function PayCardModal({
+  card,
+  currency,
+  nonCardAccounts,
+  allBuckets,
+  onClose,
+}: {
+  card: AccountData;
+  currency: string;
+  nonCardAccounts: NonCardAccount[];
+  allBuckets: BucketData[];
+  onClose: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [sourceId, setSourceId] = useState<string>(nonCardAccounts[0]?.id ?? "");
+  const source = nonCardAccounts.find((a) => a.id === sourceId) ?? null;
+  const sourceBuckets = allBuckets.filter((b) => b.accountId === sourceId);
+  // Try to pre-pick a bucket whose name references this card (fuzzy match on
+  // card name words, case-insensitive).
+  const cardWords = card.name.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  const defaultBucket =
+    source?.hasBuckets
+      ? sourceBuckets.find((b) => cardWords.some((w) => b.name.toLowerCase().includes(w)))?.id ?? ""
+      : "";
+  const [bucketId, setBucketId] = useState(defaultBucket);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm space-y-3 rounded-xl bg-surface p-4 shadow-lg ring-1 ring-black/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold">Pay {card.name}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        {(card.owedCents ?? 0) > 0 ? (
+          <p className="text-xs text-muted">
+            Currently owed: <span className="font-semibold text-negative">{formatMoney(card.owedCents ?? 0, currency)}</span>
+          </p>
+        ) : null}
+
+        <form
+          action={(fd) =>
+            start(async () => {
+              setErrorMsg(null);
+              const r = await payCard(fd);
+              if (r?.error) setErrorMsg(r.error);
+              else onClose();
+            })
+          }
+          className="space-y-2"
+        >
+          <input type="hidden" name="cardId" value={card.id} />
+          <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
+          <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+              From account
+            </span>
+            <select
+              name="sourceAccountId"
+              value={sourceId}
+              onChange={(e) => { setSourceId(e.target.value); setBucketId(""); }}
+              required
+              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              {nonCardAccounts.length === 0 ? (
+                <option value="">No accounts available</option>
+              ) : null}
+              {nonCardAccounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+          {source?.hasBuckets && sourceBuckets.length > 0 ? (
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                From bucket
+              </span>
+              <select
+                name="bucketId"
+                value={bucketId}
+                onChange={(e) => setBucketId(e.target.value)}
+                required
+                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Choose a bucket…</option>
+                {sourceBuckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <p className="mt-0.5 text-[10px] text-muted">
+                Required because {source.name} has buckets — the bucket total drives the account total.
+              </p>
+            </label>
+          ) : null}
+          <LabeledInput label="Notes" name="notes" defaultValue={`Payment to ${card.name}`} />
+          {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={pending}
+              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+            >
+              {pending ? "Paying…" : "Pay Card"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -1063,13 +1937,13 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
         {section.offerSubtype ? (
           <input
             name="subtype"
-            placeholder="Type… (e.g. Retirement, Roth IRA, 529, Trump Account)"
-            className="w-56 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            placeholder={section.creditCard ? "Bank (e.g. AMEX, Chase)" : "Type… (e.g. Retirement, Roth IRA, 529, Trump Account)"}
+            className={`${section.creditCard ? "w-40" : "w-56"} rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand`}
           />
         ) : null}
         <input
           name="name"
-          placeholder="Account name…"
+          placeholder={section.creditCard ? "Card name…" : "Account name…"}
           required
           autoFocus
           onChange={() => setError(null)}
@@ -1081,14 +1955,36 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
           title="Whose account? (e.g. V, J, Joint)"
           className="w-20 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
-        <input
-          name="balance"
-          type="number"
-          step="0.01"
-          inputMode="decimal"
-          placeholder="Balance"
-          className="w-28 rounded-md bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
+        {section.creditCard ? (
+          <>
+            <input
+              name="annualFee"
+              type="number"
+              step="0.01"
+              placeholder="Annual fee"
+              className="w-28 rounded-md bg-background px-2 py-1.5 text-right text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
+              Waived
+            </label>
+            <input
+              name="dateOpened"
+              type="date"
+              title="Date opened"
+              className="rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </>
+        ) : (
+          <input
+            name="balance"
+            type="number"
+            step="0.01"
+            inputMode="decimal"
+            placeholder="Balance"
+            className="w-28 rounded-md bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        )}
         <button
           type="submit"
           disabled={pending}

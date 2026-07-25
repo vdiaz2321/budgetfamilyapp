@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
@@ -123,19 +123,20 @@ export function ItemPanel({
       <div className="space-y-4 px-5 pb-4 pt-3">
         {kind === "debt" && row.debt ? (
           <DebtForm
+            key={row.subId}
             row={row}
             currency={currency}
             monthKey={monthKey}
             accountOptions={debtAccountOptions}
+            bucketOptions={bucketOptions}
             snowballExtraCents={snowballExtraCents}
             isSnowballFocus={isSnowballFocus}
           />
+        ) : kind === "savings" && row.savings ? (
+          <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} />
         ) : (
           <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} />
         )}
-        {kind === "savings" && row.savings ? (
-          <SavingsForm row={row} bucketOptions={bucketOptions} />
-        ) : null}
         <RenameForm row={row} kind={kind} onDeleted={onClose} />
       </div>
     </div>
@@ -186,6 +187,7 @@ function DebtForm({
   currency,
   monthKey,
   accountOptions,
+  bucketOptions,
   snowballExtraCents,
   isSnowballFocus,
 }: {
@@ -193,6 +195,7 @@ function DebtForm({
   currency: string;
   monthKey: string;
   accountOptions: AccountOption[];
+  bucketOptions: BucketOption[];
   snowballExtraCents: number;
   isSnowballFocus: boolean;
 }) {
@@ -291,6 +294,51 @@ function DebtForm({
             </span>
           </label>
         ) : null}
+        {bucketOptions.length > 0 ? (
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+              Linked bucket
+            </span>
+            <select
+              key={d.linkedBucketId ?? "none"}
+              name="bucketId"
+              defaultValue={d.linkedBucketId ?? ""}
+              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Not linked</option>
+              {(() => {
+                const family = bucketOptions.filter((b) => !b.isKids);
+                const kids = bucketOptions.filter((b) => b.isKids);
+                const groups: { label: string; items: typeof bucketOptions; disabled?: boolean }[] = [];
+                const addSection = (items: typeof bucketOptions, suffix: string) => {
+                  const seen: string[] = [];
+                  const byAcct = new Map<string, typeof bucketOptions>();
+                  for (const b of items) {
+                    if (!byAcct.has(b.accountName)) { seen.push(b.accountName); byAcct.set(b.accountName, []); }
+                    byAcct.get(b.accountName)!.push(b);
+                  }
+                  for (const acct of seen) groups.push({ label: acct + suffix, items: byAcct.get(acct)! });
+                };
+                addSection(family, "");
+                if (kids.length > 0) {
+                  groups.push({ label: "── Kids Funding ──", items: [], disabled: true });
+                  addSection(kids, " (Kids)");
+                }
+                return groups.map((g) =>
+                  g.disabled
+                    ? <optgroup key={g.label} label={g.label} disabled />
+                    : <optgroup key={g.label} label={g.label}>
+                        {g.items.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </optgroup>
+                );
+              })()}
+            </select>
+            <span className="mt-0.5 block text-[10px] text-muted">
+              Pick the sinking-fund bucket you use for this debt (e.g. &quot;Sapphire Payments&quot; on Amex Savings).
+              Payments logged here debit that bucket automatically.
+            </span>
+          </label>
+        ) : null}
         <label className="block">
           <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
             Notes
@@ -310,23 +358,85 @@ function DebtForm({
   );
 }
 
-function SavingsForm({ row, bucketOptions }: { row: RowData; bucketOptions: BucketOption[] }) {
+function calcMonthly(goalStr: string, startStr: string, targetDate: string): string {
+  const goal = parseFloat(goalStr) || 0;
+  const start = parseFloat(startStr) || 0;
+  const left = goal - start;
+  if (!targetDate || left <= 0) return "";
+  const [ty, tm] = targetDate.split("-").map(Number);
+  const now = new Date();
+  const months = (ty - now.getFullYear()) * 12 + (tm - 1 - now.getMonth());
+  if (months <= 0) return "";
+  return String(Math.ceil((left / months) * 100) / 100);
+}
+
+function savingsPace(goalCents: number, startCents: number, monthlyCents: number, targetDate: string | null, spentCents: number) {
+  if (goalCents <= 0 || !targetDate) return null;
+  const savedCents = startCents + spentCents;
+  if (savedCents >= goalCents) return "reached" as const;
+  const [ty, tm] = targetDate.split("-").map(Number);
+  const now = new Date();
+  const months = (ty - now.getFullYear()) * 12 + (tm - 1 - now.getMonth());
+  if (months <= 0) return "overdue" as const;
+  const required = Math.ceil((goalCents - savedCents) / months);
+  return monthlyCents >= required ? "on_track" as const : "behind" as const;
+}
+
+function SavingsForm({ row, bucketOptions, monthKey }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string }) {
   const [pending, start] = useTransition();
   const s = row.savings!;
+  const [goal, setGoal] = useState(centsToDisplay(s.goalCents));
+  const [savingsStart, setSavingsStart] = useState(centsToDisplay(s.startCents));
+  const [targetDate, setTargetDate] = useState(s.targetDate ?? "");
+  const [monthly, setMonthly] = useState(centsToDisplay(s.monthlyCents));
+
+  function recompute(newGoal = goal, newStart = savingsStart, newDate = targetDate) {
+    const auto = calcMonthly(newGoal, newStart, newDate);
+    if (auto) setMonthly(auto);
+  }
+
+  const pace = savingsPace(s.goalCents, s.startCents, s.monthlyCents, s.targetDate, row.spentCents);
+
   return (
     <Section title="Savings goal">
+      {pace === "reached" && (
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium text-positive">
+          <span>✓</span> Goal reached!
+        </p>
+      )}
+      {pace === "behind" && (
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium text-amber-500">
+          <span>⚠</span> Behind pace
+        </p>
+      )}
+      {pace === "overdue" && (
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium text-negative">
+          <span>!</span> Target date passed
+        </p>
+      )}
+      {pace === "on_track" && (
+        <p className="mb-2 flex items-center gap-1 text-xs font-medium text-positive">
+          <span>✓</span> On track
+        </p>
+      )}
       <form action={(fd) => start(() => upsertSavingsGoalAndLink(fd))} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
+        <input type="hidden" name="month" value={monthKey} />
         <Grid>
-          <Labeled label="Goal" name="goal" type="number" step="0.01" defaultValue={centsToDisplay(s.goalCents)} />
-          <Labeled label="Start" name="start" type="number" step="0.01" defaultValue={centsToDisplay(s.startCents)} />
-          <Labeled label="Monthly" name="monthly" type="number" step="0.01" defaultValue={centsToDisplay(s.monthlyCents)} />
+          <Labeled label="Planned" name="planned" type="number" step="0.01" defaultValue={centsToDisplay(row.plannedCents)} />
+          <Labeled label="Goal" name="goal" type="number" step="0.01" value={goal}
+            onChange={(e) => { setGoal(e.target.value); recompute(e.target.value, savingsStart, targetDate); }} />
+          <Labeled label="Start" name="start" type="number" step="0.01" value={savingsStart}
+            onChange={(e) => { setSavingsStart(e.target.value); recompute(goal, e.target.value, targetDate); }} />
+          <Labeled label="Monthly" hint="(auto from goal)" name="monthly" type="number" step="0.01" value={monthly}
+            onChange={(e) => setMonthly(e.target.value)} />
         </Grid>
         <Labeled
           label="Target date (optional)"
           name="targetDate"
           type="date"
-          defaultValue={s.targetDate ?? ""}
+          value={targetDate}
+          onChange={(e) => { setTargetDate(e.target.value); recompute(goal, savingsStart, e.target.value); }}
           title="Set this to see whether your Monthly amount is on pace to hit the Goal by then."
         />
         {bucketOptions.length > 0 ? (
@@ -430,12 +540,16 @@ function Grid({ children }: { children: React.ReactNode }) {
 
 function Labeled({
   label,
+  hint,
   onFocus,
   ...inputProps
-}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
-      <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">{label}</span>
+      <span className="mb-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+        {label}
+        {hint && <span className="font-normal normal-case tracking-normal text-muted/60">{hint}</span>}
+      </span>
       <input
         {...inputProps}
         // Select the existing value on focus so typing replaces a "0" or

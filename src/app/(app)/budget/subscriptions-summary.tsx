@@ -4,6 +4,7 @@ import { useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { DOT } from "./category-icons";
 import { SubscriptionsModal } from "../subscriptions/subscriptions-modal";
+import type { CreditCardOption } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 
 const CYCLE_LABEL: Record<string, string> = {
@@ -44,12 +45,14 @@ export function SubscriptionsSummaryCard({
   currency,
   subscriptions,
   irregularBills,
+  creditCards,
   open,
   onToggle,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
+  creditCards?: CreditCardOption[];
   open: boolean;
   onToggle: () => void;
 }) {
@@ -128,6 +131,7 @@ export function SubscriptionsSummaryCard({
           currency={currency}
           subscriptions={subscriptions}
           irregularBills={irregularBills}
+          creditCards={creditCards}
           onClose={() => setManaging(false)}
         />
       ) : null}
@@ -139,12 +143,14 @@ export function IrregularBillsSummaryCard({
   currency,
   subscriptions,
   irregularBills,
+  creditCards,
   open,
   onToggle,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
+  creditCards?: CreditCardOption[];
   open: boolean;
   onToggle: () => void;
 }) {
@@ -212,6 +218,7 @@ export function IrregularBillsSummaryCard({
           currency={currency}
           subscriptions={subscriptions}
           irregularBills={irregularBills}
+          creditCards={creditCards}
           onClose={() => setManaging(false)}
         />
       ) : null}

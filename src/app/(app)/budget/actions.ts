@@ -217,6 +217,7 @@ export async function upsertSavingsGoal(formData: FormData) {
   );
 
   revalidatePath("/budget");
+  revalidatePath("/savings");
 }
 
 // Links (or unlinks) a Savings item to a real bucket in Accounts. Once
@@ -252,8 +253,11 @@ export async function updateSavingsLink(formData: FormData) {
 // Combined save for the Savings panel: goal fields + bucket link in one
 // action, so there's a single Save button instead of two.
 export async function upsertSavingsGoalAndLink(formData: FormData) {
-  await upsertSavingsGoal(formData);
-  await updateSavingsLink(formData);
+  await Promise.all([
+    upsertSavingsGoal(formData),
+    upsertPlan(formData),
+    updateSavingsLink(formData),
+  ]);
 }
 
 // ---------- Debt (detail panel) ----------
@@ -327,11 +331,15 @@ export async function upsertDebt(formData: FormData) {
   revalidatePath("/budget");
 }
 
-// Combined save for the Debt panel: planned amount + debt details in one
-// action, so there's a single Save button instead of two.
+// Combined save for the Debt panel: planned amount + debt details + optional
+// linked bucket in one action, so there's a single Save button. The bucket
+// link reuses subcategories.linked_bucket_id — the same column savings goals
+// use — so `addTransaction` already routes payments through the right bucket
+// via `getLinkedBucketId`.
 export async function upsertDebtAndPlan(formData: FormData) {
   await upsertPlan(formData);
   await upsertDebt(formData);
+  await updateSavingsLink(formData);
 }
 
 // ---------- Transactions (the Log, right rail) ----------

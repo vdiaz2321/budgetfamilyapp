@@ -39,14 +39,18 @@ function daysUntil(dateStr: string): number {
   return Math.round((target.getTime() - today.getTime()) / 86400000);
 }
 
+export type CreditCardOption = { id: string; name: string };
+
 export function SubscriptionsBoard({
   currency,
   subscriptions,
   irregularBills,
+  creditCards = [],
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
+  creditCards?: CreditCardOption[];
 }) {
   const monthlyTotal = subscriptions
     .filter((s) => s.isActive)
@@ -63,11 +67,13 @@ export function SubscriptionsBoard({
         subscriptions={subscriptions}
         currency={currency}
         monthlyTotal={monthlyTotal}
+        creditCards={creditCards}
       />
 
       <IrregularBillsSection
         irregularBills={irregularBills}
         currency={currency}
+        creditCards={creditCards}
       />
     </div>
   );
@@ -77,10 +83,12 @@ function SubscriptionsSection({
   subscriptions,
   currency,
   monthlyTotal,
+  creditCards = [],
 }: {
   subscriptions: SubscriptionRow[];
   currency: string;
   monthlyTotal: number;
+  creditCards?: CreditCardOption[];
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
@@ -110,6 +118,7 @@ function SubscriptionsSection({
                 <th className="px-2 py-2">Cycle</th>
                 <th className="px-2 py-2">Next Renewal</th>
                 <th className="px-2 py-2">Active</th>
+                <th className="px-2 py-2">Card</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
@@ -119,6 +128,7 @@ function SubscriptionsSection({
                   <SubscriptionFormRow
                     key={s.id}
                     row={s}
+                    creditCards={creditCards}
                     onDone={() => setEditing(null)}
                   />
                 ) : (
@@ -144,6 +154,9 @@ function SubscriptionsSection({
                         <span className="text-muted">Paused</span>
                       )}
                     </td>
+                    <td className="px-2 py-2 text-center text-muted">
+                      {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}
+                    </td>
                     <td className="px-2 py-2 text-right">
                       <RowActions
                         onEdit={() => setEditing(s.id)}
@@ -160,6 +173,7 @@ function SubscriptionsSection({
               {editing === "new" ? (
                 <SubscriptionFormRow
                   row={null}
+                  creditCards={creditCards}
                   onDone={() => setEditing(null)}
                 />
               ) : null}
@@ -183,16 +197,18 @@ function SubscriptionsSection({
 
 function SubscriptionFormRow({
   row,
+  creditCards = [],
   onDone,
 }: {
   row: SubscriptionRow | null;
+  creditCards?: CreditCardOption[];
   onDone: () => void;
 }) {
   const [pending, start] = useTransition();
 
   return (
     <tr className="border-t border-line bg-brand-soft/10">
-      <td colSpan={6} className="px-2 py-3">
+      <td colSpan={7} className="px-2 py-3">
         <form
           action={(fd) =>
             start(async () => {
@@ -263,6 +279,21 @@ function SubscriptionFormRow({
               className="w-32 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>
+          {creditCards.length > 0 && (
+            <label className="flex flex-col gap-1 text-xs text-muted">
+              Card
+              <select
+                name="accountId"
+                defaultValue={row?.accountId ?? ""}
+                className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">None</option>
+                {creditCards.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="ml-auto flex items-center gap-2 pb-0.5">
             <button
               type="button"
@@ -288,9 +319,11 @@ function SubscriptionFormRow({
 function IrregularBillsSection({
   irregularBills,
   currency,
+  creditCards = [],
 }: {
   irregularBills: IrregularBillRow[];
   currency: string;
+  creditCards?: CreditCardOption[];
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
@@ -316,6 +349,7 @@ function IrregularBillsSection({
                 <th className="px-2 py-2 text-left">Name</th>
                 <th className="px-2 py-2">Typical Amount</th>
                 <th className="px-2 py-2">Notes</th>
+                <th className="px-2 py-2">Card</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
@@ -325,6 +359,7 @@ function IrregularBillsSection({
                   <IrregularBillFormRow
                     key={b.id}
                     row={b}
+                    creditCards={creditCards}
                     onDone={() => setEditing(null)}
                   />
                 ) : (
@@ -334,6 +369,9 @@ function IrregularBillsSection({
                       {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
                     </td>
                     <td className="px-2 py-2 text-center text-muted">{b.notes || "—"}</td>
+                    <td className="px-2 py-2 text-center text-muted">
+                      {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}
+                    </td>
                     <td className="px-2 py-2 text-right">
                       <RowActions
                         onEdit={() => setEditing(b.id)}
@@ -350,6 +388,7 @@ function IrregularBillsSection({
               {editing === "new" ? (
                 <IrregularBillFormRow
                   row={null}
+                  creditCards={creditCards}
                   onDone={() => setEditing(null)}
                 />
               ) : null}
@@ -373,16 +412,18 @@ function IrregularBillsSection({
 
 function IrregularBillFormRow({
   row,
+  creditCards = [],
   onDone,
 }: {
   row: IrregularBillRow | null;
+  creditCards?: CreditCardOption[];
   onDone: () => void;
 }) {
   const [pending, start] = useTransition();
 
   return (
     <tr className="border-t border-line bg-brand-soft/10">
-      <td colSpan={4} className="px-2 py-3">
+      <td colSpan={5} className="px-2 py-3">
         <form
           action={(fd) =>
             start(async () => {
@@ -423,6 +464,21 @@ function IrregularBillFormRow({
               className="w-40 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>
+          {creditCards.length > 0 && (
+            <label className="flex flex-col gap-1 text-xs text-muted">
+              Card
+              <select
+                name="accountId"
+                defaultValue={row?.accountId ?? ""}
+                className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">None</option>
+                {creditCards.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="ml-auto flex items-center gap-2 pb-0.5">
             <button
               type="button"

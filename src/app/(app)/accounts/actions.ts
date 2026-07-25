@@ -5,12 +5,14 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
-import { syncAccountFromBuckets, syncAllBucketedAccounts } from "@/lib/buckets";
+import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } from "@/lib/buckets";
+import { adjustAccountLedger } from "@/lib/account-ledger";
+import { adjustDebtBalance } from "@/lib/debts";
 
-// Kinds the UI lets you create — asset accounts only. Debts (credit cards /
-// loans) live in the Budget Debt group and flow to Net Worth + Snowball from
-// there, so they're never entered here (single source of truth).
-const ALLOWED_KINDS = ["checking", "savings_bucket", "investment"];
+// Kinds the UI lets you create. Asset accounts + credit cards for card
+// management (spending tracking, subscription linking, fee tracking). Debt
+// balances still live in the Budget Debt group for net-worth purposes.
+const ALLOWED_KINDS = ["checking", "savings_bucket", "investment", "credit_card"];
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -68,18 +70,31 @@ export async function addAccount(formData: FormData) {
   const bankGroup =
     kind === "savings_bucket" ? "savings" : kind === "checking" ? "spending" : null;
 
-  const { error } = await supabase.from("accounts").insert({
+  const isCreditCard = kind === "credit_card";
+
+  const row: Record<string, unknown> = {
     household_id: householdId,
     name,
     kind,
     holder,
     subtype,
     is_kids_account: isKidsAccount,
-    include_net_worth: !isKidsAccount,
+    include_net_worth: isCreditCard ? false : !isKidsAccount,
     current_balance_cents: balanceCents,
     sort_order: sortOrder,
     bank_group: bankGroup,
-  });
+  };
+
+  if (isCreditCard) {
+    row.annual_fee_cents = displayToCents(String(formData.get("annualFee") ?? "0"));
+    row.fee_waived = formData.get("feeWaived") === "on";
+    const dateOpened = String(formData.get("dateOpened") ?? "").trim();
+    if (dateOpened) row.date_opened = dateOpened;
+    const dateClosed = String(formData.get("dateClosed") ?? "").trim();
+    if (dateClosed) row.date_closed = dateClosed;
+  }
+
+  const { error } = await supabase.from("accounts").insert(row);
 
   if (error) {
     return {
@@ -104,19 +119,29 @@ export async function updateAccount(formData: FormData) {
   const active = formData.get("active") === "on";
   if (!id || !name) return;
 
-  // Only the Banking edit form submits bankGroup; leave it untouched otherwise.
+  const isCreditCard = formData.get("isCreditCard") === "on";
+
   const update: Record<string, unknown> = {
     name,
     holder,
     subtype,
     is_kids_account: isKidsAccount,
-    include_net_worth: !isKidsAccount,
+    include_net_worth: isCreditCard ? false : !isKidsAccount,
     active,
     updated_at: new Date().toISOString(),
   };
+  // Only the Banking edit form submits bankGroup; leave it untouched otherwise.
   if (formData.has("bankGroup")) {
     const bankGroup = String(formData.get("bankGroup") ?? "");
     update.bank_group = bankGroup === "savings" ? "savings" : "spending";
+  }
+  if (isCreditCard) {
+    update.annual_fee_cents = displayToCents(String(formData.get("annualFee") ?? "0"));
+    update.fee_waived = formData.get("feeWaived") === "on";
+    const dateOpened = String(formData.get("dateOpened") ?? "").trim();
+    update.date_opened = dateOpened || null;
+    const dateClosed = String(formData.get("dateClosed") ?? "").trim();
+    update.date_closed = dateClosed || null;
   }
 
   await supabase
@@ -205,6 +230,148 @@ export async function deleteAccount(formData: FormData) {
     .eq("household_id", householdId);
 
   revalidate();
+}
+
+export async function closeCard(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  const dateClosed = String(formData.get("dateClosed") ?? "").trim();
+
+  await supabase
+    .from("accounts")
+    .update({
+      date_closed: dateClosed || new Date().toISOString().slice(0, 10),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  revalidate();
+}
+
+export async function reopenCard(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  await supabase
+    .from("accounts")
+    .update({
+      date_closed: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  revalidate();
+}
+
+// Upsert the rewards-tracker fields for one credit card. First save creates
+// the credit_card_details row; subsequent saves update it in place.
+export async function upsertCardDetails(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const accountId = String(formData.get("accountId") ?? "");
+  if (!accountId) return;
+
+  const optText = (k: string) => {
+    const v = String(formData.get(k) ?? "").trim();
+    return v || null;
+  };
+  const optCents = (k: string) => {
+    const v = String(formData.get(k) ?? "").trim();
+    return v ? displayToCents(v) : null;
+  };
+  const optDate = (k: string) => {
+    const v = String(formData.get(k) ?? "").trim();
+    return v || null;
+  };
+  const optInt = (k: string) => {
+    const v = String(formData.get(k) ?? "").trim().replace(/,/g, "");
+    if (!v) return 0;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const row = {
+    account_id: accountId,
+    household_id: householdId,
+    bank: optText("bank"),
+    auth_user: optText("authUser"),
+    charging: optText("charging"),
+    bonus_info: optText("bonusInfo"),
+    bonus_spend_cents: optCents("bonusSpend"),
+    bonus_spend_deadline: optDate("bonusDeadline"),
+    bonus_earned: formData.get("bonusEarned") === "on",
+    current_points: optInt("currentPoints"),
+    fees_paid_cents: optCents("feesPaid") ?? 0,
+    free_night_credit_cents: optCents("freeNightCredit"),
+    free_night_expires_on: optDate("freeNightExpires"),
+    spending_limit_cents: optCents("spendingLimit"),
+    remarks: optText("remarks"),
+    is_revolving_debt: formData.get("isRevolvingDebt") === "on",
+    debt_subcategory_id: optText("debtSubcategoryId"),
+    updated_at: new Date().toISOString(),
+  };
+
+  await supabase.from("credit_card_details").upsert(row, { onConflict: "account_id" });
+  revalidate();
+}
+
+// Pay a credit card: one transaction row that debits the source bank AND
+// (via paid_to_account_id) reduces the card's auto-computed "owed" tally.
+// For revolving cards with a linked debt subcategory, also lowers that debt.
+export async function payCard(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const cardId = String(formData.get("cardId") ?? "");
+  const sourceAccountId = String(formData.get("sourceAccountId") ?? "");
+  const bucketId = String(formData.get("bucketId") ?? "").trim() || null;
+  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  const dateStr = String(formData.get("date") ?? "").trim() || new Date().toISOString().slice(0, 10);
+  const notes = String(formData.get("notes") ?? "").trim() || null;
+
+  if (!cardId) return { error: "Missing card." };
+  if (!sourceAccountId) return { error: "Pick a source account." };
+  if (amountCents <= 0) return { error: "Enter a payment amount." };
+
+  // Insert one transaction: account_id = source (debit), paid_to_account_id =
+  // card (reduces owed). subcategory_id stays null — CC payments aren't
+  // budget-category spending; the original charges already were.
+  const { error: txError } = await supabase.from("transactions").insert({
+    household_id: householdId,
+    account_id: sourceAccountId,
+    paid_to_account_id: cardId,
+    amount_cents: amountCents,
+    occurred_on: dateStr,
+    memo: notes,
+    is_withdrawal: false,
+  });
+  if (txError) return { error: "Couldn't record the payment — please try again." };
+
+  // Debit the source: prefer bucket if the source has buckets, else account.
+  if (bucketId) {
+    await adjustBucketBalance(supabase, householdId, bucketId, -amountCents);
+  } else {
+    await adjustAccountLedger(supabase, householdId, sourceAccountId, -amountCents);
+  }
+
+  // If this card is revolving-debt and linked to a debt subcategory, also
+  // decrement that debt balance so Budget/Net Worth stay honest.
+  const { data: details } = await supabase
+    .from("credit_card_details")
+    .select("is_revolving_debt, debt_subcategory_id")
+    .eq("account_id", cardId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (details?.is_revolving_debt && details.debt_subcategory_id) {
+    await adjustDebtBalance(supabase, householdId, details.debt_subcategory_id, -amountCents);
+  }
+
+  await captureSnapshots(supabase, householdId);
+  revalidate();
+  revalidatePath("/transactions");
+  return { error: null };
 }
 
 // ---- Buckets: virtual sinking funds inside one account (Amex Savings case) ----
