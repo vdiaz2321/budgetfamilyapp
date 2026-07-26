@@ -16,6 +16,7 @@ import {
   reopenCard,
   updateAccount,
   updateBalance,
+  recalculateBalance,
   updateBucket,
   updateBucketBalance,
   updateBucketBankGroup,
@@ -1513,6 +1514,7 @@ function AccountRow({
             balanceCents={account.balanceCents}
             currency={currency}
             liability={section.liability}
+            kind={account.kind}
           />
         )}
       </div>
@@ -1829,13 +1831,16 @@ function AddBucketForm({
 // Read-only total for accounts with buckets — always the sum of the buckets
 // below, so edit the buckets, not this.
 function DerivedBalance({ balanceCents, currency }: { balanceCents: number; currency: string }) {
+  const negative = balanceCents < 0;
   return (
     <div
       title="Sum of this account's buckets — edit the buckets below to change it"
       className="flex items-center justify-end gap-0.5 justify-self-end py-1 px-1"
     >
-      <span className="text-sm text-muted">{currencySymbol(currency)}</span>
-      <span className="text-[0.9375rem] tabular-nums">{centsToDisplay(balanceCents)}</span>
+      <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
+      <span className={`text-[0.9375rem] tabular-nums ${negative ? "text-negative font-semibold" : ""}`}>
+        {centsToDisplay(balanceCents)}
+      </span>
     </div>
   );
 }
@@ -1845,45 +1850,79 @@ function BalanceInput({
   balanceCents,
   currency,
   liability,
+  kind,
 }: {
   id: string;
   balanceCents: number;
   currency: string;
   liability: boolean;
+  kind?: string;
 }) {
   const [pending, start] = useTransition();
+  const [reconciling, startReconcile] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const initial = centsToDisplay(balanceCents);
+  // Reconcile only for ledger-driven accounts (skip investment — those aren't
+  // derived from a transaction ledger).
+  const canReconcile = kind !== "investment";
 
   return (
-    <form
-      ref={formRef}
-      action={(fd) => start(() => updateBalance(fd))}
-      className="flex items-center justify-end gap-0.5 justify-self-end"
-    >
-      <input type="hidden" name="id" value={id} />
-      <span className="pointer-events-none text-sm text-muted">
-        {currencySymbol(currency)}
-      </span>
-      <input
-        // Remount (reset to the server value) whenever the saved amount changes.
-        key={initial}
-        name="balance"
-        // type=text (not number) so the `size` attr can shrink the box to fit
-        // its content — `size` is ignored on number inputs, which strands the $.
-        type="text"
-        inputMode="decimal"
-        defaultValue={initial}
-        size={Math.max(initial.length, 5) + 2}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={(e) => {
-          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
-        }}
-        className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
-          liability && balanceCents > 0 ? "text-negative" : ""
-        } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
-      />
-    </form>
+    <div className="flex items-center gap-1 justify-self-end">
+      {canReconcile ? (
+        <form
+          action={(fd) => startReconcile(() => recalculateBalance(fd))}
+          onSubmit={(e) => {
+            if (!window.confirm("Rebuild this balance from all transactions on the account? Starting balance is treated as $0; any manual adjustments will be replaced.")) {
+              e.preventDefault();
+            }
+          }}
+        >
+          <input type="hidden" name="id" value={id} />
+          <button
+            type="submit"
+            disabled={reconciling}
+            title="Recalculate balance from transactions (starting from $0)"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-50"
+            aria-label="Reconcile from transactions"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" className={reconciling ? "animate-spin" : ""} aria-hidden>
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              <path d="M3 21v-5h5" />
+            </svg>
+          </button>
+        </form>
+      ) : null}
+      <form
+        ref={formRef}
+        action={(fd) => start(() => updateBalance(fd))}
+        className="flex items-center justify-end gap-0.5"
+      >
+        <input type="hidden" name="id" value={id} />
+        <span className="pointer-events-none text-sm text-muted">
+          {currencySymbol(currency)}
+        </span>
+        <input
+          // Remount (reset to the server value) whenever the saved amount changes.
+          key={initial}
+          name="balance"
+          // type=text (not number) so the `size` attr can shrink the box to fit
+          // its content — `size` is ignored on number inputs, which strands the $.
+          type="text"
+          inputMode="decimal"
+          defaultValue={initial}
+          size={Math.max(initial.length, 5) + 2}
+          onFocus={(e) => e.currentTarget.select()}
+          onBlur={(e) => {
+            if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
+          }}
+          className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+            (liability && balanceCents > 0) || (!liability && balanceCents < 0) ? "text-negative font-semibold" : ""
+          } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
+        />
+      </form>
+    </div>
   );
 }
 

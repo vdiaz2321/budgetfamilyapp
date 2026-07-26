@@ -189,6 +189,66 @@ export async function updateBalance(formData: FormData) {
   revalidate();
 }
 
+// Reconcile the account's balance from its transaction history — sums every
+// ledger delta on the account (income adds, everything else subtracts) and
+// sets current_balance_cents to that total. Assumes a starting balance of $0
+// (the current balance is discarded — call this only when you want a pure
+// rebuild from the tx log). Skipped for investment / bucketed accounts, which
+// aren't ledger-driven.
+export async function recalculateBalance(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("id, kind")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!account || account.kind === "investment") return;
+
+  const { count } = await supabase
+    .from("buckets")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", id);
+  if (count) return; // bucketed accounts already re-sum from buckets
+
+  const { data: txs } = await supabase
+    .from("transactions")
+    .select("amount_cents, category_id")
+    .eq("household_id", householdId)
+    .eq("account_id", id);
+
+  // Cache category → kind lookups since many txs share categories.
+  const kindCache = new Map<string, string | null>();
+  let sum = 0;
+  for (const t of txs ?? []) {
+    let kind: string | null;
+    if (kindCache.has(t.category_id)) {
+      kind = kindCache.get(t.category_id) ?? null;
+    } else {
+      const { data: cat } = await supabase
+        .from("categories")
+        .select("kind")
+        .eq("id", t.category_id)
+        .maybeSingle();
+      kind = cat?.kind ?? null;
+      kindCache.set(t.category_id, kind);
+    }
+    sum += kind === "income" ? t.amount_cents : -t.amount_cents;
+  }
+
+  await supabase
+    .from("accounts")
+    .update({ current_balance_cents: sum, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  await captureSnapshots(supabase, householdId);
+  revalidate();
+}
+
 // Persist a manual drag/arrow reorder of a section's accounts. `orderedIds` is
 // that section's account ids in their new top-to-bottom order — only those
 // rows' sort_order changes, so other sections are untouched.

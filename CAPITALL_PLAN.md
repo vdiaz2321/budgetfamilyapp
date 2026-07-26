@@ -178,96 +178,187 @@ to Networth/Insights step.
   built so they *could* hand off to it later (API pull / shared Supabase table /
   export-import — TBD when he shares the link).
 
-## Open design item — savings sub-buckets / envelopes (NOT YET BUILT)
+## Savings sub-buckets / envelopes (BUILT — migrations 0008/0011/0019)
 
-Discussed on the PC before the Mac handoff; missed getting written down here, which
-is exactly the kind of drift this doc exists to prevent. Captured now so it
-survives the next machine switch. Victor is sending Google Sheet screenshots to
-clarify further — **do not build until those land and this section is confirmed.**
+The virtual envelope concept above was built as **buckets nested under an
+account**. Model: one row in `accounts` (e.g. Amex Savings) with N rows in
+`buckets` (`account_id` FK, `name`, `balance_cents`). The parent account's
+`current_balance_cents` is always the sum of its buckets via
+`syncAccountFromBuckets` — never a separate source of truth. Budget savings
+subcategories can link to a specific bucket via `subcategories.linked_bucket_id`
+(migration 0011); contributions/withdrawals logged on that subcategory
+auto-adjust the bucket's balance via `adjustBucketBalance`.
 
-- **The real-world shape:** Victor consolidated multiple savings goals into ONE
-  physical bank account (Amex Savings) to maximize APY, rather than keeping
-  separate accounts per goal. But he still tracks each goal as its own
-  **virtual envelope / sinking fund** inside that one account balance — e.g.
-  Real Estate, Vehicle Purchase, Emergency Fund, Wallet$, each with its own
-  running total that should sum to the parent account's actual balance.
-- **Budget's Savings category = the planning side, not a balance tracker.** The
-  Savings items in Budget represent "how much am I putting into fund X *this
-  month*" — a plan/contribution amount. They are NOT meant to show "Spent" the
-  way Bills/Expenses/Debt do, because money isn't spent, it's being moved into
-  savings (still an asset). **Bug/behavior fix needed:** Budget's Savings group
-  currently reuses the same Spent/Remaining language as other groups — it
-  shouldn't say "Spent."
-- **The gap:** there is currently no feature connecting a Savings budget item to
-  (a) a specific envelope/bucket balance that persists and snapshots monthly, or
-  (b) the physical account it actually lives in. `savings_goals` (goal/start/
-  monthly per subcategory) is the closest existing piece but has no monthly
-  history and no link to an account.
-- **What's needed once scoped:** likely a new "bucket" or "envelope" concept —
-  either sub-rows under an Account (Amex Savings → Real Estate, Vehicle
-  Purchase, Emergency Fund, Wallet$, ...) that sum to the account's balance and
-  each get their own monthly snapshot row (mirrors his Monthly Net Worth sheet
-  screenshot), OR a link from a Budget Savings subcategory to an account (same
-  pattern as the debt↔account link in migration `0006`) plus monthly snapshots
-  for those subcategories. Needs Victor's screenshots to decide which.
-- **Withdrawals matter too:** money can flow out of a bucket (e.g. pulling from
-  Emergency Fund), not just in. Whatever gets built must handle both directions
-  and keep the account's total balance reconciled with its buckets' sum.
+- Withdrawals: `transactions.is_withdrawal` flips the sign.
+- Snapshots per bucket: `bucket_snapshots` table (migration 0008), captured
+  monthly by `captureSnapshots`.
+- Banking group tag: `bank_group` on buckets (`savings` / `spending`, migration
+  0019) so Amex Savings can carry both sinking-fund buckets and spending buckets
+  side by side.
 
-## Open design item — NOT zero-based; rollover months (NOT YET BUILT)
+**Extended to investment accounts (2026-07-26, migration 0027):** the same
+bucket model now backs investment sub-accounts too (Fidelity → Roth IRA Vic /
+Roth IRA Jo / Taxable Vic; Crypto → Tangem / Kraken / River / Robinhood). The
+Invest page renders one row per account with an expand chevron that reveals
+bucket rows, each with editable Contrib/Gains/Current cells. The transaction
+modal shows a Bucket picker whenever the selected account is `kind='investment'`
+and has ≥1 bucket; picking one writes `transactions.bucket_id` (new column),
+and `adjustBucketBalance` handles the balance side-effect.
 
-Victor does **not** want a zero-based budget. He needs unspent planned money to
-be able to **roll over to the next month** (e.g. saved up for a vacation or
-school supplies that land in a later month), rather than the "left to budget"
-number just resetting or implying leftover money vanished. He'll send a Google
-Sheet screenshot showing how he currently handles this. Needs that screenshot
-before scoping — likely touches `budget_plans` (per-month, per-subcategory
-already) and possibly needs a rollover/carry-forward calculation or an explicit
-"carried over" line, separate from the current month's fresh plan.
+## Rollover months (BUILT — migration 0015)
+
+Per-subcategory monthly rollover was built: unspent planned money carries
+forward into the next month's "left to budget" instead of resetting. Rollover
+inflow is displayed on the Budget hero as a separate `RolloverBar` and folded
+into the waterfall (own income spent first, then rolled-in buffer). Toggleable
+per household. Delivered in migration 0015.
+
+## Credit Cards / Rewards Tracker (BUILT — migrations 0024/0025/0026)
+
+Full rewards tracker to replace Victor's rewards Google Sheet:
+
+- **`credit_card_details` table** (0025): 1:1 with `accounts.kind='credit_card'`,
+  holds bank, auth user, charging, bonus info + spend/deadline + earned flag,
+  current points, fees paid, free-night credit + expiration, spending limit,
+  remarks, revolving flag, linked-debt subcategory.
+- **Free-night points-limit fields** (0026): `free_night_points_limit` +
+  `benefit_used_on` for hotel-brand cards with per-year points caps.
+- **Auto-computed "Owed"** per card = sum(charges where paid_to_account_id IS
+  NULL) − sum(payments to that card). No manual owed number.
+- **`transactions.paid_to_account_id`** (0025) represents a one-row CC payment
+  that both debits the source bank AND credits the CC's owed tally.
+- **Pay Card modal** on Accounts (source account + optional bucket picker,
+  writes the paid_to_account_id transaction and calls adjustBucketBalance /
+  adjustAccountLedger on the source).
+- **Pay-in-full vs revolving distinction**: pay-in-full cards (most) never
+  create a debt entry; revolving cards can opt in and link to a debt
+  subcategory, so 0% APR promotional balances get tracked as actual debt.
+- **Expandable row layout** on Accounts, grouped by holder (Vic / Johana) with
+  per-holder counts and totals, three sub-sections (active / closed / archived).
+
+## Investment performance / Year-by-Year (BUILT — migrations 0020/0021/0022/0027)
+
+- **`investment_years` table** (0020) — one row per (household, account, [bucket],
+  year), holding contributed / accrued / start / end (start/end added in 0021).
+  Seeded from Victor's 3-year CSV.
+- **`v_investment_contributions` view** (0020, extended 0027) — sums transactions
+  keyed by (account, bucket, year), so live contributions flow into Contrib
+  automatically.
+- **Current-year additive rule** (0027) — for the current year, Contrib =
+  seed + live transactions. Historical years stay frozen at their reviewed
+  values, so back-dating a transaction can't double-count against a past year.
+- **Bucket nesting on Invest page** (0027) — Fidelity/Crypto expand to their
+  bucket rows (Vic Taxable, Roth Vic, Roth Jo / Tangem, Kraken, River,
+  Robinhood). Each bucket cell is editable and saves via `setInvestmentYear`
+  (extended to accept optional bucketId).
+- **Annual Overview year-over-year breakdown** (0022) — 12-month grid rebuilt
+  as `annual_overview` with per-cell overrides for years missing raw
+  transactions.
+- **Chart & UI polish** — hero total-return card, stats bar (Contributed /
+  Unrealized Gains / Current / Accounts), Stacked / Grouped / % Return toggle,
+  click-to-filter chart, teal accent for gains (not green — reserved for
+  positive-cash Net Worth semantics).
+
+## Ledger reconcile (BUILT 2026-07-26)
+
+`recalculateBalance` server action + ↻ button next to the balance field on
+every non-bucketed, non-investment asset account on the Accounts page. Rebuilds
+`current_balance_cents` from the sum of every transaction's ledger delta
+(income adds, everything else subtracts), assuming a $0 starting balance.
+Fixes ledger drift when a manual balance edit or transient error caused the
+running total to diverge from the transaction log. Manual balance edits still
+win — reconcile is opt-in and confirms before overwriting.
+
+## Deferred / open
+
+- **Insights page** (four charts + date filter) — schema is ready; page not
+  built yet.
+- **Debt refactor** — Victor's rule: debts live only in Budget; the Accounts
+  page should stop offering debt entry. Refactor tracked in memory
+  `debt_single_source_budget.md`, not yet applied.
+- **CSV import for Jan–Jul 2026 subcategory totals** — Victor is preparing the
+  file from Google Sheets; build the upload tool when it arrives (memory
+  `project_2026_csv_import.md`).
+- **Retirement-planner bridge** — deferred until Victor shares the external
+  Cloudflare-hosted planner.
+- **Receipt scanner** — north-star feature, later phase.
 
 ## Build order & status
 
-1. ✅ **Design system + app shell** — Capitall brand, indigo/amber theme, sidebar,
-   placeholder pages. (commit `2c5962a`)
-2. ✅ **Budget page** — month navigator, collapsible groups (Income/Bills/Expenses/
-   Savings/Debt), Planned + Remaining↔Spent toggle, "left to budget" banner, debt
-   rows + detail panel, per-row progress lines, Summary donut. Absorbed Settings;
-   Debt Snowball got its own tab.
-3. ✅ **Transactions panel (the Log)** inside Budget — right rail with Summary/
-   Transactions toggle, search, add/edit/delete txn modal (5 category tabs) →
-   drives Spent/Remaining.
+1. ✅ **Design system + app shell** — Capitall brand, indigo/amber theme,
+   sidebar, placeholder pages.
+2. ✅ **Budget page** — month navigator, collapsible groups, Planned + Remaining
+   ↔ Spent toggle, hero "left to budget" summary card, debt rows + detail panel,
+   per-row sparklines, category icons, rollover bar, sticky footer.
+3. ✅ **Transactions panel (the Log)** inside Budget — right rail Summary /
+   Transactions toggle, search, add/edit/delete modal (5 category tabs, tab-
+   aware "charged to / paid from" label, bucket picker for investment accounts).
 4. ✅ **Accounts page** — Banking / Cash / Investments / Credit Cards with live
-   balances + net worth summary (migration `0004`); balances feed Networth.
-5. ✅ **Monthly snapshot engine** — `account_snapshots` + `debt_snapshots`
-   (migration `0005`), lazily upserted for the *current* month on every balance
-   change and Networth visit; prior months freeze automatically. No cron.
-6. ✅ **Networth** — current Assets/Debts/Net cards, over-time SVG line chart
-   with hover tooltip, year-by-year closing positions + delta, monthly history
-   table. Liabilities = credit-card/loan accounts + Budget debts, de-duplicated:
-   a Budget debt can link to its account (migration `0006`, "Linked account" in
-   the debt panel) and Networth then counts only the debt's balance.
-7. ✅ **Annual Overview** — year navigator; 12-month table (Income/Savings/Bills/
-   Expenses/Debt/Net): actuals through the current month, planned (projected,
-   grayed) beyond; year totals + Income/Outflow/Net cards.
-7b. ✅ **Transactions page** — dedicated `/transactions` register (Clear ✓ / Date /
-   Payee / Category / Account / Memo / Amount), month picker, search + type +
-   account filters, totals row, add/edit via the shared modal. `cleared` column
-   (migration `0007`) is a simple checkmark — deliberately NO reconcile flow.
-7c. ✅ **Monthly balances grid on Networth** — accounts × months table (the
-   MonthlyNetWorth tab): per-account value each month from snapshots, frozen
-   history, Net worth row, linked accounts shown but not double-counted.
-8. **Insights** — the four charts + date filter.
-9. ~~Goals~~ — dropped (Victor: not interested in a Goals tab). Route removed.
+   balances, bucketed accounts, Savings/Spending tag, drag reorder, closed &
+   archived sections, ledger reconcile ↻ button.
+5. ✅ **Monthly snapshot engine** — `account_snapshots`, `debt_snapshots`,
+   `bucket_snapshots`, lazily upserted; prior months freeze automatically.
+6. ✅ **Networth** — Assets / Debts / Net hero, SVG line chart with hover
+   tooltip, editable per-month grid, year-by-year closing positions + delta,
+   monthly balances table, sessionStorage collapse persistence.
+7. ✅ **Annual Overview** — year navigator; 12-month table; year totals; per-
+   cell override backfill for pre-import years.
+8. ✅ **Transactions page** — dedicated `/transactions` register; `cleared`
+   checkmark; month + type + account filters; bulk delete.
+9. ✅ **Monthly balances grid on Networth** — accounts × months table.
+10. ✅ **Debt Snowball** — dedicated `/snowball` page with focus subcategory,
+    extra-per-period modeling, paid-off flag, historical debt tracking.
+11. ✅ **Savings page redesign** — hero total, connected stats bar, full-ring
+    goal cards, condensed details.
+12. ✅ **Invest page** — hero Total Return, summary stats bar, Performance
+    chart (Stacked / Grouped / % Return), PerfTable with bucket expansion,
+    Year-by-Year drawer, additive current-year transaction rule.
+13. ✅ **Credit Cards / Rewards Tracker** — full rewards fields on
+    `credit_card_details`, auto-owed, Pay Card modal, holder groups.
+14. ⏳ **Insights** — four charts + date filter (deferred).
+15. ~~Goals~~ — dropped.
 
-Later: optional history importer (2024–2026 from the sheet); app view; receipt
-scanner; retirement-planner bridge.
+Later: history importer (Jan–Jul 2026 CSV upload); app view; receipt scanner;
+retirement-planner bridge.
 
 ## Stack & schema notes
 
 - Next.js 16 (App Router, Turbopack) + TS + Tailwind v4 + Supabase. Repo:
   https://github.com/vdiaz2321/budgetfamilyapp
-- Schema migrations are numbered SQL in `supabase/migrations/` — apply each new one
-  once via Supabase SQL Editor (shared DB). Current: `0001`–`0007`.
-- Existing schema already has households/profiles/categories/subcategories/payees/
-  accounts/transactions/budget_plans/debts/savings_goals + views. The current
-  `/settings` page (Start-tab mirror) will be reworked into the Budget page.
+- Schema migrations are numbered SQL in `supabase/migrations/` — apply each new
+  one once via Supabase SQL Editor (shared DB). **Victor applies all migrations
+  himself** — Claude never calls `apply_migration` or executes DDL via
+  `execute_sql`; only read-only SELECT queries are permitted via MCP.
+- Current migrations: **`0001`–`0027`**.
+
+### Migration index
+
+| # | Purpose |
+|---|---|
+| 0001 | Initial schema (households, profiles, categories, subcategories, payees, accounts, transactions, budget_plans, debts, savings_goals + views) |
+| 0002 | Start-tab schema |
+| 0003 | `create_household` RPC |
+| 0004 | Accounts page tables/views |
+| 0005 | Monthly snapshots (account_snapshots, debt_snapshots) |
+| 0006 | Debt → account link |
+| 0007 | `transactions.cleared` |
+| 0008 | Savings buckets + `bucket_snapshots` |
+| 0009 | Debt extras (APR promo, notes, etc.) |
+| 0010 | Snowball extra periods |
+| 0011 | `subcategories.linked_bucket_id`, `transactions.is_withdrawal` |
+| 0012 | `savings_goals.target_date` |
+| 0013 | Household invites |
+| 0014 | `accounts.subtype`, networth include flag |
+| 0015 | Budget rollover |
+| 0016 | Networth history (`bank_group` + `networth_history`) |
+| 0017 | `accounts.sort_order` |
+| 0018 | `debts.paid_off_at` |
+| 0019 | `buckets.bank_group` |
+| 0020 | Investment performance (`investment_years`, `v_investment_contributions`) |
+| 0021 | `investment_years.start_cents`/`end_cents` |
+| 0022 | Annual overview history |
+| 0023 | Subscriptions |
+| 0024 | Credit card fields + subscription `account_id` |
+| 0025 | `credit_card_details` + `transactions.paid_to_account_id` |
+| 0026 | `free_night_points_limit` + `benefit_used_on` |
+| 0027 | Bucket-level investing (`investment_years.bucket_id`, `transactions.bucket_id`, view update) |
