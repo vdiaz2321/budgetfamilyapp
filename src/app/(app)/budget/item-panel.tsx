@@ -10,7 +10,7 @@ import {
   upsertPlan,
   upsertSavingsGoalAndLink,
 } from "./actions";
-import type { AccountOption, BucketOption, RowData } from "./types";
+import type { AccountOption, BucketOption, RowData, TxData } from "./types";
 import { DEBT_KINDS } from "./types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
@@ -33,8 +33,14 @@ type Props = {
   bucketOptions: BucketOption[];
   snowballExtraCents: number;
   isSnowballFocus: boolean;
+  // Every tx already loaded on the Budget page; the panel filters to this
+  // subcategory + month so the user can see what actually made up the Spent
+  // figure without hopping to the Transactions page.
+  transactions: TxData[];
+  accountNameById: Map<string, string>;
   onClose: () => void;
   onAddTransaction: () => void;
+  onEditTransaction: (tx: TxData) => void;
 };
 
 export function ItemPanel({
@@ -46,9 +52,19 @@ export function ItemPanel({
   bucketOptions,
   snowballExtraCents,
   isSnowballFocus,
+  transactions,
+  accountNameById,
   onClose,
   onAddTransaction,
+  onEditTransaction,
 }: Props) {
+  // Filter txs to this row's subcategory and the currently-viewed month. The
+  // month is a "first of the month" ISO date; a tx belongs if its YYYY-MM
+  // prefix matches.
+  const monthPrefix = monthKey.slice(0, 7);
+  const monthTxs = transactions
+    .filter((t) => t.subId === row.subId && t.date.startsWith(monthPrefix))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   const over = remaining < 0;
@@ -91,7 +107,7 @@ export function ItemPanel({
         </button>
         <p className="text-[11px] font-semibold uppercase tracking-wide text-white/80">{kind}</p>
         <div className="mt-3 flex items-end justify-between gap-2">
-          <h2 className="min-w-0 truncate text-lg font-bold text-white">{row.name}</h2>
+          <InlineNameEdit subId={row.subId} name={row.name} />
           <div className="shrink-0 text-right">
             <p className="text-[10px] uppercase tracking-wide text-white/80">
               {headerLabel}
@@ -107,20 +123,7 @@ export function ItemPanel({
         </p>
       </div>
 
-      <div className="px-5 pt-4">
-        <button
-          type="button"
-          onClick={onAddTransaction}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-soft py-2 text-sm font-semibold text-brand hover:bg-brand-soft/70"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Add transaction
-        </button>
-      </div>
-
-      <div className="space-y-4 px-5 pb-4 pt-3">
+      <div className="space-y-4 px-5 pb-4 pt-4">
         {kind === "debt" && row.debt ? (
           <DebtForm
             key={row.subId}
@@ -131,15 +134,93 @@ export function ItemPanel({
             bucketOptions={bucketOptions}
             snowballExtraCents={snowballExtraCents}
             isSnowballFocus={isSnowballFocus}
+            onAddTransaction={onAddTransaction}
           />
         ) : kind === "savings" && row.savings ? (
-          <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} />
+          <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} onAddTransaction={onAddTransaction} />
         ) : (
-          <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} />
+          <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} dueDay={row.dueDay} hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)} onAddTransaction={onAddTransaction} />
         )}
-        <RenameForm row={row} kind={kind} onDeleted={onClose} />
       </div>
+
+      <MonthTransactions
+        txs={monthTxs}
+        currency={currency}
+        accountNameById={accountNameById}
+        onEdit={onEditTransaction}
+      />
+
+      <DeleteFooter subId={row.subId} onDeleted={onClose} />
     </div>
+  );
+}
+
+// Editable title inside the colored header. Click to edit, Enter or blur to
+// save, Esc to cancel. Uses the same updateSubcategory action as the old
+// Rename form — no schema change.
+function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
+  const [editing, setEditing] = useState(false);
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        title="Click to rename"
+        className="min-w-0 flex-1 truncate rounded px-1 -mx-1 text-left text-lg font-bold text-white hover:bg-white/10"
+      >
+        {name}
+      </button>
+    );
+  }
+  return (
+    <form
+      ref={formRef}
+      action={(fd) =>
+        start(async () => {
+          await updateSubcategory(fd);
+          setEditing(false);
+        })
+      }
+      className="min-w-0 flex-1"
+    >
+      <input type="hidden" name="id" value={subId} />
+      <input
+        ref={inputRef}
+        autoFocus
+        name="name"
+        defaultValue={name}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={() => formRef.current?.requestSubmit()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditing(false);
+        }}
+        disabled={pending}
+        className="w-full min-w-0 rounded bg-white px-2 py-1 text-lg font-bold text-gray-900 shadow-sm outline-none ring-2 ring-white/70"
+      />
+    </form>
+  );
+}
+
+function DeleteFooter({ subId, onDeleted }: { subId: string; onDeleted: () => void }) {
+  const [pending, start] = useTransition();
+  return (
+    <form
+      action={(fd) => start(() => deleteSubcategory(fd).then(onDeleted))}
+      className="border-t border-line/70 px-5 py-2"
+    >
+      <input type="hidden" name="id" value={subId} />
+      <button
+        type="submit"
+        disabled={pending}
+        className="w-full rounded py-1 text-xs font-medium text-negative/70 transition hover:bg-negative/5 hover:text-negative disabled:opacity-50"
+      >
+        {pending ? "Deleting…" : "Delete this item"}
+      </button>
+    </form>
   );
 }
 
@@ -152,33 +233,120 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function MonthTransactions({
+  txs,
+  currency,
+  accountNameById,
+  onEdit,
+}: {
+  txs: TxData[];
+  currency: string;
+  accountNameById: Map<string, string>;
+  onEdit: (tx: TxData) => void;
+}) {
+  if (txs.length === 0) {
+    return (
+      <div className="border-t border-line/70 px-5 py-3 text-center text-xs text-muted">
+        No transactions this month
+      </div>
+    );
+  }
+  const dateLabel = (iso: string) => {
+    // "2026-07-25" → "Jul 25". Split-based parse avoids the UTC-vs-local
+    // ambiguity of `new Date("2026-07-25")` (which would render as Jul 24 in
+    // negative UTC offsets).
+    const [, m, d] = iso.split("-").map(Number);
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${MONTHS[m - 1]} ${d}`;
+  };
+  return (
+    <div className="border-t border-line/70 px-5 py-3">
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        This month · {txs.length} transaction{txs.length === 1 ? "" : "s"}
+      </h3>
+      <ul className="max-h-56 space-y-1 overflow-y-auto">
+        {txs.map((t) => {
+          const acct = t.accountId ? accountNameById.get(t.accountId) : null;
+          return (
+            <li key={t.id}>
+              <button
+                type="button"
+                onClick={() => onEdit(t)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition hover:bg-brand-soft/40"
+                title="Edit transaction"
+              >
+                <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-medium">{t.payee ?? "—"}</span>
+                  {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}
+                </span>
+                <span className={`shrink-0 tabular-nums ${t.isWithdrawal ? "text-positive" : "text-negative"}`}>
+                  {t.isWithdrawal ? "+" : "−"}{formatMoney(t.amountCents, currency)}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function PlannedForm({
   subId,
   monthKey,
   plannedCents,
+  dueDay,
+  hasDue,
+  onAddTransaction,
 }: {
   subId: string;
   monthKey: string;
   plannedCents: number;
+  dueDay?: number | null;
+  hasDue?: boolean;
+  onAddTransaction: () => void;
 }) {
   const [pending, start] = useTransition();
+  const [duePending, startDue] = useTransition();
   return (
-    <Section title="Planned this month">
-      <form action={(fd) => start(() => upsertPlan(fd))} className="flex items-center gap-2">
-        <input type="hidden" name="subcategoryId" value={subId} />
-        <input type="hidden" name="month" value={monthKey} />
-        <input
-          key={plannedCents}
-          name="planned"
-          type="number"
-          step="0.01"
-          defaultValue={centsToDisplay(plannedCents)}
-          onFocus={(e) => e.currentTarget.select()}
-          className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        <SaveBtn pending={pending} />
-      </form>
-    </Section>
+    <>
+      <Section title="Planned this month">
+        <form action={(fd) => start(() => upsertPlan(fd))} className="flex items-center gap-2">
+          <input type="hidden" name="subcategoryId" value={subId} />
+          <input type="hidden" name="month" value={monthKey} />
+          <input
+            key={plannedCents}
+            name="planned"
+            type="number"
+            step="0.01"
+            defaultValue={centsToDisplay(plannedCents)}
+            onFocus={(e) => e.currentTarget.select()}
+            className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <SaveBtn pending={pending} />
+          <AddTxBtn onClick={onAddTransaction} />
+        </form>
+      </Section>
+      {hasDue ? (
+        <Section title="Due day (day of month)">
+          <form action={(fd) => startDue(() => updateSubcategory(fd))} className="flex items-center gap-2">
+            <input type="hidden" name="id" value={subId} />
+            <input
+              key={dueDay ?? ""}
+              name="dueDay"
+              type="number"
+              min={1}
+              max={31}
+              placeholder="—"
+              defaultValue={dueDay ?? ""}
+              className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            <SaveBtn pending={duePending} />
+          </form>
+        </Section>
+      ) : null}
+    </>
   );
 }
 
@@ -190,6 +358,7 @@ function DebtForm({
   bucketOptions,
   snowballExtraCents,
   isSnowballFocus,
+  onAddTransaction,
 }: {
   row: RowData;
   currency: string;
@@ -198,6 +367,7 @@ function DebtForm({
   bucketOptions: BucketOption[];
   snowballExtraCents: number;
   isSnowballFocus: boolean;
+  onAddTransaction: () => void;
 }) {
   const [pending, start] = useTransition();
   const plannedRef = useRef<HTMLInputElement>(null);
@@ -352,7 +522,10 @@ function DebtForm({
             className="w-full resize-none rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
-        <SaveBtn pending={pending} full />
+        <div className="flex items-center gap-2">
+          <SaveBtn pending={pending} full />
+          <AddTxBtn onClick={onAddTransaction} />
+        </div>
       </form>
     </Section>
   );
@@ -382,7 +555,7 @@ function savingsPace(goalCents: number, startCents: number, monthlyCents: number
   return monthlyCents >= required ? "on_track" as const : "behind" as const;
 }
 
-function SavingsForm({ row, bucketOptions, monthKey }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string }) {
+function SavingsForm({ row, bucketOptions, monthKey, onAddTransaction }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; onAddTransaction: () => void }) {
   const [pending, start] = useTransition();
   const s = row.savings!;
   const [goal, setGoal] = useState(centsToDisplay(s.goalCents));
@@ -484,51 +657,10 @@ function SavingsForm({ row, bucketOptions, monthKey }: { row: RowData; bucketOpt
             </span>
           </label>
         ) : null}
-        <SaveBtn pending={pending} full />
-      </form>
-    </Section>
-  );
-}
-
-function RenameForm({
-  row,
-  kind,
-  onDeleted,
-}: {
-  row: RowData;
-  kind: CategoryKind;
-  onDeleted: () => void;
-}) {
-  const [savePending, startSave] = useTransition();
-  const [delPending, startDel] = useTransition();
-  // Debt owns its own due-day field in Debt Details above (synced to this
-  // same column on save) — showing it twice here was confusing.
-  const hasDue = kind !== "debt" && KINDS_WITH_DUE.includes(kind);
-
-  return (
-    <Section title="Rename or remove">
-      <form action={(fd) => startSave(() => updateSubcategory(fd))} className="space-y-2">
-        <input type="hidden" name="id" value={row.subId} />
-        <Grid>
-          <Labeled label="Name" name="name" type="text" defaultValue={row.name} required />
-          {hasDue ? (
-            <Labeled label="Due day" name="dueDay" type="number" min={1} max={31} defaultValue={row.dueDay ?? ""} />
-          ) : null}
-        </Grid>
-        <SaveBtn pending={savePending} full label="Save changes" />
-      </form>
-      <form
-        action={(fd) => startDel(() => deleteSubcategory(fd).then(onDeleted))}
-        className="mt-2"
-      >
-        <input type="hidden" name="id" value={row.subId} />
-        <button
-          type="submit"
-          disabled={delPending}
-          className="w-full rounded-lg bg-background py-2 text-sm font-medium text-negative ring-1 ring-line hover:bg-negative/5 disabled:opacity-60"
-        >
-          {delPending ? "Deleting…" : "Delete item"}
-        </button>
+        <div className="flex items-center gap-2">
+          <SaveBtn pending={pending} full />
+          <AddTxBtn onClick={onAddTransaction} />
+        </div>
       </form>
     </Section>
   );
@@ -558,6 +690,18 @@ function Labeled({
         className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </label>
+  );
+}
+
+function AddTxBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="shrink-0 rounded-lg bg-brand-soft px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-soft/70"
+    >
+      +Add
+    </button>
   );
 }
 

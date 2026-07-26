@@ -95,8 +95,13 @@ export function BudgetBoard({
   const toggleGroup = (categoryId: string) =>
     setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? false) }));
   // Set from the item panel's "+ Add transaction" button so it doesn't
-  // require switching to the Log tab first.
-  const [quickAdd, setQuickAdd] = useState(false);
+  // require switching to the Log tab first. `true` = new; a TxData = edit
+  // (opened by clicking a row in the panel's "This month" list).
+  const [quickAdd, setQuickAdd] = useState<boolean | TxData>(false);
+
+  // Precompute account_id → name so the item panel's tx list can render each
+  // row's account without re-scanning accountOptions on every entry.
+  const accountNameById = new Map(accountOptions.map((a) => [a.id, a.name]));
 
   // Waterfall: assignments spend this month's own income first; any shortfall
   // then draws down the rolled-in buffer, and only once that's exhausted does
@@ -143,8 +148,11 @@ export function BudgetBoard({
         bucketOptions={bucketOptions}
         snowballExtraCents={snowballExtraCents}
         isSnowballFocus={selected.subId === snowballFocusSubId}
+        transactions={transactions}
+        accountNameById={accountNameById}
         onClose={() => setSelected(null)}
         onAddTransaction={() => setQuickAdd(true)}
+        onEditTransaction={(tx) => setQuickAdd(tx)}
       />
     ) : null;
 
@@ -154,7 +162,7 @@ export function BudgetBoard({
   const railContent =
     quickAdd && selected ? (
       <TransactionModal
-        editTx={null}
+        editTx={quickAdd === true ? null : quickAdd}
         monthKey={month.key}
         firstOfMonth={month.firstOfMonth}
         subOptions={subOptions}

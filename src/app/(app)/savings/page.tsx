@@ -48,7 +48,10 @@ export default async function SavingsPage() {
   const savingsSubs = (subs ?? []).filter((s) => savingsCategoryIds.includes(s.category_id));
   const savingsSubIds = savingsSubs.map((s) => s.id);
 
-  const [{ data: savingsGoals }, { data: savingsTx }] = await Promise.all([
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+
+  const [{ data: savingsGoals }, { data: savingsTx }, { data: plans }] = await Promise.all([
     savingsSubIds.length
       ? supabase
           .from("savings_goals")
@@ -58,17 +61,43 @@ export default async function SavingsPage() {
     savingsSubIds.length
       ? supabase
           .from("transactions")
-          .select("subcategory_id, amount_cents, is_withdrawal")
+          .select("id, subcategory_id, amount_cents, is_withdrawal, payee, occurred_on, account_id")
           .eq("household_id", household.id)
+          .in("subcategory_id", savingsSubIds)
+      : Promise.resolve({ data: [] }),
+    savingsSubIds.length
+      ? supabase
+          .from("budget_plans")
+          .select("subcategory_id, planned_cents")
+          .eq("household_id", household.id)
+          .eq("month", monthKey)
           .in("subcategory_id", savingsSubIds)
       : Promise.resolve({ data: [] }),
   ]);
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));
+  const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents as number]));
   const contribBySub = new Map<string, number>();
   for (const t of savingsTx ?? []) {
     const delta = t.is_withdrawal ? -t.amount_cents : t.amount_cents;
     contribBySub.set(t.subcategory_id, (contribBySub.get(t.subcategory_id) ?? 0) + delta);
+  }
+
+  // Build per-subcategory transaction lists for the card dropdown (most recent first, cap at 10)
+  const txsBySub = new Map<string, SavingsCardData["transactions"]>();
+  for (const t of savingsTx ?? []) {
+    if (!txsBySub.has(t.subcategory_id)) txsBySub.set(t.subcategory_id, []);
+    txsBySub.get(t.subcategory_id)!.push({
+      id: t.id,
+      date: t.occurred_on,
+      payee: t.payee,
+      amountCents: t.amount_cents,
+      isWithdrawal: t.is_withdrawal,
+    });
+  }
+  for (const [k, arr] of txsBySub) {
+    arr.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    txsBySub.set(k, arr.slice(0, 10));
   }
 
   const cards: SavingsCardData[] = savingsSubs.map((s) => {
@@ -84,6 +113,8 @@ export default async function SavingsPage() {
     const leftToSaveCents = goalCents - savedCents;
     const reached = goalCents > 0 && leftToSaveCents <= 0;
 
+    const plannedCents = plannedBySub.get(s.id) ?? 0;
+
     let pace: SavingsCardData["pace"] = "none";
     let requiredMonthlyCents: number | null = null;
     if (reached) {
@@ -95,7 +126,7 @@ export default async function SavingsPage() {
         requiredMonthlyCents = leftToSaveCents;
       } else {
         requiredMonthlyCents = Math.ceil(leftToSaveCents / months);
-        pace = monthlyCents >= requiredMonthlyCents ? "on_track" : "behind";
+        pace = plannedCents >= requiredMonthlyCents ? "on_track" : "behind";
       }
     }
 
@@ -106,10 +137,12 @@ export default async function SavingsPage() {
       startCents,
       savedCents,
       monthlyCents,
+      plannedCents,
       leftToSaveCents,
       targetDate,
       pace,
       requiredMonthlyCents,
+      transactions: txsBySub.get(s.id) ?? [],
     };
   });
 

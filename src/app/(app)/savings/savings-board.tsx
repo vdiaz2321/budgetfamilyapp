@@ -1,6 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { formatMoney } from "@/lib/money";
+
+export type SavingsTxData = {
+  id: string;
+  date: string;
+  payee: string | null;
+  amountCents: number;
+  isWithdrawal: boolean;
+};
 
 export type SavingsCardData = {
   id: string;
@@ -9,10 +18,12 @@ export type SavingsCardData = {
   startCents: number;
   savedCents: number;
   monthlyCents: number;
+  plannedCents: number;
   leftToSaveCents: number;
   targetDate: string | null; // YYYY-MM-DD
   pace: "none" | "reached" | "on_track" | "behind" | "overdue";
   requiredMonthlyCents: number | null;
+  transactions: SavingsTxData[];
 };
 
 type Props = {
@@ -30,10 +41,10 @@ export function SavingsBoard({ cards, currency }: Props) {
   const totals = cards.reduce(
     (acc, c) => ({
       goal: acc.goal + c.goalCents,
-      monthly: acc.monthly + c.monthlyCents,
+      planned: acc.planned + c.plannedCents,
       saved: acc.saved + c.savedCents,
     }),
-    { goal: 0, monthly: 0, saved: 0 },
+    { goal: 0, planned: 0, saved: 0 },
   );
   const leftToSave = Math.max(0, totals.goal - totals.saved);
   const remainingPct = totals.goal > 0 ? (leftToSave / totals.goal) * 100 : 0;
@@ -70,7 +81,7 @@ export function SavingsBoard({ cards, currency }: Props) {
           {/* Connected stats bar */}
           <div className="flex overflow-hidden rounded-2xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
             <Stat label="Total goal" amount={formatMoney(totals.goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
-            <Stat label="Monthly contribution" amount={formatMoney(totals.monthly, currency)} sub="auto-deposits" />
+            <Stat label="Planned this month" amount={formatMoney(totals.planned, currency)} sub="budgeted" />
             <Stat
               label="Left to save"
               amount={formatMoney(leftToSave, currency)}
@@ -121,6 +132,7 @@ function SavingsGoalCard({ card, currency }: { card: SavingsCardData; currency: 
   const hasGoal = card.goalCents > 0;
   const percent = hasGoal ? Math.min(100, Math.max(0, (card.savedCents / card.goalCents) * 100)) : 0;
   const reached = card.pace === "reached";
+  const [showTxs, setShowTxs] = useState(false);
 
   return (
     <div className="group relative flex flex-col rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-black/5 transition duration-200 hover:shadow-lg dark:ring-white/10">
@@ -129,8 +141,10 @@ function SavingsGoalCard({ card, currency }: { card: SavingsCardData; currency: 
         <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{card.name}</h3>
         <button
           type="button"
-          aria-label="Card actions"
-          className="rounded-md p-1 text-muted opacity-0 transition hover:bg-brand-soft hover:text-foreground group-hover:opacity-100"
+          aria-label="Show transactions"
+          title="Transactions"
+          onClick={() => setShowTxs((v) => !v)}
+          className={`rounded-md p-1 text-muted transition hover:bg-brand-soft hover:text-foreground ${showTxs ? "opacity-100 bg-brand-soft text-foreground" : "opacity-0 group-hover:opacity-100"}`}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
             <circle cx="12" cy="5" r="1.5" />
@@ -182,13 +196,13 @@ function SavingsGoalCard({ card, currency }: { card: SavingsCardData; currency: 
       {hasGoal ? (
         <dl className="space-y-1 border-t border-line/70 pt-3 text-xs">
           <Row label="Start" value={formatMoney(card.startCents, currency)} />
-          <Row label="Monthly" value={formatMoney(card.monthlyCents, currency)} />
+          <Row label="Planned" value={formatMoney(card.plannedCents, currency)} />
           <Row label="Left" value={formatMoney(Math.max(0, card.leftToSaveCents), currency)} />
         </dl>
       ) : (
         <dl className="space-y-1 border-t border-line/70 pt-3 text-xs opacity-60">
           <Row label="Start" value={formatMoney(card.startCents, currency)} />
-          <Row label="Monthly" value={formatMoney(card.monthlyCents, currency)} />
+          <Row label="Planned" value={formatMoney(card.plannedCents, currency)} />
           <Row label="Left" value="—" />
         </dl>
       )}
@@ -202,6 +216,34 @@ function SavingsGoalCard({ card, currency }: { card: SavingsCardData; currency: 
       {card.pace === "overdue" ? (
         <div className="mt-3 rounded-lg bg-negative/[0.06] px-2.5 py-1.5 text-center text-[11px] font-medium text-negative">
           Past target — {formatMoney(Math.max(0, card.leftToSaveCents), currency)} still needed
+        </div>
+      ) : null}
+
+      {/* Transaction dropdown */}
+      {showTxs ? (
+        <div className="mt-3 border-t border-line/70 pt-2">
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            Recent transactions
+          </p>
+          {card.transactions.length === 0 ? (
+            <p className="py-2 text-center text-[11px] text-muted">No transactions yet</p>
+          ) : (
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+              {card.transactions.map((t) => {
+                const [, m, d] = t.date.split("-").map(Number);
+                const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                return (
+                  <li key={t.id} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px]">
+                    <span className="w-9 shrink-0 tabular-nums text-muted">{MONTHS[m - 1]} {d}</span>
+                    <span className="min-w-0 flex-1 truncate">{t.payee ?? "—"}</span>
+                    <span className={`shrink-0 tabular-nums font-medium ${t.isWithdrawal ? "text-positive" : "text-negative"}`}>
+                      {t.isWithdrawal ? "+" : "−"}{formatMoney(t.amountCents, currency)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       ) : null}
     </div>
