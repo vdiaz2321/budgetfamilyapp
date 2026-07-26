@@ -122,6 +122,7 @@ export default async function SnowballPage() {
       subName: t.subcategory_id ? nameBySub.get(t.subcategory_id) ?? "Debt" : "Debt",
       accountId: t.account_id ?? null,
       kind: "debt",
+      isCardPayment: false,
       cleared: t.cleared ?? false,
       isWithdrawal: t.is_withdrawal ?? false,
     }));

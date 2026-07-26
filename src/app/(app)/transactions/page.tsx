@@ -48,7 +48,7 @@ export default async function TransactionsPage({
   let txQuery = supabase
     .from("transactions")
     .select(
-      "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal",
+      "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, paid_to_account_id, cleared, is_withdrawal",
     )
     .eq("household_id", household.id);
   if (hasRange) {
@@ -101,6 +101,7 @@ export default async function TransactionsPage({
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
   const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
+  const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
 
   const subOptions: SubOption[] = (subs ?? []).map((s) => ({
     id: s.id,
@@ -137,13 +138,18 @@ export default async function TransactionsPage({
     date: t.occurred_on,
     amountCents: t.amount_cents,
     memo: t.memo,
-    payee: t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+    payee: t.paid_to_account_id
+      ? accountNameById.get(t.paid_to_account_id) ?? "Credit card"
+      : t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
     subId: t.subcategory_id ?? null,
-    subName: t.subcategory_id
+    subName: t.paid_to_account_id
+      ? "Card payment"
+      : t.subcategory_id
       ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
       : "Uncategorized",
     accountId: t.account_id ?? null,
     kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
+    isCardPayment: Boolean(t.paid_to_account_id),
     cleared: t.cleared ?? false,
     isWithdrawal: t.is_withdrawal ?? false,
   }));

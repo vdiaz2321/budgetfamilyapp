@@ -174,7 +174,14 @@ export function TransactionsPanel({
               </div>
               <ul>
                 {g.txs.map((t) => (
-                  <TxRow key={t.id} tx={t} currency={currency} onEdit={() => setModal(t)} />
+                  <TxRow
+                    key={t.id}
+                    tx={t}
+                    currency={currency}
+                    onEdit={() => {
+                      if (!t.isCardPayment) setModal(t);
+                    }}
+                  />
                 ))}
               </ul>
             </div>
@@ -197,6 +204,7 @@ function TxRow({
   const [pending, start] = useTransition();
   const kind = tx.kind;
   const isIncome = kind === "income";
+  const canEdit = !tx.isCardPayment;
   // Income green, debt red, everything else neutral.
   const amountColor = isIncome ? "text-positive" : kind === "debt" ? "text-negative" : "text-foreground";
 
@@ -211,7 +219,13 @@ function TxRow({
 
   return (
     <li className="group flex items-center gap-3 rounded-lg px-2 py-2.5 hover:bg-brand-soft/25">
-      <button type="button" onClick={onEdit} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={onEdit}
+        title={canEdit ? undefined : "Card payment — delete and recreate it from the card"}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
+      >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate text-sm font-medium">{title}</span>
@@ -226,10 +240,11 @@ function TxRow({
         <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <button
             type="button"
+            disabled={!canEdit}
             onClick={onEdit}
-            title="Edit transaction"
+            title={canEdit ? "Edit transaction" : "Card payment — delete and recreate it from the card"}
             aria-label="Edit transaction"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground disabled:cursor-default disabled:opacity-40"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M12 20h9" />

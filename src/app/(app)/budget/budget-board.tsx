@@ -366,7 +366,7 @@ function getBudgetStatus(
   outflowPlanned: number,
 ): { tone: BudgetTone; badgeText: string } {
   const expenseRatio = outflowPlanned > 0 ? actualSpent / outflowPlanned : 0;
-  if (actualLeft < 0) return { tone: "bad", badgeText: "Over budget" };
+  if (actualLeft < 0) return { tone: "bad", badgeText: "Overspent" };
   if (expenseRatio >= 0.9 || actualLeft < displayLeft * 0.15) {
     return { tone: "warn", badgeText: `Tight — ${Math.round(expenseRatio * 100)}% spent` };
   }
@@ -436,7 +436,7 @@ function SummaryHeroCard({
     <div className="rounded-2xl bg-surface px-6 py-6 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-medium text-muted">Remaining to spend</p>
+          <p className="text-xs font-medium text-muted">Actual Spent</p>
           <p className={`text-4xl font-medium tabular-nums ${toneClasses.text}`}>
             {formatMoney(actualLeft, currency)}
           </p>
@@ -450,7 +450,7 @@ function SummaryHeroCard({
           </span>
         </div>
         <div className="text-right">
-          <p className="text-xs font-medium text-muted">Left to budget</p>
+          <p className="text-xs font-medium text-muted">Planned to Budget</p>
           <p className={`text-2xl font-medium tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
             {formatMoney(displayLeft, currency)}
           </p>
@@ -504,17 +504,17 @@ function StickyFooterBar({
         <p className="text-lg font-medium tabular-nums text-foreground">
           {formatMoney(actualIncome, currency)}
         </p>
-        <p className="text-xs text-muted">Received</p>
+        <p className="text-xs text-muted">Income Received</p>
       </div>
       <div className="border-l border-line text-center">
         <p className="text-lg font-medium tabular-nums text-foreground">
           {formatMoney(actualSpent, currency)}
         </p>
-        <p className="text-xs text-muted">Spent</p>
+        <p className="text-xs text-muted">Total Spent</p>
       </div>
       <div className={`border-l border-line text-center ${toneClasses.text}`}>
         <p className="text-lg font-medium tabular-nums">{formatMoney(actualLeft, currency)}</p>
-        <p className="text-xs text-muted">Left</p>
+        <p className="text-xs text-muted">Actual Spent</p>
       </div>
     </div>
   );

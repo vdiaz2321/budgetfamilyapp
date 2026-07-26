@@ -126,6 +126,9 @@ export type TxData = {
   subName: string;
   accountId: string | null;
   kind: CategoryKind | null;
+  // A payment from a cash account toward a credit-card account. It affects
+  // account balances, but is not new budget spending.
+  isCardPayment: boolean;
   cleared: boolean;
   isWithdrawal: boolean;
 };

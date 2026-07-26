@@ -83,6 +83,7 @@ function returnPct(cell: {
 export function InvestBoard({ accounts, years, currency }: Props) {
   const [year, setYear] = useState<number>(years[0] ?? new Date().getFullYear());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   const mine = accounts.filter((a) => !a.isKids);
   const kids = accounts.filter((a) => a.isKids);
@@ -108,61 +109,86 @@ export function InvestBoard({ accounts, years, currency }: Props) {
   }, [mine, year]);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-5 px-4 py-6">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-7">
       {/* Header: title + hero total return + year nav */}
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Investments</h1>
-          <p className="text-sm text-muted">
+      <header className="space-y-4">
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Investments</h1>
+            <p className="mt-1 text-sm text-muted">
             Contributions vs. unrealized gains, per account, per year.
-          </p>
-          <p className="mt-2 max-w-xl rounded-lg bg-brand-soft/60 px-3 py-2 text-[12px] leading-snug text-foreground/80 ring-1 ring-brand/20">
-            <span className="font-semibold">End-of-year review:</span> update each investment account&apos;s balance on the <span className="font-semibold">Accounts</span> page to the final year-end statement number, then enter this year&apos;s <span className="font-semibold">Gains</span> below (market gain/loss the brokerage reported). New contributions logged as transactions automatically add to this year&apos;s Contrib for the account (and bucket) you pick.
-          </p>
+            </p>
+          </div>
+          <div className="flex items-center justify-between gap-4 lg:justify-end">
+            <div className="text-right">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                Total return ({year})
+              </p>
+              <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${summary.gains >= 0 ? "text-positive" : "text-negative"}`}>
+                {summary.gains >= 0 ? "+" : ""}{formatMoney(summary.gains, currency)}
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={goPrev}
+                disabled={yearIdx >= years.length - 1}
+                aria-label="Previous year"
+                className="flex h-9 w-9 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+              <select
+                aria-label="Year"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                className="cursor-pointer rounded-lg bg-background px-3 py-2 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                {years.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={yearIdx <= 0}
+                aria-label="Next year"
+                className="flex h-9 w-9 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex items-end gap-4">
-          <div className="text-right">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
-              Total return ({year})
-            </p>
-            <p className={`text-xl font-semibold tabular-nums ${summary.gains >= 0 ? "text-positive" : "text-negative"}`}>
-              {summary.gains >= 0 ? "+" : ""}{formatMoney(summary.gains, currency)}
-            </p>
-          </div>
-          <div className="flex items-center gap-1 self-center">
-            <button
-              type="button"
-              onClick={goPrev}
-              disabled={yearIdx >= years.length - 1}
-              aria-label="Previous year"
-              className="flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M15 18l-6-6 6-6" />
+        <div className="max-w-3xl rounded-xl bg-brand-soft/50 ring-1 ring-brand/20">
+          <button
+            type="button"
+            onClick={() => setShowGuide((open) => !open)}
+            aria-expanded={showGuide}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground"
+          >
+            <span>How investment tracking works</span>
+            <span className="flex items-center gap-1.5 text-xs font-medium text-brand">
+              <span>{showGuide ? "Hide details" : "Show details"}</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showGuide ? "rotate-90" : ""}`} aria-hidden>
+                <path d="M9 6l6 6-6 6" />
               </svg>
-            </button>
-            <select
-              aria-label="Year"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="cursor-pointer rounded-lg bg-background px-3 py-1.5 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={goNext}
-              disabled={yearIdx <= 0}
-              aria-label="Next year"
-              className="flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </div>
+            </span>
+          </button>
+          {showGuide ? (
+            <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm leading-relaxed text-foreground/80">
+              <p className="mb-2">Use the selected year to review each investment account against its year-end statement.</p>
+              <ul className="grid gap-1.5 pl-5 marker:text-brand sm:grid-cols-3">
+                <li>Update the account balance on <span className="font-semibold text-foreground">Accounts</span>.</li>
+                <li>Enter brokerage-reported market gains or losses in <span className="font-semibold text-foreground">Gains</span>.</li>
+                <li>Logged investment contributions flow into the selected account or bucket automatically.</li>
+              </ul>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -176,7 +202,7 @@ export function InvestBoard({ accounts, years, currency }: Props) {
       ) : (
         <>
           {/* Summary stats bar */}
-          <div className="flex overflow-hidden rounded-2xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-line ring-1 ring-black/5 dark:ring-white/10 sm:grid-cols-4">
             <SummaryStat label="Total contributed" value={formatMoney(summary.contributed, currency)} />
             <SummaryStat
               label="Unrealized gains"
@@ -201,9 +227,9 @@ export function InvestBoard({ accounts, years, currency }: Props) {
 
 function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="relative flex-1 px-4 py-4 text-center [&:not(:last-child)]:border-r [&:not(:last-child)]:border-line/70">
-      <p className="text-[11px] font-medium text-muted">{label}</p>
-      <p className={`mt-1 text-xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
+    <div className="flex min-h-[5.25rem] flex-col justify-between bg-surface px-4 py-3.5 text-left sm:px-5">
+      <p className="text-xs font-medium text-muted">{label}</p>
+      <p className={`self-end text-xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
     </div>
   );
 }
@@ -612,12 +638,12 @@ function PerfTable({
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <h2 className="flex-1 text-sm font-bold">
+        <h2 className="flex flex-1 items-center gap-2 text-sm font-bold">
           {title}
-          <span className="ml-2 text-xs font-normal text-muted">{accounts.length} account{accounts.length === 1 ? "" : "s"}</span>
+          <span className="text-xs font-normal text-muted">{accounts.length} account{accounts.length === 1 ? "" : "s"}</span>
         </h2>
         {collapsed && (
-          <div className="flex items-center gap-4 text-xs tabular-nums text-muted">
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs tabular-nums text-muted">
             <span>Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
             <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--color-chart-5, #0891b2)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
             {endAny && <span>Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}

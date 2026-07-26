@@ -622,7 +622,7 @@ function BalanceGrid({
 
   // Sections start collapsed on a fresh login, but stay as you left them
   // while you're navigating around the app in that same browser session.
-  const [collapsed, setCollapsed] = useSessionCollapse("networth-grid-sections", () =>
+  const [collapsed, setCollapsed] = useSessionCollapse("networth-grid-sections-v2", () =>
     Object.fromEntries(SECTION_ORDER.map((s) => [s, true])),
   );
   const toggle = (section: string) =>
@@ -632,8 +632,8 @@ function BalanceGrid({
     setCollapsed(Object.fromEntries(sections.map((g) => [g.section, allOpen])));
 
   const [collapsedAccounts, setCollapsedAccounts] = useSessionCollapse(
-    "networth-grid-accounts",
-    () => ({}),
+    "networth-grid-accounts-v2",
+    () => Object.fromEntries(rows.filter((r) => r.hasChildren && r.id).map((r) => [r.id!, true])),
   );
   const toggleAccount = (id: string) =>
     setCollapsedAccounts((c) => ({ ...c, [id]: !c[id] }));

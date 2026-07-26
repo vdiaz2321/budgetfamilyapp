@@ -105,7 +105,7 @@ export function TransactionsTable({
     .filter((t) => t.kind === "income")
     .reduce((sum, t) => sum + t.amountCents, 0);
   const outflowTotal = filtered
-    .filter((t) => t.kind !== "income")
+    .filter((t) => t.kind !== "income" && !t.isCardPayment)
     .reduce((sum, t) => sum + t.amountCents, 0);
 
   return (
@@ -298,7 +298,9 @@ export function TransactionsTable({
                     tx={t}
                     currency={currency}
                     accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
-                    onEdit={() => setModal(t)}
+                    onEdit={() => {
+                      if (!t.isCardPayment) setModal(t);
+                    }}
                     selected={selected.has(t.id)}
                     onSelect={() => toggleSelect(t.id)}
                   />
@@ -358,6 +360,7 @@ function TxLine({
   const [clearPending, startClear] = useTransition();
   const [delPending, startDel] = useTransition();
   const isIncome = tx.kind === "income";
+  const canEdit = !tx.isCardPayment;
 
   const onToggle = (checked: boolean) => {
     const fd = new FormData();
@@ -368,8 +371,8 @@ function TxLine({
 
   return (
     <li
-      onDoubleClick={onEdit}
-      title="Double-click to edit"
+      onDoubleClick={canEdit ? onEdit : undefined}
+      title={canEdit ? "Double-click to edit" : "Card payment — delete and recreate it from the card"}
       className={`group grid ${GRID} cursor-default select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
         selected ? "bg-brand-soft/20" : ""
       } ${tx.cleared ? "opacity-60" : ""}`}
@@ -383,21 +386,22 @@ function TxLine({
           className="h-4 w-4 rounded accent-[var(--brand)]"
         />
       </span>
-      <button type="button" onClick={onEdit} className="text-left text-sm tabular-nums">
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>
-      <button type="button" onClick={onEdit} className="truncate text-left text-sm font-medium">
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
         {tx.payee ?? "—"}
       </button>
-      <button type="button" onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left">
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
         <span className="truncate text-sm">{tx.subName}</span>
       </button>
       <span className="truncate text-sm text-muted">{accountName}</span>
       <button
         type="button"
+        disabled={!canEdit}
         onClick={onEdit}
-        className={`text-center text-sm font-semibold tabular-nums ${
+        className={`text-center text-sm font-semibold tabular-nums disabled:cursor-default ${
           isIncome ? "text-positive" : "text-foreground"
         }`}
       >
