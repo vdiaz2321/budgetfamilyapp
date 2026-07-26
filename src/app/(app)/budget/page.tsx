@@ -376,6 +376,16 @@ export default async function BudgetPage({
     .filter((a) => a.kind === "credit_card")
     .map((a) => ({ id: a.id, name: a.name }));
 
+  // Buckets grouped by parent account, restricted to investment accounts —
+  // used by the transaction modal to offer a bucket picker (Fidelity → Roth
+  // IRA Vic). Other kinds of accounts don't need it.
+  const investmentAccountIds = new Set((accounts ?? []).filter((a) => a.kind === "investment").map((a) => a.id));
+  const bucketsByAccount: Record<string, { id: string; name: string }[]> = {};
+  for (const b of buckets ?? []) {
+    if (!investmentAccountIds.has(b.account_id)) continue;
+    (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.name });
+  }
+
   return (
     <BudgetBoard
       month={{
@@ -400,6 +410,7 @@ export default async function BudgetPage({
       accountOptions={accountOptions}
       debtAccountOptions={debtAccountOptions}
       bucketOptions={bucketOptions}
+      bucketsByAccount={bucketsByAccount}
       payeeOptions={(payees ?? []).map((p) => p.name)}
       payeeLineItems={payeeLineItems}
       snowballExtraCents={snowballExtraCents}

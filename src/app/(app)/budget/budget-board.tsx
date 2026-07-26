@@ -16,6 +16,7 @@ import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import type {
   AccountOption,
   BucketOption,
+  BucketsByAccount,
   GroupData,
   MonthNav,
   PayeeLineItem,
@@ -43,6 +44,7 @@ type Props = {
   accountOptions: AccountOption[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
+  bucketsByAccount?: BucketsByAccount;
   payeeOptions: string[];
   payeeLineItems?: PayeeLineItem[];
   snowballExtraCents: number;
@@ -65,6 +67,7 @@ export function BudgetBoard({
   accountOptions,
   debtAccountOptions,
   bucketOptions,
+  bucketsByAccount = {},
   payeeOptions,
   payeeLineItems = [],
   snowballExtraCents,
@@ -156,6 +159,7 @@ export function BudgetBoard({
         firstOfMonth={month.firstOfMonth}
         subOptions={subOptions}
         accountOptions={accountOptions}
+        bucketsByAccount={bucketsByAccount}
         payeeOptions={payeeOptions}
         payeeLineItems={payeeLineItems}
         initialKind={selected.kind}
@@ -302,6 +306,7 @@ export function BudgetBoard({
                   transactions={transactions}
                   subOptions={subOptions}
                   accountOptions={accountOptions}
+                  bucketsByAccount={bucketsByAccount}
                   payeeOptions={payeeOptions}
                   payeeLineItems={payeeLineItems}
                 />

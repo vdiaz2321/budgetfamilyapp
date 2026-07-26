@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, updateTransaction, deleteTransaction } from "./actions";
-import type { AccountOption, PayeeLineItem, SubOption, TxData } from "./types";
+import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
 
 // Header title (verbose) vs. button label (short), plus tab labels.
 const KIND_TITLE: Record<CategoryKind, string> = {
@@ -65,6 +65,7 @@ export function TransactionModal({
   firstOfMonth,
   subOptions,
   accountOptions,
+  bucketsByAccount = {},
   payeeOptions = [],
   payeeLineItems = [],
   initialKind,
@@ -76,6 +77,10 @@ export function TransactionModal({
   firstOfMonth: string;
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  // Buckets available for direct attribution when the selected account has
+  // them (currently only investment accounts on Fidelity/Crypto). Keyed by
+  // account_id. Empty/omitted = no bucket picker ever shows.
+  bucketsByAccount?: BucketsByAccount;
   // Previously-used payee names, offered as suggestions below the payee
   // field as you type — not a picker, just a memory aid.
   payeeOptions?: string[];
@@ -92,6 +97,9 @@ export function TransactionModal({
   const [pending, start] = useTransition();
   const isEdit = editTx != null;
   const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? "");
+  const availableBuckets = bucketsByAccount[selectedAccountId] ?? [];
+  const [selectedBucketId, setSelectedBucketId] = useState<string>("");
   const formRef = useRef<HTMLFormElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
   // Set when a payee suggestion matching a managed subscription/irregular
@@ -222,7 +230,11 @@ export function TransactionModal({
             <div>
               <select
                 name="accountId"
-                defaultValue={editTx?.accountId ?? ""}
+                value={selectedAccountId}
+                onChange={(e) => {
+                  setSelectedAccountId(e.target.value);
+                  setSelectedBucketId(""); // reset when account changes
+                }}
                 className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">
@@ -255,6 +267,26 @@ export function TransactionModal({
                 </p>
               ) : null}
             </div>
+
+            {/* Bucket picker — appears only when the chosen account has
+                buckets (currently: investment accounts like Fidelity, Crypto).
+                Lets a contribution be attributed to Roth IRA Vic, Taxable Vic,
+                etc. so the Invest page can break the number out per bucket. */}
+            {availableBuckets.length > 0 ? (
+              <div>
+                <select
+                  name="bucketId"
+                  value={selectedBucketId}
+                  onChange={(e) => setSelectedBucketId(e.target.value)}
+                  className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="">Bucket (optional — pick a sub-account)</option>
+                  {availableBuckets.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
 
             {/* Budget item */}
             <BudgetItemField

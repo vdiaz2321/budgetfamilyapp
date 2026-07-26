@@ -97,6 +97,14 @@ export type AccountOption = {
   group?: string;
 };
 
+// A bucket the transaction modal can attribute an investment contribution to,
+// e.g. Fidelity → "Roth IRA Vic". Keyed by parent account_id.
+export type InvestBucketOption = {
+  id: string;
+  name: string;
+};
+export type BucketsByAccount = Record<string, InvestBucketOption[]>;
+
 // A managed Subscription or Irregular Bill, offered in the transaction
 // Payee autocomplete. Selecting one auto-fills the linked budget item (and,
 // for subscriptions, the amount) so nothing has to be mapped by hand.

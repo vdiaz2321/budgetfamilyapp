@@ -47,7 +47,7 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   },
   {
     href: "/invest",
-    label: "Invest",
+    label: "Investments",
     icon: (
       <>
         <path d="M3 3v18h18" />

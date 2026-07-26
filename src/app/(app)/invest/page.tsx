@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { captureSnapshots } from "@/lib/snapshots";
-import { InvestBoard, type InvestAccount, type YearCell } from "./invest-board";
+import { InvestBoard, type InvestAccount, type BucketRow, type YearCell } from "./invest-board";
 
-export const metadata = { title: "Invest · Capitall" };
+export const metadata = { title: "Investments · Capitall" };
 
 // History goes back to the sheet's earliest investment year.
 const FLOOR_YEAR = 2023;
@@ -36,6 +36,7 @@ export default async function InvestPage() {
 
   const [
     { data: accountRows },
+    { data: bucketRows },
     { data: accSnaps },
     { data: contribRows },
     { data: yearRows },
@@ -48,22 +49,37 @@ export default async function InvestPage() {
       .order("sort_order")
       .order("name"),
     supabase
+      .from("buckets")
+      .select("id, account_id, name, balance_cents, sort_order")
+      .eq("household_id", household.id)
+      .order("sort_order")
+      .order("name"),
+    supabase
       .from("account_snapshots")
       .select("month, account_id, balance_cents")
       .eq("household_id", household.id)
       .order("month"),
     supabase
       .from("v_investment_contributions")
-      .select("account_id, year, net_contribution_cents")
+      .select("account_id, bucket_id, year, net_contribution_cents")
       .eq("household_id", household.id),
     supabase
       .from("investment_years")
-      .select("account_id, year, contributed_cents, accrued_cents, start_cents, end_cents")
+      .select("account_id, bucket_id, year, contributed_cents, accrued_cents, start_cents, end_cents")
       .eq("household_id", household.id),
   ]);
 
   const accounts = accountRows ?? [];
   const investIds = new Set(accounts.map((a) => a.id));
+
+  // Buckets that live under investment accounts.
+  const bucketsByAccount = new Map<string, { id: string; name: string; balanceCents: number }[]>();
+  for (const b of bucketRows ?? []) {
+    if (!investIds.has(b.account_id)) continue;
+    const arr = bucketsByAccount.get(b.account_id) ?? [];
+    arr.push({ id: b.id, name: b.name, balanceCents: b.balance_cents ?? 0 });
+    bucketsByAccount.set(b.account_id, arr);
+  }
 
   // Per-account year-end balance = balance of the LAST snapshot within that
   // calendar year (Dec if present, otherwise the latest month recorded that
@@ -76,16 +92,18 @@ export default async function InvestPage() {
     endBalance.set(`${s.account_id}:${year}`, s.balance_cents);
   }
 
-  // Live-derived net contributions per account+year.
+  // Live-derived net contributions per (account, bucket, year).
   const contribBy = new Map<string, number>();
   for (const c of contribRows ?? []) {
-    contribBy.set(`${c.account_id}:${c.year}`, c.net_contribution_cents ?? 0);
+    const key = `${c.account_id}:${c.bucket_id ?? "_"}:${c.year}`;
+    contribBy.set(key, c.net_contribution_cents ?? 0);
   }
 
-  // Stored/reviewed rows win over derivation.
+  // Stored/reviewed rows.
   const storedBy = new Map<string, { contributed: number; accrued: number; start: number | null; end: number | null }>();
   for (const r of yearRows ?? []) {
-    storedBy.set(`${r.account_id}:${r.year}`, {
+    const key = `${r.account_id}:${r.bucket_id ?? "_"}:${r.year}`;
+    storedBy.set(key, {
       contributed: r.contributed_cents ?? 0,
       accrued: r.accrued_cents ?? 0,
       start: r.start_cents ?? null,
@@ -105,35 +123,74 @@ export default async function InvestPage() {
   }
   const years = [...yearSet].filter((y) => y >= FLOOR_YEAR).sort((a, b) => b - a);
 
+  // Build a YearCell for a specific (account, bucket, year) slot. `bucketKey` is
+  // the bucket_id or "_" for the account-level (no-bucket) slot.
+  function buildCell(
+    accountId: string,
+    bucketKey: string,
+    year: number,
+    fallbackEnd: number | null,
+  ): YearCell {
+    const key = `${accountId}:${bucketKey}:${year}`;
+    const stored = storedBy.get(key);
+    const liveContrib = contribBy.get(key) ?? 0;
+    const isCurrentYear = year === nowYear;
+
+    // Additive rule: current year = seed + live transactions; historical years
+    // stay frozen at the reviewed/seeded value. This preserves the CSV totals
+    // while letting new transactions flow through going forward.
+    let contributed: number;
+    if (stored) {
+      contributed = isCurrentYear ? stored.contributed + liveContrib : stored.contributed;
+    } else {
+      contributed = liveContrib;
+    }
+
+    const start = stored?.start ?? null;
+    const end = stored?.end ?? fallbackEnd;
+
+    let accrued: number;
+    if (stored) {
+      accrued = stored.accrued;
+    } else {
+      accrued = start != null && end != null ? end - start - contributed : 0;
+    }
+
+    return {
+      year,
+      startBalanceCents: start,
+      endBalanceCents: end,
+      contributedCents: contributed,
+      accruedCents: accrued,
+      stored: !!stored,
+    };
+  }
+
   const data: InvestAccount[] = accounts.map((a) => {
+    const acctBuckets = bucketsByAccount.get(a.id) ?? [];
+
+    // Bucket rows carry their own cells. Fallback end for the current year =
+    // bucket's live balance (buckets don't have per-month snapshots today, so
+    // the current balance is the best-available "now" number).
+    const buckets: BucketRow[] = acctBuckets.map((b) => {
+      const cells: Record<number, YearCell> = {};
+      for (const year of years) {
+        const fallbackEnd = year === nowYear ? b.balanceCents : null;
+        cells[year] = buildCell(a.id, b.id, year, fallbackEnd);
+      }
+      return { id: b.id, name: b.name, balanceCents: b.balanceCents, cells };
+    });
+
+    // Account-level cells. When the account has buckets we still keep an
+    // account-level slot (bucket_id NULL) because seeded CSV rows live there.
+    // Rendering rolls up bucket rows plus this slot's stored contribution so
+    // the seed floor is preserved.
     const cells: Record<number, YearCell> = {};
     for (const year of years) {
-      const stored = storedBy.get(`${a.id}:${year}`);
-      // Prefer explicitly stored balances; fall back to account_snapshots.
-      const start = stored?.start ?? endBalance.get(`${a.id}:${year - 1}`) ?? null;
-      const end = stored?.end ?? endBalance.get(`${a.id}:${year}`) ?? null;
-
-      let contributed: number;
-      let accrued: number;
-      if (stored) {
-        contributed = stored.contributed;
-        accrued = stored.accrued;
-      } else {
-        contributed = contribBy.get(`${a.id}:${year}`) ?? 0;
-        // Unrealized gain = balance growth minus what was put in. Only
-        // computable when both year-end balances exist.
-        accrued = start != null && end != null ? end - start - contributed : 0;
-      }
-
-      cells[year] = {
-        year,
-        startBalanceCents: start,
-        endBalanceCents: end,
-        contributedCents: contributed,
-        accruedCents: accrued,
-        stored: !!stored,
-      };
+      const fallbackEnd = endBalance.get(`${a.id}:${year}`) ?? null;
+      cells[year] = buildCell(a.id, "_", year, fallbackEnd);
     }
+
     return {
       id: a.id,
       name: a.name,
@@ -141,6 +198,7 @@ export default async function InvestPage() {
       subtype: a.subtype ?? null,
       isKids: !!a.is_kids_account,
       cells,
+      buckets,
     };
   });
 

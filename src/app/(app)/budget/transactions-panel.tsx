@@ -38,6 +38,7 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  bucketsByAccount?: import("./types").BucketsByAccount;
   payeeOptions?: string[];
   payeeLineItems?: PayeeLineItem[];
   // Optional overrides so the same panel can be reused elsewhere (e.g. a
@@ -56,6 +57,7 @@ export function TransactionsPanel({
   transactions,
   subOptions,
   accountOptions,
+  bucketsByAccount = {},
   payeeOptions = [],
   payeeLineItems = [],
   title = "Transactions",
@@ -96,6 +98,7 @@ export function TransactionsPanel({
         firstOfMonth={firstOfMonth}
         subOptions={subOptions}
         accountOptions={accountOptions}
+        bucketsByAccount={bucketsByAccount}
         payeeOptions={payeeOptions}
         payeeLineItems={payeeLineItems}
         initialKind={modal === "new" ? initialKind : undefined}

@@ -26,6 +26,7 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  bucketsByAccount?: import("../budget/types").BucketsByAccount;
   payeeOptions?: string[];
   payeeLineItems?: PayeeLineItem[];
   dateRange: { from: string | null; to: string | null };
@@ -37,6 +38,7 @@ export function TransactionsTable({
   transactions,
   subOptions,
   accountOptions,
+  bucketsByAccount = {},
   payeeOptions = [],
   payeeLineItems = [],
   dateRange,
@@ -327,6 +329,7 @@ export function TransactionsTable({
           firstOfMonth={month.firstOfMonth}
           subOptions={subOptions}
           accountOptions={accountOptions}
+          bucketsByAccount={bucketsByAccount}
           payeeOptions={payeeOptions}
           payeeLineItems={payeeLineItems}
           onClose={() => setModal(null)}

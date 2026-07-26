@@ -14,6 +14,13 @@ export type YearCell = {
   stored: boolean;
 };
 
+export type BucketRow = {
+  id: string;
+  name: string;
+  balanceCents: number;
+  cells: Record<number, YearCell>;
+};
+
 export type InvestAccount = {
   id: string;
   name: string;
@@ -21,7 +28,36 @@ export type InvestAccount = {
   subtype: string | null;
   isKids: boolean;
   cells: Record<number, YearCell>;
+  buckets: BucketRow[];
 };
+
+// Roll up an account's cell + all its bucket cells for a given year. Historical
+// CSV seed values live at the account level (bucket_id NULL); going-forward
+// per-bucket edits and transactions add on top. Chart/summary/parent-row use
+// this effective total; the underlying slots stay editable individually.
+function effectiveCell(a: InvestAccount, year: number): YearCell {
+  const parent = a.cells[year];
+  let contributed = parent?.contributedCents ?? 0;
+  let accrued = parent?.accruedCents ?? 0;
+  let start = parent?.startBalanceCents ?? null;
+  let end = parent?.endBalanceCents ?? null;
+  for (const b of a.buckets) {
+    const c = b.cells[year];
+    if (!c) continue;
+    contributed += c.contributedCents;
+    accrued += c.accruedCents;
+    if (c.startBalanceCents != null) start = (start ?? 0) + c.startBalanceCents;
+    if (c.endBalanceCents != null) end = (end ?? 0) + c.endBalanceCents;
+  }
+  return {
+    year,
+    startBalanceCents: start,
+    endBalanceCents: end,
+    contributedCents: contributed,
+    accruedCents: accrued,
+    stored: !!(parent?.stored ?? false),
+  };
+}
 
 type Props = {
   accounts: InvestAccount[];
@@ -63,8 +99,7 @@ export function InvestBoard({ accounts, years, currency }: Props) {
     let gains = 0;
     let current = 0;
     for (const a of mine) {
-      const c = a.cells[year];
-      if (!c) continue;
+      const c = effectiveCell(a, year);
       contributed += c.contributedCents;
       gains += c.accruedCents;
       if (c.endBalanceCents != null) current += c.endBalanceCents;
@@ -77,9 +112,12 @@ export function InvestBoard({ accounts, years, currency }: Props) {
       {/* Header: title + hero total return + year nav */}
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">Invest</h1>
+          <h1 className="text-xl font-bold">Investments</h1>
           <p className="text-sm text-muted">
             Contributions vs. unrealized gains, per account, per year.
+          </p>
+          <p className="mt-2 max-w-xl rounded-lg bg-brand-soft/60 px-3 py-2 text-[12px] leading-snug text-foreground/80 ring-1 ring-brand/20">
+            <span className="font-semibold">End-of-year review:</span> update each investment account&apos;s balance on the <span className="font-semibold">Accounts</span> page to the final year-end statement number, then enter this year&apos;s <span className="font-semibold">Gains</span> below (market gain/loss the brokerage reported). New contributions logged as transactions automatically add to this year&apos;s Contrib for the account (and bucket) you pick.
           </p>
         </div>
         <div className="flex items-end gap-4">
@@ -200,8 +238,7 @@ function PerformanceChart({
         let endBal = 0;
         let endAny = false;
         for (const a of accounts) {
-          const c = a.cells[y];
-          if (!c) continue;
+          const c = effectiveCell(a, y);
           contrib += c.contributedCents;
           gain += c.accruedCents;
           if (c.startBalanceCents != null) start += c.startBalanceCents;
@@ -518,7 +555,13 @@ function PerfTable({
   const collapsed = collapseState.v;
   const toggle = () => setCollapseState((s) => ({ ...s, v: !s.v }));
 
-  // Group totals for the selected year. Effective start uses prior-year end as fallback.
+  // Bucket-open state — one flag per account_id. Only accounts with buckets
+  // actually render a chevron, but the map is keyed uniformly.
+  const [bucketsOpen, setBucketsOpen] = useSessionCollapse("invest-buckets-open", () => ({}));
+  const toggleBuckets = (id: string) => setBucketsOpen((s) => ({ ...s, [id]: !s[id] }));
+
+  // Group totals for the selected year, using per-account EFFECTIVE cells
+  // (account slot + all bucket slots). Effective start uses prior-year end as fallback.
   let startSum = 0;
   let startAny = false;
   let effStartSum = 0;
@@ -528,10 +571,9 @@ function PerfTable({
   let contribSum = 0;
   let accruedSum = 0;
   for (const a of accounts) {
-    const c = a.cells[year];
-    if (!c) continue;
+    const c = effectiveCell(a, year);
     if (c.startBalanceCents != null) { startSum += c.startBalanceCents; startAny = true; }
-    const eff = c.startBalanceCents ?? a.cells[year - 1]?.endBalanceCents ?? null;
+    const eff = c.startBalanceCents ?? effectiveCell(a, year - 1).endBalanceCents ?? null;
     if (eff != null) { effStartSum += eff; effStartAny = true; }
     if (c.endBalanceCents != null) { endSum += c.endBalanceCents; endAny = true; }
     contribSum += c.contributedCents;
@@ -541,12 +583,12 @@ function PerfTable({
     { startBalanceCents: effStartAny ? effStartSum : null, contributedCents: contribSum, accruedCents: accruedSum },
   );
 
-  // Sort accounts by current value (End of Year) descending so biggest holdings surface first.
+  // Sort accounts by current effective value (End of Year) descending.
   const sortedAccounts = useMemo(
     () =>
       [...accounts].sort((a, b) => {
-        const av = a.cells[year]?.endBalanceCents ?? 0;
-        const bv = b.cells[year]?.endBalanceCents ?? 0;
+        const av = effectiveCell(a, year).endBalanceCents ?? 0;
+        const bv = effectiveCell(b, year).endBalanceCents ?? 0;
         return bv - av;
       }),
     [accounts, year],
@@ -597,52 +639,159 @@ function PerfTable({
           </thead>
           <tbody>
             {sortedAccounts.map((a) => {
-              const c = a.cells[year];
-              const start = c?.startBalanceCents ?? null;
-              const end = c?.endBalanceCents ?? null;
-              const contributed = c?.contributedCents ?? 0;
-              const accrued = c?.accruedCents ?? 0;
-              const priorEnd = a.cells[year - 1]?.endBalanceCents ?? null;
-              const ret = c ? returnPct(c, priorEnd) : null;
+              const hasBuckets = a.buckets.length > 0;
+              const open = !!bucketsOpen[a.id];
+              // Parent row shows EFFECTIVE totals (account slot + all buckets).
+              // When no buckets, that equals the account cell exactly.
+              const eff = effectiveCell(a, year);
+              const priorEff = effectiveCell(a, year - 1);
+              const ret = returnPct({
+                startBalanceCents: eff.startBalanceCents ?? priorEff.endBalanceCents ?? null,
+                contributedCents: eff.contributedCents,
+                accruedCents: eff.accruedCents,
+              });
               const isSelected = selectedId === a.id;
+              // Account-level slot (bucket_id NULL) — where CSV seed lives. When
+              // buckets exist, this slot is still editable so the seed row can be
+              // adjusted, but bucket rows render below.
+              const parentCell = a.cells[year];
               return (
-                <tr key={a.id} className={`border-t border-line/70 transition ${isSelected ? "bg-brand-soft/40" : "hover:bg-brand-soft/10"}`}>
-                  <td className="px-4 py-2">
-                    <button
-                      type="button"
-                      onClick={() => onSelect(a.id)}
-                      className="flex items-baseline gap-1.5 text-left"
-                      title={isSelected ? "Click to clear filter" : "Filter chart to this account"}
-                    >
-                      <span className={`font-medium ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
-                      {a.subtype ? (
-                        <span className="text-[11px] text-muted">{a.subtype}</span>
-                      ) : null}
-                      {a.holder ? (
-                        <span className="rounded bg-background px-1 text-[10px] font-medium text-muted ring-1 ring-line">
-                          {a.holder}
-                        </span>
-                      ) : null}
-                    </button>
-                  </td>
-                  {showStart ? (
-                    <td className="px-1 py-1">
-                      <EditCell accountId={a.id} year={year} field="start" cents={start ?? 0} placeholder={start == null} currency={currency} tone={(start ?? 0) === 0 ? zeroCls : "text-muted"} />
+                <Fragment key={a.id}>
+                  <tr className={`border-t border-line/70 transition ${isSelected ? "bg-brand-soft/40" : "hover:bg-brand-soft/10"}`}>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-1.5">
+                        {hasBuckets ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleBuckets(a.id)}
+                            aria-label={open ? "Collapse buckets" : "Expand buckets"}
+                            className="rounded p-0.5 text-muted transition hover:bg-brand-soft hover:text-foreground"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform duration-150 ${open ? "rotate-90" : ""}`} aria-hidden>
+                              <path d="M9 6l6 6-6 6" />
+                            </svg>
+                          </button>
+                        ) : (
+                          <span className="inline-block w-[18px]" aria-hidden />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onSelect(a.id)}
+                          className="flex items-baseline gap-1.5 text-left"
+                          title={isSelected ? "Click to clear filter" : "Filter chart to this account"}
+                        >
+                          <span className={`font-medium ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
+                          {a.subtype ? (
+                            <span className="text-[11px] text-muted">{a.subtype}</span>
+                          ) : null}
+                          {a.holder ? (
+                            <span className="rounded bg-background px-1 text-[10px] font-medium text-muted ring-1 ring-line">
+                              {a.holder}
+                            </span>
+                          ) : null}
+                          {hasBuckets ? (
+                            <span className="rounded bg-brand-soft/70 px-1 text-[10px] font-medium text-brand ring-1 ring-brand/20">
+                              {a.buckets.length} bucket{a.buckets.length === 1 ? "" : "s"}
+                            </span>
+                          ) : null}
+                        </button>
+                      </div>
                     </td>
+                    {showStart ? (
+                      <td className="px-1 py-1">
+                        {hasBuckets ? (
+                          <span className={`block text-center text-sm tabular-nums ${(eff.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
+                            {eff.startBalanceCents == null ? "—" : formatMoney(eff.startBalanceCents, currency)}
+                          </span>
+                        ) : (
+                          <EditCell accountId={a.id} year={year} field="start" cents={parentCell?.startBalanceCents ?? 0} placeholder={parentCell?.startBalanceCents == null} currency={currency} tone={(parentCell?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"} />
+                        )}
+                      </td>
+                    ) : null}
+                    <td className="px-1 py-1">
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
+                          {formatMoney(eff.contributedCents, currency)}
+                        </span>
+                      ) : (
+                        <EditCell accountId={a.id} year={year} field="contributed" cents={eff.contributedCents} currency={currency} tone={eff.contributedCents === 0 ? zeroCls : ""} />
+                      )}
+                    </td>
+                    <td className="px-1 py-1">
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                          {formatMoney(eff.accruedCents, currency)}
+                        </span>
+                      ) : (
+                        <EditCell accountId={a.id} year={year} field="accrued" cents={eff.accruedCents} currency={currency} tone={eff.accruedCents === 0 ? zeroCls : eff.accruedCents > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                      )}
+                    </td>
+                    <td className="px-1 py-1">
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                          {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
+                        </span>
+                      ) : (
+                        <EditCell accountId={a.id} year={year} field="end" cents={eff.endBalanceCents ?? 0} placeholder={eff.endBalanceCents == null} currency={currency} tone={(eff.endBalanceCents ?? 0) === 0 ? zeroCls : "font-medium"} />
+                      )}
+                    </td>
+                    <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
+                      {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
+                    </td>
+                  </tr>
+                  {hasBuckets && open ? (
+                    <>
+                      {/* Account-level seed row (only when the CSV/manual seed at
+                          account level has any non-zero value — otherwise buckets
+                          alone are enough and the row would be pure noise). */}
+                      {(parentCell?.contributedCents || parentCell?.accruedCents || parentCell?.startBalanceCents || parentCell?.endBalanceCents) ? (
+                        <tr className="border-t border-line/40 bg-background/30 text-xs">
+                          <td className="px-4 py-1 pl-10 text-muted italic">Account (unallocated / seed)</td>
+                          {showStart ? (
+                            <td className="px-1 py-1">
+                              <EditCell accountId={a.id} year={year} field="start" cents={parentCell?.startBalanceCents ?? 0} placeholder={parentCell?.startBalanceCents == null} currency={currency} tone={(parentCell?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"} />
+                            </td>
+                          ) : null}
+                          <td className="px-1 py-1">
+                            <EditCell accountId={a.id} year={year} field="contributed" cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                          </td>
+                          <td className="px-1 py-1">
+                            <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                          </td>
+                          <td className="px-1 py-1">
+                            <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
+                          </td>
+                          <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
+                        </tr>
+                      ) : null}
+                      {a.buckets.map((b) => {
+                        const bc = b.cells[year];
+                        return (
+                          <tr key={b.id} className="border-t border-line/40 bg-background/20 text-sm">
+                            <td className="px-4 py-1 pl-10 text-foreground/80">
+                              <span className="text-brand-strong">↳</span> <span className="ml-1">{b.name}</span>
+                            </td>
+                            {showStart ? (
+                              <td className="px-1 py-1">
+                                <EditCell accountId={a.id} bucketId={b.id} year={year} field="start" cents={bc?.startBalanceCents ?? 0} placeholder={bc?.startBalanceCents == null} currency={currency} tone={(bc?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"} />
+                              </td>
+                            ) : null}
+                            <td className="px-1 py-1">
+                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="contributed" cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                            </td>
+                            <td className="px-1 py-1">
+                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                            </td>
+                            <td className="px-1 py-1">
+                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="end" cents={bc?.endBalanceCents ?? 0} placeholder={bc?.endBalanceCents == null} currency={currency} tone={(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
+                            </td>
+                            <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
+                          </tr>
+                        );
+                      })}
+                    </>
                   ) : null}
-                  <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="contributed" cents={contributed} currency={currency} tone={contributed === 0 ? zeroCls : ""} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="accrued" cents={accrued} currency={currency} tone={accrued === 0 ? zeroCls : accrued > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
-                  </td>
-                  <td className="px-1 py-1">
-                    <EditCell accountId={a.id} year={year} field="end" cents={end ?? 0} placeholder={end == null} currency={currency} tone={(end ?? 0) === 0 ? zeroCls : "font-medium"} />
-                  </td>
-                  <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
-                    {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
-                  </td>
-                </tr>
+                </Fragment>
               );
             })}
           </tbody>
@@ -680,6 +829,7 @@ function PerfTable({
 // (stored value then wins over live derivation).
 function EditCell({
   accountId,
+  bucketId,
   year,
   field,
   cents,
@@ -688,6 +838,7 @@ function EditCell({
   tone,
 }: {
   accountId: string;
+  bucketId?: string;
   year: number;
   field: "contributed" | "accrued" | "start" | "end";
   cents: number;
@@ -706,6 +857,7 @@ function EditCell({
       className="flex items-center justify-center gap-0.5"
     >
       <input type="hidden" name="accountId" value={accountId} />
+      {bucketId ? <input type="hidden" name="bucketId" value={bucketId} /> : null}
       <input type="hidden" name="year" value={year} />
       <input type="hidden" name="field" value={field} />
       <span className="pointer-events-none text-xs text-muted">{currencySymbol(currency)}</span>
@@ -791,8 +943,8 @@ function YearByYear({
                 </td>
                 <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">{mineCollapsed ? "Contributed + Gain" : ""}</td>
                 {desc.map((y) => {
-                  const contrib = mine.reduce((s, a) => s + (a.cells[y]?.contributedCents ?? 0), 0);
-                  const gain = mine.reduce((s, a) => s + (a.cells[y]?.accruedCents ?? 0), 0);
+                  const contrib = mine.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
+                  const gain = mine.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                   return (
                     <td key={y} className="bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
                       {mineCollapsed ? <><span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span></> : ""}
@@ -807,14 +959,14 @@ function YearByYear({
                     <td className="px-3 py-1.5 text-muted">Contributed</td>
                     {desc.map((y) => (
                       <td key={y} className="px-3 py-1.5 text-center tabular-nums">
-                        {formatMoney(a.cells[y]?.contributedCents ?? 0, currency)}
+                        {formatMoney(effectiveCell(a, y).contributedCents, currency)}
                       </td>
                     ))}
                   </tr>
                   <tr>
                     <td className="px-3 py-1.5 text-muted">Gain</td>
                     {desc.map((y) => {
-                      const g = a.cells[y]?.accruedCents ?? 0;
+                      const g = effectiveCell(a, y).accruedCents;
                       return (
                         <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
                           {formatMoney(g, currency)}
@@ -834,8 +986,8 @@ function YearByYear({
                   </td>
                   <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">{kidsCollapsed ? "Contributed + Gain" : ""}</td>
                   {desc.map((y) => {
-                    const contrib = kids.reduce((s, a) => s + (a.cells[y]?.contributedCents ?? 0), 0);
-                    const gain = kids.reduce((s, a) => s + (a.cells[y]?.accruedCents ?? 0), 0);
+                    const contrib = kids.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
+                    const gain = kids.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                     return (
                       <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
                         {kidsCollapsed ? <><span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span></> : ""}
@@ -851,14 +1003,14 @@ function YearByYear({
                     <td className="px-3 py-1.5 text-muted">Contributed</td>
                     {desc.map((y) => (
                       <td key={y} className="px-3 py-1.5 text-center tabular-nums">
-                        {formatMoney(a.cells[y]?.contributedCents ?? 0, currency)}
+                        {formatMoney(effectiveCell(a, y).contributedCents, currency)}
                       </td>
                     ))}
                   </tr>
                   <tr>
                     <td className="px-3 py-1.5 text-muted">Gain</td>
                     {desc.map((y) => {
-                      const g = a.cells[y]?.accruedCents ?? 0;
+                      const g = effectiveCell(a, y).accruedCents;
                       return (
                         <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
                           {formatMoney(g, currency)}

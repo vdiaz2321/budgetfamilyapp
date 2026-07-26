@@ -59,7 +59,7 @@ export default async function TransactionsPage({
   }
   txQuery = txQuery.order("occurred_on", { ascending: false }).order("created_at", { ascending: false });
 
-  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: subscriptions }, { data: irregularBills }] =
+  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }] =
     await Promise.all([
       supabase
         .from("subcategories")
@@ -76,6 +76,12 @@ export default async function TransactionsPage({
         .select("id, name, kind, is_kids_account, sort_order")
         .eq("household_id", household.id)
         .eq("active", true)
+        .order("sort_order")
+        .order("name"),
+      supabase
+        .from("buckets")
+        .select("id, account_id, name, sort_order")
+        .eq("household_id", household.id)
         .order("sort_order")
         .order("name"),
       // Managed items for the transaction Payee autocomplete's auto-fill.
@@ -116,6 +122,15 @@ export default async function TransactionsPage({
     name: a.name,
     group: accountGroupFor(a),
   }));
+
+  // Buckets grouped by parent account, restricted to investment accounts —
+  // powers the transaction modal's Bucket picker (Fidelity → Roth IRA Vic).
+  const investmentAccountIds = new Set((accounts ?? []).filter((a) => a.kind === "investment").map((a) => a.id));
+  const bucketsByAccount: Record<string, { id: string; name: string }[]> = {};
+  for (const b of buckets ?? []) {
+    if (!investmentAccountIds.has(b.account_id)) continue;
+    (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.name });
+  }
 
   const transactions: TxData[] = (txRows ?? []).map((t) => ({
     id: t.id,
@@ -159,6 +174,7 @@ export default async function TransactionsPage({
       transactions={transactions}
       subOptions={subOptions}
       accountOptions={accountOptions}
+      bucketsByAccount={bucketsByAccount}
       payeeOptions={(payees ?? []).map((p) => p.name)}
       payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}

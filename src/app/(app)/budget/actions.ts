@@ -352,6 +352,7 @@ export async function addTransaction(formData: FormData) {
   const payeeName = String(formData.get("payee") ?? "").trim();
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
+  const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   if (!subcategoryId || !occurredOn || amountCents <= 0) return;
 
@@ -389,6 +390,22 @@ export async function addTransaction(formData: FormData) {
     accountId = account?.id ?? null;
   }
 
+  // Optional direct bucket attribution (investment sub-accounts like
+  // Fidelity → Roth IRA Vic). Only valid when the bucket belongs to the
+  // account we just verified. Distinct from the subcategory.linked_bucket_id
+  // path used by savings goals below.
+  let directBucketId: string | null = null;
+  if (bucketIdRaw && accountId) {
+    const { data: b } = await supabase
+      .from("buckets")
+      .select("id")
+      .eq("id", bucketIdRaw)
+      .eq("account_id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    directBucketId = b?.id ?? null;
+  }
+
   await supabase.from("transactions").insert({
     household_id: householdId,
     occurred_on: occurredOn,
@@ -397,6 +414,7 @@ export async function addTransaction(formData: FormData) {
     subcategory_id: subcategoryId,
     payee_id: payeeId,
     account_id: accountId,
+    bucket_id: directBucketId,
     memo,
     is_withdrawal: isWithdrawal,
     source: "manual",
@@ -407,6 +425,13 @@ export async function addTransaction(formData: FormData) {
   const bucketId = await getLinkedBucketId(supabase, householdId, subcategoryId);
   if (bucketId) {
     await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
+    await captureSnapshots(supabase, householdId);
+  }
+
+  // Direct-bucket attribution (investment sub-account). adjustBucketBalance
+  // also rolls the parent account total via syncAccountFromBuckets.
+  if (directBucketId && directBucketId !== bucketId) {
+    await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
     await captureSnapshots(supabase, householdId);
   }
 
@@ -441,6 +466,7 @@ export async function updateTransaction(formData: FormData) {
   const payeeName = String(formData.get("payee") ?? "").trim();
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
+  const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   if (!id || !subcategoryId || !occurredOn || amountCents <= 0) return;
 
@@ -448,7 +474,7 @@ export async function updateTransaction(formData: FormData) {
   // the old subcategory/amount/direction may differ from the new ones.
   const { data: prevTx } = await supabase
     .from("transactions")
-    .select("subcategory_id, category_id, account_id, amount_cents, is_withdrawal")
+    .select("subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -485,6 +511,18 @@ export async function updateTransaction(formData: FormData) {
     accountId = account?.id ?? null;
   }
 
+  let directBucketId: string | null = null;
+  if (bucketIdRaw && accountId) {
+    const { data: b } = await supabase
+      .from("buckets")
+      .select("id")
+      .eq("id", bucketIdRaw)
+      .eq("account_id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    directBucketId = b?.id ?? null;
+  }
+
   await supabase
     .from("transactions")
     .update({
@@ -494,6 +532,7 @@ export async function updateTransaction(formData: FormData) {
       subcategory_id: subcategoryId,
       payee_id: payeeId,
       account_id: accountId,
+      bucket_id: directBucketId,
       memo,
       is_withdrawal: isWithdrawal,
     })
@@ -510,10 +549,21 @@ export async function updateTransaction(formData: FormData) {
       await adjustBucketBalance(supabase, householdId, prevBucketId, undoDelta);
       touchedBucket = true;
     }
+    // Undo previous direct-bucket attribution (investment sub-account).
+    if (prevTx.bucket_id && prevTx.bucket_id !== (prevBucketId ?? null)) {
+      const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
+      await adjustBucketBalance(supabase, householdId, prevTx.bucket_id, undoDelta);
+      touchedBucket = true;
+    }
   }
   const bucketId = await getLinkedBucketId(supabase, householdId, subcategoryId);
   if (bucketId) {
     await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
+    touchedBucket = true;
+  }
+  // Apply new direct-bucket attribution.
+  if (directBucketId && directBucketId !== bucketId) {
+    await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
     touchedBucket = true;
   }
   if (touchedBucket) await captureSnapshots(supabase, householdId);
@@ -559,7 +609,7 @@ export async function deleteTransaction(formData: FormData) {
 
   const { data: tx } = await supabase
     .from("transactions")
-    .select("subcategory_id, category_id, account_id, amount_cents, is_withdrawal")
+    .select("subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -570,11 +620,12 @@ export async function deleteTransaction(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId);
 
+  let linkedBucketId: string | null = null;
   if (tx?.subcategory_id) {
-    const bucketId = await getLinkedBucketId(supabase, householdId, tx.subcategory_id);
-    if (bucketId) {
+    linkedBucketId = await getLinkedBucketId(supabase, householdId, tx.subcategory_id);
+    if (linkedBucketId) {
       const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
-      await adjustBucketBalance(supabase, householdId, bucketId, undoDelta);
+      await adjustBucketBalance(supabase, householdId, linkedBucketId, undoDelta);
       await captureSnapshots(supabase, householdId);
     }
 
@@ -583,6 +634,14 @@ export async function deleteTransaction(formData: FormData) {
       await captureSnapshots(supabase, householdId);
       revalidatePath("/snowball");
     }
+  }
+
+  // Undo direct-bucket attribution (investment sub-account) — skip if this
+  // was the same bucket the savings-linked path already reversed.
+  if (tx?.bucket_id && tx.bucket_id !== linkedBucketId) {
+    const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
+    await adjustBucketBalance(supabase, householdId, tx.bucket_id, undoDelta);
+    await captureSnapshots(supabase, householdId);
   }
 
   if (tx?.account_id) {
