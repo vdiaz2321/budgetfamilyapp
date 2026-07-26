@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
-import { setInvestmentYear } from "./actions";
+import { setInvestmentYear, transferFromInvestment } from "./actions";
+import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 
 export type YearCell = {
@@ -27,6 +28,7 @@ export type InvestAccount = {
   holder: string | null;
   subtype: string | null;
   isKids: boolean;
+  sortOrder: number;
   cells: Record<number, YearCell>;
   buckets: BucketRow[];
 };
@@ -59,10 +61,13 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   };
 }
 
+export type DestAccount = { id: string; name: string };
+
 type Props = {
   accounts: InvestAccount[];
   years: number[]; // newest first
   currency: string;
+  destAccounts: DestAccount[];
 };
 
 const gainTone = (cents: number) =>
@@ -80,10 +85,11 @@ function returnPct(cell: {
   return cell.accruedCents - cell.contributedCents;
 }
 
-export function InvestBoard({ accounts, years, currency }: Props) {
+export function InvestBoard({ accounts, years, currency, destAccounts }: Props) {
   const [year, setYear] = useState<number>(years[0] ?? new Date().getFullYear());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   const mine = accounts.filter((a) => !a.isKids);
   const kids = accounts.filter((a) => a.isKids);
@@ -120,9 +126,19 @@ export function InvestBoard({ accounts, years, currency }: Props) {
             </p>
           </div>
           <div className="flex items-center justify-between gap-4 lg:justify-end">
+            <button
+              type="button"
+              onClick={() => setShowTransfer(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-soft px-3 py-2 text-sm font-medium text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M7 17l10-10M17 7v10M17 7H7" />
+              </svg>
+              Transfer
+            </button>
             <div className="text-right">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
-                Total return ({year})
+                Total gains ({year})
               </p>
               <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${summary.gains >= 0 ? "text-positive" : "text-negative"}`}>
                 {summary.gains >= 0 ? "+" : ""}{formatMoney(summary.gains, currency)}
@@ -180,13 +196,22 @@ export function InvestBoard({ accounts, years, currency }: Props) {
             </span>
           </button>
           {showGuide ? (
-            <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm leading-relaxed text-foreground/80">
-              <p className="mb-2">Use the selected year to review each investment account against its year-end statement.</p>
-              <ul className="grid gap-1.5 pl-5 marker:text-brand sm:grid-cols-3">
-                <li>Update the account balance on <span className="font-semibold text-foreground">Accounts</span>.</li>
-                <li>Enter brokerage-reported market gains or losses in <span className="font-semibold text-foreground">Gains</span>.</li>
-                <li>Logged investment contributions flow into the selected account or bucket automatically.</li>
-              </ul>
+            <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground/80">
+              <p className="mb-3 text-xs text-muted">Use the selected year to review each investment account against its year-end statement.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Contributions</p>
+                  <p className="text-xs leading-relaxed">Log a deposit transaction to any investment account — it auto-adds to <span className="font-semibold text-foreground">Contrib</span> here.</p>
+                </div>
+                <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Gains / Losses</p>
+                  <p className="text-xs leading-relaxed">At year-end, type the market gain or loss from your brokerage statement into <span className="font-semibold text-foreground">Gains</span>.</p>
+                </div>
+                <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Current balance</p>
+                  <p className="text-xs leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage's ending balance.</p>
+                </div>
+              </div>
             </div>
           ) : null}
         </div>
@@ -213,12 +238,26 @@ export function InvestBoard({ accounts, years, currency }: Props) {
             <SummaryStat label="Accounts" value={String(summary.accountCount)} />
           </div>
 
+          {showTransfer && (
+            <TransferModal
+              accounts={accounts}
+              destAccounts={destAccounts}
+              currency={currency}
+              onClose={() => setShowTransfer(false)}
+            />
+          )}
           <PerformanceChart accounts={chartAccounts} years={years} currency={currency} selectedName={selectedAccount?.name ?? null} onClear={() => setSelectedId(null)} />
-          <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} />
-          {kids.length > 0 ? (
-            <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} />
-          ) : null}
-          <YearByYear accounts={accounts} years={years} currency={currency} />
+          <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+            <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+            <div className="border-t border-foreground/10" />
+            <YearByYear accounts={accounts} years={years} currency={currency} />
+            {kids.length > 0 ? (
+              <>
+                <div className="border-t border-foreground/10" />
+                <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+              </>
+            ) : null}
+          </div>
         </>
       )}
     </div>
@@ -227,9 +266,9 @@ export function InvestBoard({ accounts, years, currency }: Props) {
 
 function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="flex min-h-[5.25rem] flex-col justify-between bg-surface px-4 py-3.5 text-left sm:px-5">
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p className={`self-end text-xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
+    <div className="flex flex-col items-center justify-center gap-1 bg-surface px-4 py-4 text-center sm:px-5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className={`text-xl font-semibold tabular-nums ${tone ?? ""}`}>{value}</p>
     </div>
   );
 }
@@ -316,7 +355,7 @@ function PerformanceChart({
   const fmtBarTotal = (b: typeof bars[number]) => {
     if (mode === "return") return `${b.returnPct >= 0 ? "+" : ""}${b.returnPct.toFixed(1)}%`;
     const total = mode === "stacked" ? b.contrib + Math.max(b.gain, 0) : Math.max(b.contrib, b.gain);
-    return compactMoney(total);
+    return `Total: ${compactMoney(total)}`;
   };
 
   return (
@@ -538,7 +577,7 @@ function ChartTooltip({
         zIndex: 10,
       }}
     >
-      <div className="mb-1 font-semibold">{b.year}</div>
+      <div className="mb-1.5 font-semibold">{b.year}</div>
       <div className="space-y-0.5 text-muted">
         <div>Contributed <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
         <div>
@@ -550,9 +589,12 @@ function ChartTooltip({
         {mode === "return" ? (
           <div>Return <span className={`font-medium ${b.returnPct >= 0 ? "text-positive" : "text-negative"}`}>{b.returnPct >= 0 ? "+" : ""}{b.returnPct.toFixed(1)}%</span></div>
         ) : null}
-        {b.endBal != null && (
+        {b.endBal != null && b.year < new Date().getFullYear() && (
           <div>End balance <span className="font-medium text-foreground">{formatMoney(b.endBal, currency)}</span></div>
         )}
+      </div>
+      <div className="mt-1.5 border-t border-line/60 pt-1.5 font-semibold text-foreground">
+        Total {formatMoney(b.contrib + b.gain, currency)}
       </div>
     </div>
   );
@@ -565,6 +607,7 @@ function PerfTable({
   currency,
   selectedId,
   onSelect,
+  noCard,
 }: {
   title: string;
   accounts: InvestAccount[];
@@ -572,6 +615,7 @@ function PerfTable({
   currency: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  noCard?: boolean;
 }) {
   const key = `invest-table-${title.toLowerCase().replace(/\s+/g, "-")}`;
   const [collapseState, setCollapseState] = useSessionCollapse(key, () => ({ v: true }));
@@ -582,6 +626,30 @@ function PerfTable({
   // actually render a chevron, but the map is keyed uniformly.
   const [bucketsOpen, setBucketsOpen] = useSessionCollapse("invest-buckets-open", () => ({}));
   const toggleBuckets = (id: string) => setBucketsOpen((s) => ({ ...s, [id]: !s[id] }));
+
+  // Local optimistic ordering — mirrors the accounts page pattern so drag-drop
+  // updates the UI immediately, then persists via reorderAccounts. Server props
+  // reset this on refresh.
+  const [localAccounts, setLocalAccounts] = useState(accounts);
+  useEffect(() => setLocalAccounts(accounts), [accounts]);
+  const [, startReorder] = useTransition();
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const reorder = (fromId: string, toId: string) => {
+    const fromIdx = localAccounts.findIndex((a) => a.id === fromId);
+    const toIdx = localAccounts.findIndex((a) => a.id === toId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const next = [...localAccounts];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setLocalAccounts(next);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
+    startReorder(async () => {
+      const res = await reorderAccounts(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
+  const { dragOverId, startDrag } = usePointerReorder("invest-account", reorder);
 
   // Group totals for the selected year, using per-account EFFECTIVE cells
   // (account slot + all bucket slots). Effective start uses prior-year end as fallback.
@@ -606,16 +674,9 @@ function PerfTable({
     { startBalanceCents: effStartAny ? effStartSum : null, contributedCents: contribSum, accruedCents: accruedSum },
   );
 
-  // Sort accounts by current effective value (End of Year) descending.
-  const sortedAccounts = useMemo(
-    () =>
-      [...accounts].sort((a, b) => {
-        const av = effectiveCell(a, year).endBalanceCents ?? 0;
-        const bv = effectiveCell(b, year).endBalanceCents ?? 0;
-        return bv - av;
-      }),
-    [accounts, year],
-  );
+  // Render in user-defined order (server sends accounts sorted by sort_order).
+  // Local state above overrides during optimistic reorder.
+  const sortedAccounts = localAccounts;
 
   // Hide "Start" column when every account has a null/zero start for the year — reduces noise.
   const showStart = startAny && startSum > 0;
@@ -624,11 +685,11 @@ function PerfTable({
   if (accounts.length === 0) return null;
 
   return (
-    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className={noCard ? "" : "overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10"}>
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center gap-2 border-b border-line px-4 py-3 text-left hover:bg-brand-soft/20"
+        className="flex w-full items-center gap-2 border-b border-line px-4 py-2.5 text-left hover:bg-brand-soft/20"
       >
         <svg
           width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -650,6 +711,9 @@ function PerfTable({
           </div>
         )}
       </button>
+      {reorderError && !collapsed ? (
+        <p className="border-b border-line/70 px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
+      ) : null}
       {collapsed ? null : <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -680,11 +744,16 @@ function PerfTable({
               // buckets exist, this slot is still editable so the seed row can be
               // adjusted, but bucket rows render below.
               const parentCell = a.cells[year];
+              const isDragOver = dragOverId === a.id;
               return (
                 <Fragment key={a.id}>
-                  <tr className={`border-t border-line/70 transition ${isSelected ? "bg-brand-soft/40" : "hover:bg-brand-soft/10"}`}>
+                  <tr
+                    data-drop-key={`invest-account:${a.id}`}
+                    className={`border-t border-line/70 transition ${isSelected ? "bg-brand-soft/40" : "hover:bg-brand-soft/10"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+                  >
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1.5">
+                        <GripHandle onMouseDown={() => startDrag(a.id)} />
                         {hasBuckets ? (
                           <button
                             type="button"
@@ -929,22 +998,22 @@ function YearByYear({
   const kids = accounts.filter((a) => a.isKids);
 
   return (
-    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
         aria-expanded={open}
       >
-        <h2 className="text-sm font-bold">Year by year</h2>
         <svg
           width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+          className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
           aria-hidden
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
+        <h2 className="text-sm font-bold">Year by year</h2>
       </button>
       {open ? (
         <div className="overflow-x-auto border-t border-line">
@@ -1051,4 +1120,221 @@ function YearByYear({
       ) : null}
     </section>
   );
+}
+
+// ─── Transfer modal ────────────────────────────────────────────────────────
+
+function TransferModal({
+  accounts,
+  destAccounts,
+  currency,
+  onClose,
+}: {
+  accounts: InvestAccount[];
+  destAccounts: DestAccount[];
+  currency: string;
+  onClose: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [sourceAccountId, setSourceAccountId] = useState("");
+  const [sourceBucketId, setSourceBucketId] = useState("");
+  const [destAccountId, setDestAccountId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [memo, setMemo] = useState("");
+
+  const srcAccount = accounts.find((a) => a.id === sourceAccountId);
+  const hasBuckets = (srcAccount?.buckets.length ?? 0) > 0;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.set("sourceAccountId", sourceAccountId);
+    if (sourceBucketId) fd.set("sourceBucketId", sourceBucketId);
+    fd.set("destAccountId", destAccountId);
+    fd.set("amount", amount);
+    fd.set("date", date);
+    if (memo) fd.set("memo", memo);
+    start(async () => {
+      await transferFromInvestment(fd);
+      onClose();
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl bg-surface shadow-xl ring-1 ring-black/10 dark:ring-white/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <h2 className="text-lg font-bold">Transfer / Withdraw</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-1 text-muted transition hover:bg-brand-soft hover:text-foreground">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
+          {/* Source account */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">From (investment account)</span>
+            <select
+              required
+              value={sourceAccountId}
+              onChange={(e) => { setSourceAccountId(e.target.value); setSourceBucketId(""); }}
+              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Select investment account</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}{a.holder ? ` (${a.holder})` : ""}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* Source bucket (when account has buckets) */}
+          {hasBuckets && (
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted">Bucket</span>
+              <select
+                value={sourceBucketId}
+                onChange={(e) => setSourceBucketId(e.target.value)}
+                className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Entire account (no specific bucket)</option>
+                {srcAccount!.buckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name} — {formatMoney(b.balanceCents, currency)}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {/* Destination account */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">To (banking account)</span>
+            <select
+              required
+              value={destAccountId}
+              onChange={(e) => setDestAccountId(e.target.value)}
+              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Select destination account</option>
+              {destAccounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+
+          {/* Amount */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">Amount</span>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">{currencySymbol(currency)}</span>
+              <input
+                required
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full rounded-lg border border-line bg-background py-2 pl-7 pr-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            </div>
+          </label>
+
+          {/* Date */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">Date</span>
+            <input
+              required
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </label>
+
+          {/* Memo */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">Note</span>
+            <input
+              type="text"
+              placeholder="Transfer note (optional)"
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </label>
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-muted transition hover:bg-brand-soft hover:text-foreground">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={pending || !sourceAccountId || !destAccountId || !amount || !date}
+              className="rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-white transition hover:bg-brand/90 disabled:opacity-40"
+            >
+              {pending ? "Transferring…" : "Transfer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Grab handle for drag-to-reorder — mirrors the Accounts board's handle so
+// both pages reorder the same way.
+function GripHandle({ onMouseDown }: { onMouseDown: () => void }) {
+  return (
+    <span
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onMouseDown();
+      }}
+      title="Drag to reorder"
+      className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+    >
+      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+    </span>
+  );
+}
+
+// Pointer-based row reordering — rows carry data-drop-key="<kind>:<id>",
+// grabbing a handle starts the drag, releasing over another row of the same
+// kind fires onReorder(fromId, toId). Same mechanism as the Accounts board.
+function usePointerReorder(kind: string, onReorder: (fromId: string, toId: string) => void) {
+  const dragId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  const keyUnder = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    const rowEl = el?.closest<HTMLElement>("[data-drop-key]");
+    const key = rowEl?.getAttribute("data-drop-key");
+    return key && key.startsWith(`${kind}:`) ? key.slice(kind.length + 1) : null;
+  };
+
+  const startDrag = (id: string) => {
+    dragId.current = id;
+    document.body.style.cursor = "grabbing";
+    const onMove = (e: MouseEvent) => setDragOverId(keyUnder(e.clientX, e.clientY));
+    const onUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      setDragOverId(null);
+      const from = dragId.current;
+      dragId.current = null;
+      const to = keyUnder(e.clientX, e.clientY);
+      if (from && to && from !== to) onReorder(from, to);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  return { dragOverId, startDrag };
 }

@@ -39,7 +39,7 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   bucketsByAccount?: import("./types").BucketsByAccount;
-  payeeOptions?: string[];
+  payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   // Optional overrides so the same panel can be reused elsewhere (e.g. a
   // "Debt Payments" list on the Snowball page). Default to the Budget wording.

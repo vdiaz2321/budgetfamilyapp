@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
+import { adjustBucketBalance } from "@/lib/buckets";
+import { captureSnapshots } from "@/lib/snapshots";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -99,4 +101,101 @@ export async function setInvestmentYear(formData: FormData) {
   }
 
   revalidatePath("/invest");
+}
+
+// Transfer money from an investment account (optionally a specific bucket)
+// into a banking account. Creates a withdrawal transaction for the audit
+// trail, adjusts both account balances, and captures snapshots.
+export async function transferFromInvestment(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+
+  const sourceAccountId = String(formData.get("sourceAccountId") ?? "");
+  const sourceBucketId = String(formData.get("sourceBucketId") ?? "").trim() || null;
+  const destAccountId = String(formData.get("destAccountId") ?? "");
+  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  const occurredOn = String(formData.get("date") ?? "");
+  const memo = String(formData.get("memo") ?? "").trim() || null;
+  if (!sourceAccountId || !destAccountId || !occurredOn || amountCents <= 0) return;
+
+  // Validate source is an investment account in this household.
+  const { data: srcAcct } = await supabase
+    .from("accounts")
+    .select("id, kind")
+    .eq("id", sourceAccountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!srcAcct || srcAcct.kind !== "investment") return;
+
+  // Validate destination is a non-investment account in this household.
+  const { data: destAcct } = await supabase
+    .from("accounts")
+    .select("id, kind, current_balance_cents")
+    .eq("id", destAccountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!destAcct || destAcct.kind === "investment") return;
+
+  // Validate bucket belongs to the source account (when provided).
+  let validBucketId: string | null = null;
+  if (sourceBucketId) {
+    const { data: bucket } = await supabase
+      .from("buckets")
+      .select("id")
+      .eq("id", sourceBucketId)
+      .eq("account_id", sourceAccountId)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    validBucketId = bucket?.id ?? null;
+  }
+
+  // 1. Create an audit transaction: withdrawal from the investment account,
+  //    paid_to the destination banking account (mirrors the card-payment pattern).
+  await supabase.from("transactions").insert({
+    household_id: householdId,
+    occurred_on: occurredOn,
+    amount_cents: amountCents,
+    account_id: sourceAccountId,
+    bucket_id: validBucketId,
+    paid_to_account_id: destAccountId,
+    is_withdrawal: true,
+    memo: memo ?? `Transfer to ${destAcct.kind === "checking" || destAcct.kind === "savings_bucket" ? "banking" : "account"}`,
+    source: "manual",
+  });
+
+  // 2. Decrement the investment side.
+  if (validBucketId) {
+    await adjustBucketBalance(supabase, householdId, validBucketId, -amountCents);
+  } else {
+    // No bucket — adjust the account balance directly.
+    const { data: acctBal } = await supabase
+      .from("accounts")
+      .select("current_balance_cents")
+      .eq("id", sourceAccountId)
+      .single();
+    await supabase
+      .from("accounts")
+      .update({
+        current_balance_cents: (acctBal?.current_balance_cents ?? 0) - amountCents,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", sourceAccountId)
+      .eq("household_id", householdId);
+  }
+
+  // 3. Increment the destination banking account.
+  await supabase
+    .from("accounts")
+    .update({
+      current_balance_cents: (destAcct.current_balance_cents ?? 0) + amountCents,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", destAccountId)
+    .eq("household_id", householdId);
+
+  // 4. Snapshot & revalidate.
+  await captureSnapshots(supabase, householdId);
+  revalidatePath("/invest");
+  revalidatePath("/accounts");
+  revalidatePath("/networth");
+  revalidatePath("/transactions");
 }

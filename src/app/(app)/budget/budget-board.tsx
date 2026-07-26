@@ -45,7 +45,7 @@ type Props = {
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
   bucketsByAccount?: BucketsByAccount;
-  payeeOptions: string[];
+  payeeOptions: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   snowballExtraCents: number;
   snowballFocusSubId: string | null;

@@ -416,7 +416,7 @@ export default async function BudgetPage({
       debtAccountOptions={debtAccountOptions}
       bucketOptions={bucketOptions}
       bucketsByAccount={bucketsByAccount}
-      payeeOptions={(payees ?? []).map((p) => p.name)}
+      payeeOptions={payees ?? []}
       payeeLineItems={payeeLineItems}
       snowballExtraCents={snowballExtraCents}
       snowballFocusSubId={snowballFocusSubId}

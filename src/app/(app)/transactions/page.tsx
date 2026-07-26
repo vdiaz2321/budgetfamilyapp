@@ -181,7 +181,7 @@ export default async function TransactionsPage({
       subOptions={subOptions}
       accountOptions={accountOptions}
       bucketsByAccount={bucketsByAccount}
-      payeeOptions={(payees ?? []).map((p) => p.name)}
+      payeeOptions={payees ?? []}
       payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}
     />

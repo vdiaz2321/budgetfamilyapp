@@ -40,6 +40,7 @@ export default async function InvestPage() {
     { data: accSnaps },
     { data: contribRows },
     { data: yearRows },
+    { data: bankingRows },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -67,6 +68,14 @@ export default async function InvestPage() {
       .from("investment_years")
       .select("account_id, bucket_id, year, contributed_cents, accrued_cents, start_cents, end_cents")
       .eq("household_id", household.id),
+    supabase
+      .from("accounts")
+      .select("id, name, kind")
+      .eq("household_id", household.id)
+      .eq("active", true)
+      .in("kind", ["checking", "savings_bucket", "credit_card"])
+      .order("sort_order")
+      .order("name"),
   ]);
 
   const accounts = accountRows ?? [];
@@ -197,10 +206,13 @@ export default async function InvestPage() {
       holder: a.holder ?? null,
       subtype: a.subtype ?? null,
       isKids: !!a.is_kids_account,
+      sortOrder: a.sort_order ?? 0,
       cells,
       buckets,
     };
   });
 
-  return <InvestBoard accounts={data} years={years} currency={household.currency} />;
+  const destAccounts = (bankingRows ?? []).map((a) => ({ id: a.id, name: a.name }));
+
+  return <InvestBoard accounts={data} years={years} currency={household.currency} destAccounts={destAccounts} />;
 }

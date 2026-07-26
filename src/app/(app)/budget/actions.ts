@@ -744,6 +744,12 @@ export async function updateGlobals(formData: FormData) {
 
 // ---------- Rollover (carry a month's leftover cash into the next) ----------
 
+export async function deletePayee(id: string) {
+  const { supabase, householdId } = await requireHousehold();
+  await supabase.from("payees").delete().eq("id", id).eq("household_id", householdId);
+  revalidatePath("/budget");
+}
+
 export async function setRollover(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01 (source month)

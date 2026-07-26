@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, updateTransaction, deleteTransaction } from "./actions";
+import { addTransaction, updateTransaction, deleteTransaction, deletePayee } from "./actions";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
 
 // Header title (verbose) vs. button label (short), plus tab labels.
@@ -81,9 +81,9 @@ export function TransactionModal({
   // them (currently only investment accounts on Fidelity/Crypto). Keyed by
   // account_id. Empty/omitted = no bucket picker ever shows.
   bucketsByAccount?: BucketsByAccount;
-  // Previously-used payee names, offered as suggestions below the payee
-  // field as you type — not a picker, just a memory aid.
-  payeeOptions?: string[];
+  // Previously-used payees (id + name), offered as suggestions below the
+  // payee field as you type — not a picker, just a memory aid.
+  payeeOptions?: { id: string; name: string }[];
   // Managed subscriptions/irregular bills — selecting one of these from the
   // payee suggestions auto-fills its linked budget item (and, for
   // subscriptions, its amount) instead of requiring manual mapping.
@@ -239,15 +239,25 @@ export function TransactionModal({
               >
                 <option value="">
                   {txType === "income"
-                    ? "Deposit to account (optional)"
+                    ? "Deposit to account"
                     : txType === "debt"
-                      ? "Paid from account (optional)"
-                      : "Charged to / paid from account (optional)"}
+                      ? "Paid from account"
+                      : "Charged to / paid from account"}
                 </option>
                 {(() => {
+                  // Income: banking only (deposit destination).
+                  // Bills/Expenses/Savings/Debt: banking + credit cards.
+                  // Investments + Kids Funding are never a payment source for
+                  // everyday transactions — use the Invest page for withdrawals.
+                  const allowedGroups = txType === "income"
+                    ? new Set(["Banking"])
+                    : new Set(["Banking", "Credit Cards"]);
+                  const filtered = accountOptions.filter(
+                    (a) => allowedGroups.has(a.group ?? "Other"),
+                  );
                   const groups: string[] = [];
                   const byGroup = new Map<string, typeof accountOptions>();
-                  for (const a of accountOptions) {
+                  for (const a of filtered) {
                     const g = a.group ?? "Other";
                     if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
                     byGroup.get(g)!.push(a);
@@ -356,10 +366,11 @@ export function TransactionModal({
   );
 }
 
-// A plain text input (still submits as `name="payee"`) with a self-positioned
-// suggestion list anchored directly below it, filtered against payees used
-// before. `onMouseDown` + `preventDefault` on each suggestion keeps the input
-// focused through the click so `onBlur` doesn't close the list first.
+// A plain text input with a self-positioned suggestion list. Supports:
+// - Arrow key navigation (ArrowDown/ArrowUp) + Enter to select
+// - × button on plain payee suggestions to delete them from the saved list
+// `onMouseDown` + `preventDefault` keeps focus during click so onBlur
+// doesn't close the list before the click fires.
 function PayeeField({
   placeholder,
   defaultValue,
@@ -369,33 +380,56 @@ function PayeeField({
 }: {
   placeholder: string;
   defaultValue: string;
-  payeeOptions: string[];
+  payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   onMatch?: (item: PayeeLineItem) => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(-1);
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [, startDel] = useTransition();
 
   const q = value.trim().toLowerCase();
-  // Managed subscriptions/irregular bills surface first (they carry a
-  // category match), followed by plain previously-used payee names that
-  // aren't already covered by a managed item.
   const lineItemNames = new Set(payeeLineItems.map((i) => i.name.toLowerCase()));
   const lineMatches = q
     ? payeeLineItems.filter((i) => i.name.toLowerCase() !== q && i.name.toLowerCase().includes(q))
     : payeeLineItems;
+  const plainOptions = (payeeOptions ?? []).filter((p) => !deletedIds.has(p.id));
   const plainMatches = (
     q
-      ? payeeOptions.filter((p) => p.toLowerCase() !== q && p.toLowerCase().includes(q))
-      : payeeOptions
-  ).filter((p) => !lineItemNames.has(p.toLowerCase()));
-  const matches = [...lineMatches.slice(0, 6), ...plainMatches.slice(0, 6 - Math.min(6, lineMatches.length))];
+      ? plainOptions.filter((p) => p.name.toLowerCase() !== q && p.name.toLowerCase().includes(q))
+      : plainOptions
+  ).filter((p) => !lineItemNames.has(p.name.toLowerCase()));
+  const lineSlice = lineMatches.slice(0, 6);
+  const plainSlice = plainMatches.slice(0, 6 - Math.min(6, lineSlice.length));
+  // Unified list: line items first, then plain payees
+  type Entry = PayeeLineItem | { id: string; name: string };
+  const matches: Entry[] = [...lineSlice, ...plainSlice];
 
   function select(name: string) {
     setValue(name);
     setOpen(false);
+    setHighlighted(-1);
     const item = payeeLineItems.find((i) => i.name.toLowerCase() === name.toLowerCase());
     if (item) onMatch?.(item);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open || matches.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted((h) => (h + 1) % matches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted((h) => (h <= 0 ? matches.length - 1 : h - 1));
+    } else if (e.key === "Enter" && highlighted >= 0) {
+      e.preventDefault();
+      select(matches[highlighted].name);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setHighlighted(-1);
+    }
   }
 
   return (
@@ -406,34 +440,46 @@ function PayeeField({
         autoComplete="off"
         placeholder={placeholder}
         value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setOpen(true);
-        }}
+        onChange={(e) => { setValue(e.target.value); setOpen(true); setHighlighted(-1); }}
         onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
+        onBlur={() => { setOpen(false); setHighlighted(-1); }}
+        onKeyDown={handleKeyDown}
         className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       {open && matches.length > 0 ? (
         <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
-          {matches.map((entry) => {
-            const name = typeof entry === "string" ? entry : entry.name;
-            const isLineItem = typeof entry !== "string";
+          {matches.map((entry, idx) => {
+            const isLineItem = "kind" in entry;
+            const isHighlighted = idx === highlighted;
             return (
-              <li key={name}>
+              <li key={entry.name} className={`group flex items-center ${isHighlighted ? "bg-brand-soft ring-1 ring-inset ring-brand/20" : "hover:bg-brand-soft/40"}`}>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => select(name)}
-                  className="flex w-full items-center justify-between gap-2 truncate px-3 py-2 text-left text-sm hover:bg-brand-soft/40"
+                  onClick={() => select(entry.name)}
+                  className="flex flex-1 items-center gap-2 px-3 py-2 text-left text-sm"
                 >
-                  <span className="truncate">{name}</span>
+                  <span className="flex-1 truncate">{entry.name}</span>
                   {isLineItem ? (
                     <span className="shrink-0 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand">
                       {entry.kind === "subscription" ? "Sub" : "Irregular"}
                     </span>
                   ) : null}
                 </button>
+                {!isLineItem ? (
+                  <button
+                    type="button"
+                    title="Remove suggestion"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setDeletedIds((s) => new Set([...s, entry.id]));
+                      startDel(() => deletePayee(entry.id));
+                    }}
+                    className="mr-2 shrink-0 rounded px-1 py-0.5 text-sm font-bold text-muted opacity-0 transition group-hover:opacity-100 hover:text-negative"
+                  >
+                    ×
+                  </button>
+                ) : null}
               </li>
             );
           })}

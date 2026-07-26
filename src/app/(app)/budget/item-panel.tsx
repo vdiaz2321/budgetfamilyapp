@@ -5,6 +5,7 @@ import { centsToDisplay, formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
   deleteSubcategory,
+  deleteTransaction,
   updateSubcategory,
   upsertDebtAndPlan,
   upsertPlan,
@@ -216,7 +217,7 @@ function DeleteFooter({ subId, onDeleted }: { subId: string; onDeleted: () => vo
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded py-1 text-xs font-medium text-negative/70 transition hover:bg-negative/5 hover:text-negative disabled:opacity-50"
+        className="w-full rounded bg-negative/[0.06] py-1 text-xs font-medium text-negative transition hover:bg-negative/10 disabled:opacity-50"
       >
         {pending ? "Deleting…" : "Delete this item"}
       </button>
@@ -265,30 +266,60 @@ function MonthTransactions({
         This month · {txs.length} transaction{txs.length === 1 ? "" : "s"}
       </h3>
       <ul className="max-h-56 space-y-1 overflow-y-auto">
-        {txs.map((t) => {
-          const acct = t.accountId ? accountNameById.get(t.accountId) : null;
-          return (
-            <li key={t.id}>
-              <button
-                type="button"
-                onClick={() => onEdit(t)}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition hover:bg-brand-soft/40"
-                title="Edit transaction"
-              >
-                <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="font-medium">{t.payee ?? "—"}</span>
-                  {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}
-                </span>
-                <span className={`shrink-0 tabular-nums ${t.isWithdrawal ? "text-positive" : "text-negative"}`}>
-                  {t.isWithdrawal ? "+" : "−"}{formatMoney(t.amountCents, currency)}
-                </span>
-              </button>
-            </li>
-          );
-        })}
+        {txs.map((t) => (
+          <TxRow key={t.id} t={t} currency={currency} accountNameById={accountNameById} onEdit={onEdit} dateLabel={dateLabel} />
+        ))}
       </ul>
     </div>
+  );
+}
+
+function TxRow({
+  t,
+  currency,
+  accountNameById,
+  onEdit,
+  dateLabel,
+}: {
+  t: TxData;
+  currency: string;
+  accountNameById: Map<string, string>;
+  onEdit: (tx: TxData) => void;
+  dateLabel: (iso: string) => string;
+}) {
+  const [delPending, startDel] = useTransition();
+  const acct = t.accountId ? accountNameById.get(t.accountId) : null;
+  return (
+    <li className="group flex items-center gap-1 rounded-md px-1 hover:bg-surface-raised/60">
+      <button
+        type="button"
+        onClick={() => onEdit(t)}
+        className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left text-xs"
+        title="Edit transaction"
+      >
+        <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-medium">{t.payee ?? "—"}</span>
+          {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}
+        </span>
+        <span className="shrink-0 tabular-nums">
+          {formatMoney(t.amountCents, currency)}
+        </span>
+      </button>
+      <button
+        type="button"
+        title="Delete transaction"
+        disabled={delPending}
+        onClick={() => {
+          const fd = new FormData();
+          fd.append("id", t.id);
+          startDel(() => deleteTransaction(fd));
+        }}
+        className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-sm font-bold text-negative opacity-0 transition group-hover:opacity-100 hover:bg-negative/10 disabled:opacity-40"
+      >
+        ×
+      </button>
+    </li>
   );
 }
 

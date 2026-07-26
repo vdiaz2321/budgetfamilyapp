@@ -27,7 +27,7 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   bucketsByAccount?: import("../budget/types").BucketsByAccount;
-  payeeOptions?: string[];
+  payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   dateRange: { from: string | null; to: string | null };
 };
