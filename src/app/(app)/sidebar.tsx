@@ -9,17 +9,18 @@ import ThemeToggle from "@/app/theme-toggle";
 
 type Props = {
   groups: SidebarGroup[];
-  currency: string;
   userEmail: string;
   badges?: Record<string, number>;
 };
 
 const STORAGE_KEY = "capitall-sidebar-collapsed";
 
-export function Sidebar({ groups, currency, userEmail, badges }: Props) {
+export function Sidebar({ groups, userEmail, badges }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
+    // Browser-only preference hydration; the initial state is SSR-safe.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCollapsed(localStorage.getItem(STORAGE_KEY) === "true");
   }, []);
 
@@ -69,7 +70,7 @@ export function Sidebar({ groups, currency, userEmail, badges }: Props) {
       {collapsed ? (
         <div className="flex-1" />
       ) : (
-        <SidebarAccounts groups={groups} currency={currency} />
+        <SidebarAccounts groups={groups} />
       )}
 
       <div className="mx-4 mt-3 border-t border-white/[0.06] pt-3">

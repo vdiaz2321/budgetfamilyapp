@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { ensureCategories, type CategoryKind } from "@/lib/categories";
+import { ensureCategories } from "@/lib/categories";
 import { SavingsBoard, type SavingsCardData } from "./savings-board";
 
 export const metadata = { title: "Savings · Capitall" };

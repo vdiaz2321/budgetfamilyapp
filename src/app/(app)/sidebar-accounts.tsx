@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
-import { formatMoney } from "@/lib/money";
 
 export type SidebarAccount = {
   id: string;
@@ -27,7 +25,6 @@ export type SidebarGroup = {
 
 type Props = {
   groups: SidebarGroup[];
-  currency: string;
 };
 
 // Fixed palette so each account name always hashes to the same dot color —
@@ -55,7 +52,7 @@ function formatWhole(cents: number): string {
 
 // YNAB-style account list under the nav: collapsible sections with a group
 // total in the header and per-account balances, plus Add Account at the foot.
-export function SidebarAccounts({ groups, currency }: Props) {
+export function SidebarAccounts({ groups }: Props) {
   // Net worth = every group's total, liabilities subtracted — so it stays
   // correct as groups are added (e.g. a future Real Estate group) without
   // needing to touch this calculation.
@@ -81,7 +78,7 @@ export function SidebarAccounts({ groups, currency }: Props) {
           .map((g) => {
             const excluded = g.items.every((a) => a.inNetWorth === false);
             return (
-              <AccountGroup key={g.label} group={g} currency={currency} showDivider={excluded} />
+              <AccountGroup key={g.label} group={g} showDivider={excluded} />
             );
           })}
       </div>
@@ -90,7 +87,7 @@ export function SidebarAccounts({ groups, currency }: Props) {
   );
 }
 
-function AccountGroup({ group, currency, showDivider }: { group: SidebarGroup; currency: string; showDivider?: boolean }) {
+function AccountGroup({ group, showDivider }: { group: SidebarGroup; showDivider?: boolean }) {
   const [open, setOpen] = useState(false);
   const total = group.totalCents;
   const sign = group.liability ? -1 : 1;

@@ -75,7 +75,7 @@ function returnPct(cell: {
   startBalanceCents: number | null;
   contributedCents: number;
   accruedCents: number;
-}, _priorEndCents?: number | null): number | null {
+}): number | null {
   if (cell.contributedCents === 0 && cell.accruedCents === 0) return null;
   return cell.accruedCents - cell.contributedCents;
 }
@@ -234,14 +234,12 @@ function PerformanceChart({
       desc.map((y) => {
         let contrib = 0;
         let gain = 0;
-        let start = 0;
         let endBal = 0;
         let endAny = false;
         for (const a of accounts) {
           const c = effectiveCell(a, y);
           contrib += c.contributedCents;
           gain += c.accruedCents;
-          if (c.startBalanceCents != null) start += c.startBalanceCents;
           if (c.endBalanceCents != null) { endBal += c.endBalanceCents; endAny = true; }
         }
         // Simple return: gains ÷ contributions × 100.
@@ -549,7 +547,6 @@ function PerfTable({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
-  if (accounts.length === 0) return null;
   const key = `invest-table-${title.toLowerCase().replace(/\s+/g, "-")}`;
   const [collapseState, setCollapseState] = useSessionCollapse(key, () => ({ v: true }));
   const collapsed = collapseState.v;
@@ -597,6 +594,8 @@ function PerfTable({
   // Hide "Start" column when every account has a null/zero start for the year — reduces noise.
   const showStart = startAny && startSum > 0;
   const zeroCls = "text-muted/50";
+
+  if (accounts.length === 0) return null;
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">

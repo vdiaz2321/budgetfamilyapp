@@ -20,7 +20,6 @@ type Props = {
   onToggle: () => void;
   // The debt currently getting the snowball's extra payment — badged
   // "next to pay" on its row. Only meaningful for the debt group.
-  snowballFocusSubId: string | null;
 };
 
 function usePointerReorder(categoryId: string, rows: RowData[]) {
@@ -75,7 +74,6 @@ export function BudgetGroup({
   onSelectRow,
   open,
   onToggle,
-  snowballFocusSubId,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const { dragOverId, startDrag, optimisticOrder } = usePointerReorder(group.categoryId, group.rows);
@@ -166,9 +164,6 @@ export function BudgetGroup({
                   selected={row.subId === selectedSubId}
                   isEven={i % 2 === 1}
                   isDragOver={dragOverId === row.subId}
-                  isSnowballFocus={
-                    isDebt && row.subId === snowballFocusSubId && (row.debt?.balanceCents ?? 0) > 0
-                  }
                   onSelect={() => onSelectRow(row, group.kind)}
                   onDragStart={() => startDrag(row.subId)}
                 />

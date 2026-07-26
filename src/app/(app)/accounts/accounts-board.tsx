@@ -83,7 +83,6 @@ export type NonCardAccount = {
   hasBuckets: boolean;
 };
 
-export type DebtSubcategoryOption = { id: string; name: string };
 
 // A debt from the Budget Debt group — shown here read-only (Budget is the
 // single source of truth for debts).
@@ -199,7 +198,6 @@ type Props = {
   budgetDebts: BudgetDebt[];
   currency: string;
   nonCardAccounts?: NonCardAccount[];
-  debtSubcategories?: DebtSubcategoryOption[];
 };
 
 export function AccountsBoard({
@@ -207,7 +205,6 @@ export function AccountsBoard({
   budgetDebts,
   currency,
   nonCardAccounts = [],
-  debtSubcategories = [],
 }: Props) {
   const active = accounts.filter((a) => a.active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
@@ -244,7 +241,6 @@ export function AccountsBoard({
   // session instead of resetting to its default every time this board
   // remounts. See feedback: "Amex Savings keeps staying expanded... when I
   // collapse it when moving to a different page."
-  const bucketCountById = new Map(accounts.map((a) => [a.id, a.buckets.length]));
   const [bucketsOpen, setBucketsOpen] = useSessionCollapse("accounts-buckets-open", () =>
     Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, false])),
   );
@@ -362,7 +358,6 @@ export function AccountsBoard({
               allCreditCards={accounts.filter((a) => a.kind === "credit_card")}
               currency={currency}
               nonCardAccounts={nonCardAccounts}
-              debtSubcategories={debtSubcategories}
               allBuckets={accounts.flatMap((a) => a.buckets)}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
@@ -382,7 +377,6 @@ function CreditCardSection({
   allCreditCards,
   currency,
   nonCardAccounts,
-  debtSubcategories,
   allBuckets,
   open,
   onToggle,
@@ -392,7 +386,6 @@ function CreditCardSection({
   allCreditCards: AccountData[];
   currency: string;
   nonCardAccounts: NonCardAccount[];
-  debtSubcategories: DebtSubcategoryOption[];
   allBuckets: BucketData[];
   open: boolean;
   onToggle: () => void;
@@ -491,7 +484,6 @@ function CreditCardSection({
                   cards={g.cards}
                   currency={currency}
                   nonCardAccounts={nonCardAccounts}
-                  debtSubcategories={debtSubcategories}
                   allBuckets={allBuckets}
                   isArchived={isArchived}
                 />
@@ -500,12 +492,11 @@ function CreditCardSection({
           ) : (
             <ul className="divide-y divide-line">
               {accounts.map((a) => (
-                <CreditCardPanel
+              <CreditCardPanel
                   key={a.id}
                   card={a}
                   currency={currency}
                   nonCardAccounts={nonCardAccounts}
-                  debtSubcategories={debtSubcategories}
                   allBuckets={allBuckets}
                   isArchived={isArchived}
                 />
@@ -550,7 +541,6 @@ function HolderGroup({
   cards,
   currency,
   nonCardAccounts,
-  debtSubcategories,
   allBuckets,
   isArchived,
 }: {
@@ -558,7 +548,6 @@ function HolderGroup({
   cards: AccountData[];
   currency: string;
   nonCardAccounts: NonCardAccount[];
-  debtSubcategories: DebtSubcategoryOption[];
   allBuckets: BucketData[];
   isArchived: boolean;
 }) {
@@ -601,7 +590,6 @@ function HolderGroup({
               card={c}
               currency={currency}
               nonCardAccounts={nonCardAccounts}
-              debtSubcategories={debtSubcategories}
               allBuckets={allBuckets}
               isArchived={isArchived}
             />
@@ -618,14 +606,12 @@ function CreditCardPanel({
   card,
   currency,
   nonCardAccounts,
-  debtSubcategories,
   allBuckets,
   isArchived,
 }: {
   card: AccountData;
   currency: string;
   nonCardAccounts: NonCardAccount[];
-  debtSubcategories: DebtSubcategoryOption[];
   allBuckets: BucketData[];
   isArchived: boolean;
 }) {
@@ -801,7 +787,6 @@ function CreditCardPanel({
           {editing ? (
             <EditCreditCardForm
               card={card}
-              debtSubcategories={debtSubcategories}
               onDone={() => setEditing(false)}
             />
           ) : null}
@@ -834,11 +819,9 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 
 function EditCreditCardForm({
   card,
-  debtSubcategories,
   onDone,
 }: {
   card: AccountData;
-  debtSubcategories: DebtSubcategoryOption[];
   onDone: () => void;
 }) {
   const [saveAcctPending, startSaveAcct] = useTransition();
@@ -1266,18 +1249,13 @@ function AccountSection({
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
 
-  // Collapsing a section while a row's edit form is open shouldn't leave it
-  // silently open underneath — close it, so reopening the section shows the
-  // normal read view again.
-  useEffect(() => {
-    if (!open) setEditingId(null);
-  }, [open]);
-
   // Reorder optimistically — reflect the new order the instant you click,
   // instead of waiting on a full round trip to the server. `accounts` still
   // wins once the server responds (revalidated data replaces this local copy).
   const [localAccounts, setLocalAccounts] = useState(accounts);
   useEffect(() => {
+    // Sync the optimistic local ordering after server revalidation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalAccounts(accounts);
   }, [accounts]);
 
@@ -1310,7 +1288,10 @@ function AccountSection({
       <div className="grid grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
         <button
           type="button"
-          onClick={onToggle}
+          onClick={() => {
+            if (open) setEditingId(null);
+            onToggle();
+          }}
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
@@ -1548,6 +1529,8 @@ function BucketDrawer({
   // Reorder optimistically, same reasoning as accounts above.
   const [localBuckets, setLocalBuckets] = useState(account.buckets);
   useEffect(() => {
+    // Sync the optimistic local ordering after server revalidation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalBuckets(account.buckets);
   }, [account.buckets]);
 

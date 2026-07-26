@@ -329,6 +329,10 @@ retirement-planner bridge.
   one once via Supabase SQL Editor (shared DB). **Victor applies all migrations
   himself** — Claude never calls `apply_migration` or executes DDL via
   `execute_sql`; only read-only SELECT queries are permitted via MCP.
+- **Migration operating rule:** Codex and Claude must never initiate, apply, or
+  execute a migration against Supabase. If schema work is needed, produce the
+  numbered SQL migration for Victor to review and paste into Supabase manually,
+  then wait for confirmation before relying on it.
 - Current migrations: **`0001`–`0027`**.
 
 ### Migration index

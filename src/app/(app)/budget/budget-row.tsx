@@ -34,13 +34,12 @@ type Props = {
   monthKey: string; // YYYY-MM-01
   selected: boolean;
   isEven: boolean;
-  isSnowballFocus?: boolean;
   isDragOver?: boolean;
   onSelect: () => void;
   onDragStart: () => void;
 };
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isSnowballFocus, isDragOver, onSelect, onDragStart }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, onSelect, onDragStart }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);

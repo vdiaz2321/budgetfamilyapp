@@ -48,8 +48,6 @@ export function SavingsBoard({ cards, currency }: Props) {
   );
   const leftToSave = Math.max(0, totals.goal - totals.saved);
   const remainingPct = totals.goal > 0 ? (leftToSave / totals.goal) * 100 : 0;
-  const withGoal = cards.filter((c) => c.goalCents > 0);
-  const onTrack = withGoal.filter((c) => c.pace === "on_track" || c.pace === "reached").length;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">

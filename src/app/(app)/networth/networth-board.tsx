@@ -69,6 +69,10 @@ function makeTicks(min: number, max: number): number[] {
   return ticks;
 }
 
+function setDocumentCursor(cursor: string) {
+  if (typeof document !== "undefined") document.body.style.cursor = cursor;
+}
+
 // One account (or Budget debt) row in the monthly balances grid.
 export type GridRow = {
   name: string;
@@ -482,6 +486,8 @@ function BalanceGrid({
   // `rows` (from the server) wins once it's revalidated.
   const [localRows, setLocalRows] = useState(rows);
   useEffect(() => {
+    // Sync the optimistic local ordering after server revalidation.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalRows(rows);
   }, [rows]);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -495,7 +501,7 @@ function BalanceGrid({
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
   function trackPointerDrag(onDropKey: (kind: string, id: string) => void) {
-    document.body.style.cursor = "grabbing";
+    setDocumentCursor("grabbing");
     const onMove = (e: MouseEvent) => {
       const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
       const rowEl = el?.closest<HTMLElement>("tr[data-drop-key]");
@@ -504,7 +510,7 @@ function BalanceGrid({
     const onUp = (e: MouseEvent) => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      document.body.style.cursor = "";
+      setDocumentCursor("");
       setDragOverKey(null);
       const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
       const rowEl = el?.closest<HTMLElement>("tr[data-drop-key]");

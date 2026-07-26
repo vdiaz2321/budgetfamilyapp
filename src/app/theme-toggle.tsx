@@ -13,6 +13,9 @@ export default function ThemeToggle() {
       document.documentElement.getAttribute("data-theme") === "dark"
         ? "dark"
         : "light";
+    // Read the browser-only theme after hydration; the initial render is
+    // intentionally deterministic for SSR.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(current);
     setMounted(true);
   }, []);

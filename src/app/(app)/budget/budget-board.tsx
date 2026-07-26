@@ -80,6 +80,8 @@ export function BudgetBoard({
   const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
   useEffect(() => {
     const saved = sessionStorage.getItem("budget-rail-tab");
+    // Browser-only preference hydration; the initial state is SSR-safe.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved === "summary" || saved === "transactions") setRailTab(saved);
   }, []);
   useEffect(() => {
@@ -243,7 +245,6 @@ export function BudgetBoard({
                 onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
                 open={openGroups[group.categoryId] ?? false}
                 onToggle={() => toggleGroup(group.categoryId)}
-                snowballFocusSubId={snowballFocusSubId}
               />
             ))}
 
@@ -374,14 +375,12 @@ function getBudgetStatus(
 
 function ProgressBar({
   label,
-  arrow,
   actual,
   planned,
   fillClassName,
   currency,
 }: {
   label: string;
-  arrow: "up" | "down";
   actual: number;
   planned: number;
   fillClassName: string;
@@ -459,10 +458,10 @@ function SummaryHeroCard({
       </div>
 
       <div className="mt-5 flex flex-col gap-3">
-        <ProgressBar label="Income" arrow="up" actual={actualIncome} planned={incomePlanned} fillClassName="bg-positive" currency={currency} />
-        <ProgressBar label="Bills & Expenses" arrow="down" actual={billsExpenses.spent} planned={billsExpenses.planned} fillClassName="bg-negative" currency={currency} />
-        <ProgressBar label="Savings" arrow="down" actual={savings.spent} planned={savings.planned} fillClassName="bg-[#6366f1]" currency={currency} />
-        <ProgressBar label="Debt" arrow="down" actual={debt.spent} planned={debt.planned} fillClassName="bg-[#f59e0b]" currency={currency} />
+        <ProgressBar label="Income" actual={actualIncome} planned={incomePlanned} fillClassName="bg-positive" currency={currency} />
+        <ProgressBar label="Bills & Expenses" actual={billsExpenses.spent} planned={billsExpenses.planned} fillClassName="bg-negative" currency={currency} />
+        <ProgressBar label="Savings" actual={savings.spent} planned={savings.planned} fillClassName="bg-[#6366f1]" currency={currency} />
+        <ProgressBar label="Debt" actual={debt.spent} planned={debt.planned} fillClassName="bg-[#f59e0b]" currency={currency} />
       </div>
     </div>
   );

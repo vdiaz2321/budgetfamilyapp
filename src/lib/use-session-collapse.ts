@@ -17,12 +17,14 @@ export function useSessionCollapse(
   useEffect(() => {
     try {
       const saved = window.sessionStorage.getItem(key);
+      // This is intentional client-only hydration from sessionStorage. The
+      // first render uses the server-safe initial value to avoid a mismatch.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved) setState(JSON.parse(saved) as Record<string, boolean>);
     } catch {
       // sessionStorage unavailable (e.g. private mode) — falls back to `initial()`.
     }
     setHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   useEffect(() => {

@@ -183,16 +183,12 @@ export default async function AccountsPage() {
       hasBuckets: a.buckets.length > 0,
     }));
 
-  // All subcategories (for the debt-link dropdown on revolving cards).
-  const debtSubcategories = (subRows ?? []).map((s) => ({ id: s.id, name: s.name }));
-
   return (
     <AccountsBoard
       accounts={accounts}
       budgetDebts={budgetDebts}
       currency={household.currency}
       nonCardAccounts={nonCardAccounts}
-      debtSubcategories={debtSubcategories}
     />
   );
 }

@@ -32,6 +32,8 @@ export function SummaryPanel({ groups, currency }: Props) {
 
   useEffect(() => {
     const saved = sessionStorage.getItem("budget-summary-mode") as ViewMode | null;
+    // Browser-only preference hydration; the initial state is SSR-safe.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved === "spent" || saved === "remaining") setMode(saved);
     setHydrated(true);
   }, []);

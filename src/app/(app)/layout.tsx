@@ -29,9 +29,8 @@ export default async function AppLayout({
   // Sidebar account list (YNAB-style): cash + investment accounts from
   // Accounts, debts from Budget (single source of truth), split like YNAB's
   // "Credit Card / Loans" sections.
-  const [{ data: household }, { data: accounts }, { data: buckets }, { data: debts }, { data: subs }] =
+  const [{ data: accounts }, { data: buckets }, { data: debts }, { data: subs }] =
     await Promise.all([
-      supabase.from("households").select("currency").eq("id", profile.household_id).single(),
       supabase
         .from("accounts")
         .select("id, name, kind, active, is_kids_account, current_balance_cents")
@@ -48,7 +47,6 @@ export default async function AppLayout({
       supabase.from("subcategories").select("id, name").eq("household_id", profile.household_id),
     ]);
 
-  const currency = household?.currency ?? "USD";
   const subName = new Map((subs ?? []).map((s) => [s.id, s.name]));
 
   const cashKinds = new Set(["checking", "savings_bucket"]);
@@ -159,7 +157,6 @@ export default async function AppLayout({
       {/* Sidebar — YNAB-style navy in both themes */}
       <Sidebar
         groups={groups}
-        currency={currency}
         userEmail={user.email ?? ""}
         badges={debtItems.length > 0 ? { "/snowball": debtItems.length } : undefined}
       />
