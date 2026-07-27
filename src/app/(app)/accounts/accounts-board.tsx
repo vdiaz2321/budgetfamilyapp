@@ -229,7 +229,7 @@ export function AccountsBoard({
     ...excludedSections.map((s) => s.key),
     ...legacySections.map((s) => s.key),
   ];
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
+  const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
     Object.fromEntries(["debts", ...SECTIONS.map((s) => s.key)].map((k) => [k, true])),
   );
   const allOpen = sectionKeys.every((k) => !collapsed[k]);

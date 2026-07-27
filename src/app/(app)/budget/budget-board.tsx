@@ -367,9 +367,6 @@ function getBudgetStatus(
 ): { tone: BudgetTone; badgeText: string } {
   const expenseRatio = outflowPlanned > 0 ? actualSpent / outflowPlanned : 0;
   if (actualLeft < 0) return { tone: "bad", badgeText: "Overspent" };
-  if (expenseRatio >= 0.9 || actualLeft < displayLeft * 0.15) {
-    return { tone: "warn", badgeText: `Tight — ${Math.round(expenseRatio * 100)}% spent` };
-  }
   return { tone: "good", badgeText: "On track" };
 }
 

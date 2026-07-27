@@ -328,11 +328,29 @@ export default async function NetworthPage() {
   }
   rows.push(...liabilityRows);
 
+  // Always show a 3-column strip: current month + the two preceding calendar
+  // months, even if no snapshots exist for the earlier months (they render "—").
+  const nowDate = new Date();
+  const displayMonths: string[] = [];
+  for (let back = 0; back <= 2; back++) {
+    const d = new Date(nowDate.getFullYear(), nowDate.getMonth() - back, 1);
+    displayMonths.push(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`,
+    );
+  }
+  const displayRows = rows.map((r) => ({
+    ...r,
+    balances: displayMonths.map((m) => {
+      const i = monthIdx.get(m);
+      return i != null ? r.balances[i] : null;
+    }),
+  }));
+
   return (
     <NetworthBoard
       points={points}
-      gridMonths={months}
-      gridRows={rows}
+      gridMonths={displayMonths}
+      gridRows={displayRows}
       currency={household.currency}
     />
   );

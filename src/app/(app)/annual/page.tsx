@@ -136,8 +136,9 @@ export default async function AnnualOverviewPage({
   );
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
 
-  // Per-subcategory actuals by month (cents), for the Category by Months table.
+  // Per-subcategory actuals and planned by month (cents), for the Category by Months table.
   const actualBySub = new Map<string, number[]>();
+  const plannedBySub = new Map<string, number[]>();
 
   // planned[monthIdx][kind] and actual[monthIdx][kind], all cents.
   const emptyKinds = (): Record<CategoryKind, number> => ({
@@ -149,7 +150,15 @@ export default async function AnnualOverviewPage({
   for (const p of plans ?? []) {
     const kind = kindBySub.get(p.subcategory_id);
     if (!kind) continue;
-    planned[parseInt(p.month.slice(5, 7), 10) - 1][kind] += p.planned_cents;
+    const monthIdx = parseInt(p.month.slice(5, 7), 10) - 1;
+    planned[monthIdx][kind] += p.planned_cents;
+
+    let pMonths = plannedBySub.get(p.subcategory_id);
+    if (!pMonths) {
+      pMonths = Array(12).fill(0);
+      plannedBySub.set(p.subcategory_id, pMonths);
+    }
+    pMonths[monthIdx] += p.planned_cents;
   }
   for (const a of actuals ?? []) {
     const kind = kindBySub.get(a.subcategory_id);
@@ -207,8 +216,6 @@ export default async function AnnualOverviewPage({
         const total = months.reduce((sum, v) => sum + v, 0);
         return { subId, name: nameBySub.get(subId) ?? "—", months, total };
       })
-      // Any non-zero month keeps the row — checking total alone would hide a
-      // row whose entries offset to zero (e.g. a charge and its refund).
       .filter((r) => r.months.some((v) => v !== 0));
 
     if (!rows.length) return [];
@@ -346,7 +353,7 @@ type BreakdownRow = {
   line_sort: number;
 };
 
-const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "savings", "investment"];
+const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "investment", "savings"];
 const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
   income: "Income",
   bills: "Bills",

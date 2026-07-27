@@ -183,138 +183,122 @@ export function TransactionModal({
           >
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
 
-            {/* Amount */}
-            <div className="relative">
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-lg font-semibold text-muted">$</span>
+            {/* Row 1: Amount | Payee | Date */}
+            <div className="flex items-center gap-2">
+              <div className="relative w-28 shrink-0">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+                <input
+                  ref={amountRef}
+                  name="amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  placeholder="0.00"
+                  autoFocus
+                  defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
+                  className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <PayeeField
+                  placeholder={PAYEE_PLACEHOLDER[txType]}
+                  defaultValue={editTx?.payee ?? ""}
+                  payeeOptions={payeeOptions}
+                  payeeLineItems={payeeLineItems}
+                  onMatch={handlePayeeMatch}
+                />
+              </div>
               <input
-                ref={amountRef}
-                name="amount"
-                type="number"
-                step="0.01"
-                min="0.01"
+                name="date"
+                type="date"
                 required
-                placeholder="0.00"
-                autoFocus
-                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
-                className="w-full rounded-xl bg-background py-3 pl-9 pr-4 text-lg font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                defaultValue={defaultDate}
+                className="w-36 shrink-0 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
 
-            {/* Date */}
-            <input
-              name="date"
-              type="date"
-              required
-              defaultValue={defaultDate}
-              className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-
-            {/* Payee — its own row so the placeholder isn't squeezed next to
-                the date. Suggests payees used before (e.g. "Fidelity",
-                "Walmart") directly below the field — not a fixed brand list,
-                and not the browser's native <datalist> popup, whose position
-                we can't control (it was showing up to the left). */}
-            <PayeeField
-              placeholder={PAYEE_PLACEHOLDER[txType]}
-              defaultValue={editTx?.payee ?? ""}
-              payeeOptions={payeeOptions}
-              payeeLineItems={payeeLineItems}
-              onMatch={handlePayeeMatch}
-            />
-
-            {/* Account — label + hint change based on tab so it's clear what
-                "account" means. Income deposits INTO an account; Expenses/Bills
-                are charged from (or to a credit card). Debt payments should
-                really use the Pay Card modal on the Accounts page, but the
-                dropdown stays available for revolving-card manual entries. */}
-            <div>
-              <select
-                name="accountId"
-                value={selectedAccountId}
-                onChange={(e) => {
-                  setSelectedAccountId(e.target.value);
-                  setSelectedBucketId(""); // reset when account changes
-                }}
-                className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">
-                  {txType === "income"
-                    ? "Deposit to account"
-                    : txType === "debt"
-                      ? "Paid from account"
-                      : "Charged to / paid from account"}
-                </option>
-                {(() => {
-                  // Income: banking only (deposit destination).
-                  // Bills/Expenses/Savings/Debt: banking + credit cards.
-                  // Investments + Kids Funding are never a payment source for
-                  // everyday transactions — use the Invest page for withdrawals.
-                  const allowedGroups = txType === "income"
-                    ? new Set(["Banking"])
-                    : new Set(["Banking", "Credit Cards"]);
-                  const filtered = accountOptions.filter(
-                    (a) => allowedGroups.has(a.group ?? "Other"),
-                  );
-                  const groups: string[] = [];
-                  const byGroup = new Map<string, typeof accountOptions>();
-                  for (const a of filtered) {
-                    const g = a.group ?? "Other";
-                    if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
-                    byGroup.get(g)!.push(a);
-                  }
-                  return groups.map((g) => (
-                    <optgroup key={g} label={g}>
-                      {byGroup.get(g)!.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </optgroup>
-                  ));
-                })()}
-              </select>
-              {txType === "debt" ? (
-                <p className="mt-1 px-1 text-[11px] text-muted">
-                  Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page — it debits your bank and clears the card&apos;s Owed in one step.
-                </p>
-              ) : null}
-            </div>
-
-            {/* Bucket picker — appears only when the chosen account has
-                buckets (currently: investment accounts like Fidelity, Crypto).
-                Lets a contribution be attributed to Roth IRA Vic, Taxable Vic,
-                etc. so the Invest page can break the number out per bucket. */}
-            {availableBuckets.length > 0 ? (
+            {/* Row 2: Account | Budget Items */}
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <select
-                  name="bucketId"
-                  value={selectedBucketId}
-                  onChange={(e) => setSelectedBucketId(e.target.value)}
+                  name="accountId"
+                  value={selectedAccountId}
+                  onChange={(e) => {
+                    setSelectedAccountId(e.target.value);
+                    setSelectedBucketId("");
+                  }}
                   className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
-                  <option value="">Bucket (optional — pick a sub-account)</option>
-                  {availableBuckets.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
+                  <option value="">
+                    {txType === "income"
+                      ? "Deposit to account"
+                      : txType === "debt"
+                        ? "Paid from account"
+                        : "Charged to / paid from account"}
+                  </option>
+                  {(() => {
+                    const allowedGroups = txType === "income"
+                      ? new Set(["Banking"])
+                      : new Set(["Banking", "Credit Cards"]);
+                    const filtered = accountOptions.filter(
+                      (a) => allowedGroups.has(a.group ?? "Other"),
+                    );
+                    const groups: string[] = [];
+                    const byGroup = new Map<string, typeof accountOptions>();
+                    for (const a of filtered) {
+                      const g = a.group ?? "Other";
+                      if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
+                      byGroup.get(g)!.push(a);
+                    }
+                    return groups.map((g) => (
+                      <optgroup key={g} label={g}>
+                        {byGroup.get(g)!.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </optgroup>
+                    ));
+                  })()}
                 </select>
+                {txType === "debt" ? (
+                  <p className="mt-1 px-1 text-[11px] text-muted">
+                    Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page — it debits your bank and clears the card&apos;s Owed in one step.
+                  </p>
+                ) : null}
               </div>
+              <BudgetItemField
+                key={`${txType}-${autoFillSubId ?? ""}`}
+                kindLabel={KIND_TAB[txType]}
+                options={options}
+                showLabel={false}
+                defaultValue={
+                  autoFillSubId ??
+                  (editTx && editTx.kind === txType
+                    ? editTx.subId ?? ""
+                    : !isEdit && initialKind === txType
+                      ? initialSubId ?? ""
+                      : "")
+                }
+                defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
+              />
+            </div>
+
+            {/* Bucket picker — only shown for investment accounts with buckets */}
+            {availableBuckets.length > 0 ? (
+              <select
+                name="bucketId"
+                value={selectedBucketId}
+                onChange={(e) => setSelectedBucketId(e.target.value)}
+                className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Bucket (optional — pick a sub-account)</option>
+                {availableBuckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
             ) : null}
 
-            {/* Budget item */}
-            <BudgetItemField
-              key={`${txType}-${autoFillSubId ?? ""}`}
-              kindLabel={KIND_TAB[txType]}
-              options={options}
-              defaultValue={
-                autoFillSubId ??
-                (editTx && editTx.kind === txType
-                  ? editTx.subId ?? ""
-                  : !isEdit && initialKind === txType
-                    ? initialSubId ?? ""
-                    : "")
-              }
-              defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
-            />
-
-            {/* Note */}
+            {/* Row 3: Note (full width) */}
             <input
               name="memo"
               type="text"
@@ -498,18 +482,20 @@ function BudgetItemField({
   options,
   defaultValue,
   defaultIsWithdrawal,
+  showLabel = true,
 }: {
   kindLabel: string;
   options: SubOption[];
   defaultValue: string;
   defaultIsWithdrawal: boolean;
+  showLabel?: boolean;
 }) {
   const [subId, setSubId] = useState(defaultValue);
   const linkedBucketId = options.find((o) => o.id === subId)?.linkedBucketId;
 
   return (
     <div>
-      <p className="mb-1.5 text-sm font-bold">Budget Items</p>
+      {showLabel ? <p className="mb-1.5 text-sm font-bold">Budget Items</p> : null}
       <select
         name="subcategoryId"
         required

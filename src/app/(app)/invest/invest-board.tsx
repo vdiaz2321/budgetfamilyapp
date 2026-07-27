@@ -292,6 +292,9 @@ function PerformanceChart({
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [mode, setMode] = useState<ChartMode>("stacked");
+  const [chartCollapseState, setChartCollapseState] = useSessionCollapse("invest-chart-open", () => ({ open: false }));
+  const chartOpen = chartCollapseState.open;
+  const setChartOpen = (v: boolean) => setChartCollapseState((s) => ({ ...s, open: v }));
   const desc = useMemo(() => [...years].sort((a, b) => b - a), [years]);
 
   const bars = useMemo(
@@ -361,15 +364,30 @@ function PerformanceChart({
   return (
     <section className="overflow-visible rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
-        <div>
-          <h2 className="text-sm font-bold">
-            Performance by year
-            {selectedName ? <span className="ml-1.5 font-medium text-brand">· {selectedName}</span> : null}
-          </h2>
-          <p className="text-xs text-muted">
-            {mode === "stacked" ? "Stacked: contributions + gains" : mode === "grouped" ? "Grouped: side-by-side comparison" : "% Return: gain vs. base each year"}
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setChartOpen((v) => !v)}
+          aria-expanded={chartOpen}
+          className="flex items-center gap-2 text-left"
+        >
+          <svg
+            width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 text-muted transition-transform ${chartOpen ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+          <div>
+            <h2 className="text-sm font-bold">
+              Performance by year
+              {selectedName ? <span className="ml-1.5 font-medium text-brand">· {selectedName}</span> : null}
+            </h2>
+            <p className="text-xs text-muted">
+              {mode === "stacked" ? "Stacked: contributions + gains" : mode === "grouped" ? "Grouped: side-by-side comparison" : "% Return: gain vs. base each year"}
+            </p>
+          </div>
+        </button>
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
           <div className="flex overflow-hidden rounded-lg ring-1 ring-line text-[11px]">
@@ -396,6 +414,7 @@ function PerformanceChart({
         </div>
       </div>
 
+      {chartOpen ? <>
       {/* Legend */}
       <div className="flex items-center gap-4 px-4 pb-2 text-xs text-muted">
         <span className="flex items-center gap-1.5">
@@ -550,6 +569,7 @@ function PerformanceChart({
           <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} mode={mode} />
         ) : null}
       </div>
+      </> : null}
     </section>
   );
 }

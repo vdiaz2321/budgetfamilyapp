@@ -152,19 +152,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
       </div>
 
       {/* Over-time chart */}
-      <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-        <div className="border-b border-line px-4 py-2.5">
-          <h2 className="font-semibold">Net Worth Over Time</h2>
-        </div>
-        {points.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted">
-            No history yet — it starts accruing as soon as you enter account balances.
-            Each month freezes automatically; check back as months pass.
-          </p>
-        ) : (
-          <NetworthChart points={points} currency={currency} />
-        )}
-      </section>
+      <ChartSection points={points} currency={currency} />
 
       {/* Monthly balances by account — the sheet's per-account grid */}
       {gridRows.length > 0 ? (
@@ -217,6 +205,42 @@ function Stat({
   );
 }
 
+function ChartSection({ points, currency }: { points: MonthPoint[]; currency: string }) {
+  const [chartState, setChartState] = useSessionCollapse("networth-chart-open", () => ({ open: false }));
+  const open = chartState.open;
+  const setOpen = (v: boolean) => setChartState((s) => ({ ...s, open: v }));
+  return (
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+      >
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+          aria-hidden
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+        <h2 className="font-semibold">Net Worth Over Time</h2>
+      </button>
+      {open ? (
+        points.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted">
+            No history yet — it starts accruing as soon as you enter account balances.
+            Each month freezes automatically; check back as months pass.
+          </p>
+        ) : (
+          <NetworthChart points={points} currency={currency} />
+        )
+      ) : null}
+    </section>
+  );
+}
+
 // Single-series line: 2px brand line, 10% area wash, end dot with surface
 // ring, hairline gridlines, crosshair + tooltip snapping to nearest month.
 function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: string }) {
@@ -256,7 +280,12 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
   const lastIdx = points.length - 1;
 
   // X labels: first, last, and up to ~4 evenly spaced between.
+  // Skip any intermediate label that would land within 50px of the last label.
   const labelEvery = Math.max(1, Math.ceil(points.length / 6));
+  const pxPerMonth = points.length > 1 ? iw / (points.length - 1) : iw;
+  const showXLabel = (i: number) =>
+    i === lastIdx ||
+    (i % labelEvery === 0 && (lastIdx - i) * pxPerMonth >= 50);
 
   return (
     <div className="relative">
@@ -323,7 +352,7 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
         ) : null}
 
         {points.map((p, i) =>
-          i % labelEvery === 0 || i === lastIdx ? (
+          showXLabel(i) ? (
             <text
               key={p.month}
               x={x(i)} y={H - 8}
@@ -688,13 +717,12 @@ function BalanceGrid({
   const monthPct = wideLayout && acctPct != null ? (100 - acctPct) / months.length : null;
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-2.5">
         <div>
           <h2 className="font-semibold">Monthly balances</h2>
           <p className="text-xs text-muted">
-            Type a balance in any cell to record it for that month. Editing the current
-            month also updates Accounts; past months are history.
+            Current month and last two months. Edit balances on the Accounts page.
           </p>
         </div>
         <button
@@ -708,7 +736,7 @@ function BalanceGrid({
       {reorderError ? (
         <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
-      <div className="overflow-x-auto">
+      <div className={wideLayout ? "" : "overflow-x-auto"}>
         <table className={`border-collapse text-sm ${wideLayout ? "w-full table-fixed" : ""}`}>
           {wideLayout ? (
             <colgroup>
@@ -718,13 +746,13 @@ function BalanceGrid({
               ))}
             </colgroup>
           ) : null}
-          <thead>
+          <thead className="sticky top-0 z-20">
             <tr className="border-b border-line">
               <th className={`${stickyCls} bg-surface ${wideLayout ? "" : "min-w-[14rem]"} px-4 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted`}>
                 Account
               </th>
               {months.map((m) => (
-                <th key={m} className={`${wideLayout ? "" : "w-28"} whitespace-nowrap px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide text-muted`}>
+                <th key={m} className={`${wideLayout ? "" : "w-28"} bg-surface whitespace-nowrap px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide text-muted`}>
                   {monthLabel(m)}
                 </th>
               ))}
@@ -892,13 +920,7 @@ function BalanceGrid({
                                     r.muted ? "italic text-muted" : ""
                                   }`}
                                 >
-                                  {r.editable && r.accountId ? (
-                                    <SnapshotCell variant="account" id={r.accountId} month={m} cents={r.balances[i]} currency={currency} />
-                                  ) : r.editable && r.bucketId ? (
-                                    <SnapshotCell variant="bucket" id={r.bucketId} month={m} cents={r.balances[i]} currency={currency} />
-                                  ) : (
-                                    readCell(r, i)
-                                  )}
+                                  {readCell(r, i)}
                                 </td>
                               ))}
                             </tr>

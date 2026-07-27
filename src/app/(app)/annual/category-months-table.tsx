@@ -88,7 +88,7 @@ function Group({
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const headerRef = useRef<HTMLDivElement>(null);
 
   function syncHeader() {
