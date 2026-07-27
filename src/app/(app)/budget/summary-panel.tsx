@@ -27,7 +27,7 @@ type Props = {
 export function SummaryPanel({ groups, currency }: Props) {
   // The donut has its own Spent/Remaining view now that the budget rows show
   // both columns at once.
-  const [mode, setMode] = useState<ViewMode>("spent");
+  const [mode, setMode] = useState<ViewMode>("remaining");
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
