@@ -111,7 +111,8 @@ export function InvestBoard({ accounts, years, currency, destAccounts }: Props) 
       gains += c.accruedCents;
       if (c.endBalanceCents != null) current += c.endBalanceCents;
     }
-    return { contributed, gains, current, accountCount: mine.length };
+    const accountCount = mine.reduce((sum, a) => sum + (a.buckets.length > 0 ? a.buckets.length : 1), 0);
+    return { contributed, gains, current, accountCount };
   }, [mine, year]);
 
   return (
@@ -251,13 +252,12 @@ export function InvestBoard({ accounts, years, currency, destAccounts }: Props) 
             <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
             <div className="border-t border-foreground/10" />
             <YearByYear accounts={accounts} years={years} currency={currency} />
-            {kids.length > 0 ? (
-              <>
-                <div className="border-t border-foreground/10" />
-                <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
-              </>
-            ) : null}
           </div>
+          {kids.length > 0 ? (
+            <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+            </div>
+          ) : null}
         </>
       )}
     </div>
@@ -701,7 +701,7 @@ function PerfTable({
         </svg>
         <h2 className="flex flex-1 items-center gap-2 text-sm font-bold">
           {title}
-          <span className="text-xs font-normal text-muted">{accounts.length} account{accounts.length === 1 ? "" : "s"}</span>
+          <span className="text-xs font-normal text-muted">{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0)} account{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0) === 1 ? "" : "s"}</span>
         </h2>
         {collapsed && (
           <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs tabular-nums text-muted">
@@ -803,31 +803,19 @@ function PerfTable({
                       </td>
                     ) : null}
                     <td className="px-1 py-1">
-                      {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
-                          {formatMoney(eff.contributedCents, currency)}
-                        </span>
-                      ) : (
-                        <EditCell accountId={a.id} year={year} field="contributed" cents={eff.contributedCents} currency={currency} tone={eff.contributedCents === 0 ? zeroCls : ""} />
-                      )}
+                      <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
+                        {formatMoney(eff.contributedCents, currency)}
+                      </span>
                     </td>
                     <td className="px-1 py-1">
-                      {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
-                          {formatMoney(eff.accruedCents, currency)}
-                        </span>
-                      ) : (
-                        <EditCell accountId={a.id} year={year} field="accrued" cents={eff.accruedCents} currency={currency} tone={eff.accruedCents === 0 ? zeroCls : eff.accruedCents > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
-                      )}
+                      <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        {formatMoney(eff.accruedCents, currency)}
+                      </span>
                     </td>
                     <td className="px-1 py-1">
-                      {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
-                          {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
-                        </span>
-                      ) : (
-                        <EditCell accountId={a.id} year={year} field="end" cents={eff.endBalanceCents ?? 0} placeholder={eff.endBalanceCents == null} currency={currency} tone={(eff.endBalanceCents ?? 0) === 0 ? zeroCls : "font-medium"} />
-                      )}
+                      <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
+                      </span>
                     </td>
                     <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
                       {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
@@ -877,7 +865,9 @@ function PerfTable({
                               <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
                             </td>
                             <td className="px-1 py-1">
-                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="end" cents={bc?.endBalanceCents ?? 0} placeholder={bc?.endBalanceCents == null} currency={currency} tone={(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
+                              <span className={`block text-center text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                                {bc?.endBalanceCents == null ? "—" : formatMoney(bc.endBalanceCents, currency)}
+                              </span>
                             </td>
                             <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
                           </tr>
@@ -948,13 +938,13 @@ function EditCell({
     <form
       ref={formRef}
       action={(fd) => start(() => setInvestmentYear(fd))}
-      className="flex items-center justify-center gap-0.5"
+      className="flex items-center justify-center"
     >
+      <span className="pointer-events-none select-none text-sm text-muted">{currencySymbol(currency)}</span>
       <input type="hidden" name="accountId" value={accountId} />
       {bucketId ? <input type="hidden" name="bucketId" value={bucketId} /> : null}
       <input type="hidden" name="year" value={year} />
       <input type="hidden" name="field" value={field} />
-      <span className="pointer-events-none text-xs text-muted">{currencySymbol(currency)}</span>
       <input
         key={initial}
         name="value"
@@ -962,12 +952,12 @@ function EditCell({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="0.00"
-        size={Math.max(initial.length, 4) + 1}
+        size={Math.max(initial.length, 4)}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
+        className={`min-w-0 rounded-md bg-transparent pl-0 pr-1 py-0.5 text-left text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
