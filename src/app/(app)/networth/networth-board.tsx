@@ -722,7 +722,7 @@ function BalanceGrid({
         <div>
           <h2 className="font-semibold">Monthly balances</h2>
           <p className="text-xs text-muted">
-            Current month and last two months. Edit balances on the Accounts page.
+            Current month and last five months. Edit balances on the Accounts page.
           </p>
         </div>
         <button
@@ -1043,7 +1043,7 @@ function SummaryBlock({
   year: string;
   onYearChange: (y: string) => void;
 }) {
-  const [summaryState, setSummaryState] = useSessionCollapse("networth-summary-block", () => ({ v: false }));
+  const [summaryState, setSummaryState] = useSessionCollapse("networth-summary-block", () => ({ v: true }));
   const collapsed = !!summaryState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setSummaryState((s) => ({ v: fn(!!s.v) }));
   const idxByMonth = new Map(points.map((p, i) => [p.month, i]));
@@ -1173,19 +1173,70 @@ const METRICS: Metric[] = [
   { key: "assets", label: "Total NW w/out Debt" },
 ];
 
+// Mirrors the shape of the Monthly Net worth spreadsheet tab, so the download
+// round-trips cleanly through the import script (scripts/import-networth-history.mjs).
+type MonthlyRow = {
+  month: string;
+  cells: { value: number; delta: number | null; monthlyPct: number | null; ytd: number | null }[];
+  debt: number;
+  actualNet: number;
+  debtRatio: number | null;
+};
+
+function downloadMonthlyNetWorthCsv(rows: MonthlyRow[], currency: string) {
+  const money = (n: number | null | undefined) =>
+    n == null ? "" : `"${formatMoney(n, currency).replace(/"/g, '""')}"`;
+  const pct = (p: number | null) => (p == null ? "" : `${(p * 100).toFixed(2)}%`);
+  const header = [
+    "Date",
+    ...METRICS.flatMap((m) => [m.label, `M2M Diff ${m.label}`, `Monthly Diff ${m.label}`, `YTD ${m.label}`]),
+    "Debt Incurred",
+    "Actual NW",
+    "Debt Ratio",
+  ];
+  const body = rows.map((r) => {
+    const parts = [monthLabel(r.month)];
+    for (const c of r.cells) {
+      parts.push(money(c.value), money(c.delta), pct(c.monthlyPct), pct(c.ytd));
+    }
+    parts.push(money(r.debt), money(r.actualNet), r.debtRatio == null ? "" : `${(r.debtRatio * 100).toFixed(2)}%`);
+    return parts.join(",");
+  });
+  const csv = [header.join(","), ...body].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `monthly-net-worth-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function MonthlyAnalytics({
   points,
   currency,
-  year,
+  year: sharedYear,
 }: {
   points: MonthPoint[];
   currency: string;
   year: string;
 }) {
   const [showChanges, setShowChanges] = useState(true);
-  const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: false }));
+  const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: true }));
   const collapsed = !!monthlyState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setMonthlyState((s) => ({ v: fn(!!s.v) }));
+
+  // Section has its own year filter so it can show a different range than
+  // "Net worth by month" above it. Defaults to "All" — you scroll through
+  // every month by default and only narrow by year when you choose.
+  const availableYears = [...new Set(points.map((p) => p.month.slice(0, 4)))].sort((a, b) =>
+    b.localeCompare(a),
+  );
+  const [year, setYear] = useState<string>("all");
+  void sharedYear;
 
   const byMonth = new Map(points.map((p) => [p.month, p]));
   const val = (p: MonthPoint | undefined, k: Metric["key"]) => (p ? p[k] : null);
@@ -1238,21 +1289,32 @@ function MonthlyAnalytics({
           <h2 className="font-semibold">Monthly Net Worth</h2>
         </button>
         {!collapsed && (
-          <button
-            type="button"
-            onClick={() => setShowChanges((v) => !v)}
-            className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
-          >
-            {showChanges ? "Hide changes" : "Show changes"}
-          </button>
+          <div className="flex items-center gap-2">
+            <YearPicker years={availableYears} year={year} onYearChange={setYear} />
+            <button
+              type="button"
+              onClick={() => setShowChanges((v) => !v)}
+              className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+            >
+              {showChanges ? "Hide changes" : "Show changes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadMonthlyNetWorthCsv(shown, currency)}
+              title="Download the visible rows as CSV"
+              className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+            >
+              Download CSV
+            </button>
+          </div>
         )}
       </div>
-      {!collapsed && <div className="border-t border-line overflow-x-auto">
+      {!collapsed && <div className="border-t border-line max-h-[520px] overflow-auto">
         <table className="w-full border-collapse whitespace-nowrap text-xs">
-          <thead>
+          <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
             {/* Grouped metric names, centered over their columns */}
             <tr className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-              <th className="sticky left-0 z-10 bg-surface px-3 pt-2 text-left" rowSpan={showChanges ? 2 : 1}>
+              <th className="sticky left-0 z-30 bg-surface px-3 pt-2 text-left" rowSpan={showChanges ? 2 : 1}>
                 Month
               </th>
               {METRICS.map((m) => (
@@ -1436,7 +1498,7 @@ function HistoricalEntry({ currency }: { currency: string }) {
 }
 
 function YearTable({ points, currency }: { points: MonthPoint[]; currency: string }) {
-  const [yearState, setYearState] = useSessionCollapse("networth-year-table", () => ({ v: false }));
+  const [yearState, setYearState] = useSessionCollapse("networth-year-table", () => ({ v: true }));
   const collapsed = !!yearState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setYearState((s) => ({ v: fn(!!s.v) }));
   // Last snapshot of each year = that year's closing position.

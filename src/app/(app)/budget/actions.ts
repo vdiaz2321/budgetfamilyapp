@@ -750,6 +750,42 @@ export async function deletePayee(id: string) {
   revalidatePath("/budget");
 }
 
+// Bulk-copy every planned amount from the previous month into the given month.
+// Overwrites existing plans for that month so a re-click stays idempotent
+// against last month's numbers.
+export async function copyPlansFromPreviousMonth(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const month = String(formData.get("month") ?? ""); // YYYY-MM-01 (destination month)
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+
+  const [y, m] = month.slice(0, 7).split("-").map(Number);
+  const prev = new Date(Date.UTC(y, m - 2, 1)); // JS month is 0-indexed; prev = m-2
+  const prevMonth = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}-01`;
+
+  const { data: prevPlans } = await supabase
+    .from("budget_plans")
+    .select("subcategory_id, planned_cents")
+    .eq("household_id", householdId)
+    .eq("month", prevMonth);
+
+  const rows = (prevPlans ?? [])
+    .filter((p) => (p.planned_cents ?? 0) > 0)
+    .map((p) => ({
+      household_id: householdId,
+      month,
+      subcategory_id: p.subcategory_id,
+      planned_cents: p.planned_cents,
+    }));
+
+  if (rows.length > 0) {
+    await supabase
+      .from("budget_plans")
+      .upsert(rows, { onConflict: "household_id,month,subcategory_id" });
+  }
+
+  revalidatePath("/budget");
+}
+
 export async function setRollover(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01 (source month)

@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { setRollover } from "./actions";
+import { copyPlansFromPreviousMonth, setRollover } from "./actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
@@ -105,13 +105,11 @@ export function BudgetBoard({
   // row's account without re-scanning accountOptions on every entry.
   const accountNameById = new Map(accountOptions.map((a) => [a.id, a.name]));
 
-  // Waterfall: assignments spend this month's own income first; any shortfall
-  // then draws down the rolled-in buffer, and only once that's exhausted does
-  // "left to budget" actually go negative. Keeps the two numbers split while
-  // making the rollover real spendable money.
+  // Planned to Budget = (income planned − outflow planned) + any rolled-in
+  // leftover. The rollover is real spendable money, so it always adds to the
+  // displayed number — not just when covering a deficit.
   const ownLeft = leftToBudget; // incomePlanned − outflowPlanned
-  const rolloverDrawn = Math.min(Math.max(0, -ownLeft), rollover.inCents);
-  const displayLeft = ownLeft + rolloverDrawn; // 0 while the buffer covers it
+  const displayLeft = ownLeft + rollover.inCents;
 
   // Actuals for the pill: what's actually been received vs actually spent so
   // far this month (income group's spent = money received).
@@ -204,6 +202,7 @@ export function BudgetBoard({
           billsExpenses={billsExpenses}
           savings={savings}
           debt={debt}
+          rolloverCents={rollover.inCents}
           currency={currency}
         />
 
@@ -413,6 +412,7 @@ function SummaryHeroCard({
   billsExpenses,
   savings,
   debt,
+  rolloverCents,
   currency,
 }: {
   actualLeft: number;
@@ -424,6 +424,7 @@ function SummaryHeroCard({
   billsExpenses: { planned: number; spent: number };
   savings: { planned: number; spent: number };
   debt: { planned: number; spent: number };
+  rolloverCents: number;
   currency: string;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
@@ -451,6 +452,13 @@ function SummaryHeroCard({
           <p className={`text-2xl font-medium tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
             {formatMoney(displayLeft, currency)}
           </p>
+          {rolloverCents > 0 && (
+            <p className="mt-0.5 text-xs text-muted">
+              incl.{" "}
+              <span className="font-medium text-brand">{formatMoney(rolloverCents, currency)}</span>{" "}
+              Rollover Income
+            </p>
+          )}
         </div>
       </div>
 
@@ -527,48 +535,67 @@ function RolloverBar({
   currency: string;
 }) {
   const [pending, start] = useTransition();
+  const [copyPending, startCopy] = useTransition();
   const { availableCents, enabled, prevMonthLabel } = rollover;
 
-  // Nothing left over from last month, and it isn't already on → no control.
-  if (availableCents <= 0 && !enabled) return null;
-
+  const hasRollover = availableCents > 0 || enabled;
   const amount = formatMoney(Math.max(0, availableCents), currency);
 
   return (
-    <form
-      action={(fd) => start(() => setRollover(fd))}
+    <div
       className={`flex items-center justify-between gap-3 rounded-2xl px-4 py-2.5 text-sm shadow-sm ring-1 ${
         enabled
           ? "bg-brand-soft/50 ring-brand/30"
           : "bg-surface ring-black/5 dark:ring-white/10"
       }`}
     >
-      <input type="hidden" name="month" value={monthFirstOfMonth} />
-      {/* Toggling: submit the opposite of the current state. */}
-      <input type="hidden" name="enable" value={enabled ? "" : "on"} />
       <span className={enabled ? "text-brand" : "text-muted"}>
-        {enabled ? (
-          <>
-            Including <span className="font-semibold tabular-nums">{amount}</span> rolled in from{" "}
-            {prevMonthLabel}
-          </>
+        {hasRollover ? (
+          enabled ? (
+            <>
+              Including <span className="font-semibold tabular-nums">{amount}</span> rolled in from{" "}
+              {prevMonthLabel}
+            </>
+          ) : (
+            <>
+              <span className="font-semibold tabular-nums">{amount}</span> left unspent in {prevMonthLabel}
+            </>
+          )
         ) : (
-          <>
-            <span className="font-semibold tabular-nums">{amount}</span> left unspent in {prevMonthLabel}
-          </>
+          <>Start this month from {prevMonthLabel}</>
         )}
       </span>
-      <button
-        type="submit"
-        disabled={pending}
-        className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-60 ${
-          enabled
-            ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-            : "bg-brand text-white hover:bg-brand-strong"
-        }`}
-      >
-        {pending ? "Saving…" : enabled ? "Undo" : "Roll in"}
-      </button>
-    </form>
+      <div className="flex shrink-0 items-center gap-2">
+        <form action={(fd) => startCopy(() => copyPlansFromPreviousMonth(fd))}>
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <button
+            type="submit"
+            disabled={copyPending}
+            title={`Copy every planned amount from ${prevMonthLabel} into this month`}
+            className="rounded-lg px-3 py-1.5 text-xs font-bold text-brand ring-1 ring-brand/30 transition hover:bg-brand-soft disabled:opacity-60"
+          >
+            {copyPending ? "Copying…" : `Roll in planned from ${prevMonthLabel}`}
+          </button>
+        </form>
+        {hasRollover ? (
+          <form action={(fd) => start(() => setRollover(fd))}>
+            <input type="hidden" name="month" value={monthFirstOfMonth} />
+            {/* Toggling: submit the opposite of the current state. */}
+            <input type="hidden" name="enable" value={enabled ? "" : "on"} />
+            <button
+              type="submit"
+              disabled={pending}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-60 ${
+                enabled
+                  ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
+                  : "bg-brand text-white hover:bg-brand-strong"
+              }`}
+            >
+              {pending ? "Saving…" : enabled ? "Undo" : "Roll in"}
+            </button>
+          </form>
+        ) : null}
+      </div>
+    </div>
   );
 }
