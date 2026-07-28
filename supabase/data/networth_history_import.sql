@@ -119,6 +119,7 @@ begin
     ('2025-12-01'::date, 16957900, 14650800, 799100)
   ) as v(month, bank, stocks, debt)
   on conflict (household_id, month) do update set
+    savings_cents = 0,
     bank_cents   = excluded.bank_cents,
     stocks_cents = excluded.stocks_cents,
     debt_cents   = excluded.debt_cents,

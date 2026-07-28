@@ -181,13 +181,11 @@ export default async function AnnualOverviewPage({
         : year === currentYear && idx === currentMonthIdx
           ? "current"
           : "future";
-    // Past & current months show what actually happened; future months show
-    // the plan (the "projected" part of the year picture).
-    const source = status === "future" ? planned[idx] : actual[idx];
+    // All months show actuals only — no planned/projected values.
+    const source = actual[idx];
     const net =
       source.income - OUTFLOW_KINDS.reduce((sum, k) => sum + source[k], 0);
-    const hasData =
-      COLUMNS.some(({ kind }) => planned[idx][kind] !== 0 || actual[idx][kind] !== 0);
+    const hasData = COLUMNS.some(({ kind }) => actual[idx][kind] !== 0);
     return { idx, name, values: source, net, status, hasData };
   });
 
@@ -280,7 +278,7 @@ export default async function AnnualOverviewPage({
         <div>
           <h1 className="text-xl font-bold">Annual Overview</h1>
           <p className="text-sm text-muted">
-            The whole year at a glance — actuals through this month, your plan beyond it.
+            The whole year at a glance — actual transactions only.
           </p>
         </div>
 

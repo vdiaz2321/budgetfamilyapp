@@ -130,12 +130,7 @@ function AccountGroup({ group, showDivider }: { group: SidebarGroup; showDivider
         <ul className="space-y-0.5">
           {group.items.map((a) => (
             <li key={a.id}>
-              <div className="group/tip relative flex cursor-default items-center gap-2 rounded-md py-[5px] pl-7 pr-2 transition hover:bg-white/[0.04]">
-                <span
-                  className="pointer-events-none absolute bottom-full left-7 z-50 mb-1 hidden whitespace-nowrap rounded bg-slate-900 px-2 py-1 text-[11px] text-white shadow-lg group-hover/tip:block"
-                >
-                  {a.name}
-                </span>
+              <div className="flex cursor-default items-center gap-2 rounded-md py-[5px] pl-7 pr-2 transition hover:bg-white/[0.04]">
                 <span
                   className="h-1.5 w-1.5 shrink-0 rounded-full"
                   style={{ backgroundColor: dotColorFor(a.name) }}

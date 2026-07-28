@@ -114,12 +114,6 @@ export function MonthsTable({ columns, rows, totals, totalNet, hasFuture, curren
               </div>
             </div>
           </div>
-          {hasFuture ? (
-            <p className="border-t border-line px-4 py-2 text-xs text-muted">
-              Grayed months haven&apos;t happened yet — their numbers are your plan (projected),
-              and they update automatically as you budget those months.
-            </p>
-          ) : null}
         </div>
       ) : null}
     </section>

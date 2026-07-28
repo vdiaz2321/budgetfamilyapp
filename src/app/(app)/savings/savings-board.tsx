@@ -52,19 +52,11 @@ export function SavingsBoard({ cards, currency }: Props) {
   return (
     <div className="mx-auto max-w-5xl space-y-6 px-4 py-6">
       {/* Header — hero total on the right */}
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Savings goals</h1>
-          <p className="mt-1 text-sm text-muted">
-            Track every goal toward its target. Set one in Budget.
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Total saved</p>
-          <p className="text-2xl font-semibold text-positive tabular-nums">
-            {formatMoney(totals.saved, currency)}
-          </p>
-        </div>
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight">Savings goals</h1>
+        <p className="mt-1 text-sm text-muted">
+          Track every goal toward its target. Set one in Budget.
+        </p>
       </header>
 
       {cards.length === 0 ? (
@@ -78,8 +70,9 @@ export function SavingsBoard({ cards, currency }: Props) {
         <>
           {/* Connected stats bar */}
           <div className="flex overflow-hidden rounded-2xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
-            <Stat label="Total goal" amount={formatMoney(totals.goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
             <Stat label="Planned this month" amount={formatMoney(totals.planned, currency)} sub="budgeted" />
+            <Stat label="Total goal" amount={formatMoney(totals.goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
+            <Stat label="Total saved" amount={formatMoney(totals.saved, currency)} amountTone="text-positive" sub="across all goals" />
             <Stat
               label="Left to save"
               amount={formatMoney(leftToSave, currency)}
@@ -89,10 +82,7 @@ export function SavingsBoard({ cards, currency }: Props) {
           </div>
 
           {/* Section header */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Active goals</h2>
-            <span className="text-xs text-muted">{cards.length} goal{cards.length === 1 ? "" : "s"}</span>
-          </div>
+          <h2 className="text-lg font-semibold">Active goals</h2>
 
           {/* Goal cards */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

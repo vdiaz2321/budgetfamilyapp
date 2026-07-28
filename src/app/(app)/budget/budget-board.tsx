@@ -100,6 +100,10 @@ export function BudgetBoard({
   // require switching to the Log tab first. `true` = new; a TxData = edit
   // (opened by clicking a row in the panel's "This month" list).
   const [quickAdd, setQuickAdd] = useState<boolean | TxData>(false);
+  // Fresh transaction modal opened from the top header's "+ Add Item"
+  // button — no preselected item/kind, renders as a centered overlay so it
+  // works with or without a selected budget row.
+  const [showAddModal, setShowAddModal] = useState(false);
 
   // Precompute account_id → name so the item panel's tx list can render each
   // row's account without re-scanning accountOptions on every entry.
@@ -189,7 +193,12 @@ export function BudgetBoard({
     <div className="mx-auto flex max-w-5xl justify-center gap-6">
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
-        <MonthPicker monthKey={month.key} />
+        <TopHeader
+          monthKey={month.key}
+          monthFirstOfMonth={month.firstOfMonth}
+          prevMonthLabel={rollover.prevMonthLabel}
+          onAddItem={() => setShowAddModal(true)}
+        />
 
         {/* Left-to-budget hero card */}
         <SummaryHeroCard
@@ -203,6 +212,8 @@ export function BudgetBoard({
           savings={savings}
           debt={debt}
           rolloverCents={rollover.inCents}
+          rollover={rollover}
+          monthFirstOfMonth={month.firstOfMonth}
           currency={currency}
         />
 
@@ -218,13 +229,6 @@ export function BudgetBoard({
             actualLeft={actualLeft}
             displayLeft={displayLeft}
             outflowPlanned={outflowPlanned}
-            currency={currency}
-          />
-
-          {/* Rollover: include last month's leftover cash in this month */}
-          <RolloverBar
-            monthFirstOfMonth={month.firstOfMonth}
-            rollover={rollover}
             currency={currency}
           />
 
@@ -338,6 +342,25 @@ export function BudgetBoard({
           </div>
         </div>
       ) : null}
+
+      {/* Header "+ Add Item" opens a centered fresh transaction modal. */}
+      {showAddModal ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10">
+          <div className="w-full max-w-[520px]">
+            <TransactionModal
+              editTx={null}
+              monthKey={month.key}
+              firstOfMonth={month.firstOfMonth}
+              subOptions={subOptions}
+              accountOptions={accountOptions}
+              bucketsByAccount={bucketsByAccount}
+              payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onClose={() => setShowAddModal(false)}
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -369,34 +392,88 @@ function getBudgetStatus(
   return { tone: "good", badgeText: "On track" };
 }
 
-function ProgressBar({
+function CategoryProgressCard({
   label,
   actual,
   planned,
-  fillClassName,
+  dotClass,
+  fillClass,
   currency,
 }: {
   label: string;
   actual: number;
   planned: number;
-  fillClassName: string;
+  dotClass: string;
+  fillClass: string;
   currency: string;
 }) {
   const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
   return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-sm">
-        <span className="text-muted">{label}</span>
-        <span className="tabular-nums">
-          <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
-          <span className="text-muted">/ {formatMoney(planned, currency)} planned</span>
-        </span>
+    <div className="rounded-xl bg-background/60 px-3 py-2.5 ring-1 ring-line">
+      <div className="flex items-center gap-2 text-sm text-muted">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
+        <span className="truncate">{label}</span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-line/60">
+      <div className="mb-1.5 mt-0.5 text-sm tabular-nums">
+        <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
+        <span className="text-muted">/ {formatMoney(planned, currency)}</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-line/60">
         <div
-          className={`h-full rounded-full transition-[width] duration-400 ease-out ${fillClassName}`}
+          className={`h-full rounded-full transition-[width] duration-400 ease-out ${fillClass}`}
           style={{ width: `${pct}%` }}
         />
+      </div>
+    </div>
+  );
+}
+
+// Top row above the hero: title + month picker on left, "+ Add Item" +
+// "Roll in {prev} planned" on the right. Splits the two rollover actions
+// into visually distinct buttons per Victor's ask.
+function TopHeader({
+  monthKey,
+  monthFirstOfMonth,
+  prevMonthLabel,
+  onAddItem,
+}: {
+  monthKey: string;
+  monthFirstOfMonth: string;
+  prevMonthLabel: string;
+  onAddItem: () => void;
+}) {
+  const [copyPending, startCopy] = useTransition();
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex shrink-0 items-center gap-3">
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Budget Overview</h1>
+        <MonthPicker monthKey={monthKey} />
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onAddItem}
+          className="flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add Item
+        </button>
+        <form action={(fd) => startCopy(() => copyPlansFromPreviousMonth(fd))}>
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <button
+            type="submit"
+            disabled={copyPending}
+            title={`Copy every planned amount from ${prevMonthLabel} into this month`}
+            className="flex items-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-sm font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
+            </svg>
+            {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
+          </button>
+        </form>
       </div>
     </div>
   );
@@ -413,6 +490,8 @@ function SummaryHeroCard({
   savings,
   debt,
   rolloverCents,
+  rollover,
+  monthFirstOfMonth,
   currency,
 }: {
   actualLeft: number;
@@ -425,49 +504,121 @@ function SummaryHeroCard({
   savings: { planned: number; spent: number };
   debt: { planned: number; spent: number };
   rolloverCents: number;
+  rollover: Props["rollover"];
+  monthFirstOfMonth: string;
   currency: string;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
   const toneClasses = TONE_CLASSES[tone];
 
   return (
-    <div className="rounded-2xl bg-surface px-6 py-6 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-medium text-muted">Actual Spent</p>
-          <p className={`text-4xl font-medium tabular-nums ${toneClasses.text}`}>
-            {formatMoney(actualLeft, currency)}
-          </p>
-          <span
-            className={`mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${toneClasses.badge}`}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d={toneClasses.icon} />
-            </svg>
-            {badgeText}
-          </span>
-        </div>
-        <div className="text-right">
-          <p className="text-xs font-medium text-muted">Planned to Budget</p>
-          <p className={`text-2xl font-medium tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
-            {formatMoney(displayLeft, currency)}
-          </p>
-          {rolloverCents > 0 && (
-            <p className="mt-0.5 text-xs text-muted">
-              incl.{" "}
-              <span className="font-medium text-brand">{formatMoney(rolloverCents, currency)}</span>{" "}
-              Rollover Income
+    <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="px-6 pb-5 pt-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
+            <p className={`mt-0.5 text-4xl font-bold tabular-nums ${toneClasses.text}`}>
+              {formatMoney(actualSpent, currency)}
             </p>
-          )}
+            <span
+              className={`mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${toneClasses.badge}`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d={toneClasses.icon} />
+              </svg>
+              {badgeText}
+            </span>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
+            <p className={`mt-0.5 text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+              {formatMoney(outflowPlanned, currency)}
+            </p>
+            {rolloverCents > 0 && (
+              <p className="mt-0.5 text-xs text-muted">
+                incl.{" "}
+                <span className="font-medium text-brand">{formatMoney(rolloverCents, currency)}</span>{" "}
+                rolled income
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+          <CategoryProgressCard label="Income" actual={actualIncome} planned={incomePlanned} dotClass="bg-positive" fillClass="bg-positive" currency={currency} />
+          <CategoryProgressCard label="Bills & Expenses" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[#f59e0b]" fillClass="bg-[#f59e0b]" currency={currency} />
+          <CategoryProgressCard label="Savings" actual={savings.spent} planned={savings.planned} dotClass="bg-[#6366f1]" fillClass="bg-[#6366f1]" currency={currency} />
+          <CategoryProgressCard label="Debt Repayment" actual={debt.spent} planned={debt.planned} dotClass="bg-[#ef4444]" fillClass="bg-[#ef4444]" currency={currency} />
         </div>
       </div>
 
-      <div className="mt-5 flex flex-col gap-3">
-        <ProgressBar label="Income" actual={actualIncome} planned={incomePlanned} fillClassName="bg-positive" currency={currency} />
-        <ProgressBar label="Bills & Expenses" actual={billsExpenses.spent} planned={billsExpenses.planned} fillClassName="bg-negative" currency={currency} />
-        <ProgressBar label="Savings" actual={savings.spent} planned={savings.planned} fillClassName="bg-[#6366f1]" currency={currency} />
-        <ProgressBar label="Debt" actual={debt.spent} planned={debt.planned} fillClassName="bg-[#f59e0b]" currency={currency} />
-      </div>
+      <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+    </div>
+  );
+}
+
+// Slim footer inside the hero card. Shows one clear button:
+// "Roll in {prev} unspent income" (or Undo). The other action —
+// copying planned amounts — lives in the top header, so users don't
+// have to guess which does what.
+function RolloverFooter({
+  rollover,
+  monthFirstOfMonth,
+  currency,
+}: {
+  rollover: Props["rollover"];
+  monthFirstOfMonth: string;
+  currency: string;
+}) {
+  const [pending, start] = useTransition();
+  const { availableCents, enabled, prevMonthLabel } = rollover;
+  const hasRollover = availableCents > 0 || enabled;
+  const amount = formatMoney(Math.max(0, availableCents), currency);
+
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 border-t px-6 py-3 text-sm ${
+        enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"
+      }`}
+    >
+      <span className={enabled ? "text-brand" : "text-muted"}>
+        {hasRollover ? (
+          enabled ? (
+            <>
+              Including <span className="font-semibold tabular-nums">{amount}</span> unspent income
+              from {prevMonthLabel}.
+            </>
+          ) : (
+            <>
+              Start this month clean, or roll over{" "}
+              <span className="font-semibold tabular-nums">{amount}</span> unspent income from{" "}
+              {prevMonthLabel}.
+            </>
+          )
+        ) : (
+          <>Start this month clean — nothing unspent to roll from {prevMonthLabel}.</>
+        )}
+      </span>
+      {hasRollover ? (
+        <form action={(fd) => start(() => setRollover(fd))}>
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <input type="hidden" name="enable" value={enabled ? "" : "on"} />
+          <button
+            type="submit"
+            disabled={pending}
+            title={enabled
+              ? `Stop including ${prevMonthLabel}'s unspent income`
+              : `Add ${prevMonthLabel}'s ${amount} unspent income to this month`}
+            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-60 ${
+              enabled
+                ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
+                : "bg-brand text-white hover:bg-brand-strong"
+            }`}
+          >
+            {pending ? "Saving…" : enabled ? "Undo" : `Roll in ${prevMonthLabel} unspent`}
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -525,77 +676,3 @@ function StickyFooterBar({
   );
 }
 
-function RolloverBar({
-  monthFirstOfMonth,
-  rollover,
-  currency,
-}: {
-  monthFirstOfMonth: string;
-  rollover: Props["rollover"];
-  currency: string;
-}) {
-  const [pending, start] = useTransition();
-  const [copyPending, startCopy] = useTransition();
-  const { availableCents, enabled, prevMonthLabel } = rollover;
-
-  const hasRollover = availableCents > 0 || enabled;
-  const amount = formatMoney(Math.max(0, availableCents), currency);
-
-  return (
-    <div
-      className={`flex items-center justify-between gap-3 rounded-2xl px-4 py-2.5 text-sm shadow-sm ring-1 ${
-        enabled
-          ? "bg-brand-soft/50 ring-brand/30"
-          : "bg-surface ring-black/5 dark:ring-white/10"
-      }`}
-    >
-      <span className={enabled ? "text-brand" : "text-muted"}>
-        {hasRollover ? (
-          enabled ? (
-            <>
-              Including <span className="font-semibold tabular-nums">{amount}</span> rolled in from{" "}
-              {prevMonthLabel}
-            </>
-          ) : (
-            <>
-              <span className="font-semibold tabular-nums">{amount}</span> left unspent in {prevMonthLabel}
-            </>
-          )
-        ) : (
-          <>Start this month from {prevMonthLabel}</>
-        )}
-      </span>
-      <div className="flex shrink-0 items-center gap-2">
-        <form action={(fd) => startCopy(() => copyPlansFromPreviousMonth(fd))}>
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <button
-            type="submit"
-            disabled={copyPending}
-            title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-            className="rounded-lg px-3 py-1.5 text-xs font-bold text-brand ring-1 ring-brand/30 transition hover:bg-brand-soft disabled:opacity-60"
-          >
-            {copyPending ? "Copying…" : `Roll in planned from ${prevMonthLabel}`}
-          </button>
-        </form>
-        {hasRollover ? (
-          <form action={(fd) => start(() => setRollover(fd))}>
-            <input type="hidden" name="month" value={monthFirstOfMonth} />
-            {/* Toggling: submit the opposite of the current state. */}
-            <input type="hidden" name="enable" value={enabled ? "" : "on"} />
-            <button
-              type="submit"
-              disabled={pending}
-              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-60 ${
-                enabled
-                  ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-                  : "bg-brand text-white hover:bg-brand-strong"
-              }`}
-            >
-              {pending ? "Saving…" : enabled ? "Undo" : "Roll in"}
-            </button>
-          </form>
-        ) : null}
-      </div>
-    </div>
-  );
-}

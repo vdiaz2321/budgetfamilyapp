@@ -185,7 +185,7 @@ export function TransactionModal({
 
             {/* Row 1: Amount | Payee | Date */}
             <div className="flex items-center gap-2">
-              <div className="relative w-28 shrink-0">
+              <div className="relative w-42 shrink-0">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
                 <input
                   ref={amountRef}
@@ -214,7 +214,7 @@ export function TransactionModal({
                 type="date"
                 required
                 defaultValue={defaultDate}
-                className="w-36 shrink-0 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-42 shrink-0 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
 

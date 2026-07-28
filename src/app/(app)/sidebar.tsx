@@ -56,12 +56,12 @@ export function Sidebar({ groups, userEmail, badges }: Props) {
         </svg>
       </button>
 
-      <div className={`mb-5 flex items-center gap-2 ${collapsed ? "justify-center" : "px-4"}`}>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-white/15 text-base font-bold text-white">
+      <div className={`mb-5 flex items-center gap-3 ${collapsed ? "justify-center" : "px-5"}`}>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-lg font-extrabold text-white shadow-[0_0_20px_rgba(139,92,246,0.45)]">
           C
         </span>
         {collapsed ? null : (
-          <span className="text-lg font-semibold tracking-tight text-white">Capitall</span>
+          <span className="text-xl font-bold tracking-tight text-white">Capitall</span>
         )}
       </div>
 

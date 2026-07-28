@@ -22,9 +22,8 @@
   --chart-1: #2563eb; /* blue-600 — Savings accent */
   --chart-5: #0891b2; /* cyan-600 — Unrealized gains (teal, not green) */
 
-  /* YNAB-style sidebar: deep indigo-navy in light mode. White text lives
-     on it in both themes. */
-  --sidebar: #303c6b;
+  /* Near-black navy sidebar; white text lives on it in both themes. */
+  --sidebar: #0B0E1B;
 }
 
 :root[data-theme="dark"] {
@@ -44,7 +43,7 @@
   --chart-1: #60a5fa; /* blue-400 — lifts on dark */
   --chart-5: #22d3ee; /* cyan-400 — lifts on dark */
 
-  --sidebar: #1a1a1a;
+  --sidebar: #0B0E1B;
 }
 
 @theme inline {

@@ -94,20 +94,17 @@ export default function SidebarNav({
             key={n.href}
             href={n.href}
             aria-current={active ? "page" : undefined}
-            className={`group relative flex items-center gap-3 rounded-lg py-[9px] text-sm font-medium transition ${
-              collapsed ? "justify-center px-0" : "mx-3 px-3"
+            className={`group relative flex items-center gap-3.5 rounded-2xl py-3 text-sm font-medium transition ${
+              collapsed ? "justify-center px-0" : "mx-3 px-4"
             } ${
               active
-                ? "bg-white/[0.08] text-white"
-                : "text-slate-400 hover:bg-white/[0.05] hover:text-white"
+                ? "bg-[#1E1F42] text-[#8B80F9] font-semibold border border-[#2F3061]/50 shadow-sm"
+                : "text-slate-400 hover:bg-[#141A2E] hover:text-slate-100"
             }`}
           >
-            {active && !collapsed ? (
-              <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-sm bg-blue-500" aria-hidden />
-            ) : null}
             <svg
-              width="18"
-              height="18"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -122,8 +119,12 @@ export default function SidebarNav({
             {collapsed ? null : (
               <span className="min-w-0 flex-1 truncate">{n.label}</span>
             )}
-            {collapsed || !badge ? null : (
-              <span className="ml-auto shrink-0 rounded-[4px] bg-red-400/15 px-1.5 py-0.5 text-[11px] font-medium text-red-400">
+            {collapsed || !badge ? null : n.href === "/snowball" ? (
+              <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#3F1922] text-[11px] font-bold text-rose-400">
+                {badge}
+              </span>
+            ) : (
+              <span className="ml-auto shrink-0 rounded-full bg-[#1A2238] px-2.5 py-1 text-[11px] font-semibold text-slate-300">
                 {badge}
               </span>
             )}

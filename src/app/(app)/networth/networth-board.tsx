@@ -213,7 +213,7 @@ function ChartSection({ points, currency }: { points: MonthPoint[]; currency: st
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
         className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
       >
@@ -716,23 +716,34 @@ function BalanceGrid({
   const acctPct = wideLayout ? Math.max(35, 70 - months.length * 8) : null;
   const monthPct = wideLayout && acctPct != null ? (100 - acctPct) / months.length : null;
 
+  const [gridOpenState, setGridOpenState] = useSessionCollapse("networth-monthly-balances-open", () => ({ open: false }));
+  const gridOpen = gridOpenState.open;
+  const toggleGrid = () => setGridOpenState((s) => ({ ...s, open: !s.open }));
+
   return (
     <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-2.5">
+      <button
+        type="button"
+        onClick={toggleGrid}
+        aria-expanded={gridOpen}
+        className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+      >
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-muted transition-transform ${gridOpen ? "" : "-rotate-90"}`}
+          aria-hidden
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
         <div>
           <h2 className="font-semibold">Monthly balances</h2>
           <p className="text-xs text-muted">
             Current month and last five months. Edit balances on the Accounts page.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={toggleAll}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
-        >
-          {allOpen ? "Collapse all" : "Expand all"}
-        </button>
-      </div>
+      </button>
+      {gridOpen ? <>
       {reorderError ? (
         <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
@@ -953,6 +964,7 @@ function BalanceGrid({
           ) : null}
         </div>
       ) : null}
+      </> : null}
     </section>
   );
 }
@@ -982,19 +994,20 @@ function YearPicker({
   year: string;
   onYearChange: (y: string) => void;
 }) {
-  // years is sorted newest-first; "all" sits at the end.
-  // Left (‹) = older = higher index; Right (›) = newer = lower index.
-  const allOptions = [...years, "all"];
+  // "all" sits first; years follow newest-first (2026, 2025, …).
+  // Left (‹) = move up the list = back to All or a newer year.
+  // Right (›) = move down the list = descend from All → 2026 → 2025 …
+  const allOptions = ["all", ...years];
   const idx = allOptions.indexOf(year);
-  const canOlder = idx < allOptions.length - 1;
-  const canNewer = idx > 0;
+  const canUp = idx > 0;
+  const canDown = idx < allOptions.length - 1;
   return (
     <div className="flex items-center gap-1">
       <button
         type="button"
-        aria-label="Older year"
-        disabled={!canOlder}
-        onClick={() => canOlder && onYearChange(allOptions[idx + 1])}
+        aria-label="Newer / All"
+        disabled={!canUp}
+        onClick={() => canUp && onYearChange(allOptions[idx - 1])}
         className="rounded-md p-1 text-muted transition hover:bg-fill disabled:opacity-30"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1007,16 +1020,16 @@ function YearPicker({
         onChange={(e) => onYearChange(e.target.value)}
         className="cursor-pointer rounded-lg bg-background px-2 py-1 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       >
+        <option value="all">All</option>
         {years.map((y) => (
           <option key={y} value={y}>{y}</option>
         ))}
-        <option value="all">All</option>
       </select>
       <button
         type="button"
-        aria-label="Newer year"
-        disabled={!canNewer}
-        onClick={() => canNewer && onYearChange(allOptions[idx - 1])}
+        aria-label="Older year"
+        disabled={!canDown}
+        onClick={() => canDown && onYearChange(allOptions[idx + 1])}
         className="rounded-md p-1 text-muted transition hover:bg-fill disabled:opacity-30"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1048,6 +1061,7 @@ function SummaryBlock({
   const setCollapsed = (fn: (v: boolean) => boolean) => setSummaryState((s) => ({ v: fn(!!s.v) }));
   const idxByMonth = new Map(points.map((p, i) => [p.month, i]));
   const cols = points.filter((p) => year === "all" || p.month.slice(0, 4) === year);
+  const displayCols = [...cols].reverse();
   const prevNet = (m: string) => {
     const i = idxByMonth.get(m);
     return i != null && i > 0 ? points[i - 1].net : null;
@@ -1117,7 +1131,7 @@ function SummaryBlock({
           <thead>
             <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
               <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-left" />
-              {cols.map((p) => (
+              {displayCols.map((p) => (
                 <th key={p.month} className="px-3 py-2 text-center">
                   {monthLabel(p.month)}
                 </th>
@@ -1137,7 +1151,7 @@ function SummaryBlock({
                   >
                     {r.label}
                   </td>
-                  {cols.map((p) => {
+                  {displayCols.map((p) => {
                     const v = r.cell(p);
                     return (
                       <td
@@ -1235,7 +1249,7 @@ function MonthlyAnalytics({
   const availableYears = [...new Set(points.map((p) => p.month.slice(0, 4)))].sort((a, b) =>
     b.localeCompare(a),
   );
-  const [year, setYear] = useState<string>("all");
+  const [year, setYear] = useState<string>(availableYears[0] ?? "all");
   void sharedYear;
 
   const byMonth = new Map(points.map((p) => [p.month, p]));

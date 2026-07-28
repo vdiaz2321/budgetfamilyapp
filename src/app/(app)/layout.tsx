@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./sign-out-button";
 import SidebarNav from "./sidebar-nav";
 import { Sidebar } from "./sidebar";
+import { SessionInit } from "./session-init";
 import type { SidebarGroup } from "./sidebar-accounts";
 
 export default async function AppLayout({
@@ -29,7 +30,12 @@ export default async function AppLayout({
   // Sidebar account list (YNAB-style): cash + investment accounts from
   // Accounts, debts from Budget (single source of truth), split like YNAB's
   // "Credit Card / Loans" sections.
-  const [{ data: accounts }, { data: buckets }, { data: debts }, { data: subs }] =
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
+
+  const [{ data: accounts }, { data: buckets }, { data: debts }, { data: subs }, { count: txCount }] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -45,6 +51,12 @@ export default async function AppLayout({
         .select("subcategory_id, current_balance_cents, debt_kind")
         .eq("household_id", profile.household_id),
       supabase.from("subcategories").select("id, name").eq("household_id", profile.household_id),
+      supabase
+        .from("transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("household_id", profile.household_id)
+        .gte("occurred_on", monthStart)
+        .lt("occurred_on", monthEnd),
     ]);
 
   const subName = new Map((subs ?? []).map((s) => [s.id, s.name]));
@@ -158,7 +170,10 @@ export default async function AppLayout({
       <Sidebar
         groups={groups}
         userEmail={user.email ?? ""}
-        badges={debtItems.length > 0 ? { "/snowball": debtItems.length } : undefined}
+        badges={{
+          ...(debtItems.length > 0 ? { "/snowball": debtItems.length } : {}),
+          ...(txCount ? { "/transactions": txCount } : {}),
+        }}
       />
 
       {/* Mobile top bar */}
@@ -179,6 +194,7 @@ export default async function AppLayout({
         </div>
 
         <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
+          <SessionInit userId={user.id} />
           {children}
         </main>
       </div>
