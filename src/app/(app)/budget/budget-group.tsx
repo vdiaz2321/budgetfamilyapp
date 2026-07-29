@@ -98,7 +98,7 @@ export function BudgetGroup({
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header row */}
-      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+      <div className="flex items-center gap-2 px-4 py-2.5">
         <button
           type="button"
           onClick={onToggle}
@@ -118,21 +118,26 @@ export function BudgetGroup({
         </button>
 
         {!open ? (
-          <div className="flex items-start gap-4 text-xs tabular-nums">
-            <span className="flex flex-col items-end">
-              <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
-              <span className="text-muted">planned</span>
+          <div className="flex flex-1 items-center gap-3">
+            <span className="rounded-md bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand">
+              {visibleRows.length} {visibleRows.length === 1 ? "source" : "sources"}
             </span>
-            <span className="flex flex-col items-end">
-              <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
-              <span className="text-muted">{actualLabel.toLowerCase()}</span>
-            </span>
-            <span className="flex flex-col items-end">
-              <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
-                {formatMoney(remainingTotal, currency)}
+            <div className="ml-auto flex items-center gap-3 text-xs tabular-nums">
+              <span className="text-muted">
+                Planned:{" "}
+                <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
               </span>
-              <span className="text-muted">remaining</span>
-            </span>
+              <span className="text-muted">
+                {actualLabel}:{" "}
+                <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
+              </span>
+              <span className="text-muted">
+                Remaining:{" "}
+                <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                  {formatMoney(remainingTotal, currency)}
+                </span>
+              </span>
+            </div>
           </div>
         ) : null}
       </div>

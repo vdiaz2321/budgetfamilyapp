@@ -45,9 +45,10 @@ export function SummaryPanel({ groups, currency }: Props) {
   // top). Each segment's size uses the current shared mode value.
   const outflow = groups.filter((g) => g.kind !== "income");
 
-  // Donut geometry.
+  // Donut geometry — matches the reference design: thin ring with rounded
+  // caps and small gaps between segments.
   const R = 60; // radius of the inner circle (center of stroke)
-  const STROKE = 18; // stroke width of the ring
+  const STROKE = 10; // stroke width of the ring (thinner = more elegant)
   const C = 2 * Math.PI * R;
 
   const base = outflow.map((g, i) => {
@@ -72,7 +73,7 @@ export function SummaryPanel({ groups, currency }: Props) {
   // Breathing room between segments (YNAB-style): shave a small gap off the
   // end of each visible arc — only when there's more than one to separate.
   const visibleCount = lens.filter((l) => l > 0).length;
-  const GAP = visibleCount > 1 ? 3 : 0;
+  const GAP = visibleCount > 1 ? 6 : 0;
   const segments = base.map((s, i) => ({
     ...s,
     len: Math.max(0.1, lens[i] - GAP),
@@ -150,7 +151,8 @@ export function SummaryPanel({ groups, currency }: Props) {
                       r={R}
                       fill="none"
                       stroke={s.color}
-                      strokeWidth={active === s.categoryId ? STROKE + 4 : STROKE}
+                      strokeWidth={active === s.categoryId ? STROKE + 3 : STROKE}
+                      strokeLinecap="round"
                       strokeDasharray={`${s.len} ${C - s.len}`}
                       strokeDashoffset={s.arcOffset}
                       className="cursor-pointer transition-[stroke-width,opacity]"
@@ -163,10 +165,10 @@ export function SummaryPanel({ groups, currency }: Props) {
               </svg>
               {/* Center label */}
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="max-w-[90px] truncate text-[10px] font-semibold uppercase tracking-wide text-muted">
-                  {activeSeg ? activeSeg.name : "Total"}
+                <span className="max-w-[100px] truncate text-[10px] font-bold uppercase tracking-widest text-muted">
+                  {activeSeg ? activeSeg.name : `Total ${modeLabel}`}
                 </span>
-                <span className="text-base font-bold tabular-nums">
+                <span className="mt-0.5 text-lg font-extrabold tabular-nums text-foreground">
                   {formatMoney(activeSeg ? activeSeg.value : total, currency)}
                 </span>
               </div>

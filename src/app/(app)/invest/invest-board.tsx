@@ -366,7 +366,7 @@ function PerformanceChart({
       <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
         <button
           type="button"
-          onClick={() => setChartOpen((v) => !v)}
+          onClick={() => setChartOpen(!chartOpen)}
           aria-expanded={chartOpen}
           className="flex items-center gap-2 text-left"
         >

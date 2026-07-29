@@ -190,16 +190,16 @@ export function BudgetBoard({
     // (stretch) cross-axis sizing makes the aside match the row height so
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
-    <div className="mx-auto flex max-w-5xl justify-center gap-6">
+    <div className="mx-auto max-w-5xl space-y-4">
+      <TopHeader
+        monthKey={month.key}
+        monthFirstOfMonth={month.firstOfMonth}
+        prevMonthLabel={rollover.prevMonthLabel}
+        onAddItem={() => setShowAddModal(true)}
+      />
+      <div className="flex justify-center gap-6">
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
-        <TopHeader
-          monthKey={month.key}
-          monthFirstOfMonth={month.firstOfMonth}
-          prevMonthLabel={rollover.prevMonthLabel}
-          onAddItem={() => setShowAddModal(true)}
-        />
-
         {/* Left-to-budget hero card */}
         <SummaryHeroCard
           actualLeft={actualLeft}
@@ -361,6 +361,7 @@ export function BudgetBoard({
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }
@@ -409,16 +410,16 @@ function CategoryProgressCard({
 }) {
   const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
   return (
-    <div className="rounded-xl bg-background/60 px-3 py-2.5 ring-1 ring-line">
-      <div className="flex items-center gap-2 text-sm text-muted">
+    <div className="rounded-xl bg-background/60 px-3 py-2 ring-1 ring-line">
+      <div className="flex items-center gap-2">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-        <span className="truncate">{label}</span>
+        <span className="truncate text-xs text-muted">{label}</span>
+        <span className="ml-auto whitespace-nowrap text-xs tabular-nums">
+          <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
+          <span className="text-muted">/ {formatMoney(planned, currency)}</span>
+        </span>
       </div>
-      <div className="mb-1.5 mt-0.5 text-sm tabular-nums">
-        <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
-        <span className="text-muted">/ {formatMoney(planned, currency)}</span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
         <div
           className={`h-full rounded-full transition-[width] duration-400 ease-out ${fillClass}`}
           style={{ width: `${pct}%` }}
@@ -516,22 +517,8 @@ function SummaryHeroCard({
       <div className="px-6 pb-5 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
-            <p className={`mt-0.5 text-4xl font-bold tabular-nums ${toneClasses.text}`}>
-              {formatMoney(actualSpent, currency)}
-            </p>
-            <span
-              className={`mt-2 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${toneClasses.badge}`}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d={toneClasses.icon} />
-              </svg>
-              {badgeText}
-            </span>
-          </div>
-          <div className="text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
-            <p className={`mt-0.5 text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+            <p className="mt-0.5 text-2xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
             {rolloverCents > 0 && (
@@ -541,6 +528,28 @@ function SummaryHeroCard({
                 rolled income
               </p>
             )}
+          </div>
+          <div className="text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
+            <p className={`mt-0.5 text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+              {formatMoney(displayLeft, currency)}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
+            <div className="mt-0.5 flex items-center justify-end gap-2">
+              <p className={`text-2xl font-bold tabular-nums ${toneClasses.text}`}>
+                {formatMoney(actualSpent, currency)}
+              </p>
+              <span
+                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d={toneClasses.icon} />
+                </svg>
+                {badgeText}
+              </span>
+            </div>
           </div>
         </div>
 

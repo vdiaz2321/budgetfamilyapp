@@ -250,6 +250,7 @@ export default async function SnowballPage() {
         currency={currency}
         settings={
           <SnowballSettings
+            key="snowball-settings"
             currency={currency}
             snowballStartDate={household.snowball_start_date}
             snowballMonthlyExtraCents={manualExtraCents}
