@@ -599,13 +599,13 @@ function RolloverFooter({
             </>
           ) : (
             <>
-              Start this month clean, or roll over{" "}
+              Roll over{" "}
               <span className="font-semibold tabular-nums">{amount}</span> unspent income from{" "}
-              {prevMonthLabel}.
+              {prevMonthLabel}?
             </>
           )
         ) : (
-          <>Start this month clean — nothing unspent to roll from {prevMonthLabel}.</>
+          <>Nothing unspent to roll from {prevMonthLabel}.</>
         )}
       </span>
       {hasRollover ? (

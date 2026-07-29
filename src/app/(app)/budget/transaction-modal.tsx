@@ -19,7 +19,7 @@ const KIND_SHORT: Record<CategoryKind, string> = {
   savings: "Savings",
   bills: "Bill",
   expenses: "Expense",
-  debt: "Debt",
+  debt: "Payment",
 };
 const KIND_TAB: Record<CategoryKind, string> = {
   income: "Income",

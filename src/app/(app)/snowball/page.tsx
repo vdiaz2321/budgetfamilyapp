@@ -105,13 +105,20 @@ export default async function SnowballPage() {
       supabase.from("payees").select("id, name").eq("household_id", household.id),
       supabase
         .from("accounts")
-        .select("id, name")
+        .select("id, name, kind, is_kids_account")
         .eq("household_id", household.id)
         .eq("active", true)
         .order("name"),
     ]);
     const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
-    accountOptions = (accounts ?? []).map((a) => ({ id: a.id, name: a.name }));
+    const bankingKinds = new Set(["checking", "savings", "cash", "savings_bucket"]);
+    accountOptions = (accounts ?? [])
+      .filter((a) => !a.is_kids_account && (bankingKinds.has(a.kind) || a.kind === "credit_card"))
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        group: a.kind === "credit_card" ? "Credit Cards" : "Banking",
+      }));
     debtTxData = (txRows ?? []).map((t) => ({
       id: t.id,
       date: t.occurred_on,

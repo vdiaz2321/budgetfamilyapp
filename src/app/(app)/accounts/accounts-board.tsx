@@ -391,6 +391,7 @@ function CreditCardSection({
   onToggle: () => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
   const isArchived = section.key === "credit_archived";
   const isMain = section.key === "credit";
 
@@ -475,30 +476,18 @@ function CreditCardSection({
             <p className="px-4 py-2.5 text-sm text-muted">
               {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
             </p>
-          ) : holderGroups.length > 1 ? (
-            <ul className="divide-y divide-line">
-              {holderGroups.map((g) => (
-                <HolderGroup
-                  key={g.holder}
-                  holder={g.holder}
-                  cards={g.cards}
-                  currency={currency}
-                  nonCardAccounts={nonCardAccounts}
-                  allBuckets={allBuckets}
-                  isArchived={isArchived}
-                />
-              ))}
-            </ul>
           ) : (
             <ul className="divide-y divide-line">
               {accounts.map((a) => (
-              <CreditCardPanel
+                <CreditCardPanel
                   key={a.id}
                   card={a}
                   currency={currency}
                   nonCardAccounts={nonCardAccounts}
                   allBuckets={allBuckets}
                   isArchived={isArchived}
+                  defaultEditing={a.id === justAddedId}
+                  onEditingOpened={() => setJustAddedId(null)}
                 />
               ))}
             </ul>
@@ -506,7 +495,13 @@ function CreditCardSection({
 
           {!isArchived && (
             adding ? (
-              <AddAccountForm section={section} onDone={() => setAdding(false)} />
+              <AddAccountForm
+                section={section}
+                onDone={(newId) => {
+                  setAdding(false);
+                  if (newId) setJustAddedId(newId);
+                }}
+              />
             ) : (
               <div className="border-t border-line px-4 py-2">
                 <button
@@ -543,6 +538,8 @@ function HolderGroup({
   nonCardAccounts,
   allBuckets,
   isArchived,
+  justAddedId,
+  onJustAddedConsumed,
 }: {
   holder: string;
   cards: AccountData[];
@@ -550,6 +547,8 @@ function HolderGroup({
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
   isArchived: boolean;
+  justAddedId?: string | null;
+  onJustAddedConsumed?: () => void;
 }) {
   const [open, setOpen] = useSessionCollapse(`accounts-cc-holder-${holder}`, () => ({ [holder]: true }));
   const isOpen = open[holder] ?? true;
@@ -592,6 +591,8 @@ function HolderGroup({
               nonCardAccounts={nonCardAccounts}
               allBuckets={allBuckets}
               isArchived={isArchived}
+              defaultEditing={c.id === justAddedId}
+              onEditingOpened={onJustAddedConsumed}
             />
           ))}
         </ul>
@@ -608,15 +609,30 @@ function CreditCardPanel({
   nonCardAccounts,
   allBuckets,
   isArchived,
+  defaultEditing = false,
+  onEditingOpened,
 }: {
   card: AccountData;
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
   isArchived: boolean;
+  defaultEditing?: boolean;
+  onEditingOpened?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(defaultEditing);
+  const [editing, setEditing] = useState(defaultEditing);
+  useEffect(() => {
+    if (defaultEditing) {
+      setExpanded(true);
+      setEditing(true);
+      onEditingOpened?.();
+    }
+    // Fires only when a new card was just added and this panel is its
+    // freshly-mounted target — parent immediately clears the marker so this
+    // won't re-trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultEditing]);
   const [paying, setPaying] = useState(false);
   const [closePending, startClose] = useTransition();
   const [reopenPending, startReopen] = useTransition();
@@ -651,18 +667,33 @@ function CreditCardPanel({
                 {bank}
               </span>
             ) : null}
+            {d?.authUser ? (
+              <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                {d.authUser}
+              </span>
+            ) : null}
             {card.dateClosed ? (
               <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
                 Closed {card.dateClosed}
               </span>
             ) : null}
+            {d && d.currentPoints > 0 ? (
+              <span className="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                {d.currentPoints.toLocaleString()} pts
+              </span>
+            ) : null}
           </span>
+          {(card.dateOpened || (card.annualFeeCents && !card.feeWaived) || (d && (d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightExpiresOn || d.benefitUsedOn))) ? (
+            <p className="mt-0.5 truncate text-[11px] text-muted">
+              {card.dateOpened ? <>Opened {card.dateOpened}</> : null}
+              {card.annualFeeCents && !card.feeWaived ? <> · <span className="font-medium text-amber-600 dark:text-amber-400">{formatMoney(card.annualFeeCents, currency)}/yr fee</span></> : null}
+              {d?.freeNightCreditCents ? <> · Free-Night Credit: {formatMoney(d.freeNightCreditCents, currency)}</> : null}
+              {d?.freeNightPointsLimit ? <> · Free Night: {d.freeNightPointsLimit.toLocaleString()} pts</> : null}
+              {d?.freeNightExpiresOn ? <> · Free-Night Expires: {d.freeNightExpiresOn}</> : null}
+              {d?.benefitUsedOn ? <> · Used/Scheduled: {d.benefitUsedOn}</> : null}
+            </p>
+          ) : null}
         </span>
-        {d && d.currentPoints > 0 ? (
-          <span className="hidden text-xs tabular-nums text-muted sm:inline">
-            {d.currentPoints.toLocaleString()} pts
-          </span>
-        ) : null}
         <span className={`w-24 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
           {owed !== 0 ? formatMoney(owed, currency) : "—"}
         </span>
@@ -824,118 +855,92 @@ function EditCreditCardForm({
   card: AccountData;
   onDone: () => void;
 }) {
-  const [saveAcctPending, startSaveAcct] = useTransition();
-  const [saveDetailsPending, startSaveDetails] = useTransition();
+  const [savePending, startSave] = useTransition();
   const [delPending, startDel] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [migrationWarning, setMigrationWarning] = useState(false);
   const d = card.cardDetails;
 
   return (
     <div className="space-y-4 rounded-md border border-line bg-surface p-3">
-      {/* Account-level fields (name, holder, annual fee, dates, active) */}
+      {/* One form: saves both account-level basics AND rewards details together */}
       <form
         action={(fd) =>
-          startSaveAcct(async () => {
-            await updateAccount(fd);
-          })
-        }
-        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
-      >
-        <input type="hidden" name="id" value={card.id} />
-        <input type="hidden" name="isCreditCard" value="on" />
-        <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
-        <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
-        <LabeledInput
-          label="Annual fee"
-          name="annualFee"
-          type="number"
-          step="0.01"
-          defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""}
-        />
-        <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-          <input
-            type="checkbox"
-            name="feeWaived"
-            defaultChecked={card.feeWaived}
-            className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
-          />
-          Fee waived (e.g. military benefit)
-        </label>
-        <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
-        <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
-        {/* keep subtype for legacy back-compat, hidden — bank is edited in the details form */}
-        <input type="hidden" name="subtype" value={card.subtype ?? ""} />
-        <input type="hidden" name="active" value={card.active ? "on" : ""} />
-        <div className="flex items-center gap-2 sm:col-span-2">
-          <button
-            type="submit"
-            disabled={saveAcctPending}
-            className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70 disabled:opacity-60"
-          >
-            {saveAcctPending ? "Saving…" : "Save card basics"}
-          </button>
-          <button
-            type="button"
-            onClick={onDone}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
-
-      {/* Rewards details */}
-      <form
-        action={(fd) =>
-          startSaveDetails(async () => {
-            await upsertCardDetails(fd);
+          startSave(async () => {
+            setDetailsError(null);
+            setMigrationWarning(false);
+            const [, detailsResult] = await Promise.all([
+              updateAccount(fd),
+              upsertCardDetails(fd),
+            ]);
+            if (detailsResult?.error) { setDetailsError(detailsResult.error); return; }
+            if (detailsResult?.missingMigration) { setMigrationWarning(true); }
             onDone();
           })
         }
-        className="grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2"
+        className="space-y-3"
       >
+        <input type="hidden" name="id" value={card.id} />
         <input type="hidden" name="accountId" value={card.id} />
-        <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
-        <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
-        <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
-        <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
-        <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
-        <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
-        <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-        <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-          <input
-            type="checkbox"
-            name="bonusEarned"
-            defaultChecked={d?.bonusEarned ?? false}
-            className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
-          />
-          Bonus earned
-        </label>
-        <LabeledInput label="Free-night credit ($)" name="freeNightCredit" type="number" step="0.01" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-        <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-        <LabeledInput label="Free night (pts limit)" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
-        <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
-        <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
-        <LabeledInput label="Fees paid this year" name="feesPaid" type="number" step="0.01" defaultValue={d?.feesPaidCents ? centsToDisplay(d.feesPaidCents) : ""} />
-        <div className="sm:col-span-2">
-          <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-            Remarks
+        <input type="hidden" name="isCreditCard" value="on" />
+        <input type="hidden" name="subtype" value={card.subtype ?? ""} />
+        <input type="hidden" name="active" value={card.active ? "on" : ""} />
+
+        {/* Card basics */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
+          <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
+          <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
+          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+            <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
+            Fee waived (e.g. military benefit)
           </label>
-          <input
-            name="remarks"
-            defaultValue={d?.remarks ?? ""}
-            placeholder=""
-            className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
+          <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
+          <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
         </div>
-        <div className="sm:col-span-2 flex items-center justify-between gap-2 pt-1">
+
+        {/* Rewards details */}
+        <div className="grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2">
+          <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
+          <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
+          <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
+          <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
+          <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
+          <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
+          <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
+          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+            <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
+            Bonus earned
+          </label>
+          <LabeledInput label="Free-night credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
+          <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+          <LabeledInput label="Free night (pts limit)" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
+          <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
+          <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
+          <LabeledInput label="Fees paid this year" name="feesPaid" type="number" step="0.01" prefix="$" defaultValue={d?.feesPaidCents ? centsToDisplay(d.feesPaidCents) : ""} />
+          <div className="sm:col-span-2">
+            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
+            <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
+          </div>
+          {detailsError ? (
+            <p className="sm:col-span-2 text-sm font-medium text-negative">{detailsError}</p>
+          ) : null}
+          {migrationWarning ? (
+            <p className="sm:col-span-2 text-xs text-amber-600 dark:text-amber-400">
+              Saved (most fields). To also save Used/Scheduled and Free Night pts limit, run migration 0026 in Supabase SQL Editor.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 pt-1">
           <div className="flex items-center gap-2">
             <button
               type="submit"
-              disabled={saveDetailsPending}
+              disabled={savePending}
               className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
             >
-              {saveDetailsPending ? "Saving…" : "Save rewards details"}
+              {savePending ? "Saving…" : "Save all changes"}
             </button>
             <button
               type="button"
@@ -983,17 +988,28 @@ function EditCreditCardForm({
 
 function LabeledInput({
   label,
+  prefix,
   ...inputProps
-}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; prefix?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
         {label}
       </span>
-      <input
-        {...inputProps}
-        className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-      />
+      {prefix ? (
+        <div className="flex items-center rounded-md ring-1 ring-line focus-within:ring-2 focus-within:ring-brand bg-background">
+          <span className="pl-2 text-sm text-muted select-none">{prefix}</span>
+          <input
+            {...inputProps}
+            className="min-w-0 flex-1 rounded-md bg-background px-1.5 py-1.5 text-sm focus:outline-none"
+          />
+        </div>
+      ) : (
+        <input
+          {...inputProps}
+          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+      )}
     </label>
   );
 }
@@ -1909,11 +1925,75 @@ function BalanceInput({
   );
 }
 
-function AddAccountForm({ section, onDone }: { section: Section; onDone: () => void }) {
+function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?: string | null) => void }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
+  const openEditRef = useRef(false);
+
+  // Credit cards get a proper labeled "card basics" form (Card name, Holder,
+  // Annual fee + waived, Date opened, Date closed) matching Edit details, so
+  // fields are clear up front. Rewards details (bank, points, bonus, etc.)
+  // are still filled in via Edit details after the card is created.
+  if (section.creditCard) {
+    return (
+      <div className="border-t border-line px-4 py-3">
+        <form
+          action={(fd) =>
+            start(async () => {
+              const result = await addAccount(fd);
+              if (result?.error) setError(result.error);
+              else onDone(openEditRef.current ? (result?.id ?? null) : null);
+            })
+          }
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+        >
+          <input type="hidden" name="kind" value={section.fixedKind ?? kindKeys[0]} />
+          <LabeledInput label="Card name" name="name" placeholder="e.g. 1175 Sapphire V" required autoFocus onChange={() => setError(null)} />
+          <LabeledInput label="Holder" name="holder" />
+          <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" />
+          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+            <input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
+            Fee waived (e.g. military benefit)
+          </label>
+          <LabeledInput label="Date opened" name="dateOpened" type="date" />
+          <LabeledInput label="Date closed" name="dateClosed" type="date" />
+          <div className="flex items-center gap-2 sm:col-span-2">
+            <button
+              type="submit"
+              disabled={pending}
+              onClick={() => { openEditRef.current = false; }}
+              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
+            >
+              {pending ? "Adding…" : "Add card"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDone()}
+              className="rounded-md px-2 py-1.5 text-sm text-muted hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <span className="ml-auto text-[11px] text-muted">
+              Rewards, points, bonus, etc. →{" "}
+              <button
+                type="submit"
+                disabled={pending}
+                onClick={() => { openEditRef.current = true; }}
+                className="font-semibold text-brand underline-offset-2 hover:underline disabled:opacity-60"
+              >
+                Add &amp; open Edit details
+              </button>
+            </span>
+          </div>
+          {error ? (
+            <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p>
+          ) : null}
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="border-t border-line">
@@ -1922,7 +2002,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
           start(async () => {
             const result = await addAccount(fd);
             if (result?.error) setError(result.error);
-            else onDone();
+            else onDone(result?.id ?? null);
           })
         }
         className="flex flex-wrap items-center gap-2 px-4 py-2"
@@ -1974,12 +2054,14 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
               <input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
               Waived
             </label>
-            <input
-              name="dateOpened"
-              type="date"
-              title="Date opened"
-              className="rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              Opened
+              <input
+                name="dateOpened"
+                type="date"
+                className="rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            </label>
           </>
         ) : (
           <input
@@ -2000,7 +2082,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: () => v
         </button>
         <button
           type="button"
-          onClick={onDone}
+          onClick={() => onDone()}
           className="rounded-md px-2 py-1.5 text-sm text-muted hover:text-foreground"
         >
           Cancel

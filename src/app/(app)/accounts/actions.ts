@@ -94,19 +94,24 @@ export async function addAccount(formData: FormData) {
     if (dateClosed) row.date_closed = dateClosed;
   }
 
-  const { error } = await supabase.from("accounts").insert(row);
+  const { data: inserted, error } = await supabase
+    .from("accounts")
+    .insert(row)
+    .select("id")
+    .single();
 
   if (error) {
     return {
       error: error.code === "23505"
         ? `You already have an account named "${name}". Pick a different name.`
         : "Couldn't save that account — please try again.",
+      id: null,
     };
   }
 
   await captureSnapshots(supabase, householdId);
   revalidate();
-  return { error: null };
+  return { error: null, id: inserted?.id ?? null };
 }
 
 export async function updateAccount(formData: FormData) {
@@ -333,7 +338,7 @@ export async function reopenCard(formData: FormData) {
 export async function upsertCardDetails(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const accountId = String(formData.get("accountId") ?? "");
-  if (!accountId) return;
+  if (!accountId) return { error: "Missing account." };
 
   const optText = (k: string) => {
     const v = String(formData.get(k) ?? "").trim();
@@ -375,8 +380,27 @@ export async function upsertCardDetails(formData: FormData) {
     updated_at: new Date().toISOString(),
   };
 
-  await supabase.from("credit_card_details").upsert(row, { onConflict: "account_id" });
+  const { error } = await supabase.from("credit_card_details").upsert(row, { onConflict: "account_id" });
+  if (error) {
+    console.error("[upsertCardDetails]", error);
+    // Migration 0026 adds benefit_used_on + free_night_points_limit — if those
+    // columns aren't in the schema yet, retry without them so other fields save.
+    if (error.code === "PGRST204") {
+      const { benefit_used_on, free_night_points_limit, ...rowWithout } = row;
+      const { error: e2 } = await supabase
+        .from("credit_card_details")
+        .upsert(rowWithout, { onConflict: "account_id" });
+      if (e2) {
+        console.error("[upsertCardDetails] retry failed", e2);
+        return { error: "Couldn't save — " + e2.message };
+      }
+      revalidate();
+      return { error: null, missingMigration: true };
+    }
+    return { error: "Couldn't save — " + error.message };
+  }
   revalidate();
+  return { error: null };
 }
 
 // Pay a credit card: one transaction row that debits the source bank AND
