@@ -41,7 +41,7 @@ export default async function SavingsPage() {
 
   const { data: subs } = await supabase
     .from("subcategories")
-    .select("id, category_id, name, sort_order, linked_bucket_id")
+    .select("id, category_id, name, sort_order, linked_bucket_id, linked_account_id")
     .eq("household_id", household.id)
     .order("sort_order");
 
@@ -51,7 +51,7 @@ export default async function SavingsPage() {
   const now = new Date();
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [{ data: savingsGoals }, { data: savingsTx }, { data: plans }] = await Promise.all([
+  const [{ data: savingsGoals }, { data: savingsTx }, { data: plans }, { data: buckets }, { data: accounts }] = await Promise.all([
     savingsSubIds.length
       ? supabase
           .from("savings_goals")
@@ -73,7 +73,12 @@ export default async function SavingsPage() {
           .eq("month", monthKey)
           .in("subcategory_id", savingsSubIds)
       : Promise.resolve({ data: [] }),
+    supabase.from("buckets").select("id, account_id").eq("household_id", household.id),
+    supabase.from("accounts").select("id, is_kids_account").eq("household_id", household.id),
   ]);
+
+  const isKidsAccountById = new Map((accounts ?? []).map((a) => [a.id, a.is_kids_account ?? false]));
+  const accountIdByBucket = new Map((buckets ?? []).map((b) => [b.id, b.account_id]));
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents as number]));
@@ -101,6 +106,11 @@ export default async function SavingsPage() {
   }
 
   const cards: SavingsCardData[] = savingsSubs.map((s) => {
+    const linkedAccountId = (s as { linked_account_id?: string | null }).linked_account_id ?? null;
+    const bucketAccountId = s.linked_bucket_id ? accountIdByBucket.get(s.linked_bucket_id) : null;
+    const resolvedAccountId = bucketAccountId ?? linkedAccountId ?? null;
+    const isKids = resolvedAccountId ? (isKidsAccountById.get(resolvedAccountId) ?? false) : false;
+
     const g = goalBySub.get(s.id);
     const goalCents = g?.goal_cents ?? 0;
     const startCents = g?.start_cents ?? 0;
@@ -143,6 +153,7 @@ export default async function SavingsPage() {
       pace,
       requiredMonthlyCents,
       transactions: txsBySub.get(s.id) ?? [],
+      isKids,
     };
   });
 

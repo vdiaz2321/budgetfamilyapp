@@ -181,3 +181,49 @@ export async function deleteIrregularBill(formData: FormData) {
   await supabase.from("irregular_bills").delete().eq("id", id).eq("household_id", householdId);
   revalidate();
 }
+
+export async function reorderSubscription(id: string, direction: "up" | "down") {
+  const { supabase, householdId } = await requireHousehold();
+  const { data: rows } = await supabase
+    .from("subscriptions")
+    .select("id, sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order")
+    .order("name");
+  if (!rows) return;
+
+  const idx = rows.findIndex((r) => r.id === id);
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (idx === -1 || swapIdx < 0 || swapIdx >= rows.length) return;
+
+  const a = rows[idx];
+  const b = rows[swapIdx];
+  await Promise.all([
+    supabase.from("subscriptions").update({ sort_order: b.sort_order }).eq("id", a.id),
+    supabase.from("subscriptions").update({ sort_order: a.sort_order }).eq("id", b.id),
+  ]);
+  revalidate();
+}
+
+export async function reorderIrregularBill(id: string, direction: "up" | "down") {
+  const { supabase, householdId } = await requireHousehold();
+  const { data: rows } = await supabase
+    .from("irregular_bills")
+    .select("id, sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order")
+    .order("name");
+  if (!rows) return;
+
+  const idx = rows.findIndex((r) => r.id === id);
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (idx === -1 || swapIdx < 0 || swapIdx >= rows.length) return;
+
+  const a = rows[idx];
+  const b = rows[swapIdx];
+  await Promise.all([
+    supabase.from("irregular_bills").update({ sort_order: b.sort_order }).eq("id", a.id),
+    supabase.from("irregular_bills").update({ sort_order: a.sort_order }).eq("id", b.id),
+  ]);
+  revalidate();
+}

@@ -25,6 +25,58 @@ async function getLinkedBucketId(
   return data?.linked_bucket_id ?? null;
 }
 
+// Same, but for the direct-account link used by Savings items pointing at a
+// bare investment account (TSP, M1, Charles Schwab, …) with no buckets.
+async function getLinkedAccountId(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  subcategoryId: string,
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("subcategories")
+    .select("linked_account_id")
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  return (data as { linked_account_id?: string | null } | null)?.linked_account_id ?? null;
+}
+
+// Move an investment account's balance directly (contributions/withdrawals
+// from a linked savings sub). Bypasses the usual "investment accounts are
+// hand-reconciled" guard in adjustAccountLedger because the user opted in by
+// linking. Still refuses if the account has buckets — those are the source
+// of truth for their parent.
+async function adjustLinkedAccountBalance(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  accountId: string,
+  deltaCents: number,
+): Promise<boolean> {
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("id, current_balance_cents")
+    .eq("id", accountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!account) return false;
+
+  const { count } = await supabase
+    .from("buckets")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId);
+  if (count) return false;
+
+  await supabase
+    .from("accounts")
+    .update({
+      current_balance_cents: (account.current_balance_cents ?? 0) + deltaCents,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", accountId)
+    .eq("household_id", householdId);
+  return true;
+}
+
 async function requireHousehold() {
   const supabase = await createClient();
   const {
@@ -228,13 +280,30 @@ export async function updateSavingsLink(formData: FormData) {
   const subcategoryId = String(formData.get("subcategoryId") ?? "");
   if (!subcategoryId) return;
 
-  const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
+  // The form sends `linkTarget` — a plain UUID for a bucket, or
+  // `account:<uuid>` for a bare investment account. Legacy callers may still
+  // send `bucketId`; treat it as a bucket UUID.
+  const raw = String(
+    formData.get("linkTarget") ?? formData.get("bucketId") ?? "",
+  ).trim();
+
   let bucketId: string | null = null;
-  if (bucketIdRaw) {
+  let accountId: string | null = null;
+
+  if (raw.startsWith("account:")) {
+    const candidate = raw.slice("account:".length);
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("id", candidate)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    accountId = account?.id ?? null;
+  } else if (raw) {
     const { data: bucket } = await supabase
       .from("buckets")
       .select("id")
-      .eq("id", bucketIdRaw)
+      .eq("id", raw)
       .eq("household_id", householdId)
       .maybeSingle();
     bucketId = bucket?.id ?? null;
@@ -242,7 +311,7 @@ export async function updateSavingsLink(formData: FormData) {
 
   await supabase
     .from("subcategories")
-    .update({ linked_bucket_id: bucketId })
+    .update({ linked_bucket_id: bucketId, linked_account_id: accountId })
     .eq("id", subcategoryId)
     .eq("household_id", householdId);
 
@@ -435,6 +504,16 @@ export async function addTransaction(formData: FormData) {
     await captureSnapshots(supabase, householdId);
   }
 
+  // Bare investment account link (TSP, M1, …) — contribution posts straight
+  // to the account balance. Only fires when there's no linked bucket.
+  if (!bucketId) {
+    const linkedAccountId = await getLinkedAccountId(supabase, householdId, subcategoryId);
+    if (linkedAccountId) {
+      await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, isWithdrawal ? -amountCents : amountCents);
+      await captureSnapshots(supabase, householdId);
+    }
+  }
+
   // A payment logged against a debt lowers its outstanding balance.
   const touchedDebt = await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents);
   if (touchedDebt) {
@@ -566,6 +645,27 @@ export async function updateTransaction(formData: FormData) {
     await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
     touchedBucket = true;
   }
+
+  // Bare-account link (TSP/M1/…) — same undo-then-reapply pattern. Only
+  // fires on the leg where there's no linked bucket for that sub.
+  if (prevTx) {
+    const prevBucketId = await getLinkedBucketId(supabase, householdId, prevTx.subcategory_id);
+    if (!prevBucketId) {
+      const prevAccountLink = await getLinkedAccountId(supabase, householdId, prevTx.subcategory_id);
+      if (prevAccountLink) {
+        const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
+        await adjustLinkedAccountBalance(supabase, householdId, prevAccountLink, undoDelta);
+        touchedBucket = true;
+      }
+    }
+  }
+  if (!bucketId) {
+    const linkedAccountId = await getLinkedAccountId(supabase, householdId, subcategoryId);
+    if (linkedAccountId) {
+      await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, isWithdrawal ? -amountCents : amountCents);
+      touchedBucket = true;
+    }
+  }
   if (touchedBucket) await captureSnapshots(supabase, householdId);
 
   // Undo the old payment's effect on its debt balance, then apply the new one's
@@ -627,6 +727,14 @@ export async function deleteTransaction(formData: FormData) {
       const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
       await adjustBucketBalance(supabase, householdId, linkedBucketId, undoDelta);
       await captureSnapshots(supabase, householdId);
+    } else {
+      // No bucket, but maybe a bare-account link — undo that too.
+      const linkedAccountId = await getLinkedAccountId(supabase, householdId, tx.subcategory_id);
+      if (linkedAccountId) {
+        const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
+        await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, undoDelta);
+        await captureSnapshots(supabase, householdId);
+      }
     }
 
     // Deleting a debt payment adds its amount back to the outstanding balance.

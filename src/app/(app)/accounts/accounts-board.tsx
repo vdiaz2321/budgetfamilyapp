@@ -1521,14 +1521,6 @@ function AccountRow({
               {account.subtype}
             </span>
           ) : null}
-          {account.isKidsAccount ? (
-            <span
-              title="Tracked here, but not counted in Assets or Net Worth"
-              className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted dark:bg-white/10"
-            >
-              not in net worth
-            </span>
-          ) : null}
           {showKind ? <span className="shrink-0 text-[11px] text-muted">{kindLabel}</span> : null}
           {bucketCount > 0 ? (
             <span className="shrink-0 text-[11px] text-muted">

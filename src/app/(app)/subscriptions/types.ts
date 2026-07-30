@@ -8,6 +8,7 @@ export type SubscriptionRow = {
   subcategoryId: string | null;
   accountId: string | null;
   notes: string | null;
+  sortOrder: number;
 };
 
 export type IrregularBillRow = {
@@ -17,4 +18,5 @@ export type IrregularBillRow = {
   subcategoryId: string | null;
   accountId: string | null;
   notes: string | null;
+  sortOrder: number;
 };

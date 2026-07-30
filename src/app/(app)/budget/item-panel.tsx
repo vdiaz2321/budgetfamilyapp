@@ -373,7 +373,6 @@ function PlannedForm({
               defaultValue={dueDay ?? ""}
               className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
-            <SaveBtn pending={duePending} />
           </form>
         </Section>
       ) : null}
@@ -615,68 +614,70 @@ function SavingsForm({ row, bucketOptions, monthKey, onAddTransaction }: { row: 
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <Grid>
-          <Labeled label="Planned" name="planned" type="number" step="0.01" defaultValue={centsToDisplay(row.plannedCents)} />
+          <Labeled label="Planned monthly" name="planned" type="number" step="0.01" defaultValue={centsToDisplay(row.plannedCents)} />
           <Labeled label="Goal" name="goal" type="number" step="0.01" value={goal}
             onChange={(e) => { setGoal(e.target.value); recompute(e.target.value, savingsStart, targetDate); }} />
+          <Labeled
+            label="Target date"
+            name="targetDate"
+            type="date"
+            value={targetDate}
+            onChange={(e) => { setTargetDate(e.target.value); recompute(goal, savingsStart, e.target.value); }}
+            title="Set this to see whether your Monthly amount is on pace to hit the Goal by then."
+          />
           <Labeled label="Start" name="start" type="number" step="0.01" value={savingsStart}
             onChange={(e) => { setSavingsStart(e.target.value); recompute(goal, e.target.value, targetDate); }} />
-          <Labeled label="Monthly" hint="(auto from goal)" name="monthly" type="number" step="0.01" value={monthly}
-            onChange={(e) => setMonthly(e.target.value)} />
         </Grid>
-        <Labeled
-          label="Target date (optional)"
-          name="targetDate"
-          type="date"
-          value={targetDate}
-          onChange={(e) => { setTargetDate(e.target.value); recompute(goal, savingsStart, e.target.value); }}
-          title="Set this to see whether your Monthly amount is on pace to hit the Goal by then."
-        />
-        {bucketOptions.length > 0 ? (
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-              Linked bucket
-            </span>
-            <select
-              key={s.linkedBucketId ?? "none"}
-              name="bucketId"
-              defaultValue={s.linkedBucketId ?? ""}
-              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Not linked</option>
-              {(() => {
-                const family = bucketOptions.filter((b) => !b.isKids);
-                const kids = bucketOptions.filter((b) => b.isKids);
-                const groups: { label: string; items: typeof bucketOptions; disabled?: boolean }[] = [];
-                const addSection = (items: typeof bucketOptions, suffix: string) => {
-                  const seen: string[] = [];
-                  const byAcct = new Map<string, typeof bucketOptions>();
-                  for (const b of items) {
-                    if (!byAcct.has(b.accountName)) { seen.push(b.accountName); byAcct.set(b.accountName, []); }
-                    byAcct.get(b.accountName)!.push(b);
-                  }
-                  for (const acct of seen) groups.push({ label: acct + suffix, items: byAcct.get(acct)! });
-                };
-                addSection(family, "");
-                if (kids.length > 0) {
-                  groups.push({ label: "── Kids Funding ──", items: [], disabled: true });
-                  addSection(kids, " (Kids)");
+        <div className="grid grid-cols-2 gap-2">
+          <Labeled label="Monthly to reach goal" labelClassName="text-[8.5px]" name="monthly" type="number" step="0.01" value={monthly}
+            onChange={(e) => setMonthly(e.target.value)} />
+          {bucketOptions.length > 0 ? (
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
+                Linked bucket
+              </span>
+              <select
+                key={s.linkedBucketId ?? s.linkedAccountId ?? "none"}
+                name="linkTarget"
+                defaultValue={
+                  s.linkedAccountId
+                    ? `account:${s.linkedAccountId}`
+                    : s.linkedBucketId ?? ""
                 }
-                return groups.map((g) =>
-                  g.disabled
-                    ? <optgroup key={g.label} label={g.label} disabled />
-                    : <optgroup key={g.label} label={g.label}>
-                        {g.items.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </optgroup>
-                );
-              })()}
-            </select>
-            <span className="mt-0.5 block text-[10px] text-muted">
-              Once linked, transactions logged under this item add to (or, marked as a
-              withdrawal, subtract from) this bucket&apos;s balance in Accounts automatically.
-            </span>
-          </label>
-        ) : null}
-        <div className="flex items-center gap-2">
+                className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Not linked</option>
+                {(() => {
+                  const family = bucketOptions.filter((b) => !b.isKids);
+                  const kids = bucketOptions.filter((b) => b.isKids);
+                  const groups: { label: string; items: typeof bucketOptions; disabled?: boolean }[] = [];
+                  const addSection = (items: typeof bucketOptions, suffix: string) => {
+                    const seen: string[] = [];
+                    const byAcct = new Map<string, typeof bucketOptions>();
+                    for (const b of items) {
+                      if (!byAcct.has(b.accountName)) { seen.push(b.accountName); byAcct.set(b.accountName, []); }
+                      byAcct.get(b.accountName)!.push(b);
+                    }
+                    for (const acct of seen) groups.push({ label: acct + suffix, items: byAcct.get(acct)! });
+                  };
+                  addSection(family, "");
+                  if (kids.length > 0) {
+                    groups.push({ label: "── Kids Funding ──", items: [], disabled: true });
+                    addSection(kids, " (Kids)");
+                  }
+                  return groups.map((g) =>
+                    g.disabled
+                      ? <optgroup key={g.label} label={g.label} disabled />
+                      : <optgroup key={g.label} label={g.label}>
+                          {g.items.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </optgroup>
+                  );
+                })()}
+              </select>
+            </label>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
           <SaveBtn pending={pending} full />
           <AddTxBtn onClick={onAddTransaction} />
         </div>
@@ -692,12 +693,13 @@ function Grid({ children }: { children: React.ReactNode }) {
 function Labeled({
   label,
   hint,
+  labelClassName,
   onFocus,
   ...inputProps
-}: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; hint?: string; labelClassName?: string } & Omit<React.InputHTMLAttributes<HTMLInputElement>, "labelClassName">) {
   return (
     <label className="block">
-      <span className="mb-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted">
+      <span className={`mb-0.5 flex items-center gap-1 font-medium uppercase tracking-wide text-muted ${labelClassName ?? "text-[10px]"}`}>
         {label}
         {hint && <span className="font-normal normal-case tracking-normal text-muted/60">{hint}</span>}
       </span>
@@ -719,7 +721,7 @@ function AddTxBtn({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       className="shrink-0 rounded-lg bg-brand-soft px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-soft/70"
     >
-      +Add
+      +Transaction
     </button>
   );
 }

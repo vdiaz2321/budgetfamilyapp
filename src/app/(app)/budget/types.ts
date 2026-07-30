@@ -10,14 +10,22 @@ export type SavingsDetail = {
   // The bucket (over on Accounts) this savings item contributes to — once
   // linked, logged transactions add/subtract from its balance automatically.
   linkedBucketId: string | null;
+  // Same idea, but for a bare investment account (TSP, M1, etc.) that has no
+  // buckets. Only one of linkedBucketId/linkedAccountId can be set.
+  linkedAccountId: string | null;
 };
 
-// A bucket a Savings item can link to, labeled with its parent account.
+// A target a Savings item can link to. Usually a bucket (with parent account
+// label), but bare investment accounts (no buckets) also appear here with
+// isBareAccount=true and accountId set — the form encodes their value as
+// `account:<uuid>` so the action knows which column to write.
 export type BucketOption = {
   id: string;
   name: string;
   accountName: string;
   isKids?: boolean;
+  isBareAccount?: boolean;
+  accountId?: string;
 };
 
 export const DEBT_KINDS = [

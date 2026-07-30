@@ -65,7 +65,7 @@ export default async function BudgetPage({
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, due_day, sort_order, linked_bucket_id")
+      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -104,7 +104,7 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("accounts")
-      .select("id, name, kind, holder, is_kids_account, sort_order")
+      .select("id, name, kind, holder, is_kids_account, sort_order, active")
       .eq("household_id", household.id)
       .eq("active", true)
       .order("sort_order")
@@ -150,6 +150,9 @@ export default async function BudgetPage({
   const linkedBucketBySub = new Map(
     (subs ?? []).map((s) => [s.id, (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null]),
   );
+  const linkedAccountBySub = new Map(
+    (subs ?? []).map((s) => [s.id, (s as { linked_account_id?: string | null }).linked_account_id ?? null]),
+  );
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
   const sparklineBySub = new Map<string, number[]>();
   for (const s of sparkRows ?? []) {
@@ -183,6 +186,7 @@ export default async function BudgetPage({
                   monthlyCents: g?.monthly_contribution_cents ?? 0,
                   targetDate: g?.target_date ?? null,
                   linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
+                  linkedAccountId: linkedAccountBySub.get(s.id) ?? null,
                 }
               : null,
           debt:
@@ -318,6 +322,23 @@ export default async function BudgetPage({
       isKids: isKidsAccountById.get(b.account_id) ?? false,
     }));
 
+  // Investment accounts with NO buckets (TSP, M1, Charles Schwab, …) can also
+  // be a savings link target — contributions post straight to the account
+  // balance. Grouped under "Investments" in the dropdown.
+  const bucketedAccountIds = new Set((buckets ?? []).map((b) => b.account_id));
+  const bareInvestmentOptions: BucketOption[] = (accounts ?? [])
+    .filter((a) => a.kind === "investment" && !bucketedAccountIds.has(a.id) && a.active)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((a) => ({
+      id: `account:${a.id}`,
+      name: a.name,
+      accountName: "Investments",
+      isKids: a.is_kids_account ?? false,
+      isBareAccount: true,
+      accountId: a.id,
+    }));
+  bucketOptions.push(...bareInvestmentOptions);
+
   const transactions: TxData[] = (txRows ?? []).map((t) => ({
     id: t.id,
     date: t.occurred_on,
@@ -366,6 +387,7 @@ export default async function BudgetPage({
     subcategoryId: s.subcategory_id,
     accountId: s.account_id ?? null,
     notes: s.notes,
+    sortOrder: (s as { sort_order?: number }).sort_order ?? 0,
   }));
 
   const irregularBillRows: IrregularBillRow[] = (irregularBills ?? []).map((b) => ({
@@ -375,6 +397,7 @@ export default async function BudgetPage({
     subcategoryId: b.subcategory_id,
     accountId: b.account_id ?? null,
     notes: b.notes,
+    sortOrder: (b as { sort_order?: number }).sort_order ?? 0,
   }));
 
   const creditCards = (accounts ?? [])

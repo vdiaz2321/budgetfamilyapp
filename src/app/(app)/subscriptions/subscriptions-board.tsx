@@ -5,6 +5,8 @@ import { centsToDisplay, formatMoney } from "@/lib/money";
 import {
   deleteIrregularBill,
   deleteSubscription,
+  reorderIrregularBill,
+  reorderSubscription,
   upsertIrregularBill,
   upsertSubscription,
 } from "./actions";
@@ -80,7 +82,7 @@ export function SubscriptionsBoard({
 }
 
 function SubscriptionsSection({
-  subscriptions,
+  subscriptions: initialSubscriptions,
   currency,
   monthlyTotal,
   creditCards = [],
@@ -92,6 +94,20 @@ function SubscriptionsSection({
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [rows, setRows] = useState(initialSubscriptions);
+  const [, startReorder] = useTransition();
+
+  function move(id: string, direction: "up" | "down") {
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.id === id);
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (idx === -1 || swapIdx < 0 || swapIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+      return next;
+    });
+    startReorder(() => reorderSubscription(id, direction));
+  }
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -123,7 +139,7 @@ function SubscriptionsSection({
               </tr>
             </thead>
             <tbody>
-              {subscriptions.map((s) =>
+              {rows.map((s, i) =>
                 editing === s.id ? (
                   <SubscriptionFormRow
                     key={s.id}
@@ -158,14 +174,20 @@ function SubscriptionsSection({
                       {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <RowActions
-                        onEdit={() => setEditing(s.id)}
-                        onDelete={async () => {
-                          const fd = new FormData();
-                          fd.set("id", s.id);
-                          await deleteSubscription(fd);
-                        }}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <ReorderButtons
+                          onUp={i > 0 ? () => move(s.id, "up") : undefined}
+                          onDown={i < rows.length - 1 ? () => move(s.id, "down") : undefined}
+                        />
+                        <RowActions
+                          onEdit={() => setEditing(s.id)}
+                          onDelete={async () => {
+                            const fd = new FormData();
+                            fd.set("id", s.id);
+                            await deleteSubscription(fd);
+                          }}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ),
@@ -317,7 +339,7 @@ function SubscriptionFormRow({
 }
 
 function IrregularBillsSection({
-  irregularBills,
+  irregularBills: initialBills,
   currency,
   creditCards = [],
 }: {
@@ -327,6 +349,20 @@ function IrregularBillsSection({
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [rows, setRows] = useState(initialBills);
+  const [, startReorder] = useTransition();
+
+  function move(id: string, direction: "up" | "down") {
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.id === id);
+      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+      if (idx === -1 || swapIdx < 0 || swapIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
+      return next;
+    });
+    startReorder(() => reorderIrregularBill(id, direction));
+  }
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -354,7 +390,7 @@ function IrregularBillsSection({
               </tr>
             </thead>
             <tbody>
-              {irregularBills.map((b) =>
+              {rows.map((b, i) =>
                 editing === b.id ? (
                   <IrregularBillFormRow
                     key={b.id}
@@ -373,14 +409,20 @@ function IrregularBillsSection({
                       {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <RowActions
-                        onEdit={() => setEditing(b.id)}
-                        onDelete={async () => {
-                          const fd = new FormData();
-                          fd.set("id", b.id);
-                          await deleteIrregularBill(fd);
-                        }}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <ReorderButtons
+                          onUp={i > 0 ? () => move(b.id, "up") : undefined}
+                          onDown={i < rows.length - 1 ? () => move(b.id, "down") : undefined}
+                        />
+                        <RowActions
+                          onEdit={() => setEditing(b.id)}
+                          onDelete={async () => {
+                            const fd = new FormData();
+                            fd.set("id", b.id);
+                            await deleteIrregularBill(fd);
+                          }}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ),
@@ -514,6 +556,41 @@ function RenewalBadge({ date }: { date: string }) {
     >
       {new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}
     </span>
+  );
+}
+
+function ReorderButtons({
+  onUp,
+  onDown,
+}: {
+  onUp?: () => void;
+  onDown?: () => void;
+}) {
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        onClick={onUp}
+        disabled={!onUp}
+        className="rounded px-1 py-0.5 text-muted transition hover:bg-black/5 disabled:opacity-20 dark:hover:bg-white/5"
+        aria-label="Move up"
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 15l-6-6-6 6" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={onDown}
+        disabled={!onDown}
+        className="rounded px-1 py-0.5 text-muted transition hover:bg-black/5 disabled:opacity-20 dark:hover:bg-white/5"
+        aria-label="Move down"
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+    </div>
   );
 }
 

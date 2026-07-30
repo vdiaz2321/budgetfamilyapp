@@ -44,6 +44,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
   const remaining = row.plannedCents - row.spentCents;
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
+  const plannedInputRef = useRef<HTMLInputElement>(null);
 
   const pct =
     row.plannedCents > 0
@@ -104,9 +105,11 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
 
             <div className="flex shrink-0 items-center gap-2">
               <Sparkline values={row.sparkline} accent={sparklineAccent} />
+              {/* Clicking the remaining amount directly focuses the planned input below */}
               <button
                 type="button"
-                onClick={onSelect}
+                onClick={(e) => { e.stopPropagation(); plannedInputRef.current?.focus(); }}
+                title="Edit planned amount"
                 className={`text-sm tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
               >
                 {formatMoney(remaining, currency)}
@@ -146,6 +149,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
               monthKey={monthKey}
               plannedCents={row.plannedCents}
               currency={currency}
+              inputRef={plannedInputRef}
             />
           </div>
         </div>
@@ -159,11 +163,13 @@ function PlannedInput({
   monthKey,
   plannedCents,
   currency,
+  inputRef,
 }: {
   subId: string;
   monthKey: string;
   plannedCents: number;
   currency: string;
+  inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -183,6 +189,7 @@ function PlannedInput({
       <input
         // Remount (reset to the server value) whenever the saved amount changes.
         key={initial}
+        ref={inputRef}
         name="planned"
         // type=text (not number) so the `size` attr can shrink the box to fit
         // its content — `size` is ignored on number inputs, which strands the $.
