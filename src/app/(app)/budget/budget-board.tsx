@@ -190,7 +190,7 @@ export function BudgetBoard({
     // (stretch) cross-axis sizing makes the aside match the row height so
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
-    <div className="mx-auto max-w-5xl space-y-4">
+    <div className="mx-auto max-w-6xl space-y-4">
       <TopHeader
         monthKey={month.key}
         monthFirstOfMonth={month.firstOfMonth}
@@ -273,7 +273,7 @@ export function BudgetBoard({
       </div>
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
-      <aside className="hidden w-[360px] shrink-0 lg:block">
+      <aside className="hidden w-[420px] shrink-0 lg:block">
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>
@@ -337,7 +337,7 @@ export function BudgetBoard({
             onClick={() => (quickAdd ? setQuickAdd(false) : setSelected(null))}
             className="fixed inset-0 z-40 bg-black/30"
           />
-          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[380px] overflow-y-auto bg-background p-2">
+          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[440px] overflow-y-auto bg-background p-2">
             {railContent}
           </div>
         </div>

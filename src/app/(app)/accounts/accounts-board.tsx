@@ -22,6 +22,13 @@ import {
   updateBucketBankGroup,
   upsertCardDetails,
 } from "./actions";
+import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// "2026-07-01" -> "Jul"
+function monthAbbr(firstOfMonth: string): string {
+  return MONTH_ABBR[parseInt(firstOfMonth.slice(5, 7), 10) - 1] ?? "";
+}
 
 export type BucketData = {
   id: string;
@@ -32,6 +39,9 @@ export type BucketData = {
   // "Checking" bucket and a "Savings" bucket under one bank account) no
   // longer have to force the whole account into one type.
   bankGroup: "savings" | "spending" | null;
+  // Prior-month bucket_snapshots (null = never recorded yet for that month).
+  prevMonthCents: number | null;
+  prev2MonthCents: number | null;
 };
 
 export type CardDetails = {
@@ -72,6 +82,10 @@ export type AccountData = {
   cardDetails?: CardDetails | null;
   owedCents?: number;
   monthSpendCents?: number;
+  // Prior-month account_snapshots (null = never recorded yet for that month).
+  // For bucketed accounts these are derived server-side from bucket_snapshots.
+  prevMonthCents: number | null;
+  prev2MonthCents: number | null;
   buckets: BucketData[];
 };
 
@@ -198,6 +212,8 @@ type Props = {
   budgetDebts: BudgetDebt[];
   currency: string;
   nonCardAccounts?: NonCardAccount[];
+  // [current, prev, prev2] as YYYY-MM-01 — powers the three balance columns.
+  historyMonths: [string, string, string];
 };
 
 export function AccountsBoard({
@@ -205,6 +221,7 @@ export function AccountsBoard({
   budgetDebts,
   currency,
   nonCardAccounts = [],
+  historyMonths,
 }: Props) {
   const active = accounts.filter((a) => a.active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
@@ -257,7 +274,7 @@ export function AccountsBoard({
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4">
+    <div className="mx-auto w-full max-w-5xl space-y-4">
       <div>
         <h1 className="text-xl font-bold">Accounts</h1>
         <p className="text-sm text-muted">
@@ -294,6 +311,7 @@ export function AccountsBoard({
             section={section}
             accounts={accounts.filter((a) => section.match(a))}
             currency={currency}
+            historyMonths={historyMonths}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
             isBucketsOpen={isBucketsOpen}
@@ -314,6 +332,7 @@ export function AccountsBoard({
             section={section}
             accounts={accounts.filter((a) => section.match(a))}
             currency={currency}
+            historyMonths={historyMonths}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
             isBucketsOpen={isBucketsOpen}
@@ -340,6 +359,7 @@ export function AccountsBoard({
               section={section}
               accounts={sectionAccounts}
               currency={currency}
+              historyMonths={historyMonths}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
               isBucketsOpen={isBucketsOpen}
@@ -1245,6 +1265,7 @@ function AccountSection({
   section,
   accounts,
   currency,
+  historyMonths,
   open,
   onToggle,
   isBucketsOpen,
@@ -1254,6 +1275,7 @@ function AccountSection({
   section: Section;
   accounts: AccountData[];
   currency: string;
+  historyMonths: [string, string, string];
   open: boolean;
   onToggle: () => void;
   isBucketsOpen: (id: string) => boolean;
@@ -1337,6 +1359,16 @@ function AccountSection({
 
       {open ? (
         <div className="border-t border-line">
+          {localAccounts.length > 0 ? (
+            <div className="grid grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              <span />
+              <span />
+              <span />
+              <span className="text-right">{monthAbbr(historyMonths[0])}</span>
+              <span className="text-right">{monthAbbr(historyMonths[1])}</span>
+              <span className="text-right">{monthAbbr(historyMonths[2])}</span>
+            </div>
+          ) : null}
           {localAccounts.length === 0 ? (
             <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — add one below.</p>
           ) : (
@@ -1347,6 +1379,7 @@ function AccountSection({
                   account={a}
                   section={section}
                   currency={currency}
+                  historyMonths={historyMonths}
                   editing={editingId === a.id}
                   onToggleEdit={() =>
                     setEditingId((id) => (id === a.id ? null : a.id))
@@ -1391,6 +1424,7 @@ function AccountRow({
   account,
   section,
   currency,
+  historyMonths,
   editing,
   onToggleEdit,
   onDragStart,
@@ -1401,6 +1435,7 @@ function AccountRow({
   account: AccountData;
   section: Section;
   currency: string;
+  historyMonths: [string, string, string];
   editing: boolean;
   onToggleEdit: () => void;
   onDragStart: () => void;
@@ -1424,7 +1459,7 @@ function AccountRow({
       data-drop-key={`account:${account.id}`}
       className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
-      <div className="grid grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_10rem] items-center gap-1.5 px-4 py-1.5">
+      <div className="grid grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 px-4 py-1.5">
         <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
@@ -1504,20 +1539,53 @@ function AccountRow({
         </button>
 
         {allowBuckets && bucketCount > 0 ? (
-          <DerivedBalance balanceCents={account.balanceCents} currency={currency} />
+          <>
+            <DerivedBalance balanceCents={account.balanceCents} currency={currency} />
+            <DerivedBalance
+              balanceCents={account.prevMonthCents ?? 0}
+              currency={currency}
+              muted={account.prevMonthCents == null}
+            />
+            <DerivedBalance
+              balanceCents={account.prev2MonthCents ?? 0}
+              currency={currency}
+              muted={account.prev2MonthCents == null}
+            />
+          </>
         ) : (
-          <BalanceInput
-            id={account.id}
-            balanceCents={account.balanceCents}
-            currency={currency}
-            liability={section.liability}
-            kind={account.kind}
-          />
+          <>
+            <BalanceInput
+              id={account.id}
+              balanceCents={account.balanceCents}
+              currency={currency}
+              liability={section.liability}
+              kind={account.kind}
+            />
+            <HistoricBalanceInput
+              accountId={account.id}
+              month={historyMonths[1]}
+              balanceCents={account.prevMonthCents}
+              currency={currency}
+              liability={section.liability}
+            />
+            <HistoricBalanceInput
+              accountId={account.id}
+              month={historyMonths[2]}
+              balanceCents={account.prev2MonthCents}
+              currency={currency}
+              liability={section.liability}
+            />
+          </>
         )}
       </div>
 
       {allowBuckets && bucketsOpen ? (
-        <BucketDrawer account={account} currency={currency} showBankGroup={section.key === "banking"} />
+        <BucketDrawer
+          account={account}
+          currency={currency}
+          historyMonths={historyMonths}
+          showBankGroup={section.key === "banking"}
+        />
       ) : null}
 
       {editing ? <EditAccountForm account={account} section={section} onDone={onToggleEdit} /> : null}
@@ -1532,10 +1600,12 @@ function AccountRow({
 function BucketDrawer({
   account,
   currency,
+  historyMonths,
   showBankGroup,
 }: {
   account: AccountData;
   currency: string;
+  historyMonths: [string, string, string];
   showBankGroup: boolean;
 }) {
   const [adding, setAdding] = useState(false);
@@ -1582,6 +1652,7 @@ function BucketDrawer({
               key={b.id}
               bucket={b}
               currency={currency}
+              historyMonths={historyMonths}
               onDragStart={() => startDrag(b.id)}
               isDragOver={dragOverId === b.id}
               showBankGroup={showBankGroup}
@@ -1608,12 +1679,14 @@ function BucketDrawer({
 function BucketRow({
   bucket,
   currency,
+  historyMonths,
   onDragStart,
   isDragOver,
   showBankGroup,
 }: {
   bucket: BucketData;
   currency: string;
+  historyMonths: [string, string, string];
   onDragStart: () => void;
   isDragOver: boolean;
   showBankGroup: boolean;
@@ -1627,8 +1700,8 @@ function BucketRow({
         isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""
       } ${
         showBankGroup
-          ? "grid-cols-[1.75rem_minmax(0,1fr)_5.5rem_10rem_1.25rem]"
-          : "grid-cols-[1.75rem_minmax(0,1fr)_10rem_1.25rem]"
+          ? "grid-cols-[1.75rem_minmax(0,1fr)_5.5rem_7.5rem_7.5rem_7.5rem_1.25rem]"
+          : "grid-cols-[1.75rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem_1.25rem]"
       }`}
     >
       <GripHandle onMouseDown={onDragStart} size="sm" />
@@ -1637,6 +1710,18 @@ function BucketRow({
         <BucketBankGroupSelect id={bucket.id} bankGroup={bucket.bankGroup} />
       ) : null}
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
+      <HistoricBucketBalanceInput
+        bucketId={bucket.id}
+        month={historyMonths[1]}
+        balanceCents={bucket.prevMonthCents}
+        currency={currency}
+      />
+      <HistoricBucketBalanceInput
+        bucketId={bucket.id}
+        month={historyMonths[2]}
+        balanceCents={bucket.prev2MonthCents}
+        currency={currency}
+      />
       <form
         action={(fd) => startDel(() => deleteBucket(fd))}
         className="justify-self-end"
@@ -1755,6 +1840,57 @@ function BucketBalanceInput({
   );
 }
 
+// Editable prior-month bucket balance. Writes to bucket_snapshots for the
+// specified month; setBucketSnapshot server-side re-derives that month's parent
+// account snapshot from all this account's bucket snapshots.
+function HistoricBucketBalanceInput({
+  bucketId,
+  month,
+  balanceCents,
+  currency,
+}: {
+  bucketId: string;
+  month: string;
+  balanceCents: number | null;
+  currency: string;
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const initial = balanceCents == null ? "" : centsToDisplay(balanceCents);
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) => start(() => setBucketSnapshot(fd))}
+      className="flex items-center justify-end gap-0.5 justify-self-end"
+    >
+      <input type="hidden" name="bucketId" value={bucketId} />
+      <input type="hidden" name="month" value={month} />
+      <span className={`pointer-events-none text-sm ${balanceCents == null ? "text-muted/50" : "text-muted"}`}>
+        {currencySymbol(currency)}
+      </span>
+      <input
+        key={initial}
+        name="balance"
+        type="text"
+        inputMode="decimal"
+        defaultValue={initial}
+        placeholder="—"
+        size={Math.max(initial.length, 5) + 2}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => {
+          const v = e.currentTarget.value.trim();
+          if (v === "" && balanceCents == null) return;
+          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
+        }}
+        className={`min-w-0 rounded-md bg-transparent py-0.5 px-1 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+          pending ? "ring-2 ring-brand" : "focus:ring-brand"
+        }`}
+      />
+    </form>
+  );
+}
+
 function AddBucketForm({
   accountId,
   onDone,
@@ -1829,8 +1965,26 @@ function AddBucketForm({
 
 // Read-only total for accounts with buckets — always the sum of the buckets
 // below, so edit the buckets, not this.
-function DerivedBalance({ balanceCents, currency }: { balanceCents: number; currency: string }) {
+function DerivedBalance({
+  balanceCents,
+  currency,
+  muted = false,
+}: {
+  balanceCents: number;
+  currency: string;
+  muted?: boolean;
+}) {
   const negative = balanceCents < 0;
+  if (muted) {
+    return (
+      <div
+        title="No snapshot for this month yet — edit a bucket below to fill it in"
+        className="flex items-center justify-end gap-0.5 justify-self-end py-1 px-1 text-muted/60"
+      >
+        <span className="text-sm">—</span>
+      </div>
+    );
+  }
   return (
     <div
       title="Sum of this account's buckets — edit the buckets below to change it"
@@ -1841,6 +1995,62 @@ function DerivedBalance({ balanceCents, currency }: { balanceCents: number; curr
         {centsToDisplay(balanceCents)}
       </span>
     </div>
+  );
+}
+
+// Editable prior-month input for a plain (non-bucketed) account. Writes to
+// account_snapshots for the specified month. Empty initial value ("—") is a
+// no-op on blur; typing a number and blurring persists it.
+function HistoricBalanceInput({
+  accountId,
+  month,
+  balanceCents,
+  currency,
+  liability,
+}: {
+  accountId: string;
+  month: string;
+  balanceCents: number | null;
+  currency: string;
+  liability: boolean;
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const initial = balanceCents == null ? "" : centsToDisplay(balanceCents);
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) => start(() => setAccountSnapshot(fd))}
+      className="flex items-center justify-end gap-0.5 justify-self-end"
+    >
+      <input type="hidden" name="accountId" value={accountId} />
+      <input type="hidden" name="month" value={month} />
+      <span className={`pointer-events-none text-sm ${balanceCents == null ? "text-muted/50" : "text-muted"}`}>
+        {currencySymbol(currency)}
+      </span>
+      <input
+        key={initial}
+        name="balance"
+        type="text"
+        inputMode="decimal"
+        defaultValue={initial}
+        placeholder="—"
+        size={Math.max(initial.length, 5) + 2}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => {
+          const v = e.currentTarget.value.trim();
+          // Empty stays empty — don't create a $0.00 snapshot from nothing.
+          if (v === "" && balanceCents == null) return;
+          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
+        }}
+        className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+          balanceCents != null && ((liability && balanceCents > 0) || (!liability && balanceCents < 0))
+            ? "text-negative font-semibold"
+            : ""
+        } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
+      />
+    </form>
   );
 }
 

@@ -205,8 +205,10 @@ export default async function SnowballPage() {
       minCents: Math.max(r.minCents, r.plannedCents),
       apr: r.apr,
     })),
-    0, // no shared extra — each debt's own scheduled amount is baked into minCents above
+    0,     // no shared extra — each debt's own scheduled amount is baked into minCents above
     month,
+    60,    // capMonths
+    true,  // noWaterfall: each debt pays independently, no cascade when one pays off
   );
 
   // ---- Mode 2: classic textbook Snowball — pay every minimum, throw the

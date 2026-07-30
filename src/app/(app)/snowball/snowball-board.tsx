@@ -186,7 +186,12 @@ export function SnowballBoard({
                   ) : payoff ? (
                     <>
                       <p className="text-lg font-bold tabular-nums">{monthLabel(payoff)}</p>
-                      <p className="text-[10px] italic text-muted">Debt Paid Off</p>
+                      <div className="flex items-center justify-between gap-1">
+                        <p className="text-[10px] italic text-muted">Debt Paid Off</p>
+                        <p className="text-[10px] font-semibold text-brand">
+                          {months.length} {months.length === 1 ? "mo" : "mos"} left
+                        </p>
+                      </div>
                     </>
                   ) : (
                     <>

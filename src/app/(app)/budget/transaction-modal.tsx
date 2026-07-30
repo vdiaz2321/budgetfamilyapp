@@ -183,9 +183,9 @@ export function TransactionModal({
           >
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
 
-            {/* Row 1: Amount | Payee | Date */}
+            {/* Row 1: Amount | Date */}
             <div className="flex items-center gap-2">
-              <div className="relative w-42 shrink-0">
+              <div className="relative flex-1">
                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
                 <input
                   ref={amountRef}
@@ -200,23 +200,23 @@ export function TransactionModal({
                   className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </div>
-              <div className="min-w-0 flex-1">
-                <PayeeField
-                  placeholder={PAYEE_PLACEHOLDER[txType]}
-                  defaultValue={editTx?.payee ?? ""}
-                  payeeOptions={payeeOptions}
-                  payeeLineItems={payeeLineItems}
-                  onMatch={handlePayeeMatch}
-                />
-              </div>
               <input
                 name="date"
                 type="date"
                 required
                 defaultValue={defaultDate}
-                className="w-42 shrink-0 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="flex-1 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
+
+            {/* Row 2: Payee — full width */}
+            <PayeeField
+              placeholder={PAYEE_PLACEHOLDER[txType]}
+              defaultValue={editTx?.payee ?? ""}
+              payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onMatch={handlePayeeMatch}
+            />
 
             {/* Row 2: Account | Budget Items */}
             <div className="grid grid-cols-2 gap-2">

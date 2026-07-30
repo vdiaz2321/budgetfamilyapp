@@ -37,6 +37,10 @@ export function projectSnowball(
   monthlyExtra: number | ((month: string) => number),
   startMonth: string,
   capMonths = 60,
+  // When true, paid-off minimums do NOT cascade to the focus debt — each debt
+  // simply pays its own minCents independently. Used by "My Plan" mode where
+  // each debt is funded at its own Planned amount with no waterfall.
+  noWaterfall = false,
 ): SnowballResult {
   const extraFor = typeof monthlyExtra === "function" ? monthlyExtra : () => monthlyExtra;
   const unpaid = debts.filter((d) => d.balanceCents > 0);
@@ -52,11 +56,13 @@ export function projectSnowball(
 
   for (let i = 0; i < capMonths && paidOff.size < order.length; i++) {
     const month = addMonths(startMonth, i);
-    // Extra pool this month = configured extra (may vary by month) + minimums
-    // freed from debts already paid off in a prior month.
+    // Extra pool = configured extra (may vary by month). In waterfall mode,
+    // also add minimums freed from debts paid off in prior months.
     let extraPool = extraFor(month);
-    for (const id of order) {
-      if (paidOff.has(id)) extraPool += byId.get(id)!.minCents;
+    if (!noWaterfall) {
+      for (const id of order) {
+        if (paidOff.has(id)) extraPool += byId.get(id)!.minCents;
+      }
     }
 
     // First unpaid debt in the fixed order is this month's focus.

@@ -1,7 +1,15 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { currentMonthFirst } from "@/lib/snapshots";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
 import { syncAllBucketedAccounts } from "./actions";
+
+// N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
+function monthsBefore(firstOfMonth: string, n: number): string {
+  const [y, m] = firstOfMonth.split("-").map(Number);
+  const d = new Date(y, m - 1 - n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
 
 export const metadata = { title: "Accounts · Capitall" };
 
@@ -32,12 +40,19 @@ export default async function AccountsPage() {
   // matched the buckets underneath it).
   await syncAllBucketedAccounts(supabase, household.id);
 
+  const currentMonth = currentMonthFirst();
+  const prevMonth = monthsBefore(currentMonth, 1);
+  const prev2Month = monthsBefore(currentMonth, 2);
+  const historyMonths = [prevMonth, prev2Month];
+
   const [
     { data: rows },
     { data: bucketRows },
     { data: debtRows },
     { data: subRows },
     { data: cardDetailRows },
+    { data: acctSnapshotRows },
+    { data: bktSnapshotRows },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -63,7 +78,27 @@ export default async function AccountsPage() {
       .from("credit_card_details")
       .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id")
       .eq("household_id", household.id),
+    supabase
+      .from("account_snapshots")
+      .select("account_id, month, balance_cents")
+      .eq("household_id", household.id)
+      .in("month", historyMonths),
+    supabase
+      .from("bucket_snapshots")
+      .select("bucket_id, month, balance_cents")
+      .eq("household_id", household.id)
+      .in("month", historyMonths),
   ]);
+
+  // (accountId, month) -> cents; buckets keyed by (bucketId, month) -> cents.
+  const acctHistory = new Map<string, number>();
+  for (const s of acctSnapshotRows ?? []) {
+    acctHistory.set(`${s.account_id}:${s.month}`, s.balance_cents ?? 0);
+  }
+  const bktHistory = new Map<string, number>();
+  for (const s of bktSnapshotRows ?? []) {
+    bktHistory.set(`${s.bucket_id}:${s.month}`, s.balance_cents ?? 0);
+  }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
   const budgetDebts: BudgetDebt[] = (debtRows ?? []).map((d) => ({
@@ -162,6 +197,8 @@ export default async function AccountsPage() {
     cardDetails: cardDetailsByAccount.get(a.id) ?? null,
     owedCents: cardOwed.get(a.id) ?? 0,
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
+    prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,
+    prev2MonthCents: acctHistory.get(`${a.id}:${prev2Month}`) ?? null,
     buckets: (bucketRows ?? [])
       .filter((b) => b.account_id === a.id)
       .map((b) => ({
@@ -170,6 +207,8 @@ export default async function AccountsPage() {
         name: b.name,
         balanceCents: b.balance_cents ?? 0,
         bankGroup: (b.bank_group as "savings" | "spending" | null) ?? null,
+        prevMonthCents: bktHistory.get(`${b.id}:${prevMonth}`) ?? null,
+        prev2MonthCents: bktHistory.get(`${b.id}:${prev2Month}`) ?? null,
       })),
   }));
 
@@ -189,6 +228,7 @@ export default async function AccountsPage() {
       budgetDebts={budgetDebts}
       currency={household.currency}
       nonCardAccounts={nonCardAccounts}
+      historyMonths={[currentMonth, prevMonth, prev2Month]}
     />
   );
 }
