@@ -5,7 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { addSubcategory, reorderSubcategories } from "./actions";
-import { BudgetRow, remainingColorClass } from "./budget-row";
+import { ACTUAL_LABEL, BudgetRow, remainingColorClass } from "./budget-row";
 import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
 
@@ -15,14 +15,22 @@ type Props = {
   monthKey: string; // YYYY-MM-01
   selectedSubId: string | null;
   onSelectRow: (row: RowData, kind: CategoryKind) => void;
-  // Open/collapsed is lifted to the board so one button can expand/collapse all.
   open: boolean;
   onToggle: () => void;
-  // The debt currently getting the snowball's extra payment — badged
-  // "next to pay" on its row. Only meaningful for the debt group.
+  compact?: boolean;
 };
 
-function usePointerReorder(categoryId: string, rows: RowData[]) {
+// Per-kind accent for the "+ Add" pill so users can tell at a glance which
+// group a button belongs to when it's the only thing visible.
+const ADD_ACCENT: Record<CategoryKind, string> = {
+  income: "bg-positive/10 text-positive hover:bg-positive/20",
+  savings: "bg-brand-soft text-brand hover:bg-brand-soft/80",
+  bills: "bg-brand-soft text-brand hover:bg-brand-soft/80",
+  expenses: "bg-warning/10 text-warning hover:bg-warning/20",
+  debt: "bg-negative/10 text-negative hover:bg-negative/20",
+};
+
+function usePointerReorder(_categoryId: string, rows: RowData[]) {
   const dragId = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [optimisticOrder, setOptimisticOrder] = useState<string[] | null>(null);
@@ -74,6 +82,7 @@ export function BudgetGroup({
   onSelectRow,
   open,
   onToggle,
+  compact,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const { dragOverId, startDrag, optimisticOrder } = usePointerReorder(group.categoryId, group.rows);
@@ -81,10 +90,8 @@ export function BudgetGroup({
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
   const isDebt = group.kind === "debt";
   const isIncome = group.kind === "income";
-  // Income "receives" money; everything else "spends" it.
   const actualLabel = isIncome ? "Received" : "Spent";
 
-  // Apply optimistic drag order, then filter paid-off debts.
   const orderedRows = optimisticOrder
     ? optimisticOrder.map((id) => group.rows.find((r) => r.subId === id)).filter(Boolean) as RowData[]
     : group.rows;
@@ -97,7 +104,9 @@ export function BudgetGroup({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* Header row */}
+      {/* Consolidated header: chevron + dot + name + sources chip on the left;
+          inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
+          on the right. Replaces both the old header AND the old footer. */}
       <div className="flex items-center gap-2 px-4 py-2.5">
         <button
           type="button"
@@ -105,8 +114,6 @@ export function BudgetGroup({
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
-          <span className="font-semibold">{group.name}</span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -115,36 +122,53 @@ export function BudgetGroup({
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
+          <span className="font-semibold">{group.name}</span>
+          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+            {visibleRows.length}
+          </span>
         </button>
 
-        {!open ? (
-          <div className="flex flex-1 items-center gap-3">
-            <span className="rounded-md bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand">
-              {visibleRows.length} {visibleRows.length === 1 ? "source" : "sources"}
+        <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
+          <span className="hidden text-muted lg:inline">
+            {actualLabel}:{" "}
+            <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
+          </span>
+          <span className="hidden text-muted lg:inline">
+            Plan:{" "}
+            <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
+          </span>
+          <span className="text-muted">
+            <span className="hidden md:inline">Left: </span>
+            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+              {formatMoney(remainingTotal, currency)}
             </span>
-            <div className="ml-auto flex items-center gap-3 text-xs tabular-nums">
-              <span className="text-muted">
-                Planned:{" "}
-                <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
-              </span>
-              <span className="text-muted">
-                {actualLabel}:{" "}
-                <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
-              </span>
-              <span className="text-muted">
-                Remaining:{" "}
-                <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
-                  {formatMoney(remainingTotal, currency)}
-                </span>
-              </span>
-            </div>
-          </div>
-        ) : null}
+          </span>
+          {isDebt ? (
+            <Link
+              href="/snowball"
+              className="hidden rounded-md px-2 py-0.5 text-[11px] font-semibold text-brand hover:bg-brand-soft md:inline-flex"
+            >
+              Snowball →
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => { if (!open) onToggle(); setAdding(true); }}
+            aria-label="Add item"
+            className={`flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_ACCENT[group.kind]}`}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span className="hidden sm:inline">Add</span>
+          </button>
+        </div>
       </div>
 
       {open ? (
         <div className="border-t border-line">
-          {visibleRows.length === 0 ? (
+          {visibleRows.length === 0 && !adding ? (
             <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
               <svg
                 width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -158,22 +182,34 @@ export function BudgetGroup({
               <p className="text-sm text-muted">Track your first item to see it here.</p>
             </div>
           ) : (
-            <ul>
-              {visibleRows.map((row, i) => (
-                <BudgetRow
-                  key={row.subId}
-                  row={row}
-                  kind={group.kind}
-                  currency={currency}
-                  monthKey={monthKey}
-                  selected={row.subId === selectedSubId}
-                  isEven={i % 2 === 1}
-                  isDragOver={dragOverId === row.subId}
-                  onSelect={() => onSelectRow(row, group.kind)}
-                  onDragStart={() => startDrag(row.subId)}
-                />
-              ))}
-            </ul>
+            <>
+              {/* Column-label strip — 12-col grid, must line up with BudgetRow */}
+              <div className={`grid grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1" : "py-1.5"} text-[10px] font-semibold uppercase tracking-wider text-muted`}>
+                <div className="col-span-5 pl-6 sm:col-span-4">Category</div>
+                <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
+                <div className="col-span-2 text-right">Planned</div>
+                <div className="col-span-2 text-right">Left</div>
+                <div className="col-span-1 text-right">%</div>
+              </div>
+
+              <ul className="divide-y divide-line/40">
+                {visibleRows.map((row, i) => (
+                  <BudgetRow
+                    key={row.subId}
+                    row={row}
+                    kind={group.kind}
+                    currency={currency}
+                    monthKey={monthKey}
+                    selected={row.subId === selectedSubId}
+                    isEven={i % 2 === 1}
+                    isDragOver={dragOverId === row.subId}
+                    compact={compact}
+                    onSelect={() => onSelectRow(row, group.kind)}
+                    onDragStart={() => startDrag(row.subId)}
+                  />
+                ))}
+              </ul>
+            </>
           )}
 
           {adding ? (
@@ -183,39 +219,6 @@ export function BudgetGroup({
               onDone={() => setAdding(false)}
             />
           ) : null}
-
-          {/* Footer: add link + totals */}
-          <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2">
-            <div className="flex items-center gap-3">
-              {!adding ? (
-                <button
-                  type="button"
-                  onClick={() => setAdding(true)}
-                  className="text-sm font-medium text-brand hover:text-brand-strong"
-                >
-                  + Add {group.kind === "income" ? "income" : "item"}
-                </button>
-              ) : null}
-              {isDebt ? (
-                <Link href="/snowball" className="text-xs font-medium text-brand hover:text-brand-strong">
-                  Snowball →
-                </Link>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-3 text-xs tabular-nums">
-              <span className="text-muted">
-                <span className="font-bold">{formatMoney(group.plannedTotal, currency)}</span> planned
-              </span>
-              <span className="text-foreground">
-                <span className="font-bold">{formatMoney(group.spentTotal, currency)}</span>{" "}
-                <span className="text-muted">{actualLabel.toLowerCase()}</span>
-              </span>
-              <span className={remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}>
-                <span className="font-bold">{formatMoney(remainingTotal, currency)}</span>{" "}
-                <span className="text-muted">remaining</span>
-              </span>
-            </div>
-          </div>
         </div>
       ) : null}
     </section>

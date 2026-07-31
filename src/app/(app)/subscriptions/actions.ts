@@ -131,7 +131,14 @@ export async function upsertSubscription(formData: FormData) {
   if (id) {
     await supabase.from("subscriptions").update(row).eq("id", id).eq("household_id", householdId);
   } else {
-    await supabase.from("subscriptions").insert(row);
+    const { data: maxRow } = await supabase
+      .from("subscriptions")
+      .select("sort_order")
+      .eq("household_id", householdId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    await supabase.from("subscriptions").insert({ ...row, sort_order: (maxRow?.sort_order ?? 0) + 1 });
   }
   await syncSubscriptionsPlanned(supabase, householdId, subcategoryId);
   revalidate();
@@ -192,6 +199,24 @@ export async function reorderSubscription(id: string, direction: "up" | "down") 
     .order("name");
   if (!rows) return;
 
+  // Normalize sort_orders (fix NULLs OR duplicates) so swaps always exchange
+  // distinct integers.
+  const seen = new Set<number>();
+  const hasDupOrNull = rows.some((r) => {
+    if (r.sort_order == null) return true;
+    if (seen.has(r.sort_order)) return true;
+    seen.add(r.sort_order);
+    return false;
+  });
+  if (hasDupOrNull) {
+    await Promise.all(
+      rows.map((r, i) =>
+        supabase.from("subscriptions").update({ sort_order: i + 1 }).eq("id", r.id),
+      ),
+    );
+    rows.forEach((r, i) => { r.sort_order = i + 1; });
+  }
+
   const idx = rows.findIndex((r) => r.id === id);
   const swapIdx = direction === "up" ? idx - 1 : idx + 1;
   if (idx === -1 || swapIdx < 0 || swapIdx >= rows.length) return;
@@ -214,6 +239,22 @@ export async function reorderIrregularBill(id: string, direction: "up" | "down")
     .order("sort_order")
     .order("name");
   if (!rows) return;
+
+  const seenIB = new Set<number>();
+  const hasDupOrNullIB = rows.some((r) => {
+    if (r.sort_order == null) return true;
+    if (seenIB.has(r.sort_order)) return true;
+    seenIB.add(r.sort_order);
+    return false;
+  });
+  if (hasDupOrNullIB) {
+    await Promise.all(
+      rows.map((r, i) =>
+        supabase.from("irregular_bills").update({ sort_order: i + 1 }).eq("id", r.id),
+      ),
+    );
+    rows.forEach((r, i) => { r.sort_order = i + 1; });
+  }
 
   const idx = rows.findIndex((r) => r.id === id);
   const swapIdx = direction === "up" ? idx - 1 : idx + 1;

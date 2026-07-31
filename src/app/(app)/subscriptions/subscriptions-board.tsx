@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import {
   deleteIrregularBill,
@@ -96,6 +96,8 @@ function SubscriptionsSection({
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [rows, setRows] = useState(initialSubscriptions);
   const [, startReorder] = useTransition();
+  const currentYear = new Date().getFullYear();
+  useEffect(() => { setRows(initialSubscriptions); }, [initialSubscriptions]);
 
   function move(id: string, direction: "up" | "down") {
     setRows((prev) => {
@@ -129,17 +131,25 @@ function SubscriptionsSection({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
+                <th className="w-6 px-1 py-2"></th>
                 <th className="px-2 py-2 text-left">Name</th>
                 <th className="px-2 py-2">Amount</th>
                 <th className="px-2 py-2">Cycle</th>
                 <th className="px-2 py-2">Next Renewal</th>
-                <th className="px-2 py-2">Active</th>
-                <th className="px-2 py-2">Card</th>
+                <th className="px-2 py-2 text-center">Card</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((s, i) =>
+              {rows
+                .filter((s) => {
+                  if (s.isActive) return true;
+                  // Keep inactive rows visible until end of current year,
+                  // then they drop off automatically at the start of the new year.
+                  const deactivatedYear = s.updatedAt ? new Date(s.updatedAt).getFullYear() : currentYear;
+                  return deactivatedYear >= currentYear;
+                })
+                .map((s, i, visible) =>
                 editing === s.id ? (
                   <SubscriptionFormRow
                     key={s.id}
@@ -148,8 +158,16 @@ function SubscriptionsSection({
                     onDone={() => setEditing(null)}
                   />
                 ) : (
-                  <tr key={s.id} className="border-t border-line">
-                    <td className="px-2 py-2 font-medium">{s.name}</td>
+                  <tr key={s.id} className={`border-t border-line ${!s.isActive ? "opacity-50" : ""}`}>
+                    <td className="px-1 py-2">
+                      <ReorderButtons
+                        onUp={i > 0 ? () => move(s.id, "up") : undefined}
+                        onDown={i < visible.length - 1 ? () => move(s.id, "down") : undefined}
+                      />
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2 font-medium">
+                      <span className={!s.isActive ? "line-through" : ""}>{s.name}</span>
+                    </td>
                     <td className="px-2 py-2 text-center tabular-nums">
                       {formatMoney(s.amountCents, currency)}
                     </td>
@@ -163,31 +181,18 @@ function SubscriptionsSection({
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-2 text-center">
-                      {s.isActive ? (
-                        <span className="text-positive">Active</span>
-                      ) : (
-                        <span className="text-muted">Paused</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-2 text-center text-muted">
+                    <td className="px-2 py-2 text-left text-muted">
                       {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <ReorderButtons
-                          onUp={i > 0 ? () => move(s.id, "up") : undefined}
-                          onDown={i < rows.length - 1 ? () => move(s.id, "down") : undefined}
-                        />
-                        <RowActions
-                          onEdit={() => setEditing(s.id)}
-                          onDelete={async () => {
-                            const fd = new FormData();
-                            fd.set("id", s.id);
-                            await deleteSubscription(fd);
-                          }}
-                        />
-                      </div>
+                      <RowActions
+                        onEdit={() => setEditing(s.id)}
+                        onDelete={async () => {
+                          const fd = new FormData();
+                          fd.set("id", s.id);
+                          await deleteSubscription(fd);
+                        }}
+                      />
                     </td>
                   </tr>
                 ),
@@ -274,15 +279,7 @@ function SubscriptionFormRow({
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Next Renewal
-            <input
-              name="nextRenewalDate"
-              type="date"
-              defaultValue={row?.nextRenewalDate ?? ""}
-              className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
+          <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} />
           <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
             <input
               type="checkbox"
@@ -351,6 +348,7 @@ function IrregularBillsSection({
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [rows, setRows] = useState(initialBills);
   const [, startReorder] = useTransition();
+  useEffect(() => { setRows(initialBills); }, [initialBills]);
 
   function move(id: string, direction: "up" | "down") {
     setRows((prev) => {
@@ -382,10 +380,11 @@ function IrregularBillsSection({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
+                <th className="w-6 px-1 py-2"></th>
                 <th className="px-2 py-2 text-left">Name</th>
                 <th className="px-2 py-2">Typical Amount</th>
                 <th className="px-2 py-2">Notes</th>
-                <th className="px-2 py-2">Card</th>
+                <th className="px-2 py-2 text-center">Card</th>
                 <th className="px-2 py-2"></th>
               </tr>
             </thead>
@@ -400,6 +399,12 @@ function IrregularBillsSection({
                   />
                 ) : (
                   <tr key={b.id} className="border-t border-line">
+                    <td className="px-1 py-2">
+                      <ReorderButtons
+                        onUp={i > 0 ? () => move(b.id, "up") : undefined}
+                        onDown={i < rows.length - 1 ? () => move(b.id, "down") : undefined}
+                      />
+                    </td>
                     <td className="px-2 py-2 font-medium">{b.name}</td>
                     <td className="px-2 py-2 text-center tabular-nums">
                       {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
@@ -409,20 +414,14 @@ function IrregularBillsSection({
                       {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}
                     </td>
                     <td className="px-2 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <ReorderButtons
-                          onUp={i > 0 ? () => move(b.id, "up") : undefined}
-                          onDown={i < rows.length - 1 ? () => move(b.id, "down") : undefined}
-                        />
-                        <RowActions
-                          onEdit={() => setEditing(b.id)}
-                          onDelete={async () => {
-                            const fd = new FormData();
-                            fd.set("id", b.id);
-                            await deleteIrregularBill(fd);
-                          }}
-                        />
-                      </div>
+                      <RowActions
+                        onEdit={() => setEditing(b.id)}
+                        onDelete={async () => {
+                          const fd = new FormData();
+                          fd.set("id", b.id);
+                          await deleteIrregularBill(fd);
+                        }}
+                      />
                     </td>
                   </tr>
                 ),
@@ -465,7 +464,7 @@ function IrregularBillFormRow({
 
   return (
     <tr className="border-t border-line bg-brand-soft/10">
-      <td colSpan={5} className="px-2 py-3">
+      <td colSpan={6} className="px-2 py-3">
         <form
           action={(fd) =>
             start(async () => {
@@ -543,6 +542,40 @@ function IrregularBillFormRow({
   );
 }
 
+function RenewalDatePicker({ defaultValue }: { defaultValue?: string }) {
+  const toDisplay = (v: string) => {
+    const p = v.split("-");
+    return p.length === 3 ? `${p[1]}/${p[2]}` : "";
+  };
+  const toHidden = (d: string) => {
+    const [mm, dd] = d.split("/");
+    const m = parseInt(mm), dy = parseInt(dd);
+    if (isNaN(m) || isNaN(dy)) return "";
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const yr = now.getFullYear();
+    const cand = new Date(yr, m - 1, dy); cand.setHours(0, 0, 0, 0);
+    const year = cand < now ? yr + 1 : yr;
+    return `${year}-${String(m).padStart(2, "0")}-${String(dy).padStart(2, "0")}`;
+  };
+  const [display, setDisplay] = useState(toDisplay(defaultValue ?? ""));
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-muted">Renewal</span>
+      <input type="hidden" name="nextRenewalDate" value={toHidden(display)} />
+      <input
+        type="text"
+        placeholder="MM/DD"
+        value={display}
+        onChange={(e) => {
+          const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+          setDisplay(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
+        }}
+        className="w-20 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+    </div>
+  );
+}
+
 function RenewalBadge({ date }: { date: string }) {
   const days = daysUntil(date);
   const upcoming = days >= 0 && days <= 30;
@@ -609,9 +642,12 @@ function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
         type="button"
         disabled={pending}
         onClick={() => start(onDelete)}
-        className="rounded-md px-2 py-1 text-xs font-semibold text-negative hover:bg-negative/10 disabled:opacity-60"
+        title="Delete"
+        className="rounded-md p-1 text-negative hover:bg-negative/10 disabled:opacity-60"
       >
-        Delete
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
       </button>
     </div>
   );

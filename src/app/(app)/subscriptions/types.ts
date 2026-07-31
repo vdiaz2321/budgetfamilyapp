@@ -5,6 +5,7 @@ export type SubscriptionRow = {
   billingCycle: "monthly" | "annual" | "quarterly" | "weekly";
   nextRenewalDate: string | null; // YYYY-MM-DD
   isActive: boolean;
+  updatedAt: string | null; // ISO timestamp — used to keep deactivated rows visible until year-end
   subcategoryId: string | null;
   accountId: string | null;
   notes: string | null;

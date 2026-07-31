@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -160,27 +160,19 @@ export function BudgetBoard({
       />
     ) : null;
 
-  // Quick-add (from the item panel's "+ Add transaction") takes over the
-  // same right-rail slot as the item panel — anchored where the budget list
-  // stays visible, instead of a centered overlay.
-  const railContent =
-    quickAdd && selected ? (
-      <TransactionModal
-        editTx={quickAdd === true ? null : quickAdd}
-        monthKey={month.key}
-        firstOfMonth={month.firstOfMonth}
-        subOptions={subOptions}
-        accountOptions={accountOptions}
-        bucketsByAccount={bucketsByAccount}
-        payeeOptions={payeeOptions}
-        payeeLineItems={payeeLineItems}
-        initialKind={selected.kind}
-        initialSubId={selected.subId}
-        onClose={() => setQuickAdd(false)}
-      />
-    ) : (
-      itemPanel
-    );
+  const railContent = itemPanel;
+
+  const heroRef = useRef<HTMLDivElement>(null);
+  const [heroHidden, setHeroHidden] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const el = heroRef.current;
+      if (el) setHeroHidden(el.getBoundingClientRect().bottom < 0);
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    return () => window.removeEventListener("scroll", check);
+  }, []);
 
   return (
     // `items-start` would leave the right rail (aside) exactly as tall as its
@@ -201,6 +193,7 @@ export function BudgetBoard({
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
         {/* Left-to-budget hero card */}
+        <div ref={heroRef}>
         <SummaryHeroCard
           actualLeft={actualLeft}
           displayLeft={displayLeft}
@@ -216,6 +209,7 @@ export function BudgetBoard({
           monthFirstOfMonth={month.firstOfMonth}
           currency={currency}
         />
+        </div>
 
         {/* Wrapping this in `relative` gives the sticky footer bar below a
             containing block that spans the whole rollover+groups list, so it
@@ -223,14 +217,16 @@ export function BudgetBoard({
             is in view, instead of unsticking the instant its own row scrolls
             past — see feedback: "freeze on top when I scroll down". */}
         <div className="relative space-y-4">
-          <StickyFooterBar
-            actualIncome={actualIncome}
-            actualSpent={actualSpent}
-            actualLeft={actualLeft}
-            displayLeft={displayLeft}
-            outflowPlanned={outflowPlanned}
-            currency={currency}
-          />
+          {heroHidden && (
+            <StickyFooterBar
+              actualIncome={actualIncome}
+              actualSpent={actualSpent}
+              actualLeft={actualLeft}
+              displayLeft={displayLeft}
+              outflowPlanned={outflowPlanned}
+              currency={currency}
+            />
+          )}
 
           <div className="flex justify-end">
             <BulkAddSubcategories groups={groups} />
@@ -248,6 +244,7 @@ export function BudgetBoard({
                 onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
                 open={openGroups[group.categoryId] ?? false}
                 onToggle={() => toggleGroup(group.categoryId)}
+                compact={true}
               />
             ))}
 
@@ -273,7 +270,7 @@ export function BudgetBoard({
       </div>
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
-      <aside className="hidden w-[420px] shrink-0 lg:block">
+      <aside className="hidden w-[300px] shrink-0 lg:block">
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>
@@ -334,21 +331,21 @@ export function BudgetBoard({
           <button
             type="button"
             aria-label="Close panel"
-            onClick={() => (quickAdd ? setQuickAdd(false) : setSelected(null))}
+            onClick={() => setSelected(null)}
             className="fixed inset-0 z-40 bg-black/30"
           />
-          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[440px] overflow-y-auto bg-background p-2">
+          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[300px] overflow-y-auto bg-background p-2">
             {railContent}
           </div>
         </div>
       ) : null}
 
-      {/* Header "+ Add Item" opens a centered fresh transaction modal. */}
-      {showAddModal ? (
+      {/* Centered modal: header "+ Add Item" OR item panel "+ Transaction" */}
+      {(showAddModal || (quickAdd && selected)) ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10">
           <div className="w-full max-w-[520px]">
             <TransactionModal
-              editTx={null}
+              editTx={quickAdd && quickAdd !== true ? quickAdd : null}
               monthKey={month.key}
               firstOfMonth={month.firstOfMonth}
               subOptions={subOptions}
@@ -356,7 +353,9 @@ export function BudgetBoard({
               bucketsByAccount={bucketsByAccount}
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}
-              onClose={() => setShowAddModal(false)}
+              initialKind={quickAdd && selected ? selected.kind : undefined}
+              initialSubId={quickAdd && selected ? selected.subId : undefined}
+              onClose={() => { setShowAddModal(false); setQuickAdd(false); }}
             />
           </div>
         </div>
@@ -518,7 +517,7 @@ function SummaryHeroCard({
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
-            <p className="mt-0.5 text-2xl font-bold tabular-nums text-foreground">
+            <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
             {rolloverCents > 0 && (
@@ -531,24 +530,26 @@ function SummaryHeroCard({
           </div>
           <div className="text-center">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
-            <p className={`mt-0.5 text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+            <p className={`mt-0.5 text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
           </div>
           <div className="text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
             <div className="mt-0.5 flex items-center justify-end gap-2">
-              <p className={`text-2xl font-bold tabular-nums ${toneClasses.text}`}>
+              <p className={`text-xl font-bold tabular-nums ${toneClasses.text}`}>
                 {formatMoney(actualSpent, currency)}
               </p>
-              <span
-                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d={toneClasses.icon} />
-                </svg>
-                {badgeText}
-              </span>
+              {tone !== "good" && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d={toneClasses.icon} />
+                  </svg>
+                  {badgeText}
+                </span>
+              )}
             </div>
           </div>
         </div>

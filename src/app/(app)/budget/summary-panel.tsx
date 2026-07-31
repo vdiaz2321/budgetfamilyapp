@@ -168,7 +168,7 @@ export function SummaryPanel({ groups, currency }: Props) {
                 <span className="max-w-[100px] truncate text-[10px] font-bold uppercase tracking-widest text-muted">
                   {activeSeg ? activeSeg.name : `Total ${modeLabel}`}
                 </span>
-                <span className="mt-0.5 text-lg font-extrabold tabular-nums text-foreground">
+                <span className="mt-0.5 text-sm font-extrabold tabular-nums text-foreground">
                   {formatMoney(activeSeg ? activeSeg.value : total, currency)}
                 </span>
               </div>

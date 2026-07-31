@@ -127,13 +127,15 @@ export default async function BudgetPage({
     // auto-fill AND the Subscriptions & Irregular Bills section below Debt.
     supabase
       .from("subscriptions")
-      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, account_id, notes")
+      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, updated_at, subcategory_id, account_id, notes, sort_order")
       .eq("household_id", household.id)
+      .order("sort_order")
       .order("name"),
     supabase
       .from("irregular_bills")
-      .select("id, name, typical_amount_cents, subcategory_id, account_id, notes")
+      .select("id, name, typical_amount_cents, subcategory_id, account_id, notes, sort_order")
       .eq("household_id", household.id)
+      .order("sort_order")
       .order("name"),
   ]);
 
@@ -384,6 +386,7 @@ export default async function BudgetPage({
     billingCycle: s.billing_cycle,
     nextRenewalDate: s.next_renewal_date,
     isActive: s.is_active,
+    updatedAt: (s as { updated_at?: string }).updated_at ?? null,
     subcategoryId: s.subcategory_id,
     accountId: s.account_id ?? null,
     notes: s.notes,

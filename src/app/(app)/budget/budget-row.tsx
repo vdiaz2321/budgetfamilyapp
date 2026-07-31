@@ -5,7 +5,6 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
-import { Sparkline } from "./category-icons";
 
 const ACTUAL_WORD: Record<CategoryKind, string> = {
   income: "received",
@@ -19,13 +18,28 @@ const ACTUAL_WORD: Record<CategoryKind, string> = {
 // income's "less remaining to receive" reads as good, not tight — the
 // generic (remaining/planned < 15%) rule only applies to money going out.
 export function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
-  // Income "remaining" is just what's left to receive — never a bad thing.
   if (kind === "income") return "text-positive";
   if (plannedCents <= 0) return remaining < 0 ? "text-negative" : "text-foreground";
   if (remaining < 0) return "text-negative";
   if (remaining / plannedCents < 0.15) return "text-warning";
   return "text-positive";
 }
+
+// The Actual column takes the kind's accent so a scan of the column reads
+// as "money in" / "money out" instantly, matching the group dot colors.
+export function actualColorClass(kind: CategoryKind, spentCents: number): string {
+  if (spentCents === 0) return "text-muted";
+  if (kind === "income" || kind === "savings" || kind === "debt") return "text-positive";
+  return "text-negative"; // bills / expenses
+}
+
+export const ACTUAL_LABEL: Record<CategoryKind, string> = {
+  income: "Received",
+  savings: "Saved",
+  bills: "Spent",
+  expenses: "Spent",
+  debt: "Paid",
+};
 
 type Props = {
   row: RowData;
@@ -35,11 +49,12 @@ type Props = {
   selected: boolean;
   isEven: boolean;
   isDragOver?: boolean;
+  compact?: boolean;
   onSelect: () => void;
   onDragStart: () => void;
 };
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, onSelect, onDragStart }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, onSelect, onDragStart }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
@@ -48,14 +63,12 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
 
   const pct =
     row.plannedCents > 0
-      ? Math.min(100, (row.spentCents / row.plannedCents) * 100)
+      ? Math.min(100, Math.round((row.spentCents / row.plannedCents) * 100))
       : row.spentCents > 0
         ? 100
         : 0;
 
   const overBudget = !isIncome && row.plannedCents > 0 && row.spentCents > row.plannedCents;
-  const sparklineAccent = overBudget ? "negative" : "chart-1";
-  const barClass = overBudget ? "bg-negative" : "bg-chart-1";
 
   const baseClass = selected
     ? "bg-brand-soft/50"
@@ -65,95 +78,86 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         ? "bg-black/[0.018] dark:bg-white/[0.03] hover:bg-brand-soft/20"
         : "hover:bg-brand-soft/25";
 
+  const pctClass = overBudget
+    ? "font-bold text-negative"
+    : pct >= 100
+      ? "font-bold text-positive"
+      : "text-muted";
+
   return (
     <li
       data-drop-key={`subcat:${row.subId}`}
-      className={`group ${baseClass}`}
+      className={`group grid grid-cols-12 items-center gap-2 px-3 ${compact ? "py-1" : "py-1.5"} ${baseClass}`}
     >
-      <div className="flex items-center gap-3 px-3 py-2.5">
-        {/* Grip handle — replaces the category icon. Isolated in its own
-            wider hit-area with a visible gap from the clickable content so
-            an imprecise click on a dense list (e.g. after bulk-add) can't
-            graze it and silently swallow the click — see feedback: Bills
-            rows needing a second click after bulk-adding many items. */}
+      {/* Name cell — grip + name + due badge — click opens ItemPanel */}
+      <div className="col-span-5 flex min-w-0 items-center gap-1.5 sm:col-span-4">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           title="Drag to reorder"
           className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <path d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </span>
-
-        {/* The whole content column (name row + progress bar) is clickable,
-            not just the thin name button, so aim doesn't matter. */}
-        <div
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={onSelect}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
-          className="min-w-0 flex-1 cursor-pointer text-left"
+          className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex min-w-0 items-baseline gap-2 truncate">
-              <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
-                {row.name}
-              </span>
-              {row.dueDay ? <span className="shrink-0 text-[11px] text-muted">due {row.dueDay}</span> : null}
+          <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
+            {row.name}
+          </span>
+          {row.dueDay ? (
+            <span className="hidden shrink-0 rounded bg-brand-soft/50 px-1.5 py-0.5 text-[9px] font-medium text-muted md:inline">
+              due {row.dueDay}
             </span>
-
-            <div className="flex shrink-0 items-center gap-2">
-              <Sparkline values={row.sparkline} accent={sparklineAccent} />
-              {/* Clicking the remaining amount directly focuses the planned input below */}
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); plannedInputRef.current?.focus(); }}
-                title="Edit planned amount"
-                className={`text-sm tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
-              >
-                {formatMoney(remaining, currency)}
-              </button>
-              <button
-                type="button"
-                onClick={onSelect}
-                aria-label={`Edit ${row.name}`}
-                className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-              >
-                <svg
-                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                  className="text-muted hover:text-foreground"
-                  aria-hidden
-                >
-                  <path d="M12 20h9" />
-                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
-            <div
-              className={`h-full rounded-full ${barClass} transition-[width] duration-200`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-
-          <div className="mt-1 flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted">
-              {formatMoney(row.spentCents, currency)} {ACTUAL_WORD[kind]}
-            </span>
-            <PlannedInput
-              subId={row.subId}
-              monthKey={monthKey}
-              plannedCents={row.plannedCents}
-              currency={currency}
-              inputRef={plannedInputRef}
-            />
-          </div>
-        </div>
+          ) : null}
+        </button>
       </div>
+
+      {/* Actual — read-only, click opens the panel (transactions are edited there) */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(kind, row.spentCents)}`}
+        title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
+      >
+        {formatMoney(row.spentCents, currency)}
+      </button>
+
+      {/* Planned — inline-editable in place. Stops click from bubbling to onSelect. */}
+      <div
+        className="col-span-2 flex justify-end"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <PlannedInput
+          subId={row.subId}
+          monthKey={monthKey}
+          plannedCents={row.plannedCents}
+          currency={currency}
+          inputRef={plannedInputRef}
+        />
+      </div>
+
+      {/* Remaining */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`col-span-2 text-right text-xs font-semibold tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
+      >
+        {formatMoney(remaining, currency)}
+      </button>
+
+      {/* % */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`col-span-1 text-right text-[11px] tabular-nums ${pctClass}`}
+      >
+        {pct}%
+      </button>
     </li>
   );
 }
@@ -179,7 +183,7 @@ function PlannedInput({
     <form
       ref={formRef}
       action={(fd) => start(() => upsertPlan(fd))}
-      className="flex items-center gap-0.5"
+      className="flex items-center justify-end gap-0.5"
     >
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
@@ -187,25 +191,20 @@ function PlannedInput({
         {currencySymbol(currency)}
       </span>
       <input
-        // Remount (reset to the server value) whenever the saved amount changes.
         key={initial}
         ref={inputRef}
         name="planned"
-        // type=text (not number) so the `size` attr can shrink the box to fit
-        // its content — `size` is ignored on number inputs, which strands the $.
         type="text"
         inputMode="decimal"
         defaultValue={initial}
-        size={Math.max(initial.length, 4) + 2}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent py-0.5 px-1 text-right text-[11px] text-muted tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
-      <span className="pointer-events-none text-[11px] text-muted">planned</span>
     </form>
   );
 }

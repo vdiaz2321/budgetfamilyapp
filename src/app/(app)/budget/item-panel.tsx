@@ -343,7 +343,7 @@ function PlannedForm({
   return (
     <>
       <Section title="Planned this month">
-        <form action={(fd) => start(() => upsertPlan(fd))} className="flex items-center gap-2">
+        <form action={(fd) => start(() => upsertPlan(fd))} className="space-y-2">
           <input type="hidden" name="subcategoryId" value={subId} />
           <input type="hidden" name="month" value={monthKey} />
           <input
@@ -353,10 +353,12 @@ function PlannedForm({
             step="0.01"
             defaultValue={centsToDisplay(plannedCents)}
             onFocus={(e) => e.currentTarget.select()}
-            className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
-          <SaveBtn pending={pending} />
-          <AddTxBtn onClick={onAddTransaction} />
+          <div className="flex gap-2">
+            <SaveBtn pending={pending} full />
+            <AddTxBtn onClick={onAddTransaction} />
+          </div>
         </form>
       </Section>
       {hasDue ? (
@@ -426,22 +428,6 @@ function DebtForm({
             onFocus={(e) => e.currentTarget.select()}
             className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
-          <p className="mt-1 text-[10px] text-muted">
-            What you&apos;re budgeting to pay — can differ from the Min. payment below.
-            {" "}Scheduled by Snowball:{" "}
-            <button
-              type="button"
-              onClick={() => {
-                if (plannedRef.current) plannedRef.current.value = centsToDisplay(scheduledCents);
-              }}
-              className="font-semibold text-brand hover:underline"
-            >
-              {formatMoney(scheduledCents, currency)}
-            </button>
-            {isSnowballFocus && snowballExtraCents > 0 ? (
-              <> (incl. {formatMoney(snowballExtraCents, currency)} snowball extra)</>
-            ) : null}
-          </p>
         </label>
         <Grid>
           <Labeled label="Balance" name="balance" type="number" step="0.01" defaultValue={centsToDisplay(d.balanceCents)} />

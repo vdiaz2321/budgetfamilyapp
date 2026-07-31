@@ -62,6 +62,7 @@ export function SubscriptionsSummaryCard({
     (sum, s) => sum + monthlyEquivalent(s.amountCents, s.billingCycle),
     0,
   );
+  const cardMap = new Map((creditCards ?? []).map((c) => [c.id, c.name]));
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -109,18 +110,22 @@ export function SubscriptionsSummaryCard({
             </div>
           ) : (
             <div className="divide-y divide-line">
-              {subscriptions.map((s) => (
-                <div key={s.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
-                  <span className={`truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className="text-xs text-muted">{CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}</span>
-                    {s.nextRenewalDate ? <RenewalBadge date={s.nextRenewalDate} /> : null}
-                    <span className="w-20 text-right font-medium tabular-nums">
-                      {formatMoney(s.amountCents, currency)}
-                    </span>
+              {subscriptions.map((s) => {
+                const cardName = s.accountId ? cardMap.get(s.accountId) : null;
+                return (
+                  <div key={s.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                    <span className={`truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-xs text-muted">{CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}</span>
+                      {s.nextRenewalDate ? <RenewalBadge date={s.nextRenewalDate} /> : null}
+                      {cardName ? <span className="text-xs text-muted">{cardName}</span> : null}
+                      <span className="w-20 text-right font-medium tabular-nums">
+                        {formatMoney(s.amountCents, currency)}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
