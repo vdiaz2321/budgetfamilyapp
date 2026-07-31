@@ -667,15 +667,15 @@ function StickyFooterBar({
     <div className="pointer-events-none sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-6 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="text-center">
         <p className="text-lg font-medium tabular-nums text-foreground">
-          {formatMoney(actualIncome, currency)}
+          {formatMoney(outflowPlanned, currency)}
         </p>
-        <p className="text-xs text-muted">Income Received</p>
+        <p className="text-xs text-muted">Planned Budget</p>
       </div>
       <div className="border-l border-line text-center">
-        <p className="text-lg font-medium tabular-nums text-foreground">
-          {formatMoney(actualSpent, currency)}
+        <p className={`text-lg font-medium tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+          {formatMoney(displayLeft, currency)}
         </p>
-        <p className="text-xs text-muted">Total Spent</p>
+        <p className="text-xs text-muted">Income Left</p>
       </div>
       <div className={`border-l border-line text-center ${toneClasses.text}`}>
         <p className="text-lg font-medium tabular-nums">{formatMoney(actualLeft, currency)}</p>
