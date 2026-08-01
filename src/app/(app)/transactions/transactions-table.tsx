@@ -7,6 +7,7 @@ import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { deleteTransaction, deleteTransactions, toggleCleared } from "../budget/actions";
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
+import { ImportCsvModal } from "./import-csv-modal";
 import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 
@@ -46,6 +47,7 @@ export function TransactionsTable({
   const router = useRouter();
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPending, startBulk] = useTransition();
   const [query, setQuery] = useState("");
@@ -118,16 +120,25 @@ export function TransactionsTable({
         ) : (
           <MonthPicker monthKey={month.key} basePath="/transactions" />
         )}
-        <button
-          type="button"
-          onClick={() => setModal("new")}
-          className="flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Add Transaction
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="rounded-xl px-3 py-2 text-sm font-semibold text-brand ring-1 ring-brand transition hover:bg-brand-soft"
+          >
+            Import CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal("new")}
+            className="flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Add Transaction
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -338,6 +349,8 @@ export function TransactionsTable({
           onClose={() => setModal(null)}
         />
       ) : null}
+
+      {importOpen ? <ImportCsvModal onClose={() => setImportOpen(false)} /> : null}
     </div>
   );
 }

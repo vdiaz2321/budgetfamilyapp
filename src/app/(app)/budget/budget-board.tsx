@@ -183,12 +183,7 @@ export function BudgetBoard({
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
     <div className="mx-auto max-w-6xl space-y-4">
-      <TopHeader
-        monthKey={month.key}
-        monthFirstOfMonth={month.firstOfMonth}
-        prevMonthLabel={rollover.prevMonthLabel}
-        onAddItem={() => setShowAddModal(true)}
-      />
+      <TopHeader monthKey={month.key} />
       <div className="flex justify-center gap-6">
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
@@ -272,6 +267,11 @@ export function BudgetBoard({
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>
+              <RailActions
+                monthFirstOfMonth={month.firstOfMonth}
+                prevMonthLabel={rollover.prevMonthLabel}
+                onAddItem={() => setShowAddModal(true)}
+              />
               {/* Summary | Transactions toggle */}
               <div className="grid grid-cols-2 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
                 <button
@@ -422,53 +422,56 @@ function CategoryProgressCard({
   );
 }
 
-// Top row above the hero: title + month picker on left, "+ Add Item" +
-// "Roll in {prev} planned" on the right. Splits the two rollover actions
-// into visually distinct buttons per Victor's ask.
-function TopHeader({
-  monthKey,
+// Top row above the hero: title + month picker on the left. The Add Item and
+// Roll-Planned buttons live in the right rail (aside), above the Summary /
+// Transactions tabs, so they align with that column's width.
+function TopHeader({ monthKey }: { monthKey: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <h1 className="text-xl font-bold tracking-tight text-foreground">Budget Overview</h1>
+      <MonthPicker monthKey={monthKey} />
+    </div>
+  );
+}
+
+// Add Item + Roll Planned, styled as a matched pair to sit above the
+// Summary / Transactions tab strip in the right rail.
+function RailActions({
   monthFirstOfMonth,
   prevMonthLabel,
   onAddItem,
 }: {
-  monthKey: string;
   monthFirstOfMonth: string;
   prevMonthLabel: string;
   onAddItem: () => void;
 }) {
   const [copyPending, startCopy] = useTransition();
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex shrink-0 items-center gap-3">
-        <h1 className="text-xl font-bold tracking-tight text-foreground">Budget Overview</h1>
-        <MonthPicker monthKey={monthKey} />
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
+    <div className="grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        onClick={onAddItem}
+        className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add Item
+      </button>
+      <form action={(fd) => startCopy(() => copyPlansFromPreviousMonth(fd))}>
+        <input type="hidden" name="month" value={monthFirstOfMonth} />
         <button
-          type="button"
-          onClick={onAddItem}
-          className="flex items-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
+          type="submit"
+          disabled={copyPending}
+          title={`Copy every planned amount from ${prevMonthLabel} into this month`}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-sm font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
           </svg>
-          Add Item
+          {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
         </button>
-        <form action={(fd) => startCopy(() => copyPlansFromPreviousMonth(fd))}>
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <button
-            type="submit"
-            disabled={copyPending}
-            title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-            className="flex items-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-sm font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
-            </svg>
-            {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
-          </button>
-        </form>
-      </div>
+      </form>
     </div>
   );
 }
@@ -521,6 +524,12 @@ function SummaryHeroCard({
                 rolled income
               </p>
             )}
+          </div>
+          <div className="text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
+            <p className="mt-0.5 text-xl font-bold tabular-nums text-positive">
+              {formatMoney(incomePlanned, currency)}
+            </p>
           </div>
           <div className="text-center">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>

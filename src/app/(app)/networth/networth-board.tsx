@@ -140,8 +140,14 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
       </div>
 
       {/* Current position */}
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label="Assets / Cash O/H" value={latest?.assets ?? 0} currency={currency} tone="text-positive" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Stat
+          label="Banking"
+          value={(latest?.savings ?? 0) + (latest?.bank ?? 0)}
+          currency={currency}
+          tone="text-positive"
+        />
+        <Stat label="Investments" value={latest?.stocks ?? 0} currency={currency} tone="text-positive" />
         <Stat label="Debts" value={latest?.liabilities ?? 0} currency={currency} tone="text-negative" />
         <Stat
           label="Net worth"
@@ -225,7 +231,7 @@ function ChartSection({ points, currency }: { points: MonthPoint[]; currency: st
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-        <h2 className="font-semibold">Net Worth Over Time</h2>
+        <h2 className="font-semibold">Net Worth Graph Breakdown</h2>
       </button>
       {open ? (
         points.length === 0 ? (
@@ -359,7 +365,8 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
             <text
               key={p.month}
               x={x(i)} y={H - 8}
-              textAnchor="middle" fontSize="11"
+              textAnchor={i === lastIdx ? "end" : i === 0 ? "start" : "middle"}
+              fontSize="9"
               fill="var(--muted)"
             >
               {monthLabel(p.month)}
@@ -753,10 +760,10 @@ function BalanceGrid({
                         >
                           <path d="M9 6l6 6-6 6" />
                         </svg>
-                        <span className="text-sm font-bold uppercase tracking-wider text-foreground">
+                        <span className="whitespace-nowrap text-sm font-bold uppercase tracking-wider text-foreground">
                           {g.section}
                         </span>
-                        <span className="text-xs font-normal normal-case text-muted">
+                        <span className="whitespace-nowrap text-xs font-normal normal-case text-muted">
                           {accountCount} {accountCount === 1 ? "account" : "accounts"}
                         </span>
                       </button>
@@ -1070,7 +1077,7 @@ function SummaryBlock({
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="font-semibold">Net worth by month</h2>
+          <h2 className="font-semibold">Net Worth Overtime</h2>
         </button>
         <YearPicker years={years} year={year} onYearChange={onYearChange} />
       </div>
