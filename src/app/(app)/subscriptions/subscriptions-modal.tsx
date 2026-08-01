@@ -18,7 +18,7 @@ export function SubscriptionsModal({
   onClose: () => void;
 }) {
   return (
-    <ModalShell title="Manage Subscriptions & Irregular Bills" onClose={onClose}>
+    <ModalShell title="Manage Subscriptions & Irregular Bills" onClose={onClose} className="max-w-5xl">
       <SubscriptionsBoard
         currency={currency}
         subscriptions={subscriptions}

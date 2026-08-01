@@ -328,11 +328,11 @@ export default async function NetworthPage() {
   }
   rows.push(...liabilityRows);
 
-  // Always show a 6-column strip: current month + the five preceding calendar
+  // Always show a 12-column strip: current month + the eleven preceding calendar
   // months, even if no snapshots exist for the earlier months (they render "—").
   const nowDate = new Date();
   const displayMonths: string[] = [];
-  for (let back = 0; back <= 5; back++) {
+  for (let back = 0; back <= 11; back++) {
     const d = new Date(nowDate.getFullYear(), nowDate.getMonth() - back, 1);
     displayMonths.push(
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`,

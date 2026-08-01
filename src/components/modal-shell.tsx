@@ -6,10 +6,12 @@ export function ModalShell({
   title,
   onClose,
   children,
+  className,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -19,7 +21,7 @@ export function ModalShell({
         onClick={onClose}
         className="fixed inset-0 z-40 bg-black/30"
       />
-      <div className="relative z-50 flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+      <div className={`relative z-50 flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10${className ? ` ${className}` : ""}`}>
         <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3.5">
           <h2 className="text-lg font-bold">{title}</h2>
           <button

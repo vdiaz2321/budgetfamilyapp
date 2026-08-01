@@ -706,7 +706,7 @@ function BalanceGrid({
   // it read as a distracting green wash (see feedback: "looks horrible").
   const zebraBg = (r: GridRow) => (r.indent ? "bg-background/30" : "");
 
-  const stickyCls = "sticky left-0 pr-3";
+  const stickyCls = "sticky left-0 z-10 min-w-[14rem] pr-3";
   const hasUnallocated = localRows.some((r) => r.muted);
 
   // A handful of months fills the card width evenly (Account column gets the
@@ -739,7 +739,7 @@ function BalanceGrid({
         <div>
           <h2 className="font-semibold">Monthly balances</h2>
           <p className="text-xs text-muted">
-            Current month and last five months. Edit balances on the Accounts page.
+            Rolling 12-month view — newest on the left. Edit balances on the Accounts page.
           </p>
         </div>
       </button>
@@ -790,7 +790,7 @@ function BalanceGrid({
                     </tr>
                   ) : null}
                   <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
-                    <td className="sticky left-0 z-10 bg-brand-soft/50 pr-3 p-0 dark:bg-brand-soft/15">
+                    <td className="sticky left-0 z-10 min-w-[14rem] bg-surface pr-3 p-0">
                       <button
                         type="button"
                         onClick={() => toggle(g.section)}
@@ -850,7 +850,7 @@ function BalanceGrid({
                               }`}
                             >
                               <td
-                                className={`${stickyCls} ${zebraBg(r) || "bg-surface"} whitespace-nowrap ${
+                                className={`${stickyCls} ${r.indent ? "bg-background" : "bg-surface"} whitespace-nowrap ${
                                   r.hasChildren
                                     ? "p-0"
                                     : r.indent

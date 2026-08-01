@@ -131,13 +131,13 @@ function SubscriptionsSection({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
-                <th className="w-6 px-1 py-2"></th>
-                <th className="px-2 py-2 text-left">Name</th>
-                <th className="px-2 py-2">Amount</th>
-                <th className="px-2 py-2">Cycle</th>
-                <th className="px-2 py-2">Next Renewal</th>
-                <th className="px-2 py-2 text-center">Card</th>
-                <th className="px-2 py-2"></th>
+                <th className="w-6 px-1 py-1"></th>
+                <th className="px-2 py-1 text-left">Name</th>
+                <th className="px-2 py-1">Amount</th>
+                <th className="px-2 py-1">Cycle</th>
+                <th className="px-2 py-1">Next Renewal</th>
+                <th className="px-2 py-1 text-center">Card</th>
+                <th className="px-2 py-1"></th>
               </tr>
             </thead>
             <tbody>
@@ -159,32 +159,32 @@ function SubscriptionsSection({
                   />
                 ) : (
                   <tr key={s.id} className={`border-t border-line ${!s.isActive ? "opacity-50" : ""}`}>
-                    <td className="px-1 py-2">
+                    <td className="px-1 py-1">
                       <ReorderButtons
                         onUp={i > 0 ? () => move(s.id, "up") : undefined}
                         onDown={i < visible.length - 1 ? () => move(s.id, "down") : undefined}
                       />
                     </td>
-                    <td className="whitespace-nowrap px-2 py-2 font-medium">
+                    <td className="whitespace-nowrap px-2 py-1 font-medium">
                       <span className={!s.isActive ? "line-through" : ""}>{s.name}</span>
                     </td>
-                    <td className="px-2 py-2 text-center tabular-nums">
+                    <td className="px-2 py-1 text-center tabular-nums">
                       {formatMoney(s.amountCents, currency)}
                     </td>
-                    <td className="px-2 py-2 text-center text-muted">
+                    <td className="px-2 py-1 text-center text-muted">
                       {CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}
                     </td>
-                    <td className="px-2 py-2 text-center">
+                    <td className="px-2 py-1 text-center">
                       {s.nextRenewalDate ? (
                         <RenewalBadge date={s.nextRenewalDate} />
                       ) : (
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="px-2 py-2 text-left text-muted">
+                    <td className="px-2 py-1 text-left text-muted">
                       {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}
                     </td>
-                    <td className="px-2 py-2 text-right">
+                    <td className="px-2 py-1 text-right">
                       <RowActions
                         onEdit={() => setEditing(s.id)}
                         onDelete={async () => {
@@ -232,6 +232,7 @@ function SubscriptionFormRow({
   onDone: () => void;
 }) {
   const [pending, start] = useTransition();
+  const [cycle, setCycle] = useState<string>(row?.billingCycle ?? "monthly");
 
   return (
     <tr className="border-t border-line bg-brand-soft/10">
@@ -272,6 +273,7 @@ function SubscriptionFormRow({
             <select
               name="billingCycle"
               defaultValue={row?.billingCycle ?? "monthly"}
+              onChange={(e) => setCycle(e.target.value)}
               className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               {Object.entries(CYCLE_LABEL).map(([v, l]) => (
@@ -279,7 +281,7 @@ function SubscriptionFormRow({
               ))}
             </select>
           </label>
-          <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} />
+          <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} cycle={cycle} />
           <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
             <input
               type="checkbox"
@@ -380,12 +382,12 @@ function IrregularBillsSection({
           <table className="w-full text-sm">
             <thead>
               <tr className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
-                <th className="w-6 px-1 py-2"></th>
-                <th className="px-2 py-2 text-left">Name</th>
-                <th className="px-2 py-2">Typical Amount</th>
-                <th className="px-2 py-2">Notes</th>
-                <th className="px-2 py-2 text-center">Card</th>
-                <th className="px-2 py-2"></th>
+                <th className="w-6 px-1 py-1"></th>
+                <th className="px-2 py-1 text-left">Name</th>
+                <th className="px-2 py-1">Typical Amount</th>
+                <th className="px-2 py-1">Notes</th>
+                <th className="px-2 py-1 text-center">Card</th>
+                <th className="px-2 py-1"></th>
               </tr>
             </thead>
             <tbody>
@@ -399,21 +401,21 @@ function IrregularBillsSection({
                   />
                 ) : (
                   <tr key={b.id} className="border-t border-line">
-                    <td className="px-1 py-2">
+                    <td className="px-1 py-1">
                       <ReorderButtons
                         onUp={i > 0 ? () => move(b.id, "up") : undefined}
                         onDown={i < rows.length - 1 ? () => move(b.id, "down") : undefined}
                       />
                     </td>
-                    <td className="px-2 py-2 font-medium">{b.name}</td>
-                    <td className="px-2 py-2 text-center tabular-nums">
+                    <td className="px-2 py-1 font-medium">{b.name}</td>
+                    <td className="px-2 py-1 text-center tabular-nums">
                       {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
                     </td>
-                    <td className="px-2 py-2 text-center text-muted">{b.notes || "—"}</td>
-                    <td className="px-2 py-2 text-center text-muted">
+                    <td className="px-2 py-1 text-center text-muted">{b.notes || "—"}</td>
+                    <td className="px-2 py-1 text-center text-muted">
                       {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}
                     </td>
-                    <td className="px-2 py-2 text-right">
+                    <td className="px-2 py-1 text-right">
                       <RowActions
                         onEdit={() => setEditing(b.id)}
                         onDelete={async () => {
@@ -542,33 +544,73 @@ function IrregularBillFormRow({
   );
 }
 
-function RenewalDatePicker({ defaultValue }: { defaultValue?: string }) {
-  const toDisplay = (v: string) => {
+function RenewalDatePicker({ defaultValue, cycle }: { defaultValue?: string; cycle?: string }) {
+  const isMonthly = !cycle || cycle === "monthly";
+
+  // For monthly: extract just the day from YYYY-MM-DD; for others: extract MM/DD.
+  const toDisplayMonthly = (v: string) => {
+    const p = v.split("-");
+    return p.length === 3 ? String(parseInt(p[2])) : "";
+  };
+  const toDisplayFull = (v: string) => {
     const p = v.split("-");
     return p.length === 3 ? `${p[1]}/${p[2]}` : "";
   };
-  const toHidden = (d: string) => {
+
+  // For monthly: compute next occurrence of `day` in current or next month.
+  const monthlyToHidden = (day: string) => {
+    const d = parseInt(day);
+    if (isNaN(d) || d < 1 || d > 31) return "";
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const yr = now.getFullYear(), mo = now.getMonth();
+    const cand = new Date(yr, mo, d); cand.setHours(0, 0, 0, 0);
+    const use = cand < now ? new Date(yr, mo + 1, d) : cand;
+    return `${use.getFullYear()}-${String(use.getMonth() + 1).padStart(2, "0")}-${String(use.getDate()).padStart(2, "0")}`;
+  };
+  // For non-monthly: compute next occurrence of MM/DD.
+  const fullToHidden = (d: string) => {
     const [mm, dd] = d.split("/");
     const m = parseInt(mm), dy = parseInt(dd);
-    if (isNaN(m) || isNaN(dy)) return "";
+    if (isNaN(m) || m < 1 || m > 12 || isNaN(dy) || dy < 1 || dy > 31) return "";
     const now = new Date(); now.setHours(0, 0, 0, 0);
     const yr = now.getFullYear();
     const cand = new Date(yr, m - 1, dy); cand.setHours(0, 0, 0, 0);
     const year = cand < now ? yr + 1 : yr;
     return `${year}-${String(m).padStart(2, "0")}-${String(dy).padStart(2, "0")}`;
   };
-  const [display, setDisplay] = useState(toDisplay(defaultValue ?? ""));
+
+  const [dayDisplay, setDayDisplay] = useState(toDisplayMonthly(defaultValue ?? ""));
+  const [fullDisplay, setFullDisplay] = useState(toDisplayFull(defaultValue ?? ""));
+
+  if (isMonthly) {
+    return (
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-muted">Due Day</span>
+        <input type="hidden" name="nextRenewalDate" value={monthlyToHidden(dayDisplay)} />
+        <input
+          type="number"
+          min="1"
+          max="31"
+          placeholder="1–31"
+          value={dayDisplay}
+          onChange={(e) => setDayDisplay(e.target.value)}
+          className="w-16 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs text-muted">Renewal</span>
-      <input type="hidden" name="nextRenewalDate" value={toHidden(display)} />
+      <input type="hidden" name="nextRenewalDate" value={fullToHidden(fullDisplay)} />
       <input
         type="text"
         placeholder="MM/DD"
-        value={display}
+        value={fullDisplay}
         onChange={(e) => {
           const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
-          setDisplay(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
+          setFullDisplay(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
         }}
         className="w-20 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
