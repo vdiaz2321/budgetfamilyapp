@@ -5,7 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { addSubcategory, reorderSubcategories } from "./actions";
-import { ACTUAL_LABEL, BudgetRow, remainingColorClass } from "./budget-row";
+import { ACTUAL_LABEL, actualColorClass, BudgetRow, remainingColorClass } from "./budget-row";
 import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
 
@@ -24,9 +24,9 @@ type Props = {
 // group a button belongs to when it's the only thing visible.
 const ADD_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive/10 text-positive hover:bg-positive/20",
-  savings: "bg-brand-soft text-brand hover:bg-brand-soft/80",
-  bills: "bg-brand-soft text-brand hover:bg-brand-soft/80",
-  expenses: "bg-warning/10 text-warning hover:bg-warning/20",
+  savings: "bg-sky-500/10 text-sky-500 hover:bg-sky-500/20",
+  bills: "bg-brand/10 text-brand hover:bg-brand/20",
+  expenses: "bg-accent/10 text-accent hover:bg-accent/20",
   debt: "bg-negative/10 text-negative hover:bg-negative/20",
 };
 
@@ -90,7 +90,15 @@ export function BudgetGroup({
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
   const isDebt = group.kind === "debt";
   const isIncome = group.kind === "income";
-  const actualLabel = isIncome ? "Received" : "Spent";
+  const actualLabel = ACTUAL_LABEL[group.kind];
+  const headerActualLabel = isIncome ? "Rec'd" : actualLabel;
+  const nameColumnLabel = isIncome
+    ? "Category / Label"
+    : group.kind === "savings"
+      ? "Account / Goal"
+      : group.kind === "bills"
+        ? "Expense Category"
+        : "Category / Label";
 
   const orderedRows = optimisticOrder
     ? optimisticOrder.map((id) => group.rows.find((r) => r.subId === id)).filter(Boolean) as RowData[]
@@ -125,13 +133,13 @@ export function BudgetGroup({
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
           <span className="font-semibold">{group.name}</span>
           <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-            {visibleRows.length}
+            {visibleRows.length} {visibleRows.length === 1 ? "item" : "items"}
           </span>
         </button>
 
-        <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
+        <div className="ml-auto flex items-center gap-4 text-[11px] tabular-nums">
           <span className="hidden text-muted lg:inline">
-            {actualLabel}:{" "}
+            {headerActualLabel}:{" "}
             <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
           </span>
           <span className="hidden text-muted lg:inline">
@@ -185,11 +193,11 @@ export function BudgetGroup({
             <>
               {/* Column-label strip — 12-col grid, must line up with BudgetRow */}
               <div className={`grid grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1" : "py-1.5"} text-[10px] font-semibold uppercase tracking-wider text-muted`}>
-                <div className="col-span-5 pl-6 sm:col-span-4">Category</div>
+                <div className="col-span-5 pl-6 sm:col-span-4">{nameColumnLabel}</div>
                 <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
                 <div className="col-span-2 text-right">Planned</div>
-                <div className="col-span-2 text-right">Left</div>
-                <div className="col-span-1 text-right">%</div>
+                <div className="col-span-2 text-right">Remaining</div>
+                <div className="col-span-2 text-center">Progress</div>
               </div>
 
               <ul className="divide-y divide-line/40">
@@ -209,6 +217,27 @@ export function BudgetGroup({
                   />
                 ))}
               </ul>
+              <div className={`grid grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 ${compact ? "py-2" : "py-2.5"}`}>
+                <div className="col-span-5 flex items-center gap-2 pl-6 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-4">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                    <path d="M8 7h8M8 11h2M12 11h2M16 11h0M8 15h2M12 15h2M16 15h0M8 19h2M12 19h2M16 19h0" />
+                  </svg>
+                  <span>{group.name} subtotal</span>
+                </div>
+                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(group.kind, group.spentTotal)}`}>
+                  {formatMoney(group.spentTotal, currency)}
+                </div>
+                <div className="col-span-2 text-right text-xs font-semibold tabular-nums text-foreground">
+                  {formatMoney(group.plannedTotal, currency)}
+                </div>
+                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                  {formatMoney(remainingTotal, currency)}
+                </div>
+                <div className={`col-span-2 text-center text-xs font-bold tabular-nums ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                  {group.plannedTotal > 0 ? `${Math.min(100, Math.round((group.spentTotal / group.plannedTotal) * 1000) / 10)}%` : "0%"}
+                </div>
+              </div>
             </>
           )}
 

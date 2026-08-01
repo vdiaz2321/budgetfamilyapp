@@ -233,6 +233,16 @@ Full rewards tracker to replace Victor's rewards Google Sheet:
 - **Pay-in-full vs revolving distinction**: pay-in-full cards (most) never
   create a debt entry; revolving cards can opt in and link to a debt
   subcategory, so 0% APR promotional balances get tracked as actual debt.
+- **Rewards categories and valuation**: cards can be tagged Travel or Hotel,
+  assigned a rewards program, and valued manually in dollars per point. The
+  card detail view links to Daily Drop's calculator for verification.
+- **Benefits checklist**: manual benefit rows support reset frequency, dollar value,
+  usage, status, requirements, official action links, verification links, and
+  notes. SQL is provided in `docs/credit-card-rewards-benefits.sql` and must
+  be applied manually in Supabase.
+- **5/24 tracking**: cards opened within the prior 24 months can be included
+  through a manual count toggle; closing or reopening preserves the original
+  opening date.
 - **Expandable row layout** on Accounts, grouped by holder (Vic / Johana) with
   per-holder counts and totals, three sub-sections (active / closed / archived).
 

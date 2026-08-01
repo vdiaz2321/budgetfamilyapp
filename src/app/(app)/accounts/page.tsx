@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentMonthFirst } from "@/lib/snapshots";
-import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
+import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type CardBenefit } from "./accounts-board";
 import { syncAllBucketedAccounts } from "./actions";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
@@ -50,7 +50,8 @@ export default async function AccountsPage() {
     { data: bucketRows },
     { data: debtRows },
     { data: subRows },
-    { data: cardDetailRows },
+    { data: cardDetailRowsInitial, error: cardDetailsError },
+    { data: benefitRows, error: benefitsError },
     { data: acctSnapshotRows },
     { data: bktSnapshotRows },
   ] = await Promise.all([
@@ -76,8 +77,14 @@ export default async function AccountsPage() {
       .eq("household_id", household.id),
     supabase
       .from("credit_card_details")
-      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id")
+      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable")
       .eq("household_id", household.id),
+    supabase
+      .from("credit_card_benefits")
+      .select("id, account_id, name, benefit_type, cadence, max_value_cents, required_spend_cents, requirement_text, enrollment_required, period_start, period_end, used_amount_cents, status, action_url, source_url, notes")
+      .eq("household_id", household.id)
+      .eq("active", true)
+      .order("period_end", { ascending: true, nullsFirst: false }),
     supabase
       .from("account_snapshots")
       .select("account_id, month, balance_cents")
@@ -89,6 +96,42 @@ export default async function AccountsPage() {
       .eq("household_id", household.id)
       .in("month", historyMonths),
   ]);
+
+  // Keep the Accounts page usable before the user applies the new SQL in
+  // Supabase. The existing rewards columns remain fully supported.
+  let cardDetailRows = cardDetailRowsInitial;
+  if (cardDetailsError?.code === "PGRST204" || cardDetailsError?.code === "42703") {
+    const legacy = await supabase
+      .from("credit_card_details")
+      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id")
+      .eq("household_id", household.id);
+    cardDetailRows = legacy.data as typeof cardDetailRowsInitial;
+  }
+  const benefitsByAccount = new Map<string, CardBenefit[]>();
+  if (!benefitsError) {
+    for (const b of benefitRows ?? []) {
+      const list = benefitsByAccount.get(b.account_id) ?? [];
+      list.push({
+        id: b.id,
+        accountId: b.account_id,
+        name: b.name,
+        benefitType: b.benefit_type ?? "credit",
+        cadence: b.cadence ?? "annual",
+        maxValueCents: b.max_value_cents ?? null,
+        requiredSpendCents: b.required_spend_cents ?? null,
+        requirementText: b.requirement_text ?? null,
+        enrollmentRequired: b.enrollment_required ?? false,
+        periodStart: b.period_start ?? null,
+        periodEnd: b.period_end ?? null,
+        usedAmountCents: b.used_amount_cents ?? 0,
+        status: b.status ?? "available",
+        actionUrl: b.action_url ?? null,
+        sourceUrl: b.source_url ?? null,
+        notes: b.notes ?? null,
+      });
+      benefitsByAccount.set(b.account_id, list);
+    }
+  }
 
   // (accountId, month) -> cents; buckets keyed by (bucketId, month) -> cents.
   const acctHistory = new Map<string, number>();
@@ -110,6 +153,10 @@ export default async function AccountsPage() {
   const cardDetailsByAccount = new Map<string, CardDetails>();
   for (const d of cardDetailRows ?? []) {
     cardDetailsByAccount.set(d.account_id, {
+      rewardsCategory: d.rewards_category === "travel" || d.rewards_category === "hotel" ? d.rewards_category : null,
+      rewardsProgram: d.rewards_program ?? null,
+      pointsValueMicros: d.points_value_micros == null ? null : Number(d.points_value_micros),
+      five24Countable: d.five24_countable ?? true,
       bank: d.bank ?? null,
       authUser: d.auth_user ?? null,
       charging: d.charging ?? null,
@@ -195,6 +242,7 @@ export default async function AccountsPage() {
     dateOpened: a.date_opened ?? null,
     dateClosed: a.date_closed ?? null,
     cardDetails: cardDetailsByAccount.get(a.id) ?? null,
+    benefits: benefitsByAccount.get(a.id) ?? [],
     owedCents: cardOwed.get(a.id) ?? 0,
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
     prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,

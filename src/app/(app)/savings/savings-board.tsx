@@ -155,30 +155,6 @@ export function SavingsBoard({ cards, currency }: Props) {
   );
 }
 
-function GoalSection({ title, cards, currency }: { title: string; cards: SavingsCardData[]; currency: string }) {
-  if (cards.length === 0) return null;
-  const { goal, planned, saved, leftToSave, remainingPct } = statsFor(cards);
-  return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <div className="flex overflow-hidden rounded-2xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
-        <Stat label="Planned this month" amount={formatMoney(planned, currency)} sub="budgeted" />
-        <Stat label="Total goal" amount={formatMoney(goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
-        <Stat label="Total saved" amount={formatMoney(saved, currency)} amountTone="text-positive" sub="across all goals" />
-        <Stat
-          label="Left to save"
-          amount={formatMoney(leftToSave, currency)}
-          amountTone={leftToSave > 0 ? "text-negative" : "text-positive"}
-          sub={goal > 0 ? `${remainingPct.toFixed(1)}% remaining` : "—"}
-        />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {cards.map((c) => <SavingsGoalCard key={c.id} card={c} currency={currency} />)}
-      </div>
-    </section>
-  );
-}
-
 function Stat({
   label,
   amount,

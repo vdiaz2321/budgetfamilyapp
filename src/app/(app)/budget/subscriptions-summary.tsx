@@ -1,18 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { DOT } from "./category-icons";
 import { SubscriptionsModal } from "../subscriptions/subscriptions-modal";
+import { updateSubscriptionDueDate } from "../subscriptions/actions";
 import type { CreditCardOption } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
-
-const CYCLE_LABEL: Record<string, string> = {
-  monthly: "Monthly",
-  quarterly: "Quarterly",
-  annual: "Annual",
-  weekly: "Weekly",
-};
 
 function monthlyEquivalent(amountCents: number, cycle: string): number {
   switch (cycle) {
@@ -25,13 +19,6 @@ function monthlyEquivalent(amountCents: number, cycle: string): number {
     default:
       return amountCents;
   }
-}
-
-function daysUntil(dateStr: string): number {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(dateStr + "T00:00:00");
-  return Math.round((target.getTime() - today.getTime()) / 86400000);
 }
 
 const GearIcon = (
@@ -62,6 +49,10 @@ export function SubscriptionsSummaryCard({
     (sum, s) => sum + monthlyEquivalent(s.amountCents, s.billingCycle),
     0,
   );
+  const annualBilledTotal = activeSubs
+    .filter((s) => s.billingCycle === "annual")
+    .reduce((sum, s) => sum + s.amountCents, 0);
+  const annualizedTotal = Math.round(monthlyTotal * 12);
   const cardMap = new Map((creditCards ?? []).map((c) => [c.id, c.name]));
 
   return (
@@ -109,24 +100,32 @@ export function SubscriptionsSummaryCard({
               </button>
             </div>
           ) : (
-            <div className="divide-y divide-line">
+            <>
+              <div className="grid grid-cols-3 divide-x divide-line border-b border-line bg-background/40">
+                <SummaryMetric label="Monthly total" value={formatMoney(Math.round(monthlyTotal), currency)} />
+                <SummaryMetric label="Annual billed" value={formatMoney(annualBilledTotal, currency)} />
+                <SummaryMetric label="Total annual" value={formatMoney(annualizedTotal, currency)} />
+              </div>
+              <div className="grid grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted">
+                <span>Name</span>
+                <span className="text-right">Amount</span>
+                <span className="text-center">Due</span>
+                <span>Card</span>
+              </div>
+              <div className="divide-y divide-line">
               {subscriptions.map((s) => {
                 const cardName = s.accountId ? cardMap.get(s.accountId) : null;
                 return (
-                  <div key={s.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
-                    <span className={`truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className="text-xs text-muted">{CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}</span>
-                      {s.nextRenewalDate ? <RenewalBadge date={s.nextRenewalDate} /> : null}
-                      {cardName ? <span className="text-xs text-muted">{cardName}</span> : null}
-                      <span className="w-20 text-right font-medium tabular-nums">
-                        {formatMoney(s.amountCents, currency)}
-                      </span>
-                    </div>
+                  <div key={s.id} className="grid grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] items-center gap-3 px-4 py-2 text-sm">
+                    <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
+                    <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
+                    <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
+                    <span className="min-w-0 truncate text-xs text-muted">{cardName ?? "—"}</span>
                   </div>
                 );
               })}
-            </div>
+              </div>
+            </>
           )}
         </div>
       ) : null}
@@ -142,6 +141,128 @@ export function SubscriptionsSummaryCard({
       ) : null}
     </section>
   );
+}
+
+function SummaryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-3 py-2 text-center">
+      <p className="truncate text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-bold tabular-nums text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function DueCell({
+  id,
+  name,
+  date,
+  billingCycle,
+}: {
+  id: string;
+  name: string;
+  date: string | null;
+  billingCycle: SubscriptionRow["billingCycle"];
+}) {
+  const monthly = billingCycle === "monthly";
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(() => dueInputValue(date, monthly));
+  const [, start] = useTransition();
+  const cancelled = useRef(false);
+
+  function save() {
+    const nextDate = buildDueDate(value, date, monthly);
+    if (!nextDate) return;
+    const form = new FormData();
+    form.set("id", id);
+    form.set("nextRenewalDate", nextDate);
+    start(async () => {
+      await updateSubscriptionDueDate(form);
+      setEditing(false);
+    });
+  }
+
+  function beginEditing() {
+    cancelled.current = false;
+    setValue(dueInputValue(date, monthly));
+    setEditing(true);
+  }
+
+  if (editing) {
+    return (
+      <div className="flex justify-center">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={value}
+          placeholder={monthly ? "DD" : "MM/DD"}
+          autoFocus
+          aria-label={`Due date for ${name}`}
+          onChange={(event) => setValue(event.target.value.replace(/[^\d/]/g, "").slice(0, 5))}
+          onBlur={() => {
+            if (!cancelled.current) save();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              save();
+            }
+            if (event.key === "Escape") {
+              cancelled.current = true;
+              setEditing(false);
+            }
+          }}
+          className="w-[6.5rem] rounded-lg bg-background px-1.5 py-1 text-center text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <span className="whitespace-nowrap text-center text-xs">
+      {date ? (
+        <RenewalBadge
+          date={date}
+          billingCycle={billingCycle}
+          label={monthly ? date.slice(8, 10) : undefined}
+          onClick={beginEditing}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={beginEditing}
+          className="rounded px-2 py-0.5 text-muted transition hover:bg-brand-soft hover:text-brand"
+          aria-label={`Set due date for ${name}`}
+        >
+          —
+        </button>
+      )}
+    </span>
+  );
+}
+
+function dueInputValue(date: string | null, monthly: boolean) {
+  if (!date) return "";
+  return monthly ? String(Number(date.slice(8, 10))) : date.slice(5).replace("-", "/");
+}
+
+function buildDueDate(value: string, currentDate: string | null, monthly: boolean) {
+  const today = new Date();
+  const year = currentDate?.slice(0, 4) ?? String(today.getFullYear());
+  const month = currentDate?.slice(5, 7) ?? String(today.getMonth() + 1).padStart(2, "0");
+
+  if (monthly) {
+    const day = Number(value);
+    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+    return `${year}-${month}-${String(day).padStart(2, "0")}`;
+  }
+
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (!match) return null;
+  const [, monthValue, dayValue] = match;
+  const monthNumber = Number(monthValue);
+  const dayNumber = Number(dayValue);
+  if (monthNumber < 1 || monthNumber > 12 || dayNumber < 1 || dayNumber > 31) return null;
+  return `${year}-${String(monthNumber).padStart(2, "0")}-${String(dayNumber).padStart(2, "0")}`;
 }
 
 export function IrregularBillsSummaryCard({
@@ -231,19 +352,29 @@ export function IrregularBillsSummaryCard({
   );
 }
 
-function RenewalBadge({ date }: { date: string }) {
-  const days = daysUntil(date);
-  const upcoming = days >= 0 && days <= 30;
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-        upcoming
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-          : "text-muted"
-      }`}
-    >
-      {new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-    </span>
+function RenewalBadge({
+  date,
+  billingCycle,
+  label,
+  onClick,
+}: {
+  date: string;
+  billingCycle: SubscriptionRow["billingCycle"];
+  label?: string;
+  onClick?: () => void;
+}) {
+  const className = `rounded-full px-2 py-0.5 text-xs font-medium ${
+    billingCycle === "monthly"
+      ? "bg-positive/10 text-positive dark:bg-positive/20"
+      : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+  }`;
+  const displayLabel = label ?? new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return onClick ? (
+    <button type="button" onClick={onClick} className={`${className} hover:brightness-95`} aria-label={`Edit due date ${displayLabel}`}>
+      {displayLabel}
+    </button>
+  ) : (
+    <span className={className}>{displayLabel}</span>
   );
 }
 

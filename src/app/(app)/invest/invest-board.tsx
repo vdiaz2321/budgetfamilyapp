@@ -210,7 +210,7 @@ export function InvestBoard({ accounts, years, currency, destAccounts }: Props) 
                 </div>
                 <div className="rounded-lg bg-surface/60 px-3 py-2.5">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Current balance</p>
-                  <p className="text-xs leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage's ending balance.</p>
+                  <p className="text-xs leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage&apos;s ending balance.</p>
                 </div>
               </div>
             </div>
@@ -651,6 +651,9 @@ function PerfTable({
   // updates the UI immediately, then persists via reorderAccounts. Server props
   // reset this on refresh.
   const [localAccounts, setLocalAccounts] = useState(accounts);
+  // This is an intentional synchronization of server-provided ordering into
+  // the optimistic drag-and-drop copy after a revalidation.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setLocalAccounts(accounts), [accounts]);
   const [, startReorder] = useTransition();
   const [reorderError, setReorderError] = useState<string | null>(null);

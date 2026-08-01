@@ -194,8 +194,6 @@ export default async function AnnualOverviewPage({
     for (const { kind } of COLUMNS) totals[kind] += r.values[kind];
   }
   const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
-  const hasFuture = rows.some((r) => r.status === "future" && r.hasData);
-
   // Category by Months: each subcategory as a row (actuals only), grouped by
   // kind. Only include rows/groups that have at least one non-zero actual.
   const subIdsByKind = new Map<CategoryKind, string[]>();
@@ -313,7 +311,6 @@ export default async function AnnualOverviewPage({
         rows={rows}
         totals={totals}
         totalNet={totalNet}
-        hasFuture={hasFuture}
         currency={currency}
         gridCols={gridCols}
       />

@@ -154,7 +154,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       <button
         type="button"
         onClick={onSelect}
-        className={`col-span-1 text-right text-[11px] tabular-nums ${pctClass}`}
+        className={`col-span-2 text-center text-[11px] tabular-nums ${pctClass}`}
       >
         {pct}%
       </button>

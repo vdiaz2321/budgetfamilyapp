@@ -219,8 +219,6 @@ export function BudgetBoard({
         <div className="relative space-y-4">
           {heroHidden && (
             <StickyFooterBar
-              actualIncome={actualIncome}
-              actualSpent={actualSpent}
               actualLeft={actualLeft}
               displayLeft={displayLeft}
               outflowPlanned={outflowPlanned}
@@ -270,7 +268,7 @@ export function BudgetBoard({
       </div>
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
-      <aside className="hidden w-[300px] shrink-0 lg:block">
+      <aside className="hidden w-[360px] shrink-0 lg:block">
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>
@@ -383,11 +381,7 @@ const TONE_CLASSES: Record<BudgetTone, { text: string; badge: string; icon: stri
 
 function getBudgetStatus(
   actualLeft: number,
-  displayLeft: number,
-  actualSpent: number,
-  outflowPlanned: number,
 ): { tone: BudgetTone; badgeText: string } {
-  const expenseRatio = outflowPlanned > 0 ? actualSpent / outflowPlanned : 0;
   if (actualLeft < 0) return { tone: "bad", badgeText: "Overspent" };
   return { tone: "good", badgeText: "On track" };
 }
@@ -508,7 +502,7 @@ function SummaryHeroCard({
   monthFirstOfMonth: string;
   currency: string;
 }) {
-  const { tone, badgeText } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
+  const { tone, badgeText } = getBudgetStatus(actualLeft);
   const toneClasses = TONE_CLASSES[tone];
 
   return (
@@ -639,21 +633,17 @@ function RolloverFooter({
 // the viewport across that whole scroll region instead of unsticking after
 // only its own row height.
 function StickyFooterBar({
-  actualIncome,
-  actualSpent,
   actualLeft,
   displayLeft,
   outflowPlanned,
   currency,
 }: {
-  actualIncome: number;
-  actualSpent: number;
   actualLeft: number;
   displayLeft: number;
   outflowPlanned: number;
   currency: string;
 }) {
-  const { tone } = getBudgetStatus(actualLeft, displayLeft, actualSpent, outflowPlanned);
+  const { tone } = getBudgetStatus(actualLeft);
   const toneClasses = TONE_CLASSES[tone];
 
   return (
@@ -685,4 +675,3 @@ function StickyFooterBar({
     </div>
   );
 }
-

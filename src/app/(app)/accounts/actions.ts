@@ -358,10 +358,20 @@ export async function upsertCardDetails(formData: FormData) {
     const n = parseInt(v, 10);
     return Number.isFinite(n) ? n : 0;
   };
+  const optMicros = (k: string) => {
+    const v = String(formData.get(k) ?? "").trim();
+    if (!v) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 1_000_000) : null;
+  };
 
   const row = {
     account_id: accountId,
     household_id: householdId,
+    rewards_category: ["travel", "hotel"].includes(String(formData.get("rewardsCategory") ?? "")) ? String(formData.get("rewardsCategory")) : null,
+    rewards_program: optText("rewardsProgram"),
+    points_value_micros: optMicros("pointsValue"),
+    five24_countable: formData.get("five24Countable") === "on",
     bank: optText("bank"),
     auth_user: optText("authUser"),
     charging: optText("charging"),
@@ -386,7 +396,13 @@ export async function upsertCardDetails(formData: FormData) {
     // Migration 0026 adds benefit_used_on + free_night_points_limit — if those
     // columns aren't in the schema yet, retry without them so other fields save.
     if (error.code === "PGRST204") {
-      const { benefit_used_on, free_night_points_limit, ...rowWithout } = row;
+      const rowWithout = { ...row } as Record<string, unknown>;
+      delete rowWithout.benefit_used_on;
+      delete rowWithout.free_night_points_limit;
+      delete rowWithout.rewards_category;
+      delete rowWithout.rewards_program;
+      delete rowWithout.points_value_micros;
+      delete rowWithout.five24_countable;
       const { error: e2 } = await supabase
         .from("credit_card_details")
         .upsert(rowWithout, { onConflict: "account_id" });
@@ -399,6 +415,62 @@ export async function upsertCardDetails(formData: FormData) {
     }
     return { error: "Couldn't save — " + error.message };
   }
+  revalidate();
+  return { error: null };
+}
+
+// Benefits are intentionally manual: clicking a benefit opens its official
+// action/source URL, while these actions record the user's usage and notes.
+export async function saveCardBenefit(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const id = String(formData.get("id") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim();
+  if (!accountId) return { error: "Missing card." };
+  if (!id && !name) return { error: "Benefit name is required." };
+
+  const text = (key: string) => String(formData.get(key) ?? "").trim() || null;
+  const cents = (key: string) => {
+    const value = String(formData.get(key) ?? "").trim();
+    return value ? displayToCents(value) : null;
+  };
+  const row = {
+    ...(id ? { id } : {}),
+    account_id: accountId,
+    household_id: householdId,
+    name: name || "Benefit",
+    benefit_type: text("benefitType") ?? "credit",
+    cadence: text("cadence") ?? "annual",
+    max_value_cents: cents("maxValue"),
+    required_spend_cents: cents("requiredSpend"),
+    requirement_text: text("requirementText"),
+    enrollment_required: formData.get("enrollmentRequired") === "on",
+    period_start: text("periodStart"),
+    period_end: text("periodEnd"),
+    used_amount_cents: cents("usedAmount") ?? 0,
+    status: text("status") ?? "available",
+    action_url: text("actionUrl"),
+    source_url: text("sourceUrl"),
+    notes: text("notes"),
+    active: true,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("credit_card_benefits").upsert(row, { onConflict: "id" });
+  if (error) return { error: "Couldn't save benefit — " + error.message };
+  revalidate();
+  return { error: null };
+}
+
+export async function deleteCardBenefit(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return { error: "Missing benefit." };
+  const { error } = await supabase
+    .from("credit_card_benefits")
+    .update({ active: false, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+  if (error) return { error: "Couldn't delete benefit — " + error.message };
   revalidate();
   return { error: null };
 }

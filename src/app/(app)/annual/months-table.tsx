@@ -18,12 +18,11 @@ type Props = {
   rows: MonthRow[];
   totals: Record<CategoryKind, number>;
   totalNet: number;
-  hasFuture: boolean;
   currency: string;
   gridCols: string;
 };
 
-export function MonthsTable({ columns, rows, totals, totalNet, hasFuture, currency, gridCols }: Props) {
+export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCols }: Props) {
   const [open, setOpen] = useState(false);
 
   return (

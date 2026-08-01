@@ -339,7 +339,7 @@ function PlannedForm({
   onAddTransaction: () => void;
 }) {
   const [pending, start] = useTransition();
-  const [duePending, startDue] = useTransition();
+  const [, startDue] = useTransition();
   return (
     <>
       <Section title="Planned this month">
@@ -429,6 +429,7 @@ function DebtForm({
             className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
+        {isSnowballFocus ? <p className="text-[11px] text-muted">Snowball baseline this month: <span className="font-semibold tabular-nums text-brand">{formatMoney(scheduledCents, currency)}</span></p> : null}
         <Grid>
           <Labeled label="Balance" name="balance" type="number" step="0.01" defaultValue={centsToDisplay(d.balanceCents)} />
           <Labeled label="Min. payment" name="minPayment" type="number" step="0.01" defaultValue={centsToDisplay(d.minCents)} />

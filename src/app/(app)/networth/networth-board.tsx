@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState, useTransition } from "react";
-import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { setAccountSnapshot, setBucketSnapshot, setNetworthHistory, upsertNetworthYear } from "./actions";
+import { setNetworthHistory, upsertNetworthYear } from "./actions";
 import { reorderAccounts, reorderBuckets, renameAccount, updateBucket } from "../accounts/actions";
 
 export type MonthPoint = {
@@ -154,11 +154,6 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
       {/* Over-time chart */}
       <ChartSection points={points} currency={currency} />
 
-      {/* Monthly balances by account — the sheet's per-account grid */}
-      {gridRows.length > 0 ? (
-        <BalanceGrid months={gridMonths} rows={gridRows} currency={currency} />
-      ) : null}
-
       {/* Transposed summary — the sheet's top block (Total Assets → NW w/out Invest) */}
       {points.length > 0 ? (
         <SummaryBlock
@@ -168,6 +163,11 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
           year={year}
           onYearChange={setYear}
         />
+      ) : null}
+
+      {/* Monthly balances by account — the sheet's per-account grid */}
+      {gridRows.length > 0 ? (
+        <BalanceGrid months={gridMonths} rows={gridRows} currency={currency} />
       ) : null}
 
       {/* Monthly Net Worth analytics — the sheet's YearlyNetWorth tab */}
@@ -286,6 +286,9 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
   const showXLabel = (i: number) =>
     i === lastIdx ||
     (i % labelEvery === 0 && (lastIdx - i) * pxPerMonth >= 50);
+  const tooltipPct = hover != null ? (x(hover) / W) * 100 : 50;
+  const tooltipTransform =
+    tooltipPct < 20 ? "translateX(0)" : tooltipPct > 80 ? "translateX(-100%)" : "translateX(-50%)";
 
   return (
     <div className="relative">
@@ -367,9 +370,10 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
 
       {hovered != null && hover != null ? (
         <div
-          className="pointer-events-none absolute top-2 z-10 -translate-x-1/2 rounded-lg bg-surface px-3 py-2 text-center shadow-md ring-1 ring-black/10 dark:ring-white/15"
-          style={{ left: `${(x(hover) / W) * 100}%` }}
+          className="pointer-events-none absolute top-2 z-10 max-w-[18rem] rounded-lg bg-surface px-3 py-2 text-center shadow-md ring-1 ring-black/10 dark:ring-white/15"
+          style={{ left: `${tooltipPct}%`, transform: tooltipTransform }}
         >
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Net worth</p>
           <p className="text-sm font-bold tabular-nums">{formatMoney(hovered.net, currency)}</p>
           <p className="text-[11px] text-muted">{monthLabel(hovered.month)}</p>
           <p className="text-[10px] text-muted tabular-nums">
@@ -383,56 +387,6 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
 
 // One editable snapshot cell — reads like text until focused, saves on blur.
 // Mirrors the Accounts page balance input, sized down for the grid.
-function SnapshotCell({
-  variant,
-  id,
-  month,
-  cents,
-  currency,
-  liability,
-}: {
-  variant: "account" | "bucket";
-  id: string;
-  month: string;
-  cents: number | null;
-  currency: string;
-  liability?: boolean;
-}) {
-  const [pending, start] = useTransition();
-  const formRef = useRef<HTMLFormElement>(null);
-  const initial = cents == null ? "" : centsToDisplay(cents);
-  const action = variant === "account" ? setAccountSnapshot : setBucketSnapshot;
-  const idName = variant === "account" ? "accountId" : "bucketId";
-
-  return (
-    <form
-      ref={formRef}
-      action={(fd) => start(() => action(fd))}
-      className="flex items-center justify-center gap-0.5"
-    >
-      <input type="hidden" name={idName} value={id} />
-      <input type="hidden" name="month" value={month} />
-      <span className="pointer-events-none text-xs text-muted">{currencySymbol(currency)}</span>
-      <input
-        key={initial}
-        name="balance"
-        type="text"
-        inputMode="decimal"
-        defaultValue={initial}
-        placeholder="—"
-        size={Math.max(initial.length, 4) + 1}
-        onFocus={(e) => e.currentTarget.select()}
-        onBlur={(e) => {
-          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
-        }}
-        className={`min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${
-          liability && cents != null && cents > 0 ? "text-negative" : ""
-        } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
-      />
-    </form>
-  );
-}
-
 // Inline-editable account/bucket name — reads like text until clicked, saves
 // on blur. `rename` is renameAccount or updateBucket from the Accounts
 // actions, both of which take just {id, name} form fields.
@@ -656,9 +610,6 @@ function BalanceGrid({
   );
   const toggle = (section: string) =>
     setCollapsed((c) => ({ ...c, [section]: !c[section] }));
-  const allOpen = sections.every((g) => !collapsed[g.section]);
-  const toggleAll = () =>
-    setCollapsed(Object.fromEntries(sections.map((g) => [g.section, allOpen])));
 
   const [collapsedAccounts, setCollapsedAccounts] = useSessionCollapse(
     "networth-grid-accounts-v2",
@@ -738,9 +689,6 @@ function BalanceGrid({
         </svg>
         <div>
           <h2 className="font-semibold">Monthly balances</h2>
-          <p className="text-xs text-muted">
-            Rolling 12-month view — newest on the left. Edit balances on the Accounts page.
-          </p>
         </div>
       </button>
       {gridOpen ? <>

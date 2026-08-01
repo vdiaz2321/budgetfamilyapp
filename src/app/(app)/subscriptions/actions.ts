@@ -153,6 +153,20 @@ export async function deleteSubscription(formData: FormData) {
   revalidate();
 }
 
+export async function updateSubscriptionDueDate(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  const nextRenewalDate = String(formData.get("nextRenewalDate") ?? "").trim() || null;
+  if (!id) return;
+
+  await supabase
+    .from("subscriptions")
+    .update({ next_renewal_date: nextRenewalDate, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+  revalidate();
+}
+
 export async function upsertIrregularBill(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "").trim() || null;
@@ -186,6 +200,63 @@ export async function deleteIrregularBill(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");
   await supabase.from("irregular_bills").delete().eq("id", id).eq("household_id", householdId);
+  revalidate();
+}
+
+// Persist the complete visible order in one request from the board. This is
+// safer than replaying several up/down swaps after a drag, especially when a
+// user moves an item across multiple rows.
+export async function reorderSubscriptions(orderedIds: string[]) {
+  const { supabase, householdId } = await requireHousehold();
+  const { data: rows } = await supabase
+    .from("subscriptions")
+    .select("id, sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order")
+    .order("name");
+  if (!rows) return;
+
+  const knownIds = new Set(rows.map((row) => row.id));
+  const requested = [...new Set(orderedIds)].filter((id) => knownIds.has(id));
+  const requestedSet = new Set(requested);
+  const finalIds = [...requested, ...rows.filter((row) => !requestedSet.has(row.id)).map((row) => row.id)];
+
+  await Promise.all(
+    finalIds.map((id, index) =>
+      supabase
+        .from("subscriptions")
+        .update({ sort_order: index + 1 })
+        .eq("id", id)
+        .eq("household_id", householdId),
+    ),
+  );
+  revalidate();
+}
+
+export async function reorderIrregularBills(orderedIds: string[]) {
+  const { supabase, householdId } = await requireHousehold();
+  const { data: rows } = await supabase
+    .from("irregular_bills")
+    .select("id, sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order")
+    .order("name");
+  if (!rows) return;
+
+  const knownIds = new Set(rows.map((row) => row.id));
+  const requested = [...new Set(orderedIds)].filter((id) => knownIds.has(id));
+  const requestedSet = new Set(requested);
+  const finalIds = [...requested, ...rows.filter((row) => !requestedSet.has(row.id)).map((row) => row.id)];
+
+  await Promise.all(
+    finalIds.map((id, index) =>
+      supabase
+        .from("irregular_bills")
+        .update({ sort_order: index + 1 })
+        .eq("id", id)
+        .eq("household_id", householdId),
+    ),
+  );
   revalidate();
 }
 

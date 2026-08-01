@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import {
   deleteIrregularBill,
   deleteSubscription,
-  reorderIrregularBill,
-  reorderSubscription,
+  reorderIrregularBills,
+  reorderSubscriptions,
   upsertIrregularBill,
   upsertSubscription,
 } from "./actions";
@@ -39,6 +39,72 @@ function daysUntil(dateStr: string): number {
   today.setHours(0, 0, 0, 0);
   const target = new Date(dateStr + "T00:00:00");
   return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+type Reorderable = { id: string };
+
+function usePointerReorder<T extends Reorderable>(
+  rows: T[],
+  onReorder: (nextRows: T[]) => void,
+) {
+  const rowsRef = useRef(rows);
+  const dragId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  const keyUnder = (x: number, y: number) => {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    return el?.closest<HTMLElement>("[data-reorder-id]")?.dataset.reorderId ?? null;
+  };
+
+  const startDrag = (id: string) => {
+    dragId.current = id;
+    document.body.style.cursor = "grabbing";
+
+    const onMove = (event: MouseEvent) => setDragOverId(keyUnder(event.clientX, event.clientY));
+    const onUp = (event: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      setDragOverId(null);
+
+      const from = dragId.current;
+      dragId.current = null;
+      const to = keyUnder(event.clientX, event.clientY);
+      if (!from || !to || from === to) return;
+
+      const current = rowsRef.current;
+      const fromIndex = current.findIndex((row) => row.id === from);
+      const toIndex = current.findIndex((row) => row.id === to);
+      if (fromIndex < 0 || toIndex < 0) return;
+
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      onReorder(next);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  return { dragOverId, startDrag };
+}
+
+function reorderVisibleRows<T extends Reorderable>(
+  allRows: T[],
+  visibleRows: T[],
+  nextVisibleRows: T[],
+) {
+  const visibleIds = new Set(visibleRows.map((row) => row.id));
+  let nextIndex = 0;
+  return allRows.map((row) => {
+    if (!visibleIds.has(row.id)) return row;
+    return nextVisibleRows[nextIndex++];
+  });
 }
 
 export type CreditCardOption = { id: string; name: string };
@@ -97,19 +163,19 @@ function SubscriptionsSection({
   const [rows, setRows] = useState(initialSubscriptions);
   const [, startReorder] = useTransition();
   const currentYear = new Date().getFullYear();
-  useEffect(() => { setRows(initialSubscriptions); }, [initialSubscriptions]);
-
-  function move(id: string, direction: "up" | "down") {
-    setRows((prev) => {
-      const idx = prev.findIndex((r) => r.id === id);
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (idx === -1 || swapIdx < 0 || swapIdx >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
-      return next;
-    });
-    startReorder(() => reorderSubscription(id, direction));
-  }
+  useEffect(() => {
+    const reset = window.setTimeout(() => setRows(initialSubscriptions), 0);
+    return () => window.clearTimeout(reset);
+  }, [initialSubscriptions]);
+  const visibleRows = rows.filter((s) => {
+    if (s.isActive) return true;
+    const deactivatedYear = s.updatedAt ? new Date(s.updatedAt).getFullYear() : currentYear;
+    return deactivatedYear >= currentYear;
+  });
+  const { dragOverId, startDrag } = usePointerReorder(visibleRows, (nextVisibleRows) => {
+    setRows((prev) => reorderVisibleRows(prev, visibleRows, nextVisibleRows));
+    startReorder(() => reorderSubscriptions(nextVisibleRows.map((row) => row.id)));
+  });
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -141,15 +207,7 @@ function SubscriptionsSection({
               </tr>
             </thead>
             <tbody>
-              {rows
-                .filter((s) => {
-                  if (s.isActive) return true;
-                  // Keep inactive rows visible until end of current year,
-                  // then they drop off automatically at the start of the new year.
-                  const deactivatedYear = s.updatedAt ? new Date(s.updatedAt).getFullYear() : currentYear;
-                  return deactivatedYear >= currentYear;
-                })
-                .map((s, i, visible) =>
+              {visibleRows.map((s) =>
                 editing === s.id ? (
                   <SubscriptionFormRow
                     key={s.id}
@@ -158,12 +216,13 @@ function SubscriptionsSection({
                     onDone={() => setEditing(null)}
                   />
                 ) : (
-                  <tr key={s.id} className={`border-t border-line ${!s.isActive ? "opacity-50" : ""}`}>
+                  <tr
+                    key={s.id}
+                    data-reorder-id={s.id}
+                    className={`border-t border-line ${!s.isActive ? "opacity-50" : ""} ${dragOverId === s.id ? "bg-brand-soft/40" : ""}`}
+                  >
                     <td className="px-1 py-1">
-                      <ReorderButtons
-                        onUp={i > 0 ? () => move(s.id, "up") : undefined}
-                        onDown={i < visible.length - 1 ? () => move(s.id, "down") : undefined}
-                      />
+                      <DragHandle onStart={() => startDrag(s.id)} label={`Drag ${s.name} to reorder`} />
                     </td>
                     <td className="whitespace-nowrap px-2 py-1 font-medium">
                       <span className={!s.isActive ? "line-through" : ""}>{s.name}</span>
@@ -350,19 +409,14 @@ function IrregularBillsSection({
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [rows, setRows] = useState(initialBills);
   const [, startReorder] = useTransition();
-  useEffect(() => { setRows(initialBills); }, [initialBills]);
-
-  function move(id: string, direction: "up" | "down") {
-    setRows((prev) => {
-      const idx = prev.findIndex((r) => r.id === id);
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-      if (idx === -1 || swapIdx < 0 || swapIdx >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[swapIdx]] = [next[swapIdx], next[idx]];
-      return next;
-    });
-    startReorder(() => reorderIrregularBill(id, direction));
-  }
+  useEffect(() => {
+    const reset = window.setTimeout(() => setRows(initialBills), 0);
+    return () => window.clearTimeout(reset);
+  }, [initialBills]);
+  const { dragOverId, startDrag } = usePointerReorder(rows, (nextRows) => {
+    setRows(nextRows);
+    startReorder(() => reorderIrregularBills(nextRows.map((row) => row.id)));
+  });
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -391,7 +445,7 @@ function IrregularBillsSection({
               </tr>
             </thead>
             <tbody>
-              {rows.map((b, i) =>
+              {rows.map((b) =>
                 editing === b.id ? (
                   <IrregularBillFormRow
                     key={b.id}
@@ -400,12 +454,13 @@ function IrregularBillsSection({
                     onDone={() => setEditing(null)}
                   />
                 ) : (
-                  <tr key={b.id} className="border-t border-line">
+                  <tr
+                    key={b.id}
+                    data-reorder-id={b.id}
+                    className={`border-t border-line ${dragOverId === b.id ? "bg-brand-soft/40" : ""}`}
+                  >
                     <td className="px-1 py-1">
-                      <ReorderButtons
-                        onUp={i > 0 ? () => move(b.id, "up") : undefined}
-                        onDown={i < rows.length - 1 ? () => move(b.id, "down") : undefined}
-                      />
+                      <DragHandle onStart={() => startDrag(b.id)} label={`Drag ${b.name} to reorder`} />
                     </td>
                     <td className="px-2 py-1 font-medium">{b.name}</td>
                     <td className="px-2 py-1 text-center tabular-nums">
@@ -634,38 +689,21 @@ function RenewalBadge({ date }: { date: string }) {
   );
 }
 
-function ReorderButtons({
-  onUp,
-  onDown,
-}: {
-  onUp?: () => void;
-  onDown?: () => void;
-}) {
+function DragHandle({ onStart, label }: { onStart: () => void; label: string }) {
   return (
-    <div className="flex flex-col">
-      <button
-        type="button"
-        onClick={onUp}
-        disabled={!onUp}
-        className="rounded px-1 py-0.5 text-muted transition hover:bg-black/5 disabled:opacity-20 dark:hover:bg-white/5"
-        aria-label="Move up"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 15l-6-6-6 6" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        onClick={onDown}
-        disabled={!onDown}
-        className="rounded px-1 py-0.5 text-muted transition hover:bg-black/5 disabled:opacity-20 dark:hover:bg-white/5"
-        aria-label="Move down"
-      >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-    </div>
+    <button
+      type="button"
+      onMouseDown={(event) => {
+        event.preventDefault();
+        onStart();
+      }}
+      aria-label={label}
+      className="flex cursor-grab items-center rounded p-1 text-muted/50 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+    </button>
   );
 }
 
