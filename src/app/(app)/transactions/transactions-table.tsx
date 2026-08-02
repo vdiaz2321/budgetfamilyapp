@@ -164,7 +164,7 @@ export function TransactionsTable({
         <select
           value={kindFilter}
           onChange={(e) => setKindFilter(e.target.value)}
-          className="rounded-xl bg-surface px-3 py-2 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
+          className="hidden rounded-xl bg-surface px-3 py-2 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand sm:block dark:ring-white/10"
         >
           <option value="">All types</option>
           {CATEGORY_KINDS.map(({ kind }) => (
@@ -197,7 +197,7 @@ export function TransactionsTable({
       </div>
 
       {/* Date range — searches across months instead of just the one selected above */}
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+      <div className="hidden flex-wrap items-center gap-2 text-sm sm:flex">
         <span className="text-muted">From</span>
         <input
           type="date"
