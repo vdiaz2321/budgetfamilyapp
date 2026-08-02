@@ -318,10 +318,7 @@ export function TransactionModal({
                 Delete
               </button>
             ) : (
-              <label className="flex items-center gap-2 text-sm text-muted">
-                <input type="checkbox" name="createAnother" className="h-4 w-4 rounded accent-[var(--brand)]" />
-                Create another
-              </label>
+              <span />
             )}
             <div className="flex items-center gap-2">
               <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
