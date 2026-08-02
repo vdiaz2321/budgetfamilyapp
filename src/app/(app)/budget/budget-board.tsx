@@ -186,9 +186,11 @@ export function BudgetBoard({
     // See feedback: item detail panel required scrolling up to reach.
     <div className="mx-auto max-w-6xl space-y-4">
       <TopHeader monthKey={month.key} />
-
-      {/* Hero card spans full width above the budget/rail columns on desktop */}
-      <div ref={heroRef}>
+      <div className="flex justify-center gap-6">
+      {/* Budget column */}
+      <div className="w-full min-w-0 max-w-[620px] space-y-4">
+        {/* Left-to-budget hero card */}
+        <div ref={heroRef}>
         <SummaryHeroCard
           actualLeft={actualLeft}
           displayLeft={displayLeft}
@@ -204,11 +206,8 @@ export function BudgetBoard({
           monthFirstOfMonth={month.firstOfMonth}
           currency={currency}
         />
-      </div>
+        </div>
 
-      <div className="flex justify-center gap-6">
-      {/* Budget column */}
-      <div className="w-full min-w-0 max-w-[620px] space-y-4">
         {/* Wrapping this in `relative` gives the sticky footer bar below a
             containing block that spans the whole rollover+groups list, so it
             stays pinned to the top of the viewport for as long as that list
@@ -515,10 +514,10 @@ function SummaryHeroCard({
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="px-6 pb-5 pt-6">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 sm:gap-y-0">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
-            <p className="mt-0.5 text-lg font-bold tabular-nums text-foreground sm:text-xl">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
+            <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
             {rolloverCents > 0 && (
@@ -529,33 +528,35 @@ function SummaryHeroCard({
               </p>
             )}
           </div>
-          <div className="min-w-0 text-right sm:border-l sm:border-line/40 sm:pl-4 sm:text-left">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
-            <p className="mt-0.5 text-lg font-bold tabular-nums text-positive sm:text-xl">
+          <div className="min-w-0 text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
+            <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
             </p>
           </div>
-          <div className="min-w-0 sm:border-l sm:border-line/40 sm:pl-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
-            <p className={`mt-0.5 text-lg font-bold tabular-nums sm:text-xl ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
+            <p className={`mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
           </div>
-          <div className="min-w-0 text-right sm:border-l sm:border-line/40 sm:pl-4 sm:text-left">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
-            <p className={`mt-0.5 text-lg font-bold tabular-nums sm:text-xl ${toneClasses.text}`}>
-              {formatMoney(actualSpent, currency)}
-            </p>
-            {tone !== "good" && (
-              <span
-                className={`mt-1 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d={toneClasses.icon} />
-                </svg>
-                {badgeText}
-              </span>
-            )}
+          <div className="min-w-0 text-right">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
+            <div className="mt-0.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+              <p className={`whitespace-nowrap text-xl font-bold tabular-nums ${toneClasses.text}`}>
+                {formatMoney(actualSpent, currency)}
+              </p>
+              {tone !== "good" && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d={toneClasses.icon} />
+                  </svg>
+                  {badgeText}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
