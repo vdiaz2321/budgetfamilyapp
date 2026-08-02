@@ -52,6 +52,7 @@ type Props = {
   compact?: boolean;
   onSelect: () => void;
   onDragStart: () => void;
+  autoPlanned?: boolean;
 };
 
 function DeleteButton({ subId }: { subId: string }) {
@@ -76,7 +77,7 @@ function DeleteButton({ subId }: { subId: string }) {
   );
 }
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, onSelect, onDragStart }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, onSelect, onDragStart, autoPlanned }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
@@ -149,19 +150,28 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         {formatMoney(row.spentCents, currency)}
       </button>
 
-      {/* Planned — inline-editable in place. Stops click from bubbling to onSelect. */}
+      {/* Planned — read-only when auto-derived from subscriptions/irregular bills */}
       <div
         className="col-span-2 flex justify-end"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <PlannedInput
-          subId={row.subId}
-          monthKey={monthKey}
-          plannedCents={row.plannedCents}
-          currency={currency}
-          inputRef={plannedInputRef}
-        />
+        {autoPlanned ?? row.autoPlanned ? (
+          <span
+            className="px-1 py-0.5 text-right text-xs text-muted tabular-nums"
+            title="Auto-calculated from subscriptions / irregular bills"
+          >
+            {formatMoney(row.plannedCents, currency)}
+          </span>
+        ) : (
+          <PlannedInput
+            subId={row.subId}
+            monthKey={monthKey}
+            plannedCents={row.plannedCents}
+            currency={currency}
+            inputRef={plannedInputRef}
+          />
+        )}
       </div>
 
       {/* Remaining */}

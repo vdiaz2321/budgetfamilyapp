@@ -45,10 +45,9 @@ export function SubscriptionsSummaryCard({
 }) {
   const [managing, setManaging] = useState(false);
   const activeSubs = subscriptions.filter((s) => s.isActive);
-  const monthlyTotal = activeSubs.reduce(
-    (sum, s) => sum + monthlyEquivalent(s.amountCents, s.billingCycle),
-    0,
-  );
+  const monthlyTotal = activeSubs
+    .filter((s) => s.billingCycle === "monthly")
+    .reduce((sum, s) => sum + s.amountCents, 0);
   const annualBilledTotal = activeSubs
     .filter((s) => s.billingCycle === "annual")
     .reduce((sum, s) => sum + s.amountCents, 0);

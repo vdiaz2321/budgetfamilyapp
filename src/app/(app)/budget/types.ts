@@ -62,6 +62,9 @@ export type RowData = {
   dueDay: number | null;
   plannedCents: number;
   spentCents: number;
+  // When true the planned amount is derived from subscriptions/irregular-bills
+  // data and cannot be edited directly from the budget row.
+  autoPlanned?: boolean;
   // Up to the last 6 months of actuals for this subcategory, chronological,
   // sparse (no zero-fill) — the row hides its sparkline below 2 points.
   sparkline: number[];

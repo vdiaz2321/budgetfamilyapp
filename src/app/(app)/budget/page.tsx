@@ -163,12 +163,31 @@ export default async function BudgetPage({
     sparklineBySub.set(s.subcategory_id, list);
   }
 
+  // Auto-planned totals: subcategory rows linked to subscriptions or irregular
+  // bills show a derived planned amount and are not directly editable.
+  const autoPlannedBySub = new Map<string, number>();
+  for (const sub of subscriptions ?? []) {
+    if (!sub.subcategory_id || !sub.is_active || sub.billing_cycle !== "monthly") continue;
+    autoPlannedBySub.set(sub.subcategory_id, (autoPlannedBySub.get(sub.subcategory_id) ?? 0) + sub.amount_cents);
+  }
+  const irregularAutoPlannedBySub = new Map<string, number>();
+  for (const bill of irregularBills ?? []) {
+    if (!bill.subcategory_id) continue;
+    irregularAutoPlannedBySub.set(bill.subcategory_id, (irregularAutoPlannedBySub.get(bill.subcategory_id) ?? 0) + bill.typical_amount_cents);
+  }
+
   const groups: GroupData[] = categories.map((cat) => {
     const kind = cat.kind as CategoryKind;
     const rows = (subs ?? [])
       .filter((s) => s.category_id === cat.id)
       .map((s) => {
-        const plannedCents = plannedBySub.get(s.id) ?? 0;
+        const isAutoSub = autoPlannedBySub.has(s.id);
+        const isAutoIrregular = irregularAutoPlannedBySub.has(s.id);
+        const plannedCents = isAutoSub
+          ? autoPlannedBySub.get(s.id)!
+          : isAutoIrregular
+            ? irregularAutoPlannedBySub.get(s.id)!
+            : (plannedBySub.get(s.id) ?? 0);
         const spentCents = spentBySub.get(s.id) ?? 0;
         const g = goalBySub.get(s.id);
         const d = debtBySub.get(s.id);
@@ -178,6 +197,7 @@ export default async function BudgetPage({
           dueDay: s.due_day,
           plannedCents,
           spentCents,
+          autoPlanned: isAutoSub || isAutoIrregular,
           sparkline: sparklineBySub.get(s.id) ?? [],
           savings:
             kind === "savings"
