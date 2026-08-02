@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { copyPlansFromPreviousMonth, setRollover } from "./actions";
+import { copyPlansFromPreviousMonth, setRollover, setRolloverOverride } from "./actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
@@ -36,7 +36,9 @@ type Props = {
   leftToBudget: number;
   rollover: {
     inCents: number; // amount actually rolled in this month (0 if excluded)
-    availableCents: number; // last month's leftover, regardless of the toggle
+    availableCents: number; // last month's leftover (live or override)
+    liveAvailableCents: number; // always the live-calculated amount
+    overrideCents: number | null; // null = no override
     enabled: boolean; // is last month's leftover included in this month?
     prevMonthLabel: string;
   };
@@ -584,9 +586,11 @@ function RolloverFooter({
   currency: string;
 }) {
   const [pending, start] = useTransition();
-  const { availableCents, enabled, prevMonthLabel } = rollover;
-  const hasRollover = availableCents > 0 || enabled;
+  const [editing, setEditing] = useState(false);
+  const { availableCents, liveAvailableCents, overrideCents, enabled, prevMonthLabel } = rollover;
+  const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
   const amount = formatMoney(Math.max(0, availableCents), currency);
+  const isOverridden = overrideCents != null;
 
   return (
     <div
@@ -594,12 +598,35 @@ function RolloverFooter({
         enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"
       }`}
     >
-      <span className={enabled ? "text-brand" : "text-muted"}>
+      <span className={`flex items-center gap-1.5 ${enabled ? "text-brand" : "text-muted"}`}>
         {hasRollover ? (
           enabled ? (
             <>
-              Including <span className="font-semibold tabular-nums">{amount}</span> unspent income
-              from {prevMonthLabel}.
+              Including{" "}
+              {editing ? (
+                <OverrideInput
+                  monthFirstOfMonth={monthFirstOfMonth}
+                  currentCents={availableCents}
+                  liveLabel={formatMoney(liveAvailableCents, currency)}
+                  onDone={() => setEditing(false)}
+                />
+              ) : (
+                <>
+                  <span className="font-semibold tabular-nums">{amount}</span>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    title="Manually adjust the rollover amount"
+                    className="rounded p-0.5 opacity-40 hover:opacity-100 hover:text-foreground"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
+                    </svg>
+                  </button>
+                </>
+              )}{" "}
+              unspent income from {prevMonthLabel}.
             </>
           ) : (
             <>
@@ -633,6 +660,58 @@ function RolloverFooter({
         </form>
       ) : null}
     </div>
+  );
+}
+
+function OverrideInput({
+  monthFirstOfMonth,
+  currentCents,
+  liveLabel,
+  onDone,
+}: {
+  monthFirstOfMonth: string;
+  currentCents: number;
+  liveLabel: string;
+  onDone: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const initial = (currentCents / 100).toFixed(2);
+
+  const save = (value: string) => {
+    const fd = new FormData();
+    fd.set("month", monthFirstOfMonth);
+    fd.set("override", value.trim() === "" || value.trim() === liveLabel ? "" : value.trim());
+    start(async () => {
+      await setRolloverOverride(fd);
+      onDone();
+    });
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        type="text"
+        inputMode="decimal"
+        defaultValue={initial}
+        autoFocus
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => save(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.currentTarget.blur(); }
+          if (e.key === "Escape") { onDone(); }
+        }}
+        className="w-24 rounded border border-brand/40 bg-surface px-1.5 py-0.5 text-sm font-semibold tabular-nums text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
+        disabled={pending}
+      />
+      <button
+        type="button"
+        onClick={() => save("")}
+        title={`Reset to live calc (${liveLabel})`}
+        className="text-[10px] text-muted underline hover:text-foreground"
+      >
+        reset
+      </button>
+    </span>
   );
 }
 

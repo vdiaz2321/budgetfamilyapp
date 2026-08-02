@@ -914,3 +914,19 @@ export async function setRollover(formData: FormData) {
 
   revalidatePath("/budget");
 }
+
+export async function setRolloverOverride(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const month = String(formData.get("month") ?? "");
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+  const raw = String(formData.get("override") ?? "").trim();
+  // Empty string = clear override (back to live calc). Number = cents override.
+  const overrideCents = raw === "" ? null : Math.round(parseFloat(raw) * 100);
+  if (overrideCents !== null && isNaN(overrideCents)) return;
+
+  await supabase
+    .from("budget_rollovers")
+    .upsert({ household_id: householdId, month, override_cents: overrideCents }, { onConflict: "household_id,month" });
+
+  revalidatePath("/budget");
+}

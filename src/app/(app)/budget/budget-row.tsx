@@ -3,7 +3,7 @@
 import { useRef, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
-import { upsertPlan } from "./actions";
+import { deleteSubcategory, upsertPlan } from "./actions";
 import type { RowData } from "./types";
 
 const ACTUAL_WORD: Record<CategoryKind, string> = {
@@ -54,6 +54,28 @@ type Props = {
   onDragStart: () => void;
 };
 
+function DeleteButton({ subId }: { subId: string }) {
+  const [pending, start] = useTransition();
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        if (!window.confirm("Delete this item? This cannot be undone.")) return;
+        const fd = new FormData();
+        fd.set("id", subId);
+        start(() => deleteSubcategory(fd));
+      }}
+      title="Delete item"
+      className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-all hover:bg-negative/10 hover:text-negative group-hover:opacity-100 group-hover:text-muted/50 disabled:pointer-events-none"
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+        <path d="M18 6 6 18M6 6l12 12" />
+      </svg>
+    </button>
+  );
+}
+
 export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, onSelect, onDragStart }: Props) {
   const isIncome = kind === "income";
   const remaining = row.plannedCents - row.spentCents;
@@ -87,8 +109,9 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
   return (
     <li
       data-drop-key={`subcat:${row.subId}`}
-      className={`group grid grid-cols-12 items-center gap-2 px-3 ${compact ? "py-1" : "py-1.5"} ${baseClass}`}
+      className={`group relative grid grid-cols-12 items-center gap-2 px-3 ${compact ? "py-1" : "py-1.5"} ${baseClass}`}
     >
+      <DeleteButton subId={row.subId} />
       {/* Name cell — grip + name + due badge — click opens ItemPanel */}
       <div className="col-span-5 flex min-w-0 items-center gap-1.5 sm:col-span-4">
         <span

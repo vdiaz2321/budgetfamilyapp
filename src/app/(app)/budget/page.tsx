@@ -254,7 +254,7 @@ export default async function BudgetPage({
   const [{ data: rolloverRows }, { data: prevActuals }] = await Promise.all([
     supabase
       .from("budget_rollovers")
-      .select("month")
+      .select("month, override_cents")
       .eq("household_id", household.id)
       .eq("month", month.firstOfMonth),
     supabase
@@ -263,10 +263,13 @@ export default async function BudgetPage({
       .eq("household_id", household.id)
       .eq("month", prevFirst),
   ]);
-  const rolloverInEnabled = (rolloverRows ?? []).length > 0;
+  const rolloverRow = (rolloverRows ?? [])[0] ?? null;
+  const rolloverInEnabled = rolloverRow != null;
   const prevSpentBySub = new Map((prevActuals ?? []).map((a) => [a.subcategory_id, a.actual_cents]));
   // A deficit doesn't carry forward as negative money — only real leftover.
-  const incomingAvailableCents = Math.max(0, actualLeftover(prevSpentBySub));
+  const liveAvailableCents = Math.max(0, actualLeftover(prevSpentBySub));
+  const overrideCents: number | null = rolloverRow?.override_cents ?? null;
+  const incomingAvailableCents = overrideCents ?? liveAvailableCents;
   const rolloverInCents = rolloverInEnabled ? incomingAvailableCents : 0;
 
   const labelForKey = (key: string) => {
@@ -434,6 +437,8 @@ export default async function BudgetPage({
       rollover={{
         inCents: rolloverInCents,
         availableCents: incomingAvailableCents,
+        liveAvailableCents,
+        overrideCents,
         enabled: rolloverInEnabled,
         prevMonthLabel: labelForKey(month.prevKey),
       }}
