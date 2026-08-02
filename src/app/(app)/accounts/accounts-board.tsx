@@ -777,7 +777,7 @@ function CreditCardPanel({
                     onClick={() => setPaying(true)}
                     className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong"
                   >
-                    Pay Card
+                    {owed > 0 ? "Pay full balance" : "Pay Card"}
                   </button>
                 ) : null}
                 {!isArchived && !card.dateClosed ? (
@@ -878,10 +878,9 @@ function BenefitsChecklist({
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{benefit.name}</p>
               <p className="text-[11px] text-muted">{benefit.cadence}{benefit.requirementText ? ` · ${benefit.requirementText}` : ""}</p>
-              {benefit.actionUrl || benefit.sourceUrl ? (
+              {benefit.sourceUrl ? (
                 <span className="flex gap-2 text-[11px]">
-                  {benefit.actionUrl ? <a href={benefit.actionUrl} target="_blank" rel="noreferrer" className="text-brand hover:underline">Use / enroll ↗</a> : null}
-                  {benefit.sourceUrl ? <a href={benefit.sourceUrl} target="_blank" rel="noreferrer" className="text-muted hover:text-foreground hover:underline">Verify ↗</a> : null}
+                  <a href={benefit.sourceUrl} target="_blank" rel="noreferrer" className="text-muted hover:text-foreground hover:underline">Card URL ↗</a>
                 </span>
               ) : null}
             </div>
@@ -899,13 +898,11 @@ function BenefitsChecklist({
       {adding ? (
         <form action={(fd) => { void saveCardBenefit(fd); }} className="grid gap-2 rounded-md border border-dashed border-brand/40 bg-brand-soft/20 p-2 sm:grid-cols-2">
           <input type="hidden" name="accountId" value={card.id} />
-          <LabeledInput label="Benefit name" name="name" placeholder="Annual hotel credit" required />
+          <LabeledInput label="Airline/Hotel credit" name="name" placeholder="Hilton resort credit" required />
           <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Often Resets</span><select name="cadence" defaultValue="annual" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option><option value="anniversary">Card anniversary</option><option value="one_time">One-time</option></select></label>
           <LabeledInput label="Dollar Value" name="maxValue" type="number" step="0.01" prefix="$" placeholder="100" />
-          <LabeledInput label="Requirement" name="requirementText" placeholder="Book through issuer portal" />
-          <LabeledInput label="Action URL" name="actionUrl" type="url" placeholder="https://…" />
-          <LabeledInput label="Verification URL" name="sourceUrl" type="url" placeholder="https://dailydrop.com/calculator" />
-          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted"><input type="checkbox" name="enrollmentRequired" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" /> Enrollment required</label>
+          <LabeledInput label="Spending requirement" name="requirementText" placeholder="Spend $4,000 in 3 months" />
+          <LabeledInput label="Card URL" name="sourceUrl" type="url" placeholder="https://issuer.com/card" />
           <div className="sm:col-span-2"><button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white">Add benefit</button></div>
         </form>
       ) : null}
@@ -1156,7 +1153,21 @@ function PayCardModal({
           className="space-y-2"
         >
           <input type="hidden" name="cardId" value={card.id} />
-          <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
+          <LabeledInput
+            label="Payment amount"
+            name="amount"
+            type="number"
+            step="0.01"
+            min="0"
+            defaultValue={card.owedCents && card.owedCents > 0 ? centsToDisplay(card.owedCents) : ""}
+            required
+            autoFocus
+          />
+          {card.owedCents && card.owedCents > 0 ? (
+            <p className="text-[10px] text-muted">
+              The full balance is prefilled. Recording this payment will bring the card to {formatMoney(0, currency)} while keeping the imported charges.
+            </p>
+          ) : null}
           <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
           <label className="block">
             <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">

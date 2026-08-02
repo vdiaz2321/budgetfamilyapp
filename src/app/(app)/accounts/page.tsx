@@ -178,9 +178,10 @@ export default async function AccountsPage() {
   }
 
   // Auto-computed "owed" per credit card:
-  //   sum(charges: account_id = card AND paid_to_account_id IS NULL)
+  //   sum(non-imported charges: account_id = card AND paid_to_account_id IS NULL)
   // minus sum(payments: paid_to_account_id = card)
-  // This is the whole point — never a manually-entered number.
+  // CSV imports are historical budget records and are intentionally excluded
+  // from the live card balance. Account balances/snapshots remain unchanged.
   const creditCardIds = (rows ?? [])
     .filter((a) => a.kind === "credit_card")
     .map((a) => a.id);
@@ -197,7 +198,7 @@ export default async function AccountsPage() {
     const [{ data: chargeRows }, { data: paymentRows }, { data: monthCharges }] = await Promise.all([
       supabase
         .from("transactions")
-        .select("account_id, amount_cents")
+        .select("account_id, amount_cents, source")
         .eq("household_id", household.id)
         .in("account_id", creditCardIds)
         .is("paid_to_account_id", null),
@@ -208,21 +209,21 @@ export default async function AccountsPage() {
         .in("paid_to_account_id", creditCardIds),
       supabase
         .from("transactions")
-        .select("account_id, amount_cents")
+        .select("account_id, amount_cents, source")
         .eq("household_id", household.id)
         .in("account_id", creditCardIds)
         .is("paid_to_account_id", null)
         .gte("occurred_on", firstOfMonth)
         .lt("occurred_on", nextMonth),
     ]);
-    for (const t of chargeRows ?? []) {
+    for (const t of (chargeRows ?? []).filter((row) => row.source !== "import")) {
       cardOwed.set(t.account_id, (cardOwed.get(t.account_id) ?? 0) + (t.amount_cents ?? 0));
     }
     for (const t of paymentRows ?? []) {
       const to = t.paid_to_account_id as string;
       cardOwed.set(to, (cardOwed.get(to) ?? 0) - (t.amount_cents ?? 0));
     }
-    for (const t of monthCharges ?? []) {
+    for (const t of (monthCharges ?? []).filter((row) => row.source !== "import")) {
       cardMonthSpend.set(t.account_id, (cardMonthSpend.get(t.account_id) ?? 0) + (t.amount_cents ?? 0));
     }
   }

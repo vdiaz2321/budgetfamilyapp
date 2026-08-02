@@ -53,6 +53,7 @@ function formatWhole(cents: number): string {
 // YNAB-style account list under the nav: collapsible sections with a group
 // total in the header and per-account balances, plus Add Account at the foot.
 export function SidebarAccounts({ groups }: Props) {
+  const [expanded, setExpanded] = useState(false);
   // Net worth = every group's total, liabilities subtracted — so it stays
   // correct as groups are added (e.g. a future Real Estate group) without
   // needing to touch this calculation.
@@ -64,24 +65,49 @@ export function SidebarAccounts({ groups }: Props) {
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col">
       <div className="mx-4 mb-3 border-t border-white/[0.06] pt-3">
-        <div className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          className="flex w-full items-center justify-between rounded-xl bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.07]"
+        >
           <p className="text-[15px] font-bold uppercase tracking-wide text-slate-300">Net Worth</p>
-          <p className={`text-[15px] font-bold tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
-            {formatWhole(netWorthCents)}
-          </p>
-        </div>
+          <span className="flex items-center gap-2">
+            {expanded ? (
+              <p className={`text-[15px] font-bold tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
+                {formatWhole(netWorthCents)}
+              </p>
+            ) : null}
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`shrink-0 text-slate-500 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+              aria-hidden
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </span>
+        </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pr-2">
-        {groups
-          .filter((g) => g.items.length > 0)
-          .map((g) => {
-            const excluded = g.items.every((a) => a.inNetWorth === false);
-            return (
-              <AccountGroup key={g.label} group={g} showDivider={excluded} />
-            );
-          })}
-      </div>
+      {expanded ? (
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pr-2">
+          {groups
+            .filter((g) => g.items.length > 0)
+            .map((g) => {
+              const excluded = g.items.every((a) => a.inNetWorth === false);
+              return (
+                <AccountGroup key={g.label} group={g} showDivider={excluded} />
+              );
+            })}
+        </div>
+      ) : null}
 
     </div>
   );

@@ -514,10 +514,10 @@ function SummaryHeroCard({
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="px-6 pb-5 pt-6">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
-            <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 sm:gap-x-6 sm:gap-y-0">
+          <div className="min-w-0">
+            <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
+            <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums text-foreground sm:text-xl">
               {formatMoney(outflowPlanned, currency)}
             </p>
             {rolloverCents > 0 && (
@@ -528,22 +528,22 @@ function SummaryHeroCard({
               </p>
             )}
           </div>
-          <div className="text-right">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
-            <p className="mt-0.5 text-xl font-bold tabular-nums text-positive">
+          <div className="min-w-0 text-right">
+            <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
+            <p className="mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums text-positive sm:text-xl">
               {formatMoney(incomePlanned, currency)}
             </p>
           </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
-            <p className={`mt-0.5 text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+          <div className="min-w-0 sm:pl-6">
+            <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
+            <p className={`mt-0.5 whitespace-nowrap text-lg font-bold tabular-nums sm:text-xl ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
+          <div className="min-w-0 text-right">
+            <p className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
             <div className="mt-0.5 flex items-center justify-end gap-2">
-              <p className={`text-xl font-bold tabular-nums ${toneClasses.text}`}>
+              <p className={`whitespace-nowrap text-lg font-bold tabular-nums sm:text-xl ${toneClasses.text}`}>
                 {formatMoney(actualSpent, currency)}
               </p>
               {tone !== "good" && (
