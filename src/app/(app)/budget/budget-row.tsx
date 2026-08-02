@@ -68,7 +68,7 @@ function DeleteButton({ subId }: { subId: string }) {
         start(() => deleteSubcategory(fd));
       }}
       title="Delete item"
-      className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-all hover:bg-negative/10 hover:text-negative group-hover:opacity-100 group-hover:text-muted/50 disabled:pointer-events-none"
+      className="absolute right-1 top-2 rounded p-0.5 text-muted/50 transition-all hover:bg-negative/10 hover:text-negative disabled:pointer-events-none sm:top-1/2 sm:-translate-y-1/2 sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:text-muted/50"
     >
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
         <path d="M18 6 6 18M6 6l12 12" />
@@ -107,18 +107,27 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       ? "font-bold text-positive"
       : "text-muted";
 
+  const barFillClass = overBudget
+    ? "bg-negative"
+    : pct >= 100
+      ? "bg-positive"
+      : kind === "income"
+        ? "bg-positive/70"
+        : "bg-brand";
+
   return (
     <li
       data-drop-key={`subcat:${row.subId}`}
-      className={`group relative grid grid-cols-12 items-center gap-2 px-3 ${compact ? "py-1" : "py-1.5"} ${baseClass}`}
+      className={`group relative flex flex-col gap-1.5 px-3 py-2 sm:grid sm:grid-cols-12 sm:items-center sm:gap-2 ${compact ? "sm:py-1" : "sm:py-1.5"} ${baseClass}`}
     >
       <DeleteButton subId={row.subId} />
-      {/* Name cell — grip + name + due badge — click opens ItemPanel */}
-      <div className="col-span-5 flex min-w-0 items-center gap-1.5 sm:col-span-4">
+
+      {/* Line 1 mobile / Name cell desktop */}
+      <div className="flex min-w-0 items-center gap-1.5 pr-7 sm:col-span-4 sm:pr-0">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           title="Drag to reorder"
-          className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+          className="-ml-1 hidden shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing sm:flex"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <path d="M4 6h16M4 12h16M4 18h16" />
@@ -138,21 +147,46 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
             </span>
           ) : null}
         </button>
+
+        {/* Mobile-only trailing: spent taps panel, planned is inline-editable */}
+        <div className="flex shrink-0 items-baseline gap-0.5 text-xs tabular-nums sm:hidden">
+          <button
+            type="button"
+            onClick={onSelect}
+            className={`font-semibold ${actualColorClass(kind, row.spentCents)}`}
+          >
+            {formatMoney(row.spentCents, currency)}
+          </button>
+          <span className="text-muted"> /</span>
+          {autoPlanned ?? row.autoPlanned ? (
+            <span className="text-muted tabular-nums"> {formatMoney(row.plannedCents, currency)}</span>
+          ) : (
+            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} currency={currency} />
+          )}
+        </div>
       </div>
 
-      {/* Actual — read-only, click opens the panel (transactions are edited there) */}
+      {/* Mobile-only progress bar */}
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-brand-soft/40 sm:hidden">
+        <div
+          className={`h-full ${barFillClass} transition-all`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* Desktop: Actual — read-only, click opens the panel */}
       <button
         type="button"
         onClick={onSelect}
-        className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(kind, row.spentCents)}`}
+        className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
         title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
       >
         {formatMoney(row.spentCents, currency)}
       </button>
 
-      {/* Planned — read-only when auto-derived from subscriptions/irregular bills */}
+      {/* Desktop: Planned — read-only when auto-derived */}
       <div
-        className="col-span-2 flex justify-end"
+        className="hidden sm:col-span-2 sm:flex sm:justify-end"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -174,24 +208,57 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         )}
       </div>
 
-      {/* Remaining */}
+      {/* Desktop: Remaining */}
       <button
         type="button"
         onClick={onSelect}
-        className={`col-span-2 text-right text-xs font-semibold tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
+        className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
       >
         {formatMoney(remaining, currency)}
       </button>
 
-      {/* % */}
+      {/* Desktop: % */}
       <button
         type="button"
         onClick={onSelect}
-        className={`col-span-2 text-center text-[11px] tabular-nums ${pctClass}`}
+        className={`hidden sm:col-span-2 sm:block sm:text-center sm:text-[11px] sm:tabular-nums ${pctClass}`}
       >
         {pct}%
       </button>
     </li>
+  );
+}
+
+function MobilePlannedInput({
+  subId,
+  monthKey,
+  plannedCents,
+  currency,
+}: {
+  subId: string;
+  monthKey: string;
+  plannedCents: number;
+  currency: string;
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const initial = centsToDisplay(plannedCents);
+  return (
+    <form ref={formRef} action={(fd) => start(() => upsertPlan(fd))} className="inline-flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+      <input type="hidden" name="subcategoryId" value={subId} />
+      <input type="hidden" name="month" value={monthKey} />
+      <span className="pointer-events-none text-xs text-muted">{currencySymbol(currency)}</span>
+      <input
+        key={initial}
+        name="planned"
+        type="text"
+        inputMode="decimal"
+        defaultValue={initial}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => { if (e.currentTarget.value !== initial) formRef.current?.requestSubmit(); }}
+        className={`w-14 rounded bg-transparent px-0.5 text-right text-xs text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand ${pending ? "ring-1 ring-brand" : ""}`}
+      />
+    </form>
   );
 }
 

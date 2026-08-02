@@ -325,7 +325,7 @@ export function BudgetBoard({
         </div>
       </aside>
 
-      {/* Mobile: item detail / quick-add slides over */}
+      {/* Mobile: item detail slides up as bottom sheet */}
       {railContent ? (
         <div className="lg:hidden">
           <button
@@ -334,7 +334,8 @@ export function BudgetBoard({
             onClick={() => setSelected(null)}
             className="fixed inset-0 z-40 bg-black/30"
           />
-          <div className="fixed inset-y-0 right-0 z-50 w-full max-w-[300px] overflow-y-auto bg-background p-2">
+          <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-background p-2 shadow-xl">
+            <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" />
             {railContent}
           </div>
         </div>
@@ -342,8 +343,8 @@ export function BudgetBoard({
 
       {/* Centered modal: header "+ Add Item" OR item panel "+ Transaction" */}
       {(showAddModal || (quickAdd && selected)) ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10">
-          <div className="w-full max-w-[520px]">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+          <div className="w-full sm:max-w-[520px]">
             <TransactionModal
               editTx={quickAdd && quickAdd !== true ? quickAdd : null}
               monthKey={month.key}
@@ -513,7 +514,7 @@ function SummaryHeroCard({
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="px-6 pb-5 pt-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
             <p className="mt-0.5 text-xl font-bold tabular-nums text-foreground">
@@ -527,13 +528,13 @@ function SummaryHeroCard({
               </p>
             )}
           </div>
-          <div className="text-center">
+          <div className="text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
             <p className="mt-0.5 text-xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
             </p>
           </div>
-          <div className="text-center">
+          <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
             <p className={`mt-0.5 text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
@@ -587,10 +588,9 @@ function RolloverFooter({
 }) {
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
-  const { availableCents, liveAvailableCents, overrideCents, enabled, prevMonthLabel } = rollover;
+  const { availableCents, liveAvailableCents, enabled, prevMonthLabel } = rollover;
   const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
   const amount = formatMoney(Math.max(0, availableCents), currency);
-  const isOverridden = overrideCents != null;
 
   return (
     <div
@@ -598,11 +598,11 @@ function RolloverFooter({
         enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"
       }`}
     >
-      <span className={`flex items-center gap-1.5 ${enabled ? "text-brand" : "text-muted"}`}>
+      <span className={`flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-xs ${enabled ? "text-brand" : "text-muted"}`}>
         {hasRollover ? (
           enabled ? (
             <>
-              Including{" "}
+              Using{" "}
               {editing ? (
                 <OverrideInput
                   monthFirstOfMonth={monthFirstOfMonth}
@@ -630,9 +630,7 @@ function RolloverFooter({
             </>
           ) : (
             <>
-              Roll over{" "}
-              <span className="font-semibold tabular-nums">{amount}</span> unspent income from{" "}
-              {prevMonthLabel}?
+              <span className="font-semibold tabular-nums">{amount}</span> unspent income from {prevMonthLabel} available.
             </>
           )
         ) : (
@@ -649,13 +647,13 @@ function RolloverFooter({
             title={enabled
               ? `Stop including ${prevMonthLabel}'s unspent income`
               : `Add ${prevMonthLabel}'s ${amount} unspent income to this month`}
-            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition disabled:opacity-60 ${
+            className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
               enabled
                 ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
                 : "bg-brand text-white hover:bg-brand-strong"
             }`}
           >
-            {pending ? "Saving…" : enabled ? "Undo" : `Roll in ${prevMonthLabel} unspent`}
+            {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
           </button>
         </form>
       ) : null}
@@ -743,22 +741,22 @@ function StickyFooterBar({
     // non-positioned ones), which is all that's needed for it to sit above
     // the budget groups scrolling underneath — see feedback: sticky bar was
     // covering the Add Transaction modal.
-    <div className="pointer-events-none sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-6 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="text-center">
-        <p className="text-lg font-medium tabular-nums text-foreground">
+    <div className="pointer-events-none relative z-10 sticky top-4 grid grid-cols-3 rounded-2xl bg-surface px-2 py-2 shadow-sm ring-1 ring-black/5 sm:px-6 sm:py-3 dark:ring-white/10">
+      <div className="min-w-0 px-1 text-center">
+        <p className="truncate text-sm font-medium tabular-nums text-foreground sm:text-lg">
           {formatMoney(outflowPlanned, currency)}
         </p>
-        <p className="text-xs text-muted">Planned Budget</p>
+        <p className="text-[10px] text-muted sm:text-xs">Planned</p>
       </div>
-      <div className="border-l border-line text-center">
-        <p className={`text-lg font-medium tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+      <div className="min-w-0 border-l border-line px-1 text-center">
+        <p className={`truncate text-sm font-medium tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
           {formatMoney(displayLeft, currency)}
         </p>
-        <p className="text-xs text-muted">Income Left</p>
+        <p className="text-[10px] text-muted sm:text-xs">Income Left</p>
       </div>
-      <div className={`border-l border-line text-center ${toneClasses.text}`}>
-        <p className="text-lg font-medium tabular-nums">{formatMoney(actualLeft, currency)}</p>
-        <p className="text-xs text-muted">Actual Spent</p>
+      <div className={`min-w-0 border-l border-line px-1 text-center ${toneClasses.text}`}>
+        <p className="truncate text-sm font-medium tabular-nums sm:text-lg">{formatMoney(actualLeft, currency)}</p>
+        <p className="text-[10px] text-muted sm:text-xs">Actual Spent</p>
       </div>
     </div>
   );

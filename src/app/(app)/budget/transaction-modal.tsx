@@ -122,229 +122,221 @@ export function TransactionModal({
   const defaultDate = editTx?.date ?? (today.startsWith(monthKey) ? today : firstOfMonth);
   const options = subOptions.filter((s) => s.kind === txType);
 
+  const allowedGroups = txType === "income" ? new Set(["Banking"]) : new Set(["Banking", "Credit Cards"]);
+  const filteredAccounts = accountOptions.filter((a) => allowedGroups.has(a.group ?? "Other"));
+  const accountGroups: string[] = [];
+  const accountByGroup = new Map<string, typeof accountOptions>();
+  for (const a of filteredAccounts) {
+    const g = a.group ?? "Other";
+    if (!accountByGroup.has(g)) { accountGroups.push(g); accountByGroup.set(g, []); }
+    accountByGroup.get(g)!.push(a);
+  }
+
+  function handleFormAction(fd: FormData) {
+    start(async () => {
+      if (isEdit) {
+        await updateTransaction(fd);
+        onClose();
+      } else {
+        await addTransaction(fd);
+        if (fd.get("createAnother") === "on") {
+          formRef.current?.reset();
+        } else {
+          onClose();
+        }
+      }
+    });
+  }
+
   return (
-    <div className="flex max-h-[calc(100vh-6rem)] w-full flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <div className="flex max-h-[calc(100vh-6rem)] w-full flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:max-h-[85vh] sm:rounded-2xl dark:ring-white/10">
       {/* Header — tinted by category */}
-        <div className={`relative px-5 py-3.5 text-center transition-colors ${HEADER_TINT[txType]}`}>
-          <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
-            {isEdit ? "Edit" : "Add"} {KIND_TITLE[txType]}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
+      <div className={"relative px-5 py-3.5 text-center transition-colors " + HEADER_TINT[txType]}>
+        <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
+          {isEdit ? "Edit" : "Add"} {KIND_TITLE[txType]}
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="overflow-y-auto px-5 py-4">
+        {/* Five type tabs */}
+        <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+          {CATEGORY_KINDS.map(({ kind }) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => setTxType(kind)}
+              className={
+                "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
+                (txType === kind
+                  ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
+                  : "text-muted hover:text-foreground")
+              }
+            >
+              {KIND_TAB[kind]}
+            </button>
+          ))}
         </div>
 
-        <div className="overflow-y-auto px-5 py-4">
-          {/* Five type tabs — flex-wrap so each pill sizes to its own label
-              instead of being squashed into an equal-width grid column that
-              doesn't fit "Expenses"/"Savings" at the rail's narrower width. */}
-          <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
-            {CATEGORY_KINDS.map(({ kind }) => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => setTxType(kind)}
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
-                  txType === kind
-                    ? `bg-surface shadow-sm ring-1 ring-line ${TAB_ACTIVE_TEXT[kind]}`
-                    : "text-muted hover:text-foreground"
-                }`}
-              >
-                {KIND_TAB[kind]}
-              </button>
-            ))}
+        <form ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
+          {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
+
+          {/* Row 1: Amount | Date */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+              <input
+                ref={amountRef}
+                name="amount"
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9]*\.?[0-9]*"
+                required
+                placeholder="0.00"
+                autoFocus
+                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
+                className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            </div>
+            <input
+              name="date"
+              type="date"
+              required
+              defaultValue={defaultDate}
+              className="flex-1 rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+            />
           </div>
 
-          <form
-            ref={formRef}
-            action={(fd) =>
-              start(async () => {
-                if (isEdit) {
-                  await updateTransaction(fd);
-                  onClose();
-                } else {
-                  await addTransaction(fd);
-                  if (fd.get("createAnother") === "on") {
-                    formRef.current?.reset();
-                  } else {
-                    onClose();
-                  }
-                }
-              })
-            }
-            className="mt-4 space-y-4"
-          >
-            {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
+          {/* Payee */}
+          <PayeeField
+            placeholder={PAYEE_PLACEHOLDER[txType]}
+            defaultValue={editTx?.payee ?? ""}
+            payeeOptions={payeeOptions}
+            payeeLineItems={payeeLineItems}
+            onMatch={handlePayeeMatch}
+          />
 
-            {/* Row 1: Amount | Date */}
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
-                <input
-                  ref={amountRef}
-                  name="amount"
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  required
-                  placeholder="0.00"
-                  autoFocus
-                  defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
-                  className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                />
-              </div>
-              <input
-                name="date"
-                type="date"
-                required
-                defaultValue={defaultDate}
-                className="flex-1 rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-            </div>
-
-            {/* Row 2: Payee — full width */}
-            <PayeeField
-              placeholder={PAYEE_PLACEHOLDER[txType]}
-              defaultValue={editTx?.payee ?? ""}
-              payeeOptions={payeeOptions}
-              payeeLineItems={payeeLineItems}
-              onMatch={handlePayeeMatch}
-            />
-
-            {/* Row 2: Account | Budget Items */}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <select
-                  name="accountId"
-                  value={selectedAccountId}
-                  onChange={(e) => {
-                    setSelectedAccountId(e.target.value);
-                    setSelectedBucketId("");
-                  }}
-                  className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                >
-                  <option value="">
-                    {txType === "income"
-                      ? "Deposit to account"
-                      : txType === "debt"
-                        ? "Paid from account"
-                        : "Charged to / paid from account"}
-                  </option>
-                  {(() => {
-                    const allowedGroups = txType === "income"
-                      ? new Set(["Banking"])
-                      : new Set(["Banking", "Credit Cards"]);
-                    const filtered = accountOptions.filter(
-                      (a) => allowedGroups.has(a.group ?? "Other"),
-                    );
-                    const groups: string[] = [];
-                    const byGroup = new Map<string, typeof accountOptions>();
-                    for (const a of filtered) {
-                      const g = a.group ?? "Other";
-                      if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
-                      byGroup.get(g)!.push(a);
-                    }
-                    return groups.map((g) => (
-                      <optgroup key={g} label={g}>
-                        {byGroup.get(g)!.map((a) => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
-                      </optgroup>
-                    ));
-                  })()}
-                </select>
-                {txType === "debt" ? (
-                  <p className="mt-1 px-1 text-[11px] text-muted">
-                    Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page — it debits your bank and clears the card&apos;s Owed in one step.
-                  </p>
-                ) : null}
-              </div>
-              <BudgetItemField
-                key={`${txType}-${autoFillSubId ?? ""}`}
-                kindLabel={KIND_TAB[txType]}
-                options={options}
-                showLabel={false}
-                defaultValue={
-                  autoFillSubId ??
-                  (editTx && editTx.kind === txType
-                    ? editTx.subId ?? ""
-                    : !isEdit && initialKind === txType
-                      ? initialSubId ?? ""
-                      : "")
-                }
-                defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
-              />
-            </div>
-
-            {/* Bucket picker — only shown for investment accounts with buckets */}
-            {availableBuckets.length > 0 ? (
+          {/* Account | Budget Items */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
               <select
-                name="bucketId"
-                value={selectedBucketId}
-                onChange={(e) => setSelectedBucketId(e.target.value)}
-                className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                name="accountId"
+                value={selectedAccountId}
+                onChange={(e) => {
+                  setSelectedAccountId(e.target.value);
+                  setSelectedBucketId("");
+                }}
+                className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
-                <option value="">Bucket (optional — pick a sub-account)</option>
-                {availableBuckets.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
+                <option value="">
+                  {txType === "income"
+                    ? "Deposit to account"
+                    : txType === "debt"
+                      ? "Paid from account"
+                      : "Charged to / paid from account"}
+                </option>
+                {accountGroups.map((g) => (
+                  <optgroup key={g} label={g}>
+                    {accountByGroup.get(g)!.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
-            ) : null}
-
-            {/* Row 3: Note (full width) */}
-            <input
-              name="memo"
-              type="text"
-              placeholder="Add a note (optional)"
-              defaultValue={editTx?.memo ?? ""}
-              className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-
-            {/* Footer */}
-            <div className="flex items-center justify-between gap-3 pt-2">
-              {isEdit ? (
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() =>
-                    start(async () => {
-                      const fd = new FormData();
-                      fd.set("id", editTx.id);
-                      await deleteTransaction(fd);
-                      onClose();
-                    })
-                  }
-                  className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
-                >
-                  Delete
-                </button>
-              ) : (
-                <label className="flex items-center gap-2 text-sm text-muted">
-                  <input type="checkbox" name="createAnother" className="h-4 w-4 rounded accent-[var(--brand)]" />
-                  Create another
-                </label>
-              )}
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={pending}
-                  className={`rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-60 ${BTN_COLOR[txType]}`}
-                >
-                  {pending ? "Saving…" : isEdit ? "Save" : `Add ${KIND_SHORT[txType]}`}
-                </button>
-              </div>
+              {txType === "debt" ? (
+                <p className="mt-1 px-1 text-[11px] text-muted">
+                  Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page. It debits your bank and clears the card{"'"}s Owed in one step.
+                </p>
+              ) : null}
             </div>
-          </form>
+            <BudgetItemField
+              key={txType + "-" + (autoFillSubId ?? "")}
+              kindLabel={KIND_TAB[txType]}
+              options={options}
+              showLabel={false}
+              defaultValue={
+                autoFillSubId ??
+                (editTx && editTx.kind === txType
+                  ? editTx.subId ?? ""
+                  : !isEdit && initialKind === txType
+                    ? initialSubId ?? ""
+                    : "")
+              }
+              defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
+            />
+          </div>
+
+          {/* Bucket picker */}
+          {availableBuckets.length > 0 ? (
+            <select
+              name="bucketId"
+              value={selectedBucketId}
+              onChange={(e) => setSelectedBucketId(e.target.value)}
+              className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+            >
+              <option value="">Bucket (optional)</option>
+              {availableBuckets.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          ) : null}
+
+          {/* Note */}
+          <input
+            name="memo"
+            type="text"
+            placeholder="Add a note (optional)"
+            defaultValue={editTx?.memo ?? ""}
+            className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+          />
+
+          {/* Footer */}
+          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+            {isEdit ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const fd = new FormData();
+                    fd.set("id", editTx.id);
+                    await deleteTransaction(fd);
+                    onClose();
+                  })
+                }
+                className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
+              >
+                Delete
+              </button>
+            ) : (
+              <label className="flex items-center gap-2 text-sm text-muted">
+                <input type="checkbox" name="createAnother" className="h-4 w-4 rounded accent-[var(--brand)]" />
+                Create another
+              </label>
+            )}
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pending}
+                className={"rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-60 " + BTN_COLOR[txType]}
+              >
+                {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );
@@ -428,7 +420,7 @@ function PayeeField({
         onFocus={() => setOpen(true)}
         onBlur={() => { setOpen(false); setHighlighted(-1); }}
         onKeyDown={handleKeyDown}
-        className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
       />
       {open && matches.length > 0 ? (
         <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
@@ -501,7 +493,7 @@ function BudgetItemField({
         required
         value={subId}
         onChange={(e) => setSubId(e.target.value)}
-        className="w-full rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
       >
         <option value="" disabled>Choose Budget Item…</option>
         {options.map((o) => (

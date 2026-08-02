@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { SignOutButton } from "./sign-out-button";
-import SidebarNav from "./sidebar-nav";
 import { Sidebar } from "./sidebar";
 import { SessionInit } from "./session-init";
+import { MobileTabBar } from "./mobile-tab-bar";
 import type { SidebarGroup } from "./sidebar-accounts";
 
 export default async function AppLayout({
@@ -164,39 +163,37 @@ export default async function AppLayout({
     buildGroup("Kids Funding", active.filter((a) => a.is_kids_account)),
   ];
 
+  const badges: Record<string, number> = {
+    ...(debtItems.length > 0 ? { "/snowball": debtItems.length } : {}),
+    ...(txCount ? { "/transactions": txCount } : {}),
+  };
+
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       {/* Sidebar — YNAB-style navy in both themes */}
       <Sidebar
         groups={groups}
         userEmail={user.email ?? ""}
-        badges={{
-          ...(debtItems.length > 0 ? { "/snowball": debtItems.length } : {}),
-          ...(txCount ? { "/transactions": txCount } : {}),
-        }}
+        badges={badges}
       />
 
       {/* Mobile top bar */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between bg-sidebar px-4 py-3 text-white md:hidden">
+        <header className="flex items-center bg-sidebar px-4 py-3 text-white md:hidden">
           <Link href="/budget" className="flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/15 text-sm font-bold text-white">
               C
             </span>
             <span className="font-semibold text-white">Capitall</span>
           </Link>
-          <SignOutButton />
         </header>
 
-        {/* Mobile nav row */}
-        <div className="flex gap-1 overflow-x-auto bg-sidebar px-2 py-2 text-white md:hidden">
-          <SidebarNav />
-        </div>
-
-        <main className="min-w-0 flex-1 px-4 py-6 md:px-8 md:py-8">
+        <main className="min-w-0 flex-1 px-4 py-6 pb-20 md:px-8 md:py-8 md:pb-8">
           <SessionInit userId={user.id} />
           {children}
         </main>
+
+        <MobileTabBar badges={badges} />
       </div>
     </div>
   );

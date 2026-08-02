@@ -133,11 +133,19 @@ export function BudgetGroup({
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
           <span className="font-semibold">{group.name}</span>
           <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-            {visibleRows.length} {visibleRows.length === 1 ? "item" : "items"}
+            {visibleRows.length}
+            <span className="hidden sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
 
-        <div className="ml-auto flex items-center gap-4 text-[11px] tabular-nums">
+        <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums sm:gap-4">
+          {/* Mobile-only: $spent / $planned instead of Left */}
+          <span className="whitespace-nowrap text-xs tabular-nums sm:hidden">
+            <span className={`font-semibold ${actualColorClass(group.kind, group.spentTotal)}`}>
+              {formatMoney(group.spentTotal, currency)}
+            </span>
+            <span className="text-muted"> / {formatMoney(group.plannedTotal, currency)}</span>
+          </span>
           <span className="hidden text-muted lg:inline">
             {headerActualLabel}:{" "}
             <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
@@ -146,7 +154,7 @@ export function BudgetGroup({
             Plan:{" "}
             <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
           </span>
-          <span className="text-muted">
+          <span className="hidden text-muted sm:inline">
             <span className="hidden md:inline">Left: </span>
             <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
               {formatMoney(remainingTotal, currency)}
@@ -191,8 +199,13 @@ export function BudgetGroup({
             </div>
           ) : (
             <>
-              {/* Column-label strip — 12-col grid, must line up with BudgetRow */}
-              <div className={`grid grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1" : "py-1.5"} text-[10px] font-semibold uppercase tracking-wider text-muted`}>
+              {/* Mobile column label */}
+              <div className="flex items-center justify-end px-3 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:hidden">
+                Spent / Planned
+              </div>
+
+              {/* Column-label strip — desktop only, must line up with BudgetRow */}
+              <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1" : "py-1.5"} text-[10px] font-semibold uppercase tracking-wider text-muted sm:grid`}>
                 <div className="col-span-5 pl-6 sm:col-span-4">{nameColumnLabel}</div>
                 <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
                 <div className="col-span-2 text-right">Planned</div>
@@ -217,7 +230,28 @@ export function BudgetGroup({
                   />
                 ))}
               </ul>
-              <div className={`grid grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 ${compact ? "py-2" : "py-2.5"}`}>
+              {/* Mobile subtotal: label + spent/planned + remaining pill */}
+              <div className="flex items-center gap-2 border-t border-line bg-background/50 px-3 py-2 sm:hidden">
+                <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                    <path d="M8 7h8M8 11h8M8 15h8M8 19h5" />
+                  </svg>
+                  <span className="truncate">Subtotal</span>
+                </div>
+                <div className="ml-auto text-right text-xs tabular-nums">
+                  <span className={`font-semibold ${actualColorClass(group.kind, group.spentTotal)}`}>
+                    {formatMoney(group.spentTotal, currency)}
+                  </span>
+                  <span className="text-muted"> / {formatMoney(group.plannedTotal, currency)}</span>
+                  <span className={`ml-2 font-semibold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                    ({formatMoney(remainingTotal, currency)})
+                  </span>
+                </div>
+              </div>
+
+              {/* Desktop subtotal: 12-col grid matching row layout */}
+              <div className={`hidden grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 sm:grid ${compact ? "py-2" : "py-2.5"}`}>
                 <div className="col-span-5 flex items-center gap-2 pl-6 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-4">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <rect x="4" y="3" width="16" height="18" rx="2" />

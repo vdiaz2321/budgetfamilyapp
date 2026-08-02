@@ -269,8 +269,8 @@ export function TransactionsTable({
         </div>
       ) : null}
 
-      {/* Register */}
-      <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      {/* Register — desktop table */}
+      <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
         <div className="overflow-x-auto">
           <div className="min-w-[52rem]">
             {/* Header */}
@@ -336,18 +336,61 @@ export function TransactionsTable({
         </div>
       </section>
 
+      {/* Register — mobile card list */}
+      <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
+        {filtered.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted">
+            {transactions.length === 0
+              ? "No transactions this month yet — tap Add Transaction to log one."
+              : "No transactions match your filters."}
+          </p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {filtered.map((t) => (
+              <TxCard
+                key={t.id}
+                tx={t}
+                currency={currency}
+                accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                onTap={() => {
+                  if (!t.isCardPayment) setModal(t);
+                }}
+              />
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-center justify-between gap-2 border-t border-line bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
+          <span className="whitespace-nowrap font-medium text-muted">
+            {filtered.length} {filtered.length === 1 ? "tx" : "txs"}
+          </span>
+          <span className="truncate text-right text-muted">
+            <span className="text-positive">+{formatMoney(incomeTotal, currency)}</span>
+            {" · "}
+            <span className="text-negative">−{formatMoney(outflowTotal, currency)}</span>
+          </span>
+          <span className={`whitespace-nowrap font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+            {formatMoney(incomeTotal - outflowTotal, currency)}
+          </span>
+        </div>
+      </section>
+
       {modal ? (
-        <TransactionModal
-          editTx={modal === "new" ? null : modal}
-          monthKey={month.key}
-          firstOfMonth={month.firstOfMonth}
-          subOptions={subOptions}
-          accountOptions={accountOptions}
-          bucketsByAccount={bucketsByAccount}
-          payeeOptions={payeeOptions}
-          payeeLineItems={payeeLineItems}
-          onClose={() => setModal(null)}
-        />
+        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+          <div className="w-full sm:max-w-[520px]">
+            <TransactionModal
+              editTx={modal === "new" ? null : modal}
+              monthKey={month.key}
+              firstOfMonth={month.firstOfMonth}
+              subOptions={subOptions}
+              accountOptions={accountOptions}
+              bucketsByAccount={bucketsByAccount}
+              payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onClose={() => setModal(null)}
+            />
+          </div>
+        </div>
       ) : null}
 
       {importOpen ? <ImportCsvModal onClose={() => setImportOpen(false)} /> : null}
@@ -451,6 +494,58 @@ function TxLine({
           </svg>
         </button>
       </form>
+    </li>
+  );
+}
+
+function TxCard({
+  tx,
+  currency,
+  accountName,
+  onTap,
+}: {
+  tx: TxData;
+  currency: string;
+  accountName: string;
+  onTap: () => void;
+}) {
+  const canEdit = !tx.isCardPayment;
+  const isIncome = tx.kind === "income";
+  const dateStr = `${tx.date.slice(5, 7)}/${tx.date.slice(8, 10)}`;
+
+  return (
+    <li>
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={onTap}
+        className={`flex w-full flex-col gap-1 px-4 py-3 text-left transition active:bg-brand-soft/25 disabled:cursor-default ${
+          tx.cleared ? "opacity-60" : ""
+        }`}
+      >
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="whitespace-nowrap text-xs font-medium text-muted tabular-nums">
+            {dateStr}
+          </span>
+          <span
+            className={`whitespace-nowrap text-sm font-bold tabular-nums ${
+              isIncome ? "text-positive" : "text-foreground"
+            }`}
+          >
+            {isIncome ? "+" : "−"}
+            {formatMoney(tx.amountCents, currency)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
+            <span className="truncate text-sm font-medium text-foreground">{tx.subName}</span>
+          </div>
+          <span className="shrink-0 truncate text-xs text-muted">
+            {tx.payee ?? accountName}
+          </span>
+        </div>
+      </button>
     </li>
   );
 }
