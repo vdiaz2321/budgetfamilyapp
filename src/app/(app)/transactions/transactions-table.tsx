@@ -324,9 +324,13 @@ export function TransactionsTable({
               <span className="col-span-3 whitespace-nowrap text-xs font-medium text-muted">
                 {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
               </span>
-              <span className="col-span-2 truncate text-right text-xs font-medium text-muted">
-                Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
-              </span>
+              {incomeTotal > 0 && outflowTotal > 0 ? (
+                <span className="col-span-2 truncate text-right text-xs font-medium text-muted">
+                  Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
+                </span>
+              ) : (
+                <span className="col-span-2" />
+              )}
               <span className={`col-span-2 whitespace-nowrap text-center text-xs font-medium tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
                 {formatMoney(incomeTotal - outflowTotal, currency)} <span className="font-normal text-muted">left</span>
               </span>
@@ -362,13 +366,15 @@ export function TransactionsTable({
 
         <div className="flex items-center justify-between gap-2 border-t border-line bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
           <span className="whitespace-nowrap font-medium text-muted">
-            {filtered.length} {filtered.length === 1 ? "tx" : "txs"}
+            {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
           </span>
-          <span className="truncate text-right text-muted">
-            <span className="text-positive">+{formatMoney(incomeTotal, currency)}</span>
-            {" · "}
-            <span className="text-negative">−{formatMoney(outflowTotal, currency)}</span>
-          </span>
+          {incomeTotal > 0 && outflowTotal > 0 && (
+            <span className="truncate text-right text-muted">
+              <span className="text-positive">+{formatMoney(incomeTotal, currency)}</span>
+              {" · "}
+              <span className="text-negative">−{formatMoney(outflowTotal, currency)}</span>
+            </span>
+          )}
           <span className={`whitespace-nowrap font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
             {formatMoney(incomeTotal - outflowTotal, currency)}
           </span>

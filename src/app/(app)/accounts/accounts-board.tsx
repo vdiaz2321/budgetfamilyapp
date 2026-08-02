@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useTransition } from "react";
+import React, { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
@@ -21,8 +21,6 @@ import {
   updateBucketBalance,
   updateBucketBankGroup,
   upsertCardDetails,
-  saveCardBenefit,
-  deleteCardBenefit,
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 
@@ -68,25 +66,8 @@ export type CardDetails = {
   remarks: string | null;
   isRevolvingDebt: boolean;
   debtSubcategoryId: string | null;
-};
-
-export type CardBenefit = {
-  id: string;
-  accountId: string;
-  name: string;
-  benefitType: string;
-  cadence: string;
-  maxValueCents: number | null;
-  requiredSpendCents: number | null;
-  requirementText: string | null;
-  enrollmentRequired: boolean;
-  periodStart: string | null;
-  periodEnd: string | null;
-  usedAmountCents: number;
-  status: string;
-  actionUrl: string | null;
-  sourceUrl: string | null;
-  notes: string | null;
+  cardUrl: string | null;
+  benefitCadence: string | null;
 };
 
 export type AccountData = {
@@ -105,7 +86,6 @@ export type AccountData = {
   dateClosed: string | null;
   // Credit-card only. Auto-computed on the server for CCs.
   cardDetails?: CardDetails | null;
-  benefits?: CardBenefit[];
   owedCents?: number;
   monthSpendCents?: number;
   // Prior-month account_snapshots (null = never recorded yet for that month).
@@ -438,6 +418,33 @@ function CreditCardSection({
 }) {
   const [adding, setAdding] = useState(false);
   const [justAddedId, setJustAddedId] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [, startReorder] = useTransition();
+  const [localAccounts, setLocalAccounts] = useState(accounts);
+  useEffect(() => { setLocalAccounts(accounts); }, [accounts]);
+  const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
+  const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
+    const next = new Set(prev);
+    next.has(bank) ? next.delete(bank) : next.add(bank);
+    return next;
+  });
+
+  const reorder = (fromId: string, toId: string) => {
+    const fromIdx = localAccounts.findIndex((a) => a.id === fromId);
+    const toIdx = localAccounts.findIndex((a) => a.id === toId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const next = [...localAccounts];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setLocalAccounts(next);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
+    startReorder(async () => {
+      const res = await reorderAccounts(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
+  const { dragOverId, startDrag } = usePointerReorder("credit-card", reorder);
   const isArchived = section.key === "credit_archived";
   const isMain = section.key === "credit";
 
@@ -458,6 +465,7 @@ function CreditCardSection({
     return sum + (d?.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0);
   }, 0);
   const freeNightValue = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.freeNightCreditCents ?? 0), 0);
+  const totalPoints = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
   const travelValue = rewardCards
     .filter((a) => a.cardDetails?.rewardsCategory === "travel")
     .reduce((sum, a) => sum + (a.cardDetails?.pointsValueMicros ? Math.round((a.cardDetails.currentPoints * a.cardDetails.pointsValueMicros) / 10_000) : 0), 0);
@@ -506,61 +514,89 @@ function CreditCardSection({
               <span className="font-semibold">Owed:</span>{" "}
               <span className={`font-semibold tabular-nums ${totalOwed > 0 ? "text-negative" : "text-positive"}`}>
                 {formatMoney(totalOwed, currency)}
-              </span>{" "}
-              across {accounts.length} card{accounts.length !== 1 ? "s" : ""}
-            </span>
-          ) : null}
-          {feesAll > 0 ? (
-            <span>
-              <span className="font-semibold">Annual fees:</span>{" "}
-              <span className="font-semibold text-foreground">{formatMoney(feesPaid, currency)}</span> paid
-              {feesWaived > 0 ? (
-                <>
-                  {" · "}
-                  <span className="font-semibold text-positive">{formatMoney(feesWaived, currency)}</span> waived
-                </>
-              ) : null}
-              {" · "}
-              <span className="font-semibold text-foreground">{formatMoney(feesAll, currency)}</span> if all applied
+              </span>
             </span>
           ) : null}
           {isMain && rewardCards.length > 0 ? (
             <span>
               <span className="font-semibold">Rewards value:</span>{" "}
               <span className="font-semibold text-positive">{formatMoney(pointsValue + freeNightValue, currency)}</span>
+              {totalPoints > 0 ? <> · <span className="font-semibold">Current Pts:</span> <span className="font-semibold text-foreground">{totalPoints.toLocaleString()}</span></> : null}
               {travelValue > 0 ? <> · Travel {formatMoney(travelValue, currency)}</> : null}
               {hotelValue > 0 ? <> · Hotel {formatMoney(hotelValue, currency)}</> : null}
               {freeNightValue > 0 ? <> · Free nights {formatMoney(freeNightValue, currency)}</> : null}
             </span>
-          ) : null}
-          {isMain && allCreditCards.length > 0 ? (
-            <span><span className="font-semibold">Chase 5/24:</span> {five24Count}/5 countable cards opened in the last 24 months</span>
           ) : null}
         </div>
       ) : null}
 
       {open ? (
         <div className="border-t border-line">
-          {accounts.length === 0 ? (
+          {reorderError ? (
+            <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
+          ) : null}
+          {localAccounts.length === 0 ? (
             <p className="px-4 py-2.5 text-sm text-muted">
               {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
             </p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {accounts.map((a) => (
-                <CreditCardPanel
-                  key={a.id}
-                  card={a}
-                  currency={currency}
-                  nonCardAccounts={nonCardAccounts}
-                  allBuckets={allBuckets}
-                  isArchived={isArchived}
-                  defaultEditing={a.id === justAddedId}
-                  onEditingOpened={() => setJustAddedId(null)}
-                />
-              ))}
-            </ul>
-          )}
+          ) : (() => {
+            const bankLabel = (a: AccountData) => a.cardDetails?.bank ?? a.subtype ?? "Other";
+            const groups = localAccounts.reduce<{ bank: string; cards: AccountData[] }[]>((acc, a) => {
+              const b = bankLabel(a);
+              const existing = acc.find((g) => g.bank === b);
+              if (existing) { existing.cards.push(a); } else { acc.push({ bank: b, cards: [a] }); }
+              return acc;
+            }, []);
+            return (
+              <div className="divide-y divide-line">
+                {groups.map((group) => {
+                  const collapsed = collapsedBanks.has(group.bank);
+                  return (
+                    <div key={group.bank}>
+                      <button
+                        type="button"
+                        onClick={() => toggleBank(group.bank)}
+                        className="flex w-full items-center gap-1.5 px-4 py-1 text-left bg-black/[0.02] dark:bg-white/[0.02] hover:bg-black/[0.04] dark:hover:bg-white/[0.04]"
+                      >
+                        <svg
+                          width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                          strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                          className={`shrink-0 text-muted/60 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+                          aria-hidden
+                        >
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted/60">
+                          {group.bank}
+                        </span>
+                        <span className="text-[10px] text-muted/40">
+                          {group.cards.length} card{group.cards.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <ul className="divide-y divide-line">
+                          {group.cards.map((a) => (
+                            <CreditCardPanel
+                              key={a.id}
+                              card={a}
+                              currency={currency}
+                              nonCardAccounts={nonCardAccounts}
+                              allBuckets={allBuckets}
+                              isArchived={isArchived}
+                              defaultEditing={a.id === justAddedId}
+                              onEditingOpened={() => setJustAddedId(null)}
+                              onDragStart={() => startDrag(a.id)}
+                              isDragOver={dragOverId === a.id}
+                            />
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {!isArchived && (
             adding ? (
@@ -599,6 +635,8 @@ function CreditCardPanel({
   isArchived,
   defaultEditing = false,
   onEditingOpened,
+  onDragStart,
+  isDragOver,
 }: {
   card: AccountData;
   currency: string;
@@ -607,6 +645,8 @@ function CreditCardPanel({
   isArchived: boolean;
   defaultEditing?: boolean;
   onEditingOpened?: () => void;
+  onDragStart?: () => void;
+  isDragOver?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultEditing);
   const [editing, setEditing] = useState(defaultEditing);
@@ -623,8 +663,28 @@ function CreditCardPanel({
   const [reopenPending, startReopen] = useTransition();
 
   const d = card.cardDetails;
-  const benefits = card.benefits ?? [];
   const owed = card.owedCents ?? 0;
+
+  // Free-night expiry state for highlighting
+  const today = new Date().toISOString().slice(0, 10);
+  const fnExpires = d?.freeNightExpiresOn ?? null;
+  const fnUsed = d?.benefitUsedOn ?? null;
+  const fnExpired = fnExpires ? fnExpires < today : false;
+  const fnDaysLeft = fnExpires && !fnExpired
+    ? Math.round((new Date(fnExpires).getTime() - Date.now()) / 86_400_000)
+    : null;
+  const fnSoon = fnDaysLeft !== null && fnDaysLeft <= 60;
+  // expires color: muted-strikethrough if used+expired (renewal due), green if used+not-expired,
+  // red if expired+unused (missed), amber if soon+unused, else normal
+  const fnExpiresColor = fnUsed && fnExpired
+    ? "text-muted line-through"
+    : fnUsed
+      ? "text-positive"
+      : fnExpired
+        ? "text-negative font-semibold"
+        : fnSoon
+          ? "text-amber-600 dark:text-amber-400 font-semibold"
+          : "";
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const monthLabel = monthNames[new Date().getMonth()];
   const monthSpend = card.monthSpendCents ?? 0;
@@ -632,12 +692,21 @@ function CreditCardPanel({
   const bank = d?.bank ?? card.subtype ?? null;
 
   return (
-    <li className={expanded ? "bg-brand-soft/15" : "hover:bg-brand-soft/25"}>
+    <li
+      data-drop-key={`credit-card:${card.id}`}
+      className={`${expanded ? "bg-brand-soft/15" : "hover:bg-brand-soft/25"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+    >
       {/* Collapsed row */}
+      <div className="flex items-center">
+        {!isArchived && onDragStart ? (
+          <span className="flex-none pl-2 py-2">
+            <GripHandle onMouseDown={onDragStart} size="sm" />
+          </span>
+        ) : null}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left"
+        className={`flex flex-1 items-center gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-4 py-2 text-left`}
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
@@ -668,17 +737,26 @@ function CreditCardPanel({
                 {d.currentPoints.toLocaleString()} pts
               </span>
             ) : null}
+            {card.dateOpened ? (
+              <span className="shrink-0 text-[10px] text-muted">
+                Opened {card.dateOpened}
+              </span>
+            ) : null}
           </span>
-          {(card.dateOpened || (card.annualFeeCents && !card.feeWaived) || (d && (d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightExpiresOn || d.benefitUsedOn))) ? (
-            <p className="mt-0.5 truncate text-[11px] text-muted">
-              {card.dateOpened ? <>Opened {card.dateOpened}</> : null}
-              {card.annualFeeCents && !card.feeWaived ? <> · <span className="font-medium text-amber-600 dark:text-amber-400">{formatMoney(card.annualFeeCents, currency)}/yr fee</span></> : null}
-              {d?.freeNightCreditCents ? <> · Free-Night Credit: {formatMoney(d.freeNightCreditCents, currency)}</> : null}
-              {d?.freeNightPointsLimit ? <> · Free Night: {d.freeNightPointsLimit.toLocaleString()} pts</> : null}
-              {d?.freeNightExpiresOn ? <> · Free-Night Expires: {d.freeNightExpiresOn}</> : null}
-              {d?.benefitUsedOn ? <> · Used/Scheduled: {d.benefitUsedOn}</> : null}
-            </p>
-          ) : null}
+          {(() => {
+            const parts: React.ReactNode[] = [];
+            if (card.annualFeeCents && !card.feeWaived) parts.push(<span key="fee">{formatMoney(card.annualFeeCents, currency)}/yr fee</span>);
+            if (d?.freeNightCreditCents) parts.push(<span key="fnc">Free-Night Credit: {formatMoney(d.freeNightCreditCents, currency)}</span>);
+            if (d?.freeNightPointsLimit) parts.push(<span key="fnp">Free Night: {d.freeNightPointsLimit.toLocaleString()} pts</span>);
+            if (d?.freeNightExpiresOn) parts.push(<span key="fne" className={fnExpiresColor}>Free-Night Expires: {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}</span>);
+            if (d?.benefitUsedOn) parts.push(<span key="fnu" className={fnUsed && fnExpired ? "text-negative" : "text-positive"}>Used/Scheduled: {d.benefitUsedOn}</span>);
+            if (!parts.length) return null;
+            return (
+              <p className="mt-0.5 truncate text-[11px] text-muted">
+                {parts.map((p, i) => <React.Fragment key={i}>{i > 0 ? " · " : ""}{p}</React.Fragment>)}
+              </p>
+            );
+          })()}
         </span>
         <span className={`w-24 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
           {owed !== 0 ? formatMoney(owed, currency) : "—"}
@@ -692,6 +770,7 @@ function CreditCardPanel({
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
+      </div>
 
       {expanded ? (
         <div className="space-y-3 border-t border-line bg-background/40 px-4 py-3">
@@ -757,8 +836,6 @@ function CreditCardPanel({
               <span className="font-semibold">Remarks:</span> {d.remarks}
             </p>
           ) : null}
-
-          <BenefitsChecklist card={card} currency={currency} benefits={benefits} />
 
           {/* Action bar */}
           <div className="flex flex-wrap items-center gap-2">
@@ -837,75 +914,6 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
         {label}
       </span>
       <span className="min-w-0 text-sm text-foreground">{value}</span>
-    </div>
-  );
-}
-
-function BenefitsChecklist({
-  card,
-  currency,
-  benefits,
-}: {
-  card: AccountData;
-  currency: string;
-  benefits: CardBenefit[];
-}) {
-  const [adding, setAdding] = useState(false);
-  const totalValue = benefits.reduce((sum, b) => sum + Math.max(0, b.maxValueCents ?? 0), 0);
-  const usedValue = benefits.reduce((sum, b) => sum + Math.min(Math.max(0, b.usedAmountCents), Math.max(0, b.maxValueCents ?? 0)), 0);
-
-  return (
-    <div className="space-y-2 rounded-lg border border-line bg-surface p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wide">Benefits checklist</h3>
-          <p className="text-[11px] text-muted">
-            {benefits.length ? `${formatMoney(usedValue, currency)} used of ${formatMoney(totalValue, currency)} tracked` : "Add credits, free nights, status, or spending milestones."}
-          </p>
-        </div>
-        <button type="button" onClick={() => setAdding((v) => !v)} className="rounded-md bg-brand-soft px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70">
-          {adding ? "Cancel" : "+ Add benefit"}
-        </button>
-      </div>
-
-      {benefits.map((benefit) => {
-        const remaining = benefit.maxValueCents == null ? null : Math.max(0, benefit.maxValueCents - benefit.usedAmountCents);
-        return (
-          <form key={benefit.id} action={(fd) => { void saveCardBenefit(fd); }} className="grid gap-2 rounded-md bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_7rem_7rem_auto] sm:items-end">
-            <input type="hidden" name="id" value={benefit.id} />
-            <input type="hidden" name="accountId" value={card.id} />
-            <input type="hidden" name="name" value={benefit.name} />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{benefit.name}</p>
-              <p className="text-[11px] text-muted">{benefit.cadence}{benefit.requirementText ? ` · ${benefit.requirementText}` : ""}</p>
-              {benefit.sourceUrl ? (
-                <span className="flex gap-2 text-[11px]">
-                  <a href={benefit.sourceUrl} target="_blank" rel="noreferrer" className="text-muted hover:text-foreground hover:underline">Card URL ↗</a>
-                </span>
-              ) : null}
-            </div>
-            <LabeledInput label="Used" name="usedAmount" type="number" step="0.01" prefix="$" defaultValue={centsToDisplay(benefit.usedAmountCents)} />
-            <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Status</span><select name="status" defaultValue={benefit.status} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line"><option value="available">Available</option><option value="in_progress">In progress</option><option value="used">Used</option><option value="expired">Expired</option><option value="not_applicable">N/A</option></select></label>
-            <div className="flex items-center justify-between gap-2 sm:justify-end">
-              <span className="text-xs font-semibold tabular-nums text-positive">{remaining == null ? "—" : `${formatMoney(remaining, currency)} left`}</span>
-              <button type="submit" className="rounded-md bg-brand px-2.5 py-1.5 text-xs font-semibold text-white">Save</button>
-              <button formAction={(fd) => { void deleteCardBenefit(fd); }} type="submit" className="rounded-md px-2 py-1.5 text-xs font-medium text-negative hover:bg-negative/10">Delete</button>
-            </div>
-          </form>
-        );
-      })}
-
-      {adding ? (
-        <form action={(fd) => { void saveCardBenefit(fd); }} className="grid gap-2 rounded-md border border-dashed border-brand/40 bg-brand-soft/20 p-2 sm:grid-cols-2">
-          <input type="hidden" name="accountId" value={card.id} />
-          <LabeledInput label="Airline/Hotel credit" name="name" placeholder="Hilton resort credit" required />
-          <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Often Resets</span><select name="cadence" defaultValue="annual" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option><option value="anniversary">Card anniversary</option><option value="one_time">One-time</option></select></label>
-          <LabeledInput label="Dollar Value" name="maxValue" type="number" step="0.01" prefix="$" placeholder="100" />
-          <LabeledInput label="Spending requirement" name="requirementText" placeholder="Spend $4,000 in 3 months" />
-          <LabeledInput label="Card URL" name="sourceUrl" type="url" placeholder="https://issuer.com/card" />
-          <div className="sm:col-span-2"><button type="submit" className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white">Add benefit</button></div>
-        </form>
-      ) : null}
     </div>
   );
 }
@@ -993,6 +1001,16 @@ function EditCreditCardForm({
           <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
           <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
           <LabeledInput label="Fees paid this year" name="feesPaid" type="number" step="0.01" prefix="$" defaultValue={d?.feesPaidCents ? centsToDisplay(d.feesPaidCents) : ""} />
+          <LabeledInput label="Card URL" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
+            <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="annual">Annual</option>
+              <option value="anniversary">Card anniversary</option>
+            </select>
+          </label>
           <div className="sm:col-span-2">
             <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
             <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
@@ -1560,7 +1578,7 @@ function AccountRow({
           >
             Click to edit
           </span>
-          <span className={`truncate text-sm ${account.active ? "text-foreground" : "text-muted line-through"}`}>
+          <span className={`truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
           {account.holder ? (

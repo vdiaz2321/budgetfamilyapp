@@ -185,7 +185,7 @@ export function BudgetBoard({
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
     <div className="mx-auto max-w-6xl space-y-4">
-      <TopHeader monthKey={month.key} />
+      <TopHeader monthKey={month.key} onAddTransaction={() => setShowAddModal(true)} />
       <div className="flex justify-center gap-6">
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
@@ -428,11 +428,20 @@ function CategoryProgressCard({
 // Top row above the hero: title + month picker on the left. The Add Item and
 // Roll-Planned buttons live in the right rail (aside), above the Summary /
 // Transactions tabs, so they align with that column's width.
-function TopHeader({ monthKey }: { monthKey: string }) {
+function TopHeader({ monthKey, onAddTransaction }: { monthKey: string; onAddTransaction: () => void }) {
   return (
-    <div className="flex items-center gap-3">
-      <h1 className="text-xl font-bold tracking-tight text-foreground">Budget Overview</h1>
+    <div className="flex items-center justify-between gap-3">
       <MonthPicker monthKey={monthKey} />
+      <button
+        type="button"
+        onClick={onAddTransaction}
+        className="flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 active:opacity-80"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add
+      </button>
     </div>
   );
 }
@@ -516,7 +525,7 @@ function SummaryHeroCard({
       <div className="px-6 pb-5 pt-6">
         <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned Budget</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>
             <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
@@ -529,7 +538,7 @@ function SummaryHeroCard({
             )}
           </div>
           <div className="min-w-0 text-right">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Income Planned</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
             <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
             </p>

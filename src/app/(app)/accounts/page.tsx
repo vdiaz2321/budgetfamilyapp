@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentMonthFirst } from "@/lib/snapshots";
-import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type CardBenefit } from "./accounts-board";
+import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
 import { syncAllBucketedAccounts } from "./actions";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
@@ -51,7 +51,6 @@ export default async function AccountsPage() {
     { data: debtRows },
     { data: subRows },
     { data: cardDetailRowsInitial, error: cardDetailsError },
-    { data: benefitRows, error: benefitsError },
     { data: acctSnapshotRows },
     { data: bktSnapshotRows },
   ] = await Promise.all([
@@ -77,14 +76,8 @@ export default async function AccountsPage() {
       .eq("household_id", household.id),
     supabase
       .from("credit_card_details")
-      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable")
+      .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence")
       .eq("household_id", household.id),
-    supabase
-      .from("credit_card_benefits")
-      .select("id, account_id, name, benefit_type, cadence, max_value_cents, required_spend_cents, requirement_text, enrollment_required, period_start, period_end, used_amount_cents, status, action_url, source_url, notes")
-      .eq("household_id", household.id)
-      .eq("active", true)
-      .order("period_end", { ascending: true, nullsFirst: false }),
     supabase
       .from("account_snapshots")
       .select("account_id, month, balance_cents")
@@ -107,32 +100,6 @@ export default async function AccountsPage() {
       .eq("household_id", household.id);
     cardDetailRows = legacy.data as typeof cardDetailRowsInitial;
   }
-  const benefitsByAccount = new Map<string, CardBenefit[]>();
-  if (!benefitsError) {
-    for (const b of benefitRows ?? []) {
-      const list = benefitsByAccount.get(b.account_id) ?? [];
-      list.push({
-        id: b.id,
-        accountId: b.account_id,
-        name: b.name,
-        benefitType: b.benefit_type ?? "credit",
-        cadence: b.cadence ?? "annual",
-        maxValueCents: b.max_value_cents ?? null,
-        requiredSpendCents: b.required_spend_cents ?? null,
-        requirementText: b.requirement_text ?? null,
-        enrollmentRequired: b.enrollment_required ?? false,
-        periodStart: b.period_start ?? null,
-        periodEnd: b.period_end ?? null,
-        usedAmountCents: b.used_amount_cents ?? 0,
-        status: b.status ?? "available",
-        actionUrl: b.action_url ?? null,
-        sourceUrl: b.source_url ?? null,
-        notes: b.notes ?? null,
-      });
-      benefitsByAccount.set(b.account_id, list);
-    }
-  }
-
   // (accountId, month) -> cents; buckets keyed by (bucketId, month) -> cents.
   const acctHistory = new Map<string, number>();
   for (const s of acctSnapshotRows ?? []) {
@@ -174,6 +141,8 @@ export default async function AccountsPage() {
       remarks: d.remarks ?? null,
       isRevolvingDebt: d.is_revolving_debt ?? false,
       debtSubcategoryId: d.debt_subcategory_id ?? null,
+      cardUrl: d.card_url ?? null,
+      benefitCadence: d.benefit_cadence ?? null,
     });
   }
 
@@ -243,7 +212,6 @@ export default async function AccountsPage() {
     dateOpened: a.date_opened ?? null,
     dateClosed: a.date_closed ?? null,
     cardDetails: cardDetailsByAccount.get(a.id) ?? null,
-    benefits: benefitsByAccount.get(a.id) ?? [],
     owedCents: cardOwed.get(a.id) ?? 0,
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
     prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,

@@ -387,6 +387,8 @@ export async function upsertCardDetails(formData: FormData) {
     benefit_used_on: optDate("benefitUsedOn"),
     spending_limit_cents: optCents("spendingLimit"),
     remarks: optText("remarks"),
+    card_url: optText("cardUrl"),
+    benefit_cadence: optText("benefitCadence"),
     updated_at: new Date().toISOString(),
   };
 
@@ -419,61 +421,6 @@ export async function upsertCardDetails(formData: FormData) {
   return { error: null };
 }
 
-// Benefits are intentionally manual: clicking a benefit opens its official
-// action/source URL, while these actions record the user's usage and notes.
-export async function saveCardBenefit(formData: FormData) {
-  const { supabase, householdId } = await requireHousehold();
-  const accountId = String(formData.get("accountId") ?? "").trim();
-  const id = String(formData.get("id") ?? "").trim();
-  const name = String(formData.get("name") ?? "").trim();
-  if (!accountId) return { error: "Missing card." };
-  if (!id && !name) return { error: "Benefit name is required." };
-
-  const text = (key: string) => String(formData.get(key) ?? "").trim() || null;
-  const cents = (key: string) => {
-    const value = String(formData.get(key) ?? "").trim();
-    return value ? displayToCents(value) : null;
-  };
-  const row = {
-    ...(id ? { id } : {}),
-    account_id: accountId,
-    household_id: householdId,
-    name: name || "Benefit",
-    benefit_type: text("benefitType") ?? "credit",
-    cadence: text("cadence") ?? "annual",
-    max_value_cents: cents("maxValue"),
-    required_spend_cents: cents("requiredSpend"),
-    requirement_text: text("requirementText"),
-    enrollment_required: formData.get("enrollmentRequired") === "on",
-    period_start: text("periodStart"),
-    period_end: text("periodEnd"),
-    used_amount_cents: cents("usedAmount") ?? 0,
-    status: text("status") ?? "available",
-    action_url: text("actionUrl"),
-    source_url: text("sourceUrl"),
-    notes: text("notes"),
-    active: true,
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await supabase.from("credit_card_benefits").upsert(row, { onConflict: "id" });
-  if (error) return { error: "Couldn't save benefit — " + error.message };
-  revalidate();
-  return { error: null };
-}
-
-export async function deleteCardBenefit(formData: FormData) {
-  const { supabase, householdId } = await requireHousehold();
-  const id = String(formData.get("id") ?? "").trim();
-  if (!id) return { error: "Missing benefit." };
-  const { error } = await supabase
-    .from("credit_card_benefits")
-    .update({ active: false, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("household_id", householdId);
-  if (error) return { error: "Couldn't delete benefit — " + error.message };
-  revalidate();
-  return { error: null };
-}
 
 // Pay a credit card: one transaction row that debits the source bank AND
 // (via paid_to_account_id) reduces the card's auto-computed "owed" tally.
