@@ -123,7 +123,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       <DeleteButton subId={row.subId} />
 
       {/* Line 1 mobile / Name cell desktop */}
-      <div className="flex min-w-0 items-center gap-1.5 pr-7 sm:col-span-4 sm:pr-0">
+      <div className="flex min-w-0 items-center gap-1.5 pr-10 sm:col-span-4 sm:pr-0">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           title="Drag to reorder"
