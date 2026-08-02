@@ -124,7 +124,7 @@ export function TransactionsTable({
           <button
             type="button"
             onClick={() => setImportOpen(true)}
-            className="rounded-xl px-3 py-2 text-sm font-semibold text-brand ring-1 ring-brand transition hover:bg-brand-soft"
+            className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-brand ring-1 ring-brand transition hover:bg-brand-soft sm:inline-block"
           >
             Import CSV
           </button>
