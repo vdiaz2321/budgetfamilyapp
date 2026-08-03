@@ -94,9 +94,24 @@ export function SummaryPanel({ groups, currency }: Props) {
         subId: r.subId,
         name: r.name,
         value: mode === "spent" ? r.spentCents : r.plannedCents,
+        isKids: r.isKids ?? false,
       }))
       .filter((r) => r.value !== 0)
       .sort((a, b) => b.value - a.value);
+  };
+
+  const sectionedFor = (categoryId: string) => {
+    const rows = subRowsFor(categoryId);
+    const group = groups.find((g) => g.categoryId === categoryId);
+    if (group?.kind !== "savings") return null;
+    const kids = rows.filter((r) => r.isKids);
+    const mine = rows.filter((r) => !r.isKids);
+    if (kids.length === 0 || mine.length === 0) return null;
+    const totalOf = (rs: typeof rows) => rs.reduce((s, r) => s + r.value, 0);
+    return [
+      { label: "My Savings", rows: mine, subtotal: totalOf(mine) },
+      { label: "Kids Funding", rows: kids, subtotal: totalOf(kids) },
+    ];
   };
 
   return (
@@ -216,27 +231,49 @@ export function SummaryPanel({ groups, currency }: Props) {
                     </svg>
                   </button>
 
-                  {isOpen ? (
-                    <ul className="mb-1 ml-5 border-l border-line pl-3">
-                      {subRows.length === 0 ? (
-                        <li className="py-1 text-xs text-muted">
-                          {mode === "spent" ? "Nothing spent here yet." : "Nothing remaining here."}
-                        </li>
-                      ) : (
-                        subRows.map((r) => (
-                          <li
-                            key={r.subId}
-                            className="flex items-center gap-2 py-1"
-                          >
-                            <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
-                            <span className="shrink-0 text-xs tabular-nums">
-                              {formatMoney(r.value, currency)}
-                            </span>
+                  {isOpen ? (() => {
+                    const sections = sectionedFor(s.categoryId);
+                    if (sections) {
+                      return (
+                        <div className="mb-1 ml-5 border-l border-line pl-3">
+                          {sections.map((sec) => (
+                            <div key={sec.label} className="mb-1">
+                              <div className="flex items-center gap-2 rounded px-1 py-0.5 bg-brand-soft/30 mt-1">
+                                <span className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-wide text-brand">{sec.label}</span>
+                                <span className="shrink-0 text-[10px] font-bold tabular-nums text-brand">
+                                  {formatMoney(sec.subtotal, currency)}
+                                </span>
+                              </div>
+                              <ul>
+                                {sec.rows.map((r) => (
+                                  <li key={r.subId} className="flex items-center gap-2 py-1">
+                                    <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
+                                    <span className="shrink-0 text-xs tabular-nums">{formatMoney(r.value, currency)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return (
+                      <ul className="mb-1 ml-5 border-l border-line pl-3">
+                        {subRows.length === 0 ? (
+                          <li className="py-1 text-xs text-muted">
+                            {mode === "spent" ? "Nothing spent here yet." : "Nothing remaining here."}
                           </li>
-                        ))
-                      )}
-                    </ul>
-                  ) : null}
+                        ) : (
+                          subRows.map((r) => (
+                            <li key={r.subId} className="flex items-center gap-2 py-1">
+                              <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
+                              <span className="shrink-0 text-xs tabular-nums">{formatMoney(r.value, currency)}</span>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                    );
+                  })() : null}
                 </li>
               );
             })}

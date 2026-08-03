@@ -53,6 +53,8 @@ export function SavingsBoard({ cards, currency }: Props) {
   const kidsCards = cards.filter((c) => c.isKids);
   const [statsExpanded, setStatsExpanded] = useState(true);
   const [cardsExpanded, setCardsExpanded] = useState(true);
+  const [familyExpanded, setFamilyExpanded] = useState(true);
+  const [kidsExpanded, setKidsExpanded] = useState(true);
 
   const { goal, planned, saved, leftToSave, remainingPct } = statsFor(cards);
   const f = statsFor(familyCards);
@@ -90,7 +92,7 @@ export function SavingsBoard({ cards, currency }: Props) {
               <div className="divide-y divide-line/60">
                 <div className="px-4 py-3">
                   <p className="mb-2 text-xs font-medium text-muted">Overall Total Savings w/ Kids Funding</p>
-                  <div className="flex overflow-hidden rounded-xl bg-background ring-1 ring-black/5 dark:ring-white/10">
+                  <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-background ring-1 ring-black/5 sm:grid-cols-4 dark:ring-white/10">
                     <Stat label="Planned this month" amount={formatMoney(planned, currency)} sub="budgeted" />
                     <Stat label="Total goal" amount={formatMoney(goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
                     <Stat label="Total saved" amount={formatMoney(saved, currency)} amountTone="text-positive" sub="across all goals" />
@@ -100,7 +102,7 @@ export function SavingsBoard({ cards, currency }: Props) {
                 {familyCards.length > 0 && (
                   <div className="px-4 py-3">
                     <p className="mb-2 text-xs font-medium text-muted">Only Family Total Savings w/out Kids Funding</p>
-                    <div className="flex overflow-hidden rounded-xl bg-background ring-1 ring-black/5 dark:ring-white/10">
+                    <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-background ring-1 ring-black/5 sm:grid-cols-4 dark:ring-white/10">
                       <Stat label="Planned this month" amount={formatMoney(f.planned, currency)} sub="budgeted" />
                       <Stat label="Total goal" amount={formatMoney(f.goal, currency)} sub={`across ${familyCards.length} goal${familyCards.length === 1 ? "" : "s"}`} />
                       <Stat label="Total saved" amount={formatMoney(f.saved, currency)} amountTone="text-positive" sub="across all goals" />
@@ -131,19 +133,45 @@ export function SavingsBoard({ cards, currency }: Props) {
             {cardsExpanded && (
               <div className="space-y-6 p-4">
                 {familyCards.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-muted">Family goals</h3>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {familyCards.map((c) => <SavingsGoalCard key={c.id} card={c} currency={currency} />)}
-                    </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setFamilyExpanded((v) => !v)}
+                      className="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left hover:bg-brand-soft/20"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                        className={`shrink-0 text-muted transition-transform duration-200 ${familyExpanded ? "rotate-90" : ""}`}>
+                        <path d="M9 18l6-6-6-6" />
+                      </svg>
+                      <h3 className="text-sm font-semibold">{familyCards.length} Family goal{familyCards.length === 1 ? "" : "s"}</h3>
+                    </button>
+                    {familyExpanded && (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {familyCards.map((c) => <SavingsGoalCard key={c.id} card={c} currency={currency} />)}
+                      </div>
+                    )}
                   </div>
                 )}
                 {kidsCards.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-muted">Kids funding</h3>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {kidsCards.map((c) => <SavingsGoalCard key={c.id} card={c} currency={currency} />)}
-                    </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setKidsExpanded((v) => !v)}
+                      className="flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left hover:bg-brand-soft/20"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                        className={`shrink-0 text-muted transition-transform duration-200 ${kidsExpanded ? "rotate-90" : ""}`}>
+                        <path d="M9 18l6-6-6-6" />
+                      </svg>
+                      <h3 className="text-sm font-semibold">{kidsCards.length} Kids funding goal{kidsCards.length === 1 ? "" : "s"}</h3>
+                    </button>
+                    {kidsExpanded && (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {kidsCards.map((c) => <SavingsGoalCard key={c.id} card={c} currency={currency} />)}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -217,6 +217,7 @@ export function BudgetBoard({
           {heroHidden && (
             <StickyFooterBar
               actualLeft={actualLeft}
+              actualSpent={actualSpent}
               displayLeft={displayLeft}
               outflowPlanned={outflowPlanned}
               currency={currency}
@@ -537,7 +538,7 @@ function SummaryHeroCard({
             </p>
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left to Budget</p>
             <p className={`mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
@@ -729,11 +730,13 @@ function OverrideInput({
 // only its own row height.
 function StickyFooterBar({
   actualLeft,
+  actualSpent,
   displayLeft,
   outflowPlanned,
   currency,
 }: {
   actualLeft: number;
+  actualSpent: number;
   displayLeft: number;
   outflowPlanned: number;
   currency: string;
@@ -761,10 +764,10 @@ function StickyFooterBar({
         <p className={`truncate text-sm font-medium tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
           {formatMoney(displayLeft, currency)}
         </p>
-        <p className="text-[10px] text-muted sm:text-xs">Income Left</p>
+        <p className="text-[10px] text-muted sm:text-xs">Income Left to Budget</p>
       </div>
       <div className={`min-w-0 border-l border-line px-1 text-center ${toneClasses.text}`}>
-        <p className="truncate text-sm font-medium tabular-nums sm:text-lg">{formatMoney(actualLeft, currency)}</p>
+        <p className="truncate text-sm font-medium tabular-nums sm:text-lg">{formatMoney(actualSpent, currency)}</p>
         <p className="text-[10px] text-muted sm:text-xs">Actual Spent</p>
       </div>
     </div>

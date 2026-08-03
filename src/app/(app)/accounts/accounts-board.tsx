@@ -279,6 +279,54 @@ export function AccountsBoard({
     );
   };
 
+  const exportCsv = () => {
+    const q = (v: string | number | null | undefined) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows: string[] = [
+      ["Name", "Kind", "Subtype", "Holder", "Active", "Balance", "Owed", "Annual Fee", "Fee Waived", "Date Opened", "Date Closed", "Is Kids", "Bank Group", "Current Points", "Rewards Program"].join(","),
+    ];
+    for (const a of accounts) {
+      const d = a.cardDetails;
+      rows.push([
+        q(a.name),
+        q(a.kind),
+        q(a.subtype),
+        q(a.holder),
+        q(a.active ? "Yes" : "No"),
+        q((a.balanceCents / 100).toFixed(2)),
+        q(a.owedCents ? (a.owedCents / 100).toFixed(2) : ""),
+        q(a.annualFeeCents ? (a.annualFeeCents / 100).toFixed(2) : ""),
+        q(a.feeWaived ? "Yes" : ""),
+        q(a.dateOpened),
+        q(a.dateClosed),
+        q(a.isKidsAccount ? "Yes" : ""),
+        q(a.bankGroup),
+        q(d?.currentPoints ?? ""),
+        q(d?.rewardsProgram),
+      ].join(","));
+      for (const b of a.buckets) {
+        rows.push([
+          q(`  ${b.name}`),
+          q("bucket"),
+          q(""),
+          q(""),
+          q(""),
+          q((b.balanceCents / 100).toFixed(2)),
+          q(""), q(""), q(""), q(""), q(""), q(""), q(b.bankGroup), q(""), q(""),
+        ].join(","));
+      }
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `accounts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
       <div>
@@ -300,7 +348,14 @@ export function AccountsBoard({
         />
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={exportCsv}
+          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-muted shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft hover:text-brand dark:ring-white/15"
+        >
+          Export CSV
+        </button>
         <button
           type="button"
           onClick={toggleAll}

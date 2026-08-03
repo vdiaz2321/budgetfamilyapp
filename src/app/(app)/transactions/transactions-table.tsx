@@ -19,7 +19,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[1.75rem_5.5rem_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_7rem_2.25rem_2rem]";
+const GRID = "grid-cols-[1.75rem_5.5rem_2.25rem_6.5rem_minmax(7rem,1.2fr)_5.5rem_minmax(7rem,1.2fr)_minmax(5rem,0.9fr)_7rem_2rem]";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -72,6 +72,35 @@ export function TransactionsTable({
 
   const accountName = new Map(accountOptions.map((a) => [a.id, a.name]));
 
+  function exportCsv() {
+    const qf = (v: string | number | null | undefined) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [
+      ["Date", "Amount", "Category", "Type", "Payee", "Account", "Remarks", "Cleared"].join(","),
+      ...filtered.map((t) =>
+        [
+          qf(t.date),
+          qf(((t.isWithdrawal ? -1 : 1) * t.amountCents / 100).toFixed(2)),
+          qf(t.subName),
+          qf(t.isCardPayment ? "Card Payment" : (t.kind ? KIND_LABEL[t.kind] : "")),
+          qf(t.payee),
+          qf(t.accountId ? accountName.get(t.accountId) : ""),
+          qf(t.memo),
+          qf(t.cleared ? "Yes" : "No"),
+        ].join(",")
+      ),
+    ];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `transactions-${month.key}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function toggleSelect(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -121,6 +150,13 @@ export function TransactionsTable({
           <MonthPicker monthKey={month.key} basePath="/transactions" />
         )}
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-muted ring-1 ring-black/20 transition hover:bg-brand-soft hover:text-brand sm:inline-block dark:ring-white/20"
+          >
+            Export CSV
+          </button>
           <button
             type="button"
             onClick={() => setImportOpen(true)}
@@ -286,12 +322,13 @@ export function TransactionsTable({
                 />
               </span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Date</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Memo</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Type</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Remarks</span>
               <span />
             </div>
 
@@ -321,20 +358,22 @@ export function TransactionsTable({
 
             {/* Totals — same grid as the rows so the net sits under the Amount column */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-              <span className="col-span-3 whitespace-nowrap text-xs font-medium text-muted">
+              <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
                 {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
               </span>
-              {incomeTotal > 0 && outflowTotal > 0 ? (
-                <span className="col-span-2 truncate text-right text-xs font-medium text-muted">
-                  Income {formatMoney(incomeTotal, currency)} · Spent {formatMoney(outflowTotal, currency)}
+              <span className="col-span-7 whitespace-nowrap text-xs text-muted">
+                <span className="font-medium">Income Rc&apos;d</span>{" "}
+                <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
+                <span className="mx-1.5">–</span>
+                <span className="font-medium">Spent Income</span>{" "}
+                <span className="tabular-nums">{formatMoney(outflowTotal, currency)}</span>
+                <span className="mx-1.5">–</span>
+                <span className="font-medium">Income Left</span>{" "}
+                <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+                  {formatMoney(incomeTotal - outflowTotal, currency)}
                 </span>
-              ) : (
-                <span className="col-span-2" />
-              )}
-              <span className={`col-span-2 whitespace-nowrap text-center text-xs font-medium tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-                {formatMoney(incomeTotal - outflowTotal, currency)} <span className="font-normal text-muted">left</span>
               </span>
-              <span className="col-span-2" />
+              <span />
             </div>
           </div>
         </div>
@@ -451,26 +490,6 @@ function TxLine({
       <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
-        {tx.payee ?? "—"}
-      </button>
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
-        {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
-        <span className="truncate text-sm">{tx.subName}</span>
-      </button>
-      <span className="truncate text-sm text-muted">{accountName}</span>
-      <button
-        type="button"
-        disabled={!canEdit}
-        onClick={onEdit}
-        className={`text-center text-sm font-semibold tabular-nums disabled:cursor-default ${
-          isIncome ? "text-positive" : "text-foreground"
-        }`}
-      >
-        {isIncome ? "+" : "−"}
-        {formatMoney(tx.amountCents, currency)}
-      </button>
-      <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
       <span onDoubleClick={(e) => e.stopPropagation()} className="flex justify-center">
         <input
           type="checkbox"
@@ -482,6 +501,27 @@ function TxLine({
           className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
         />
       </span>
+      <button
+        type="button"
+        disabled={!canEdit}
+        onClick={onEdit}
+        className={`text-center text-sm font-semibold tabular-nums disabled:cursor-default ${
+          isIncome ? "text-positive" : "text-foreground"
+        }`}
+      >
+        {isIncome ? "+" : "−"}
+        {formatMoney(tx.amountCents, currency)}
+      </button>
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
+        {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
+        <span className="truncate text-sm">{tx.subName}</span>
+      </button>
+      <span className="truncate text-sm text-muted">{tx.kind ? KIND_LABEL[tx.kind] : "—"}</span>
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
+        {tx.payee ?? "—"}
+      </button>
+      <span className="truncate text-sm text-muted">{accountName}</span>
+      <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
       <form
         action={(fd) => startDel(() => deleteTransaction(fd))}
         onDoubleClick={(e) => e.stopPropagation()}

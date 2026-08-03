@@ -123,7 +123,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       <DeleteButton subId={row.subId} />
 
       {/* Line 1 mobile / Name cell desktop */}
-      <div className="flex min-w-0 items-center gap-1.5 pr-10 sm:col-span-4 sm:pr-0">
+      <div className="flex min-w-0 items-center gap-1.5 pr-6 sm:col-span-4 sm:pr-0">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           title="Drag to reorder"
@@ -256,7 +256,7 @@ function MobilePlannedInput({
         defaultValue={initial}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => { if (e.currentTarget.value !== initial) formRef.current?.requestSubmit(); }}
-        className={`w-14 rounded bg-transparent px-0.5 text-right text-xs text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand ${pending ? "ring-1 ring-brand" : ""}`}
+        className={`w-16 rounded bg-transparent px-0.5 text-right text-xs text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand ${pending ? "ring-1 ring-brand" : ""}`}
       />
     </form>
   );

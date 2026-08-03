@@ -135,7 +135,12 @@ export default async function SavingsPage() {
         pace = "overdue";
         requiredMonthlyCents = leftToSaveCents;
       } else {
-        requiredMonthlyCents = Math.ceil(leftToSaveCents / months);
+        // Treat this month's planned contribution as already made — Victor
+        // logs savings at end of month, so give the month a chance to land
+        // before flagging behind. Required = what's needed each future month
+        // after this month's planned amount comes through.
+        const projectedLeft = Math.max(0, leftToSaveCents - plannedCents);
+        requiredMonthlyCents = Math.ceil(projectedLeft / months);
         pace = plannedCents >= requiredMonthlyCents ? "on_track" : "behind";
       }
     }

@@ -213,23 +213,65 @@ export function BudgetGroup({
                 <div className="col-span-2 text-center">Progress</div>
               </div>
 
-              <ul className="divide-y divide-line/40">
-                {visibleRows.map((row, i) => (
-                  <BudgetRow
-                    key={row.subId}
-                    row={row}
-                    kind={group.kind}
-                    currency={currency}
-                    monthKey={monthKey}
-                    selected={row.subId === selectedSubId}
-                    isEven={i % 2 === 1}
-                    isDragOver={dragOverId === row.subId}
-                    compact={compact}
-                    onSelect={() => onSelectRow(row, group.kind)}
-                    onDragStart={() => startDrag(row.subId)}
-                  />
-                ))}
-              </ul>
+              {(() => {
+                const kidsRows = group.kind === "savings" ? visibleRows.filter((r) => r.isKids) : [];
+                const mineRows = group.kind === "savings" ? visibleRows.filter((r) => !r.isKids) : visibleRows;
+                const splitSavings = group.kind === "savings" && kidsRows.length > 0 && mineRows.length > 0;
+
+                const subtotalRow = (label: string, rows: RowData[]) => {
+                  const planned = rows.reduce((s, r) => s + r.plannedCents, 0);
+                  const spent = rows.reduce((s, r) => s + r.spentCents, 0);
+                  const remaining = planned - spent;
+                  return (
+                    <>
+                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
+                        <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
+                        <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
+                        <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
+                        <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
+                        <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{planned > 0 ? `${Math.min(100, Math.round((spent / planned) * 1000) / 10)}%` : "0%"}</div>
+                      </div>
+                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
+                        <span className="truncate">{label}</span>
+                        <span className="ml-auto text-xs tabular-nums">
+                          <span className={`font-semibold ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</span>
+                          <span className="text-muted"> / {formatMoney(planned, currency)}</span>
+                        </span>
+                      </div>
+                    </>
+                  );
+                };
+
+                const renderRows = (rows: RowData[], offset: number) => (
+                  <ul className="divide-y divide-line/40">
+                    {rows.map((row, i) => (
+                      <BudgetRow
+                        key={row.subId}
+                        row={row}
+                        kind={group.kind}
+                        currency={currency}
+                        monthKey={monthKey}
+                        selected={row.subId === selectedSubId}
+                        isEven={(offset + i) % 2 === 1}
+                        isDragOver={dragOverId === row.subId}
+                        compact={compact}
+                        onSelect={() => onSelectRow(row, group.kind)}
+                        onDragStart={() => startDrag(row.subId)}
+                      />
+                    ))}
+                  </ul>
+                );
+
+                if (!splitSavings) return renderRows(visibleRows, 0);
+                return (
+                  <>
+                    {subtotalRow("My Savings", mineRows)}
+                    {renderRows(mineRows, 0)}
+                    {subtotalRow("Kids Funding", kidsRows)}
+                    {renderRows(kidsRows, mineRows.length)}
+                  </>
+                );
+              })()}
               {/* Mobile subtotal: label + spent/planned + remaining pill */}
               <div className="flex items-center gap-2 border-t border-line bg-background/50 px-3 py-2 sm:hidden">
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">

@@ -176,6 +176,9 @@ export default async function BudgetPage({
     irregularAutoPlannedBySub.set(bill.subcategory_id, (irregularAutoPlannedBySub.get(bill.subcategory_id) ?? 0) + bill.typical_amount_cents);
   }
 
+  const isKidsAcctByIdEarly = new Map((accounts ?? []).map((a) => [a.id, a.is_kids_account ?? false]));
+  const isKidsByBucketId = new Map((buckets ?? []).map((b) => [b.id, isKidsAcctByIdEarly.get(b.account_id) ?? false]));
+
   const groups: GroupData[] = categories.map((cat) => {
     const kind = cat.kind as CategoryKind;
     const rows = (subs ?? [])
@@ -191,6 +194,13 @@ export default async function BudgetPage({
         const spentCents = spentBySub.get(s.id) ?? 0;
         const g = goalBySub.get(s.id);
         const d = debtBySub.get(s.id);
+        const linkedBucketId = linkedBucketBySub.get(s.id) ?? null;
+        const linkedAcctId = linkedAccountBySub.get(s.id) ?? null;
+        const isKids = kind === "savings"
+          ? (linkedBucketId ? isKidsByBucketId.get(linkedBucketId) ?? false
+            : linkedAcctId ? isKidsAcctByIdEarly.get(linkedAcctId) ?? false
+            : false)
+          : false;
         return {
           subId: s.id,
           name: s.name,
@@ -199,6 +209,7 @@ export default async function BudgetPage({
           spentCents,
           autoPlanned: isAutoSub || isAutoIrregular,
           sparkline: sparklineBySub.get(s.id) ?? [],
+          isKids,
           savings:
             kind === "savings"
               ? {

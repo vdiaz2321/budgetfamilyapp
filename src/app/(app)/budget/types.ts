@@ -70,6 +70,9 @@ export type RowData = {
   sparkline: number[];
   savings: SavingsDetail | null;
   debt: DebtDetail | null;
+  // True when this row's linked bucket/account belongs to a kids-marked
+  // account. Used only to visually subgroup Savings rows on Budget.
+  isKids?: boolean;
 };
 
 export type GroupData = {

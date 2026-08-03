@@ -181,10 +181,10 @@ export default async function AppLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center bg-sidebar px-4 py-3 text-white md:hidden">
           <Link href="/budget" className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/15 text-sm font-bold text-white">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-sm font-bold text-white">
               C
             </span>
-            <span className="font-semibold text-white">Capitall</span>
+            <span className="text-xl font-bold tracking-tight text-white">Capitall</span>
           </Link>
         </header>
 
