@@ -105,21 +105,23 @@ export function SubscriptionsSummaryCard({
                 <SummaryMetric label="Annual billed" value={formatMoney(annualBilledTotal, currency)} />
                 <SummaryMetric label="Total annual" value={formatMoney(annualizedTotal, currency)} />
               </div>
-              <div className="grid grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
                 <span>Name</span>
                 <span className="text-right">Amount</span>
-                <span className="text-center">Due</span>
-                <span>Card</span>
+                <span className="hidden text-center sm:inline">Due</span>
+                <span className="hidden sm:inline">Card</span>
               </div>
               <div className="divide-y divide-line">
               {subscriptions.map((s) => {
                 const cardName = s.accountId ? cardMap.get(s.accountId) : null;
                 return (
-                  <div key={s.id} className="grid grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] items-center gap-3 px-4 py-2 text-sm">
+                  <div key={s.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm sm:grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
                     <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
                     <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
-                    <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
-                    <span className="min-w-0 truncate text-xs text-muted">{cardName ?? "—"}</span>
+                    <span className="hidden sm:block">
+                      <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
+                    </span>
+                    <span className="hidden min-w-0 truncate text-xs text-muted sm:inline">{cardName ?? "—"}</span>
                   </div>
                 );
               })}

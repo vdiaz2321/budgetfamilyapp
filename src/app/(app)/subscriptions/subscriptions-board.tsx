@@ -121,8 +121,8 @@ export function SubscriptionsBoard({
   creditCards?: CreditCardOption[];
 }) {
   const monthlyTotal = subscriptions
-    .filter((s) => s.isActive)
-    .reduce((sum, s) => sum + monthlyEquivalent(s.amountCents, s.billingCycle), 0);
+    .filter((s) => s.isActive && s.billingCycle === "monthly")
+    .reduce((sum, s) => sum + s.amountCents, 0);
 
   return (
     <div className="space-y-4 p-5">
@@ -194,7 +194,56 @@ function SubscriptionsSection({
 
       {open ? (
         <div className="border-t border-line p-3">
-          <table className="w-full text-sm">
+          {/* Mobile: stacked card layout — every field visible without horizontal scroll */}
+          <div className="space-y-2 md:hidden">
+            {visibleRows.map((s) =>
+              editing === s.id ? (
+                <SubscriptionFormCard
+                  key={s.id}
+                  row={s}
+                  creditCards={creditCards}
+                  onDone={() => setEditing(null)}
+                />
+              ) : (
+                <div
+                  key={s.id}
+                  className={`rounded-lg border border-line bg-background/40 p-3 ${!s.isActive ? "opacity-60" : ""}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className={`font-semibold ${!s.isActive ? "line-through" : ""}`}>{s.name}</span>
+                    <span className="whitespace-nowrap font-semibold tabular-nums">{formatMoney(s.amountCents, currency)}</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                    <span>{CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}</span>
+                    {s.nextRenewalDate ? <RenewalBadge date={s.nextRenewalDate} /> : null}
+                    {s.accountId ? (
+                      <span>Card: {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 flex justify-end">
+                    <RowActions
+                      onEdit={() => setEditing(s.id)}
+                      onDelete={async () => {
+                        const fd = new FormData();
+                        fd.set("id", s.id);
+                        await deleteSubscription(fd);
+                      }}
+                    />
+                  </div>
+                </div>
+              ),
+            )}
+            {editing === "new" ? (
+              <SubscriptionFormCard
+                row={null}
+                creditCards={creditCards}
+                onDone={() => setEditing(null)}
+              />
+            ) : null}
+          </div>
+
+          {/* Desktop: full table */}
+          <table className="hidden w-full text-sm md:table">
             <thead>
               <tr className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
                 <th className="w-6 px-1 py-1"></th>
@@ -281,7 +330,7 @@ function SubscriptionsSection({
   );
 }
 
-function SubscriptionFormRow({
+function SubscriptionForm({
   row,
   creditCards = [],
   onDone,
@@ -294,105 +343,128 @@ function SubscriptionFormRow({
   const [cycle, setCycle] = useState<string>(row?.billingCycle ?? "monthly");
 
   return (
+    <form
+      action={(fd) =>
+        start(async () => {
+          await upsertSubscription(fd);
+          onDone();
+        })
+      }
+      className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end"
+    >
+      {row ? <input type="hidden" name="id" value={row.id} /> : null}
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Name
+        <input
+          name="name"
+          type="text"
+          required
+          defaultValue={row?.name ?? ""}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Amount
+        <input
+          name="amount"
+          type="number"
+          step="0.01"
+          min="0"
+          inputMode="decimal"
+          defaultValue={row ? centsToDisplay(row.amountCents) : ""}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-24 md:text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Cycle
+        <select
+          name="billingCycle"
+          defaultValue={row?.billingCycle ?? "monthly"}
+          onChange={(e) => setCycle(e.target.value)}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+        >
+          {Object.entries(CYCLE_LABEL).map(([v, l]) => (
+            <option key={v} value={v}>{l}</option>
+          ))}
+        </select>
+      </label>
+      <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} cycle={cycle} />
+      <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
+        <input
+          type="checkbox"
+          name="isActive"
+          defaultChecked={row?.isActive ?? true}
+          className="h-4 w-4 rounded accent-[var(--brand)]"
+        />
+        Active
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Notes
+        <input
+          name="notes"
+          type="text"
+          defaultValue={row?.notes ?? ""}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-32 md:text-sm"
+        />
+      </label>
+      {creditCards.length > 0 && (
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Card
+          <select
+            name="accountId"
+            defaultValue={row?.accountId ?? ""}
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+          >
+            <option value="">None</option>
+            {creditCards.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="mt-1 flex items-center justify-end gap-2 pb-0.5 md:ml-auto md:mt-0">
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+        >
+          {pending ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SubscriptionFormRow(props: {
+  row: SubscriptionRow | null;
+  creditCards?: CreditCardOption[];
+  onDone: () => void;
+}) {
+  return (
     <tr className="border-t border-line bg-brand-soft/10">
       <td colSpan={7} className="px-2 py-3">
-        <form
-          action={(fd) =>
-            start(async () => {
-              await upsertSubscription(fd);
-              onDone();
-            })
-          }
-          className="flex flex-wrap items-end gap-2"
-        >
-          {row ? <input type="hidden" name="id" value={row.id} /> : null}
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Name
-            <input
-              name="name"
-              type="text"
-              required
-              defaultValue={row?.name ?? ""}
-              className="w-36 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Amount
-            <input
-              name="amount"
-              type="number"
-              step="0.01"
-              min="0"
-              defaultValue={row ? centsToDisplay(row.amountCents) : ""}
-              className="w-24 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Cycle
-            <select
-              name="billingCycle"
-              defaultValue={row?.billingCycle ?? "monthly"}
-              onChange={(e) => setCycle(e.target.value)}
-              className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              {Object.entries(CYCLE_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
-          </label>
-          <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} cycle={cycle} />
-          <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
-            <input
-              type="checkbox"
-              name="isActive"
-              defaultChecked={row?.isActive ?? true}
-              className="h-4 w-4 rounded accent-[var(--brand)]"
-            />
-            Active
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Notes
-            <input
-              name="notes"
-              type="text"
-              defaultValue={row?.notes ?? ""}
-              className="w-32 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          {creditCards.length > 0 && (
-            <label className="flex flex-col gap-1 text-xs text-muted">
-              Card
-              <select
-                name="accountId"
-                defaultValue={row?.accountId ?? ""}
-                className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">None</option>
-                {creditCards.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <div className="ml-auto flex items-center gap-2 pb-0.5">
-            <button
-              type="button"
-              onClick={onDone}
-              className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </form>
+        <SubscriptionForm {...props} />
       </td>
     </tr>
+  );
+}
+
+function SubscriptionFormCard(props: {
+  row: SubscriptionRow | null;
+  creditCards?: CreditCardOption[];
+  onDone: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-brand-soft/10 p-3">
+      <SubscriptionForm {...props} />
+    </div>
   );
 }
 
@@ -433,7 +505,56 @@ function IrregularBillsSection({
 
       {open ? (
         <div className="border-t border-line p-3">
-          <table className="w-full text-sm">
+          {/* Mobile: stacked card layout */}
+          <div className="space-y-2 md:hidden">
+            {rows.map((b) =>
+              editing === b.id ? (
+                <IrregularBillFormCard
+                  key={b.id}
+                  row={b}
+                  creditCards={creditCards}
+                  onDone={() => setEditing(null)}
+                />
+              ) : (
+                <div key={b.id} className="rounded-lg border border-line bg-background/40 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold">{b.name}</span>
+                    <span className="whitespace-nowrap font-semibold tabular-nums">
+                      {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
+                    </span>
+                  </div>
+                  {(b.notes || b.accountId) && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+                      {b.notes ? <span>{b.notes}</span> : null}
+                      {b.accountId ? (
+                        <span>Card: {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}</span>
+                      ) : null}
+                    </div>
+                  )}
+                  <div className="mt-2 flex justify-end">
+                    <RowActions
+                      onEdit={() => setEditing(b.id)}
+                      onDelete={async () => {
+                        const fd = new FormData();
+                        fd.set("id", b.id);
+                        await deleteIrregularBill(fd);
+                      }}
+                    />
+                  </div>
+                </div>
+              ),
+            )}
+            {editing === "new" ? (
+              <IrregularBillFormCard
+                row={null}
+                creditCards={creditCards}
+                onDone={() => setEditing(null)}
+              />
+            ) : null}
+          </div>
+
+          {/* Desktop: full table */}
+          <table className="hidden w-full text-sm md:table">
             <thead>
               <tr className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
                 <th className="w-6 px-1 py-1"></th>
@@ -508,7 +629,7 @@ function IrregularBillsSection({
   );
 }
 
-function IrregularBillFormRow({
+function IrregularBillForm({
   row,
   creditCards = [],
   onDone,
@@ -520,82 +641,105 @@ function IrregularBillFormRow({
   const [pending, start] = useTransition();
 
   return (
+    <form
+      action={(fd) =>
+        start(async () => {
+          await upsertIrregularBill(fd);
+          onDone();
+        })
+      }
+      className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end"
+    >
+      {row ? <input type="hidden" name="id" value={row.id} /> : null}
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Name
+        <input
+          name="name"
+          type="text"
+          required
+          defaultValue={row?.name ?? ""}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Typical Amount
+        <input
+          name="typicalAmount"
+          type="number"
+          step="0.01"
+          min="0"
+          inputMode="decimal"
+          defaultValue={row ? centsToDisplay(row.typicalAmountCents) : ""}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-28 md:text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-muted">
+        Notes
+        <input
+          name="notes"
+          type="text"
+          defaultValue={row?.notes ?? ""}
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-40 md:text-sm"
+        />
+      </label>
+      {creditCards.length > 0 && (
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Card
+          <select
+            name="accountId"
+            defaultValue={row?.accountId ?? ""}
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+          >
+            <option value="">None</option>
+            {creditCards.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="mt-1 flex items-center justify-end gap-2 pb-0.5 md:ml-auto md:mt-0">
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+        >
+          {pending ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function IrregularBillFormRow(props: {
+  row: IrregularBillRow | null;
+  creditCards?: CreditCardOption[];
+  onDone: () => void;
+}) {
+  return (
     <tr className="border-t border-line bg-brand-soft/10">
       <td colSpan={6} className="px-2 py-3">
-        <form
-          action={(fd) =>
-            start(async () => {
-              await upsertIrregularBill(fd);
-              onDone();
-            })
-          }
-          className="flex flex-wrap items-end gap-2"
-        >
-          {row ? <input type="hidden" name="id" value={row.id} /> : null}
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Name
-            <input
-              name="name"
-              type="text"
-              required
-              defaultValue={row?.name ?? ""}
-              className="w-36 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Typical Amount
-            <input
-              name="typicalAmount"
-              type="number"
-              step="0.01"
-              min="0"
-              defaultValue={row ? centsToDisplay(row.typicalAmountCents) : ""}
-              className="w-28 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
-            Notes
-            <input
-              name="notes"
-              type="text"
-              defaultValue={row?.notes ?? ""}
-              className="w-40 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          {creditCards.length > 0 && (
-            <label className="flex flex-col gap-1 text-xs text-muted">
-              Card
-              <select
-                name="accountId"
-                defaultValue={row?.accountId ?? ""}
-                className="rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">None</option>
-                {creditCards.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <div className="ml-auto flex items-center gap-2 pb-0.5">
-            <button
-              type="button"
-              onClick={onDone}
-              className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </form>
+        <IrregularBillForm {...props} />
       </td>
     </tr>
+  );
+}
+
+function IrregularBillFormCard(props: {
+  row: IrregularBillRow | null;
+  creditCards?: CreditCardOption[];
+  onDone: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-line bg-brand-soft/10 p-3">
+      <IrregularBillForm {...props} />
+    </div>
   );
 }
 

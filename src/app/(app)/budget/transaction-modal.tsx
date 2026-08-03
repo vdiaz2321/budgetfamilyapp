@@ -212,7 +212,7 @@ export function TransactionModal({
               type="date"
               required
               defaultValue={defaultDate}
-              className="flex-1 rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+              className="flex-1 rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
           </div>
 
@@ -235,7 +235,7 @@ export function TransactionModal({
                   setSelectedAccountId(e.target.value);
                   setSelectedBucketId("");
                 }}
-                className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
                 <option value="">
                   {txType === "income"
@@ -281,7 +281,7 @@ export function TransactionModal({
               name="bucketId"
               value={selectedBucketId}
               onChange={(e) => setSelectedBucketId(e.target.value)}
-              className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+              className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             >
               <option value="">Bucket (optional)</option>
               {availableBuckets.map((b) => (
@@ -296,7 +296,7 @@ export function TransactionModal({
             type="text"
             placeholder="Add a note (optional)"
             defaultValue={editTx?.memo ?? ""}
-            className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+            className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
           />
 
           {/* Footer */}
@@ -417,7 +417,7 @@ function PayeeField({
         onFocus={() => setOpen(true)}
         onBlur={() => { setOpen(false); setHighlighted(-1); }}
         onKeyDown={handleKeyDown}
-        className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+        className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
       />
       {open && matches.length > 0 ? (
         <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
@@ -490,7 +490,7 @@ function BudgetItemField({
         required
         value={subId}
         onChange={(e) => setSubId(e.target.value)}
-        className="w-full rounded-xl bg-background px-2 py-2.5 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+        className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
       >
         <option value="" disabled>Choose Budget Item…</option>
         {options.map((o) => (

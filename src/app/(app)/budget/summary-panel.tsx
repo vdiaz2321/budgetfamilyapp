@@ -52,7 +52,7 @@ export function SummaryPanel({ groups, currency }: Props) {
   const C = 2 * Math.PI * R;
 
   const base = outflow.map((g, i) => {
-    const value = mode === "spent" ? g.spentTotal : g.plannedTotal - g.spentTotal;
+    const value = mode === "spent" ? g.spentTotal : g.plannedTotal;
     return {
       categoryId: g.categoryId,
       name: g.name,
@@ -93,7 +93,7 @@ export function SummaryPanel({ groups, currency }: Props) {
       .map((r) => ({
         subId: r.subId,
         name: r.name,
-        value: mode === "spent" ? r.spentCents : r.plannedCents - r.spentCents,
+        value: mode === "spent" ? r.spentCents : r.plannedCents,
       }))
       .filter((r) => r.value !== 0)
       .sort((a, b) => b.value - a.value);

@@ -463,7 +463,7 @@ function RailActions({
       <button
         type="button"
         onClick={onAddItem}
-        className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
+        className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
           <path d="M12 5v14M5 12h14" />
@@ -476,7 +476,7 @@ function RailActions({
           type="submit"
           disabled={copyPending}
           title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-sm font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10"
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-xs font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10 whitespace-nowrap"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
@@ -529,13 +529,6 @@ function SummaryHeroCard({
             <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
-            {rolloverCents > 0 && (
-              <p className="mt-0.5 text-xs text-muted">
-                incl.{" "}
-                <span className="font-medium text-brand">{formatMoney(rolloverCents, currency)}</span>{" "}
-                rolled income
-              </p>
-            )}
           </div>
           <div className="min-w-0 text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
@@ -548,6 +541,13 @@ function SummaryHeroCard({
             <p className={`mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
+            {rolloverCents > 0 && (
+              <p className="mt-0.5 text-xs text-muted">
+                incl.{" "}
+                <span className="font-medium text-brand">{formatMoney(rolloverCents, currency)}</span>{" "}
+                rolled in
+              </p>
+            )}
           </div>
           <div className="min-w-0 text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
