@@ -43,7 +43,7 @@ function daysUntil(dateStr: string): number {
 
 type Reorderable = { id: string };
 
-function usePointerReorder<T extends Reorderable>(
+export function usePointerReorder<T extends Reorderable>(
   rows: T[],
   onReorder: (nextRows: T[]) => void,
 ) {
@@ -94,7 +94,7 @@ function usePointerReorder<T extends Reorderable>(
   return { dragOverId, startDrag };
 }
 
-function reorderVisibleRows<T extends Reorderable>(
+export function reorderVisibleRows<T extends Reorderable>(
   allRows: T[],
   visibleRows: T[],
   nextVisibleRows: T[],

@@ -34,6 +34,7 @@ const ALIAS_MAP: Record<string, string> = {
 
 const AUTO_CREATE_SUBCATS: { category: string; name: string; asPaidOffDebt?: boolean }[] = [
   { category: "Bills", name: "Irregular Bills" },
+  { category: "Income", name: "Income Taxes" },
   { category: "Debt", name: "QuickSil7906V (Jun26)", asPaidOffDebt: true },
   { category: "Debt", name: "Sante Fe 2020 (APR26)", asPaidOffDebt: true },
   { category: "Debt", name: "Savor2946J (Mar26)", asPaidOffDebt: true },

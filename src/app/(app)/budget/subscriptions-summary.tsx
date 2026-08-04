@@ -1,12 +1,18 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { DOT } from "./category-icons";
 import { SubscriptionsModal } from "../subscriptions/subscriptions-modal";
-import { updateSubscriptionDueDate } from "../subscriptions/actions";
-import type { CreditCardOption } from "../subscriptions/subscriptions-board";
+import { reorderIrregularBills, reorderSubscriptions, updateSubscriptionDueDate } from "../subscriptions/actions";
+import { type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
+
+const DragHandle = (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
 
 function monthlyEquivalent(amountCents: number, cycle: string): number {
   switch (cycle) {
@@ -44,7 +50,16 @@ export function SubscriptionsSummaryCard({
   onToggle: () => void;
 }) {
   const [managing, setManaging] = useState(false);
-  const activeSubs = subscriptions.filter((s) => s.isActive);
+  const [rows, setRows] = useState(subscriptions);
+  const [, startReorder] = useTransition();
+  useEffect(() => {
+    setRows(subscriptions);
+  }, [subscriptions]);
+  const { dragOverId, startDrag } = usePointerReorder(rows, (next) => {
+    setRows(next);
+    startReorder(() => reorderSubscriptions(next.map((r) => r.id)));
+  });
+  const activeSubs = rows.filter((s) => s.isActive);
   const monthlyTotal = activeSubs
     .filter((s) => s.billingCycle === "monthly")
     .reduce((sum, s) => sum + s.amountCents, 0);
@@ -105,17 +120,30 @@ export function SubscriptionsSummaryCard({
                 <SummaryMetric label="Annual billed" value={formatMoney(annualBilledTotal, currency)} />
                 <SummaryMetric label="Total annual" value={formatMoney(annualizedTotal, currency)} />
               </div>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
+                <span className="w-3" aria-hidden />
                 <span>Name</span>
                 <span className="text-right">Amount</span>
                 <span className="hidden text-center sm:inline">Due</span>
                 <span className="hidden sm:inline">Card</span>
               </div>
               <div className="divide-y divide-line">
-              {subscriptions.map((s) => {
+              {rows.map((s) => {
                 const cardName = s.accountId ? cardMap.get(s.accountId) : null;
+                const dragOver = dragOverId === s.id;
                 return (
-                  <div key={s.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm sm:grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
+                  <div
+                    key={s.id}
+                    data-reorder-id={s.id}
+                    className={`group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
+                  >
+                    <span
+                      onMouseDown={(e) => { e.preventDefault(); startDrag(s.id); }}
+                      title="Drag to reorder"
+                      className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+                    >
+                      {DragHandle}
+                    </span>
                     <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
                     <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
                     <span className="hidden sm:flex sm:items-center sm:justify-center">
@@ -282,6 +310,15 @@ export function IrregularBillsSummaryCard({
   onToggle: () => void;
 }) {
   const [managing, setManaging] = useState(false);
+  const [rows, setRows] = useState(irregularBills);
+  const [, startReorder] = useTransition();
+  useEffect(() => {
+    setRows(irregularBills);
+  }, [irregularBills]);
+  const { dragOverId, startDrag } = usePointerReorder(rows, (next) => {
+    setRows(next);
+    startReorder(() => reorderIrregularBills(next.map((r) => r.id)));
+  });
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -324,17 +361,31 @@ export function IrregularBillsSummaryCard({
             </div>
           ) : (
             <div className="divide-y divide-line">
-              {irregularBills.map((b) => (
-                <div key={b.id} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
-                  <span className="truncate">{b.name}</span>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className="text-xs text-muted">Irregular</span>
-                    <span className="w-20 text-right font-medium tabular-nums text-muted">
-                      {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
+              {rows.map((b) => {
+                const dragOver = dragOverId === b.id;
+                return (
+                  <div
+                    key={b.id}
+                    data-reorder-id={b.id}
+                    className={`flex items-center gap-2 px-4 py-2 text-sm ${dragOver ? "bg-brand-soft/40" : ""}`}
+                  >
+                    <span
+                      onMouseDown={(e) => { e.preventDefault(); startDrag(b.id); }}
+                      title="Drag to reorder"
+                      className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+                    >
+                      {DragHandle}
                     </span>
+                    <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-xs text-muted">Irregular</span>
+                      <span className="w-20 text-right font-medium tabular-nums text-muted">
+                        {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

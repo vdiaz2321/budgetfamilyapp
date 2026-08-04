@@ -102,6 +102,9 @@ export type SubOption = {
   // Set only for Savings items linked to a bucket — lets the transaction
   // form offer the withdrawal toggle for those.
   linkedBucketId?: string | null;
+  // Budget remaining for this item this month (planned − spent). Shown in
+  // the multi-select picker so the user can see how much is left per item.
+  remainingCents?: number;
 };
 
 // An account option for the add-transaction form.

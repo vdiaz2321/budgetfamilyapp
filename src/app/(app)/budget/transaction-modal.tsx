@@ -36,7 +36,6 @@ const PAYEE_PLACEHOLDER: Record<CategoryKind, string> = {
   debt: "Who did you pay?",
 };
 
-// Colors that shift with the selected category.
 const HEADER_TINT: Record<CategoryKind, string> = {
   income: "bg-emerald-100 dark:bg-emerald-950",
   savings: "bg-sky-100 dark:bg-sky-950",
@@ -59,6 +58,8 @@ const TAB_ACTIVE_TEXT: Record<CategoryKind, string> = {
   debt: "text-rose-600 dark:text-rose-400",
 };
 
+type SplitEntry = { subId: string; amountCents: number };
+
 export function TransactionModal({
   editTx,
   monthKey,
@@ -77,19 +78,9 @@ export function TransactionModal({
   firstOfMonth: string;
   subOptions: SubOption[];
   accountOptions: AccountOption[];
-  // Buckets available for direct attribution when the selected account has
-  // them (currently only investment accounts on Fidelity/Crypto). Keyed by
-  // account_id. Empty/omitted = no bucket picker ever shows.
   bucketsByAccount?: BucketsByAccount;
-  // Previously-used payees (id + name), offered as suggestions below the
-  // payee field as you type — not a picker, just a memory aid.
   payeeOptions?: { id: string; name: string }[];
-  // Managed subscriptions/irregular bills — selecting one of these from the
-  // payee suggestions auto-fills its linked budget item (and, for
-  // subscriptions, its amount) instead of requiring manual mapping.
   payeeLineItems?: PayeeLineItem[];
-  // Preselects the type + budget item when opened from an item's own panel
-  // (e.g. its "+ Add transaction" button) instead of the general Log tab.
   initialKind?: CategoryKind;
   initialSubId?: string;
   onClose: () => void;
@@ -102,19 +93,54 @@ export function TransactionModal({
   const [selectedBucketId, setSelectedBucketId] = useState<string>("");
   const formRef = useRef<HTMLFormElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
-  // Set when a payee suggestion matching a managed subscription/irregular
-  // bill is selected — forces the Budget Item field to remount with the
-  // matched subcategory preselected (see the `key` below).
   const [autoFillSubId, setAutoFillSubId] = useState<string | null>(null);
+
+  // Split state — for NEW transactions only. Edit mode keeps the existing single-item flow.
+  const [totalCents, setTotalCents] = useState(editTx?.amountCents ?? 0);
+  const [splits, setSplits] = useState<SplitEntry[]>(() =>
+    initialSubId ? [{ subId: initialSubId, amountCents: editTx?.amountCents ?? 0 }] : []
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const splitTotal = splits.reduce((s, sp) => s + sp.amountCents, 0);
+  const leftToSplit = totalCents - splitTotal;
 
   function handlePayeeMatch(item: PayeeLineItem) {
     if (item.subcategoryId) {
       const kind = subOptions.find((s) => s.id === item.subcategoryId)?.kind;
       if (kind) setTxType(kind);
       setAutoFillSubId(item.subcategoryId);
+      // Also seed the splits if not yet set
+      if (!isEdit) {
+        setSplits([{ subId: item.subcategoryId, amountCents: item.amountCents ?? totalCents }]);
+      }
     }
     if (item.amountCents != null && amountRef.current) {
       amountRef.current.value = centsToDisplay(item.amountCents);
+      setTotalCents(item.amountCents);
+    }
+  }
+
+  // When txType changes, clear splits (stale subcategories no longer valid).
+  function handleTypeChange(kind: CategoryKind) {
+    setTxType(kind);
+    if (!isEdit) setSplits([]);
+  }
+
+  function handlePickerConfirm(selectedIds: string[]) {
+    setPickerOpen(false);
+    if (!isEdit) {
+      setSplits((prev) => {
+        const kept = prev.filter((sp) => selectedIds.includes(sp.subId));
+        const keptIds = new Set(kept.map((sp) => sp.subId));
+        const newIds = selectedIds.filter((id) => !keptIds.has(id));
+        // New items get whatever is left unallocated, or 0.
+        const keptTotal = kept.reduce((s, sp) => s + sp.amountCents, 0);
+        const pool = Math.max(0, totalCents - keptTotal);
+        const perNew = newIds.length > 0 ? Math.round(pool / newIds.length) : 0;
+        const added = newIds.map((id) => ({ subId: id, amountCents: perNew }));
+        return [...kept, ...added];
+      });
     }
   }
 
@@ -131,6 +157,11 @@ export function TransactionModal({
     if (!accountByGroup.has(g)) { accountGroups.push(g); accountByGroup.set(g, []); }
     accountByGroup.get(g)!.push(a);
   }
+  accountGroups.sort((a, b) => {
+    if (a === "Credit Cards") return -1;
+    if (b === "Credit Cards") return 1;
+    return 0;
+  });
 
   function handleFormAction(fd: FormData) {
     start(async () => {
@@ -138,9 +169,18 @@ export function TransactionModal({
         await updateTransaction(fd);
         onClose();
       } else {
-        await addTransaction(fd);
+        if (splits.length === 0) return;
+        for (const sp of splits) {
+          const sfd = new FormData();
+          fd.forEach((v, k) => { if (k !== "subcategoryId" && k !== "amount") sfd.append(k, v); });
+          sfd.set("subcategoryId", sp.subId);
+          sfd.set("amount", (sp.amountCents / 100).toFixed(2));
+          await addTransaction(sfd);
+        }
         if (fd.get("createAnother") === "on") {
           formRef.current?.reset();
+          setSplits([]);
+          setTotalCents(0);
         } else {
           onClose();
         }
@@ -149,201 +189,443 @@ export function TransactionModal({
   }
 
   return (
-    <div className="flex max-h-[calc(100vh-6rem)] w-full flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:max-h-[85vh] sm:rounded-2xl dark:ring-white/10">
-      {/* Header — tinted by category */}
-      <div className={"relative px-5 py-3.5 text-center transition-colors " + HEADER_TINT[txType]}>
-        <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
-          {isEdit ? "Edit" : "Add"} {KIND_TITLE[txType]}
-        </h2>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+    <>
+      {/* Budget item picker — full-screen overlay */}
+      {pickerOpen && (
+        <BudgetItemPicker
+          options={options}
+          selectedIds={new Set(splits.map((s) => s.subId))}
+          onConfirm={handlePickerConfirm}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
 
-      <div className="overflow-y-auto px-5 py-4">
-        {/* Five type tabs */}
-        <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
-          {CATEGORY_KINDS.map(({ kind }) => (
-            <button
-              key={kind}
-              type="button"
-              onClick={() => setTxType(kind)}
-              className={
-                "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
-                (txType === kind
-                  ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
-                  : "text-muted hover:text-foreground")
-              }
-            >
-              {KIND_TAB[kind]}
-            </button>
-          ))}
+      <div className="flex max-h-[calc(100vh-6rem)] w-full flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:max-h-[85vh] sm:rounded-2xl dark:ring-white/10">
+        {/* Header */}
+        <div className={"relative px-5 py-3.5 text-center transition-colors " + HEADER_TINT[txType]}>
+          <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
+            {isEdit ? "Edit" : "Add"} {KIND_TITLE[txType]}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
-        <form ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
-          {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
+        <div className="overflow-y-auto px-5 py-4">
+          {/* Five type tabs */}
+          <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+            {CATEGORY_KINDS.map(({ kind }) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => handleTypeChange(kind)}
+                className={
+                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
+                  (txType === kind
+                    ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
+                    : "text-muted hover:text-foreground")
+                }
+              >
+                {KIND_TAB[kind]}
+              </button>
+            ))}
+          </div>
 
-          {/* Row 1: Amount | Date */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+          <form ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
+            {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
+
+            {/* Row 1: Amount | Date */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+                <input
+                  ref={amountRef}
+                  name="amount"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*\.?[0-9]*"
+                  required
+                  placeholder="0.00"
+                  autoFocus
+                  defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    setTotalCents(isNaN(v) ? 0 : Math.round(v * 100));
+                  }}
+                  className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </div>
               <input
-                ref={amountRef}
-                name="amount"
-                type="text"
-                inputMode="decimal"
-                pattern="[0-9]*\.?[0-9]*"
+                name="date"
+                type="date"
                 required
-                placeholder="0.00"
-                autoFocus
-                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
-                className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                defaultValue={defaultDate}
+                className="flex-1 rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               />
             </div>
-            <input
-              name="date"
-              type="date"
-              required
-              defaultValue={defaultDate}
-              className="flex-1 rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+
+            {/* Payee */}
+            <PayeeField
+              placeholder={PAYEE_PLACEHOLDER[txType]}
+              defaultValue={editTx?.payee ?? ""}
+              payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onMatch={handlePayeeMatch}
             />
-          </div>
 
-          {/* Payee */}
-          <PayeeField
-            placeholder={PAYEE_PLACEHOLDER[txType]}
-            defaultValue={editTx?.payee ?? ""}
-            payeeOptions={payeeOptions}
-            payeeLineItems={payeeLineItems}
-            onMatch={handlePayeeMatch}
-          />
+            {/* Account | Budget Item(s) */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <select
+                  name="accountId"
+                  value={selectedAccountId}
+                  onChange={(e) => {
+                    setSelectedAccountId(e.target.value);
+                    setSelectedBucketId("");
+                  }}
+                  className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                >
+                  <option value="">
+                    {txType === "income"
+                      ? "Deposit to account"
+                      : txType === "debt"
+                        ? "Paid from account"
+                        : "Charged to / paid from account"}
+                  </option>
+                  {accountGroups.map((g) => (
+                    <optgroup key={g} label={g}>
+                      {accountByGroup.get(g)!.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                {txType === "debt" ? (
+                  <p className="mt-1 px-1 text-[11px] text-muted">
+                    Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page.
+                  </p>
+                ) : null}
+              </div>
 
-          {/* Account | Budget Items */}
-          <div className="grid grid-cols-2 gap-2">
-            <div>
+              {/* Budget item: single select for edit, multi-select for new */}
+              {isEdit ? (
+                <BudgetItemField
+                  key={txType + "-" + (autoFillSubId ?? "")}
+                  kindLabel={KIND_TAB[txType]}
+                  options={options}
+                  showLabel={false}
+                  defaultValue={
+                    autoFillSubId ??
+                    (editTx && editTx.kind === txType ? editTx.subId ?? "" : "")
+                  }
+                  defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
+                />
+              ) : (
+                // Trigger button for the full-screen picker
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                >
+                  {splits.length === 0
+                    ? <span className="text-muted">Choose Budget Item…</span>
+                    : splits.length === 1
+                      ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
+                      : <span>{splits.length} items</span>
+                  }
+                </button>
+              )}
+            </div>
+
+            {/* Bucket picker */}
+            {availableBuckets.length > 0 ? (
               <select
-                name="accountId"
-                value={selectedAccountId}
-                onChange={(e) => {
-                  setSelectedAccountId(e.target.value);
-                  setSelectedBucketId("");
-                }}
+                name="bucketId"
+                value={selectedBucketId}
+                onChange={(e) => setSelectedBucketId(e.target.value)}
                 className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
-                <option value="">
-                  {txType === "income"
-                    ? "Deposit to account"
-                    : txType === "debt"
-                      ? "Paid from account"
-                      : "Charged to / paid from account"}
-                </option>
-                {accountGroups.map((g) => (
-                  <optgroup key={g} label={g}>
-                    {accountByGroup.get(g)!.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </optgroup>
+                <option value="">Bucket (optional)</option>
+                {availableBuckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
               </select>
-              {txType === "debt" ? (
-                <p className="mt-1 px-1 text-[11px] text-muted">
-                  Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page. It debits your bank and clears the card{"'"}s Owed in one step.
-                </p>
-              ) : null}
-            </div>
-            <BudgetItemField
-              key={txType + "-" + (autoFillSubId ?? "")}
-              kindLabel={KIND_TAB[txType]}
-              options={options}
-              showLabel={false}
-              defaultValue={
-                autoFillSubId ??
-                (editTx && editTx.kind === txType
-                  ? editTx.subId ?? ""
-                  : !isEdit && initialKind === txType
-                    ? initialSubId ?? ""
-                    : "")
-              }
-              defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
-            />
-          </div>
+            ) : null}
 
-          {/* Bucket picker */}
-          {availableBuckets.length > 0 ? (
-            <select
-              name="bucketId"
-              value={selectedBucketId}
-              onChange={(e) => setSelectedBucketId(e.target.value)}
-              className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
-            >
-              <option value="">Bucket (optional)</option>
-              {availableBuckets.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
-          ) : null}
-
-          {/* Note */}
-          <input
-            name="memo"
-            type="text"
-            placeholder="Add a note (optional)"
-            defaultValue={editTx?.memo ?? ""}
-            className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
-          />
-
-          {/* Footer */}
-          <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-            {isEdit ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  start(async () => {
-                    const fd = new FormData();
-                    fd.set("id", editTx.id);
-                    await deleteTransaction(fd);
-                    onClose();
-                  })
+            {/* Split rows — shown for new transactions with ≥1 item selected */}
+            {!isEdit && splits.length > 0 && (
+              <SplitRows
+                splits={splits}
+                options={options}
+                totalCents={totalCents}
+                leftToSplit={leftToSplit}
+                onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
+                onAmountChange={(subId, cents) =>
+                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp))
                 }
-                className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
-              >
-                Delete
-              </button>
-            ) : (
-              <span />
+                onAddSplit={() => setPickerOpen(true)}
+              />
             )}
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={pending}
-                className={"rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-60 " + BTN_COLOR[txType]}
-              >
-                {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
-              </button>
+
+            {/* Note */}
+            <input
+              name="memo"
+              type="text"
+              placeholder="Add a note (optional)"
+              defaultValue={editTx?.memo ?? ""}
+              className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+            />
+
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+              {isEdit ? (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    start(async () => {
+                      const fd = new FormData();
+                      fd.set("id", editTx.id);
+                      await deleteTransaction(fd);
+                      onClose();
+                    })
+                  }
+                  className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
+                >
+                  Delete
+                </button>
+              ) : (
+                <span />
+              )}
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={pending || (!isEdit && splits.length === 0)}
+                  className={"rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-60 " + BTN_COLOR[txType]}
+                >
+                  {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Split rows shown below the account/item row for new multi-item transactions.
+function SplitRows({
+  splits,
+  options,
+  totalCents,
+  leftToSplit,
+  onRemove,
+  onAmountChange,
+  onAddSplit,
+}: {
+  splits: SplitEntry[];
+  options: SubOption[];
+  totalCents: number;
+  leftToSplit: number;
+  onRemove: (subId: string) => void;
+  onAmountChange: (subId: string, cents: number) => void;
+  onAddSplit: () => void;
+}) {
+  return (
+    <div className="rounded-xl ring-1 ring-line overflow-hidden">
+      {splits.map((sp) => {
+        const opt = options.find((o) => o.id === sp.subId);
+        return (
+          <div key={sp.subId} className="flex items-center gap-2 border-b border-line/60 px-3 py-2.5 last:border-b-0">
+            <button
+              type="button"
+              onClick={() => onRemove(sp.subId)}
+              className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-negative text-white text-xs font-bold leading-none"
+              aria-label="Remove"
+            >
+              −
+            </button>
+            <span className="flex-1 truncate text-sm font-medium">{opt?.name ?? sp.subId}</span>
+            <div className="relative shrink-0">
+              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">$</span>
+              <SplitAmountInput
+                amountCents={sp.amountCents}
+                onChange={(cents) => onAmountChange(sp.subId, cents)}
+              />
             </div>
           </div>
-        </form>
+        );
+      })}
+
+      {/* Add Split + Left to Split footer */}
+      <div className="flex items-center justify-between border-t border-line/60 bg-background/60 px-3 py-2">
+        <button
+          type="button"
+          onClick={onAddSplit}
+          className="text-sm font-semibold text-brand"
+        >
+          + Add Split
+        </button>
+        <span className={`text-xs font-semibold tabular-nums ${Math.abs(leftToSplit) < 2 ? "text-positive" : leftToSplit < 0 ? "text-negative" : "text-warning"}`}>
+          {leftToSplit >= 0 ? "$" + (leftToSplit / 100).toFixed(2) + " left to split" : "−$" + (Math.abs(leftToSplit) / 100).toFixed(2) + " over"}
+        </span>
       </div>
     </div>
   );
 }
 
-// A plain text input with a self-positioned suggestion list. Supports:
-// - Arrow key navigation (ArrowDown/ArrowUp) + Enter to select
-// - × button on plain payee suggestions to delete them from the saved list
-// `onMouseDown` + `preventDefault` keeps focus during click so onBlur
-// doesn't close the list before the click fires.
+// Uncontrolled-style amount input: keeps raw string while typing, formats on blur.
+// Avoids the "typing 10 → 1.00" issue caused by re-formatting on every keystroke.
+function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onChange: (cents: number) => void }) {
+  const [raw, setRaw] = useState(amountCents === 0 ? "" : (amountCents / 100).toFixed(2));
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={raw}
+      placeholder="0.00"
+      onChange={(e) => {
+        setRaw(e.target.value);
+        const v = parseFloat(e.target.value);
+        onChange(isNaN(v) ? 0 : Math.round(v * 100));
+      }}
+      onBlur={() => {
+        const v = parseFloat(raw);
+        setRaw(isNaN(v) || v <= 0 ? "" : v.toFixed(2));
+      }}
+      className="w-24 rounded-lg bg-background py-1.5 pl-6 pr-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    />
+  );
+}
+
+// Full-screen budget item picker with search + checkboxes + remaining amounts.
+function BudgetItemPicker({
+  options,
+  selectedIds,
+  onConfirm,
+  onClose,
+}: {
+  options: SubOption[];
+  selectedIds: Set<string>;
+  onConfirm: (ids: string[]) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [checked, setChecked] = useState<Set<string>>(new Set(selectedIds));
+
+  const filtered = search
+    ? options.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
+    : options;
+
+  function toggle(id: string) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-surface">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-sm font-medium text-muted hover:text-foreground"
+        >
+          Cancel
+        </button>
+        <h2 className="text-base font-bold">Select Budget Item(s)</h2>
+        <button
+          type="button"
+          onClick={() => onConfirm([...checked])}
+          className="text-sm font-semibold text-brand"
+        >
+          Done
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="border-b border-line px-4 py-2">
+        <div className="relative">
+          <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input
+            type="search"
+            autoFocus
+            placeholder="Search…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </div>
+      </div>
+
+      {/* Header row */}
+      <div className="flex items-center justify-between border-b border-line/40 bg-background/60 px-4 py-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Item</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Remaining</span>
+      </div>
+
+      {/* Item list */}
+      <div className="flex-1 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
+        ) : (
+          filtered.map((o) => {
+            const isChecked = checked.has(o.id);
+            const rem = o.remainingCents;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => toggle(o.id)}
+                className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
+              >
+                {/* Checkbox */}
+                <span
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${
+                    isChecked
+                      ? "border-brand bg-brand text-white"
+                      : "border-zinc-400 bg-transparent dark:border-zinc-600"
+                  }`}
+                >
+                  {isChecked && (
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M2 6l3 3 5-5" />
+                    </svg>
+                  )}
+                </span>
+                <span className="flex-1 text-sm font-medium">{o.name}</span>
+                {rem != null && (
+                  <span className={`shrink-0 text-sm tabular-nums ${rem < 0 ? "text-negative" : "text-muted"}`}>
+                    {rem < 0 ? "−$" + (Math.abs(rem) / 100).toFixed(2) : "$" + (rem / 100).toFixed(2)}
+                  </span>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Payee field (unchanged)
 function PayeeField({
   placeholder,
   defaultValue,
@@ -376,7 +658,6 @@ function PayeeField({
   ).filter((p) => !lineItemNames.has(p.name.toLowerCase()));
   const lineSlice = lineMatches.slice(0, 6);
   const plainSlice = plainMatches.slice(0, 6 - Math.min(6, lineSlice.length));
-  // Unified list: line items first, then plain payees
   type Entry = PayeeLineItem | { id: string; name: string };
   const matches: Entry[] = [...lineSlice, ...plainSlice];
 
@@ -462,10 +743,7 @@ function PayeeField({
   );
 }
 
-// Keyed by txType from the parent (remounts on tab switch, resetting local
-// state) so a stale selection from another tab can't leak in. Shows the
-// withdrawal toggle only when the chosen item is a Savings item linked to a
-// bucket in Accounts.
+// Single-select field used only in edit mode.
 function BudgetItemField({
   kindLabel,
   options,
@@ -510,8 +788,7 @@ function BudgetItemField({
             defaultChecked={defaultIsWithdrawal}
             className="h-4 w-4 rounded accent-[var(--brand)]"
           />
-          This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a
-          purchase)
+          This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a purchase)
         </label>
       ) : null}
     </div>

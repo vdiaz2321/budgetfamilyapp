@@ -199,11 +199,18 @@ export default async function BudgetPage({
       .map((s) => {
         const isAutoSub = autoPlannedBySub.has(s.id);
         const isAutoIrregular = irregularAutoPlannedBySub.has(s.id);
-        const plannedCents = isAutoSub
-          ? autoPlannedBySub.get(s.id)!
-          : isAutoIrregular
-            ? irregularAutoPlannedBySub.get(s.id)!
-            : (plannedBySub.get(s.id) ?? 0);
+        // A budget_plans row for the current month overrides the auto-derived
+        // amount — lets a subscription/irregular row absorb monthly variance
+        // (e.g. an off-cycle charge) without touching the source table's
+        // typical/renewal figure.
+        const hasManualPlan = plannedBySub.has(s.id);
+        const plannedCents = hasManualPlan
+          ? plannedBySub.get(s.id)!
+          : isAutoSub
+            ? autoPlannedBySub.get(s.id)!
+            : isAutoIrregular
+              ? irregularAutoPlannedBySub.get(s.id)!
+              : 0;
         const spentCents = spentBySub.get(s.id) ?? 0;
         const g = goalBySub.get(s.id);
         const d = debtBySub.get(s.id);
@@ -220,7 +227,7 @@ export default async function BudgetPage({
           dueDay: s.due_day,
           plannedCents,
           spentCents,
-          autoPlanned: isAutoSub || isAutoIrregular,
+          autoPlanned: !hasManualPlan && (isAutoSub || isAutoIrregular),
           sparkline: sparklineBySub.get(s.id) ?? [],
           isKids,
           savings:
@@ -357,11 +364,19 @@ export default async function BudgetPage({
     return `${names[parseInt(m, 10) - 1]} ${y}`;
   };
 
+  const remainingBySub = new Map<string, number>();
+  for (const group of groups) {
+    for (const row of group.rows) {
+      remainingBySub.set(row.subId, row.plannedCents - row.spentCents);
+    }
+  }
+
   const subOptions: SubOption[] = (subs ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
     linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
+    remainingCents: remainingBySub.get(s.id),
   }));
 
   // Disambiguate same-named accounts (e.g. two "Fidelity" accounts, one in

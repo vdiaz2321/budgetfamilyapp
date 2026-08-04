@@ -185,7 +185,15 @@ export function BudgetBoard({
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
     <div className="mx-auto max-w-6xl space-y-4">
-      <TopHeader monthKey={month.key} onAddTransaction={() => setShowAddModal(true)} />
+      <div className="flex items-center justify-between">
+        <MonthPicker monthKey={month.key} />
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="md:hidden rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-strong"
+        >
+          + Add
+        </button>
+      </div>
       <div className="flex justify-center gap-6">
       {/* Budget column */}
       <div className="w-full min-w-0 max-w-[620px] space-y-4">
@@ -427,26 +435,6 @@ function CategoryProgressCard({
 }
 
 // Top row above the hero: title + month picker on the left. The Add Item and
-// Roll-Planned buttons live in the right rail (aside), above the Summary /
-// Transactions tabs, so they align with that column's width.
-function TopHeader({ monthKey, onAddTransaction }: { monthKey: string; onAddTransaction: () => void }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <MonthPicker monthKey={monthKey} />
-      <button
-        type="button"
-        onClick={onAddTransaction}
-        className="flex items-center gap-1 rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 active:opacity-80"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        Add
-      </button>
-    </div>
-  );
-}
-
 // Add Item + Roll Planned, styled as a matched pair to sit above the
 // Summary / Transactions tab strip in the right rail.
 function RailActions({
@@ -647,26 +635,24 @@ function RolloverFooter({
           <>Nothing unspent to roll from {prevMonthLabel}.</>
         )}
       </span>
-      {hasRollover ? (
-        <form action={(fd) => start(() => setRollover(fd))}>
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <input type="hidden" name="enable" value={enabled ? "" : "on"} />
-          <button
-            type="submit"
-            disabled={pending}
-            title={enabled
-              ? `Stop including ${prevMonthLabel}'s unspent income`
-              : `Add ${prevMonthLabel}'s ${amount} unspent income to this month`}
-            className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
-              enabled
-                ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-                : "bg-brand text-white hover:bg-brand-strong"
-            }`}
-          >
-            {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
-          </button>
-        </form>
-      ) : null}
+      <form action={(fd) => start(() => setRollover(fd))}>
+        <input type="hidden" name="month" value={monthFirstOfMonth} />
+        <input type="hidden" name="enable" value={enabled ? "" : "on"} />
+        <button
+          type="submit"
+          disabled={pending}
+          title={enabled
+            ? `Stop including ${prevMonthLabel}'s unspent income`
+            : `Add ${prevMonthLabel}'s unspent income to this month`}
+          className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
+            enabled
+              ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
+              : "bg-brand text-white hover:bg-brand-strong"
+          }`}
+        >
+          {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
+        </button>
+      </form>
     </div>
   );
 }

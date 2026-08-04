@@ -57,7 +57,7 @@ export default async function TransactionsPage({
   } else {
     txQuery = txQuery.gte("occurred_on", month.firstOfMonth).lt("occurred_on", nextFirst);
   }
-  txQuery = txQuery.order("occurred_on", { ascending: false }).order("created_at", { ascending: false });
+  txQuery = txQuery.order("occurred_on", { ascending: true }).order("created_at", { ascending: true });
 
   const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }] =
     await Promise.all([

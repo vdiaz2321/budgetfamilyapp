@@ -55,6 +55,9 @@ export function TransactionsTable({
   const [kindFilter, setKindFilter] = useState("");
   const [fromDate, setFromDate] = useState(dateRange.from ?? "");
   const [toDate, setToDate] = useState(dateRange.to ?? "");
+  // Date sort — defaults to ascending (1st → 31st). Click header to flip.
+  const [dateSort, setDateSort] = useState<"asc" | "desc">("asc");
+  const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
   const hasRange = Boolean(dateRange.from || dateRange.to);
 
   function applyRange(nextFrom: string, nextTo: string) {
@@ -131,6 +134,10 @@ export function TransactionsTable({
     if (kindFilter && t.kind !== kindFilter) return false;
     return true;
   });
+  {
+    const dir = dateSort === "desc" ? -1 : 1;
+    filtered.sort((a, b) => (a.date < b.date ? -dir : a.date > b.date ? dir : 0));
+  }
 
   const incomeTotal = filtered
     .filter((t) => t.kind === "income")
@@ -321,7 +328,21 @@ export function TransactionsTable({
                   className="h-4 w-4 rounded accent-[var(--brand)]"
                 />
               </span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Date</span>
+              <button
+                type="button"
+                onClick={cycleDateSort}
+                className="flex w-full items-center justify-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted hover:text-primary"
+                title={
+                  dateSort === "asc"
+                    ? "Oldest first — click for newest first"
+                    : "Newest first — click for oldest first"
+                }
+              >
+                Date
+                <span className="text-[9px] leading-none">
+                  {dateSort === "desc" ? "▼" : "▲"}
+                </span>
+              </button>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>

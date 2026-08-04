@@ -18,7 +18,7 @@ const ACTUAL_WORD: Record<CategoryKind, string> = {
 // income's "less remaining to receive" reads as good, not tight — the
 // generic (remaining/planned < 15%) rule only applies to money going out.
 export function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
-  if (kind === "income") return "text-positive";
+  if (kind === "income") return remaining < 0 ? "text-negative" : "text-positive";
   if (plannedCents <= 0) return remaining < 0 ? "text-negative" : "text-foreground";
   if (remaining < 0) return "text-negative";
   if (remaining / plannedCents < 0.15) return "text-warning";
