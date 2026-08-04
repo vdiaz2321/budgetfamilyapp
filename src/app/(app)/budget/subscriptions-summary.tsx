@@ -118,7 +118,7 @@ export function SubscriptionsSummaryCard({
                   <div key={s.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm sm:grid-cols-[minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
                     <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
                     <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
-                    <span className="hidden sm:block">
+                    <span className="hidden sm:flex sm:items-center sm:justify-center">
                       <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
                     </span>
                     <span className="hidden min-w-0 truncate text-xs text-muted sm:inline">{cardName ?? "—"}</span>

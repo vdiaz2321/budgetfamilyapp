@@ -35,6 +35,9 @@ export function MonthPicker({
 
   function goTo(key: string) {
     setOpen(false);
+    // Session cookie (no Max-Age) — cleared when browser closes, so fresh
+    // logins always land on the current month.
+    document.cookie = `budget-month=${key}; path=/; SameSite=Lax`;
     router.push(`${basePath}?month=${key}`);
   }
 

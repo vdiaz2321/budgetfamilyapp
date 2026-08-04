@@ -113,7 +113,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       ? "bg-positive"
       : kind === "income"
         ? "bg-positive/70"
-        : "bg-brand";
+        : "bg-warning";
 
   return (
     <li

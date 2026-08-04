@@ -165,9 +165,22 @@ export default async function BudgetPage({
 
   // Auto-planned totals: subcategory rows linked to subscriptions or irregular
   // bills show a derived planned amount and are not directly editable.
+  const currentMonthNum = month.key.slice(5); // "MM" from "YYYY-MM"
   const autoPlannedBySub = new Map<string, number>();
   for (const sub of subscriptions ?? []) {
-    if (!sub.subcategory_id || !sub.is_active || sub.billing_cycle !== "monthly") continue;
+    if (!sub.subcategory_id || !sub.is_active || !sub.next_renewal_date) continue;
+    let includeThisMonth = false;
+    if (sub.billing_cycle === "monthly") {
+      includeThisMonth = true;
+    } else if (sub.billing_cycle === "annual") {
+      // next_renewal_date advances by a year after each charge, so compare
+      // just the month number (annual subs always charge in the same month).
+      includeThisMonth = sub.next_renewal_date.slice(5, 7) === currentMonthNum;
+    } else {
+      // quarterly / weekly: next_renewal_date is the exact next occurrence
+      includeThisMonth = sub.next_renewal_date.slice(0, 7) === month.key;
+    }
+    if (!includeThisMonth) continue;
     autoPlannedBySub.set(sub.subcategory_id, (autoPlannedBySub.get(sub.subcategory_id) ?? 0) + sub.amount_cents);
   }
   const irregularAutoPlannedBySub = new Map<string, number>();
@@ -264,41 +277,73 @@ export default async function BudgetPage({
     .filter((g) => g.kind !== "income")
     .reduce((sum, g) => sum + g.plannedTotal, 0);
 
-  // ---- Rollover (destination-keyed): the control lives on the month that
-  // RECEIVES the money — a per-month include/exclude toggle for the previous
-  // month's actual leftover cash (income received minus what was actually
-  // spent). A budget_rollovers row for THIS month = "include last month's
-  // leftover here." The amount is recomputed live from the prior month's
-  // actuals, so it stays correct as those transactions change.
-  const actualLeftover = (bySub: Map<string, number>) => {
-    let income = 0;
-    let outflow = 0;
-    for (const [subId, cents] of bySub) {
-      const kind = kindBySub.get(subId);
-      if (kind === "income") income += cents;
-      else if (kind) outflow += cents;
-    }
-    return income - outflow;
-  };
-
-  const prevFirst = `${month.prevKey}-01`;
-  const [{ data: rolloverRows }, { data: prevActuals }] = await Promise.all([
+  // ---- Rollover (destination-keyed, accumulating): the control lives on the
+  // month that RECEIVES the money — a per-month include/exclude toggle for the
+  // running cash carry from prior months. We walk forward from Jan 2026,
+  // computing each month's income − outflow and accumulating into a running
+  // balance whenever that month's rollover is enabled. Manual overrides on a
+  // past month reset the incoming amount for that month; the accumulation
+  // continues forward from there.
+  const ROLLOVER_ANCHOR = "2026-01-01";
+  const [{ data: rolloverRows }, { data: allActuals }] = await Promise.all([
     supabase
       .from("budget_rollovers")
       .select("month, override_cents")
       .eq("household_id", household.id)
-      .eq("month", month.firstOfMonth),
+      .gte("month", ROLLOVER_ANCHOR)
+      .lte("month", month.firstOfMonth),
     supabase
       .from("v_monthly_actuals")
-      .select("subcategory_id, actual_cents")
+      .select("month, subcategory_id, actual_cents")
       .eq("household_id", household.id)
-      .eq("month", prevFirst),
+      .gte("month", ROLLOVER_ANCHOR)
+      .lt("month", month.firstOfMonth),
   ]);
-  const rolloverRow = (rolloverRows ?? [])[0] ?? null;
+
+  // Bucket actuals per month, converting each into a leftover (income − outflow).
+  const leftoverByMonth = new Map<string, number>();
+  for (const row of allActuals ?? []) {
+    const kind = kindBySub.get(row.subcategory_id);
+    if (!kind) continue;
+    const delta = kind === "income" ? row.actual_cents : -row.actual_cents;
+    leftoverByMonth.set(row.month, (leftoverByMonth.get(row.month) ?? 0) + delta);
+  }
+
+  // Index rollover rows by month for quick lookup.
+  const rolloverByMonth = new Map<string, { override_cents: number | null }>();
+  for (const r of rolloverRows ?? []) {
+    rolloverByMonth.set(r.month, { override_cents: r.override_cents });
+  }
+
+  // Walk forward from Jan 2026 through prev month, always accumulating a
+  // running cash carry — money is fungible, so unspent income from any past
+  // month remains available regardless of whether an intermediate month's
+  // rollover toggle was on. The toggle only controls whether the current
+  // month DISPLAYS the carry as an included rollover. Manual overrides on a
+  // past month reset the carry to that override amount at that point.
+  const stepMonth = (key: string) => {
+    const [y, m] = key.split("-").map(Number);
+    const d = new Date(y, m, 1); // m is 1-based, and this constructs the *next* month
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  };
+
+  let carry = 0;
+  let cursor = ROLLOVER_ANCHOR;
+  while (cursor < month.firstOfMonth) {
+    const own = leftoverByMonth.get(cursor) ?? 0;
+    const meta = rolloverByMonth.get(cursor);
+    // An override on a past month replaces the accumulated carry at that
+    // point (user is saying "the real starting amount for this month was X").
+    // Otherwise the carry just keeps rolling forward through this month.
+    const baseline = meta?.override_cents ?? carry;
+    carry = baseline + own;
+    cursor = stepMonth(cursor);
+  }
+
+  // A cumulative deficit doesn't carry as negative money.
+  const liveAvailableCents = Math.max(0, carry);
+  const rolloverRow = rolloverByMonth.get(month.firstOfMonth) ?? null;
   const rolloverInEnabled = rolloverRow != null;
-  const prevSpentBySub = new Map((prevActuals ?? []).map((a) => [a.subcategory_id, a.actual_cents]));
-  // A deficit doesn't carry forward as negative money — only real leftover.
-  const liveAvailableCents = Math.max(0, actualLeftover(prevSpentBySub));
   const overrideCents: number | null = rolloverRow?.override_cents ?? null;
   const incomingAvailableCents = overrideCents ?? liveAvailableCents;
   const rolloverInCents = rolloverInEnabled ? incomingAvailableCents : 0;
