@@ -1000,6 +1000,7 @@ function YearByYear({
   currency: string;
 }) {
   const [collapseState, setCollapseState] = useSessionCollapse("invest-yby", () => ({ open: false, mine: true, kids: true }));
+  const [yByBucketsOpen, setYByBucketsOpen] = useSessionCollapse("invest-yby-buckets-open", () => ({}));
   const open = collapseState.open;
   const setOpen = (v: boolean | ((p: boolean) => boolean)) => setCollapseState((s) => ({ ...s, open: typeof v === "function" ? v(s.open) : v }));
   const mineCollapsed = collapseState.mine;
@@ -1060,28 +1061,14 @@ function YearByYear({
                 })}
               </tr>
               {!mineCollapsed && mine.map((a) => (
-                <Fragment key={a.id}>
-                  <tr className="border-t border-line/70">
-                    <td rowSpan={2} className="px-4 py-2 align-top font-medium">{a.name}</td>
-                    <td className="px-3 py-1.5 text-muted">Contributed</td>
-                    {desc.map((y) => (
-                      <td key={y} className="px-3 py-1.5 text-center tabular-nums">
-                        {formatMoney(effectiveCell(a, y).contributedCents, currency)}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-1.5 text-muted">Gain</td>
-                    {desc.map((y) => {
-                      const g = effectiveCell(a, y).accruedCents;
-                      return (
-                        <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
-                          {formatMoney(g, currency)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                </Fragment>
+                <YByAccountRows
+                  key={a.id}
+                  account={a}
+                  desc={desc}
+                  currency={currency}
+                  open={!!yByBucketsOpen[a.id]}
+                  onToggle={() => setYByBucketsOpen((s) => ({ ...s, [a.id]: !s[a.id] }))}
+                />
               ))}
               {kids.length > 0 && (
                 <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setKidsCollapsed((c) => !c)}>
@@ -1104,34 +1091,107 @@ function YearByYear({
                 </tr>
               )}
               {!kidsCollapsed && kids.map((a) => (
-                <Fragment key={a.id}>
-                  <tr className="border-t border-line/70">
-                    <td rowSpan={2} className="px-4 py-2 align-top font-medium">{a.name}</td>
-                    <td className="px-3 py-1.5 text-muted">Contributed</td>
-                    {desc.map((y) => (
-                      <td key={y} className="px-3 py-1.5 text-center tabular-nums">
-                        {formatMoney(effectiveCell(a, y).contributedCents, currency)}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-1.5 text-muted">Gain</td>
-                    {desc.map((y) => {
-                      const g = effectiveCell(a, y).accruedCents;
-                      return (
-                        <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
-                          {formatMoney(g, currency)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                </Fragment>
+                <YByAccountRows
+                  key={a.id}
+                  account={a}
+                  desc={desc}
+                  currency={currency}
+                  open={!!yByBucketsOpen[a.id]}
+                  onToggle={() => setYByBucketsOpen((s) => ({ ...s, [a.id]: !s[a.id] }))}
+                />
               ))}
             </tbody>
           </table>
         </div>
       ) : null}
     </section>
+  );
+}
+
+function YByAccountRows({
+  account,
+  desc,
+  currency,
+  open,
+  onToggle,
+}: {
+  account: InvestAccount;
+  desc: number[];
+  currency: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const hasBuckets = account.buckets.length > 0;
+  return (
+    <>
+      <tr className="border-t border-line/70">
+        <td rowSpan={2} className="px-4 py-2 align-top font-medium">
+          <span className="flex items-center gap-1.5">
+            {hasBuckets ? (
+              <button
+                type="button"
+                onClick={onToggle}
+                aria-label={open ? "Collapse buckets" : "Expand buckets"}
+                className="rounded p-0.5 text-muted hover:bg-brand-soft/40 hover:text-foreground"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`} aria-hidden>
+                  <path d="M9 6l6 6-6 6" />
+                </svg>
+              </button>
+            ) : null}
+            {account.name}
+            {hasBuckets ? (
+              <span className="rounded bg-brand-soft/40 px-1.5 py-0.5 text-[10px] font-normal text-muted">
+                {account.buckets.length} bucket{account.buckets.length === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </span>
+        </td>
+        <td className="px-3 py-1.5 text-muted">Contributed</td>
+        {desc.map((y) => (
+          <td key={y} className="px-3 py-1.5 text-center tabular-nums">
+            {formatMoney(effectiveCell(account, y).contributedCents, currency)}
+          </td>
+        ))}
+      </tr>
+      <tr>
+        <td className="px-3 py-1.5 text-muted">Gain</td>
+        {desc.map((y) => {
+          const g = effectiveCell(account, y).accruedCents;
+          return (
+            <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
+              {formatMoney(g, currency)}
+            </td>
+          );
+        })}
+      </tr>
+      {hasBuckets && open
+        ? account.buckets.map((b) => (
+            <Fragment key={b.id}>
+              <tr className="border-t border-line/40 bg-background/30">
+                <td rowSpan={2} className="px-4 py-1.5 pl-10 align-top text-sm text-muted">↳ {b.name}</td>
+                <td className="px-3 py-1 text-sm text-muted">Contributed</td>
+                {desc.map((y) => (
+                  <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
+                    {formatMoney(b.cells[y]?.contributedCents ?? 0, currency)}
+                  </td>
+                ))}
+              </tr>
+              <tr className="bg-background/30">
+                <td className="px-3 py-1 text-sm text-muted">Gain</td>
+                {desc.map((y) => {
+                  const g = b.cells[y]?.accruedCents ?? 0;
+                  return (
+                    <td key={y} className={`px-3 py-1 text-center text-sm tabular-nums ${gainTone(g)}`}>
+                      {formatMoney(g, currency)}
+                    </td>
+                  );
+                })}
+              </tr>
+            </Fragment>
+          ))
+        : null}
+    </>
   );
 }
 

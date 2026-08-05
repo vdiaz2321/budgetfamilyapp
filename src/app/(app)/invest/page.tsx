@@ -46,7 +46,7 @@ export default async function InvestPage() {
       .from("accounts")
       .select("id, name, holder, subtype, is_kids_account, sort_order")
       .eq("household_id", household.id)
-      .eq("kind", "investment")
+      .or("kind.eq.investment,is_kids_account.eq.true")
       .order("sort_order")
       .order("name"),
     supabase

@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
+import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, updateTransaction, deleteTransaction, deletePayee } from "./actions";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
@@ -146,7 +147,13 @@ export function TransactionModal({
 
   const today = new Date().toISOString().slice(0, 10);
   const defaultDate = editTx?.date ?? (today.startsWith(monthKey) ? today : firstOfMonth);
-  const options = subOptions.filter((s) => s.kind === txType);
+  // When editing (single-select) keep options scoped to the current tab.
+  // When adding (multi-select picker), income stays income-only, but spend
+  // kinds share the picker so one receipt can split across e.g. Bills + Expenses.
+  const SPEND_KINDS = new Set<CategoryKind>(["savings", "bills", "expenses", "debt"]);
+  const options = isEdit
+    ? subOptions.filter((s) => s.kind === txType)
+    : subOptions.filter((s) => txType === "income" ? s.kind === "income" : SPEND_KINDS.has(s.kind));
 
   const allowedGroups = txType === "income" ? new Set(["Banking"]) : new Set(["Banking", "Credit Cards"]);
   const filteredAccounts = accountOptions.filter((a) => allowedGroups.has(a.group ?? "Other"));
@@ -219,24 +226,44 @@ export function TransactionModal({
         </div>
 
         <div className="overflow-y-auto px-5 py-4">
-          {/* Five type tabs */}
-          <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
-            {CATEGORY_KINDS.map(({ kind }) => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => handleTypeChange(kind)}
-                className={
-                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
-                  (txType === kind
-                    ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
-                    : "text-muted hover:text-foreground")
-                }
-              >
-                {KIND_TAB[kind]}
-              </button>
-            ))}
-          </div>
+          {/* Tabs: two-way (Income / Expense) when adding new; five-way when editing */}
+          {isEdit ? (
+            <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+              {CATEGORY_KINDS.map(({ kind }) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => handleTypeChange(kind)}
+                  className={
+                    "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
+                    (txType === kind
+                      ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
+                      : "text-muted hover:text-foreground")
+                  }
+                >
+                  {KIND_TAB[kind]}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+              {(["income", "expenses"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => handleTypeChange(kind)}
+                  className={
+                    "flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
+                    (txType === kind || (kind === "expenses" && txType !== "income")
+                      ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
+                      : "text-muted hover:text-foreground")
+                  }
+                >
+                  {kind === "income" ? "Income" : "Expense"}
+                </button>
+              ))}
+            </div>
+          )}
 
           <form ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
@@ -538,9 +565,10 @@ function BudgetItemPicker({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-surface">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-surface sm:items-center sm:justify-center sm:bg-black/50 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="flex flex-1 flex-col bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+      <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:rounded-t-2xl">
         <button
           type="button"
           onClick={onClose}
@@ -583,44 +611,49 @@ function BudgetItemPicker({
 
       {/* Item list */}
       <div className="flex-1 overflow-y-auto">
-        {filtered.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
-        ) : (
-          filtered.map((o) => {
-            const isChecked = checked.has(o.id);
-            const rem = o.remainingCents;
-            return (
-              <button
-                key={o.id}
-                type="button"
-                onClick={() => toggle(o.id)}
-                className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
-              >
-                {/* Checkbox */}
-                <span
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${
-                    isChecked
-                      ? "border-brand bg-brand text-white"
-                      : "border-zinc-400 bg-transparent dark:border-zinc-600"
-                  }`}
-                >
-                  {isChecked && (
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <path d="M2 6l3 3 5-5" />
-                    </svg>
-                  )}
-                </span>
-                <span className="flex-1 text-sm font-medium">{o.name}</span>
-                {rem != null && (
-                  <span className={`shrink-0 text-sm tabular-nums ${rem < 0 ? "text-negative" : "text-muted"}`}>
-                    {rem < 0 ? "−$" + (Math.abs(rem) / 100).toFixed(2) : "$" + (rem / 100).toFixed(2)}
-                  </span>
-                )}
-              </button>
-            );
-          })
-        )}
+        {filtered.length === 0
+          ? <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
+          : (() => {
+              const multiKind = new Set(filtered.map((o) => o.kind)).size > 1;
+              return CATEGORY_KINDS
+                .filter(({ kind }) => filtered.some((o) => o.kind === kind))
+                .map(({ kind, name }) => (
+                  <Fragment key={kind}>
+                    {multiKind && (
+                      <div className="border-b border-line/40 bg-background/40 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                        {name}
+                      </div>
+                    )}
+                    {filtered.filter((o) => o.kind === kind).map((o) => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => toggle(o.id)}
+                        className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
+                      >
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked.has(o.id) ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+                          {checked.has(o.id) && (
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M2 6l3 3 5-5" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="flex-1 text-sm font-medium">{o.name}</span>
+                        {o.remainingCents != null && (
+                          <span className={`shrink-0 text-sm tabular-nums ${o.remainingCents < 0 ? "text-negative" : "text-muted"}`}>
+                            {o.remainingCents < 0
+                              ? "−$" + (Math.abs(o.remainingCents) / 100).toFixed(2)
+                              : "$" + (o.remainingCents / 100).toFixed(2)}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </Fragment>
+                ));
+            })()
+        }
       </div>
+    </div>
     </div>
   );
 }
