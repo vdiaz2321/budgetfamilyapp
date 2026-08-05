@@ -108,7 +108,11 @@ export function BudgetGroup({
     return true;
   });
 
-  const remainingTotal = group.plannedTotal - group.spentTotal;
+  // Totals mirror what's rendered — paid-off debts are hidden from the list,
+  // so their planned/spent must not bulk up the subtotal either.
+  const visiblePlannedTotal = visibleRows.reduce((s, r) => s + r.plannedCents, 0);
+  const visibleSpentTotal = visibleRows.reduce((s, r) => s + r.spentCents, 0);
+  const remainingTotal = visiblePlannedTotal - visibleSpentTotal;
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -141,22 +145,22 @@ export function BudgetGroup({
         <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums sm:gap-4">
           {/* Mobile-only: $spent / $planned instead of Left */}
           <span className="whitespace-nowrap text-xs tabular-nums sm:hidden">
-            <span className={`font-semibold ${actualColorClass(group.kind, group.spentTotal)}`}>
-              {formatMoney(group.spentTotal, currency)}
+            <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+              {formatMoney(visibleSpentTotal, currency)}
             </span>
-            <span className="text-muted"> / {formatMoney(group.plannedTotal, currency)}</span>
+            <span className="text-muted"> / {formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
           <span className="hidden text-muted lg:inline">
             {headerActualLabel}:{" "}
-            <span className="font-bold text-foreground">{formatMoney(group.spentTotal, currency)}</span>
+            <span className="font-bold text-foreground">{formatMoney(visibleSpentTotal, currency)}</span>
           </span>
           <span className="hidden text-muted lg:inline">
             Plan:{" "}
-            <span className="font-bold text-foreground">{formatMoney(group.plannedTotal, currency)}</span>
+            <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
           <span className="hidden text-muted sm:inline">
             <span className="hidden md:inline">Left: </span>
-            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
               {formatMoney(remainingTotal, currency)}
             </span>
           </span>
@@ -201,15 +205,15 @@ export function BudgetGroup({
             <>
               {/* Mobile column label */}
               <div className="flex items-center justify-end px-3 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:hidden">
-                Spent / Planned
+                Planned / Spent
               </div>
 
               {/* Column-label strip — desktop only, must line up with BudgetRow */}
               <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1" : "py-1.5"} text-[10px] font-semibold uppercase tracking-wider text-muted sm:grid`}>
                 <div className="col-span-5 pl-6 sm:col-span-4">{nameColumnLabel}</div>
-                <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
                 <div className="col-span-2 text-right">Planned</div>
                 <div className="col-span-2 text-right">Remaining</div>
+                <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
                 <div className="col-span-2 text-center">Progress</div>
               </div>
 
@@ -226,16 +230,16 @@ export function BudgetGroup({
                     <>
                       <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
-                        <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
                         <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
+                        <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
                         <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{planned > 0 ? `${Math.min(100, Math.round((spent / planned) * 1000) / 10)}%` : "0%"}</div>
                       </div>
                       <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
                         <span className="truncate">{label}</span>
                         <span className="ml-auto text-xs tabular-nums">
+                          <span className="text-muted">{formatMoney(planned, currency)} / </span>
                           <span className={`font-semibold ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</span>
-                          <span className="text-muted"> / {formatMoney(planned, currency)}</span>
                         </span>
                       </div>
                     </>
@@ -282,11 +286,11 @@ export function BudgetGroup({
                   <span className="truncate">Subtotal</span>
                 </div>
                 <div className="ml-auto text-right text-xs tabular-nums">
-                  <span className={`font-semibold ${actualColorClass(group.kind, group.spentTotal)}`}>
-                    {formatMoney(group.spentTotal, currency)}
+                  <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
+                  <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+                    {formatMoney(visibleSpentTotal, currency)}
                   </span>
-                  <span className="text-muted"> / {formatMoney(group.plannedTotal, currency)}</span>
-                  <span className={`ml-2 font-semibold ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                  <span className={`ml-2 font-semibold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
                     ({formatMoney(remainingTotal, currency)})
                   </span>
                 </div>
@@ -301,17 +305,17 @@ export function BudgetGroup({
                   </svg>
                   <span>{group.name} subtotal</span>
                 </div>
-                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(group.kind, group.spentTotal)}`}>
-                  {formatMoney(group.spentTotal, currency)}
-                </div>
                 <div className="col-span-2 text-right text-xs font-semibold tabular-nums text-foreground">
-                  {formatMoney(group.plannedTotal, currency)}
+                  {formatMoney(visiblePlannedTotal, currency)}
                 </div>
-                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
+                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
                   {formatMoney(remainingTotal, currency)}
                 </div>
-                <div className={`col-span-2 text-center text-xs font-bold tabular-nums ${remainingColorClass(group.kind, remainingTotal, group.plannedTotal)}`}>
-                  {group.plannedTotal > 0 ? `${Math.min(100, Math.round((group.spentTotal / group.plannedTotal) * 1000) / 10)}%` : "0%"}
+                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+                  {formatMoney(visibleSpentTotal, currency)}
+                </div>
+                <div className={`col-span-2 text-center text-xs font-bold tabular-nums ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+                  {visiblePlannedTotal > 0 ? `${Math.min(100, Math.round((visibleSpentTotal / visiblePlannedTotal) * 1000) / 10)}%` : "0%"}
                 </div>
               </div>
             </>

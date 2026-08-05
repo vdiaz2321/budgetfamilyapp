@@ -166,6 +166,7 @@ export function SubscriptionsSummaryCard({
           irregularBills={irregularBills}
           creditCards={creditCards}
           onClose={() => setManaging(false)}
+          showOnly="subscriptions"
         />
       ) : null}
     </section>
@@ -398,6 +399,7 @@ export function IrregularBillsSummaryCard({
           irregularBills={irregularBills}
           creditCards={creditCards}
           onClose={() => setManaging(false)}
+          showOnly="irregular"
         />
       ) : null}
     </section>

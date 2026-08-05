@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { copyPlansFromPreviousMonth, setRollover, setRolloverOverride } from "./actions";
+import { copyPlansFromPreviousMonth, restorePlansSnapshot, setRollover, setRolloverOverride } from "./actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
@@ -126,10 +126,24 @@ export function BudgetBoard({
     .filter((g) => g.kind !== "income")
     .reduce((sum, g) => sum + g.spentTotal, 0);
 
-  const kindTotals = (kinds: string[]) => ({
-    planned: groups.filter((g) => kinds.includes(g.kind)).reduce((s, g) => s + g.plannedTotal, 0),
-    spent: groups.filter((g) => kinds.includes(g.kind)).reduce((s, g) => s + g.spentTotal, 0),
-  });
+  // Paid-off debts are hidden from the debt group's row list, so they must
+  // also drop out of the summary hero totals — otherwise the "Debt Repayment"
+  // card's Planned inflates by every stale/paid-off debt's plan row.
+  const isVisibleRow = (kind: string, r: RowData) =>
+    !(kind === "debt" && r.debt && r.debt.balanceCents <= 0);
+  const kindTotals = (kinds: string[]) => {
+    const matching = groups.filter((g) => kinds.includes(g.kind));
+    return {
+      planned: matching.reduce(
+        (s, g) => s + g.rows.filter((r) => isVisibleRow(g.kind, r)).reduce((rs, r) => rs + r.plannedCents, 0),
+        0,
+      ),
+      spent: matching.reduce(
+        (s, g) => s + g.rows.filter((r) => isVisibleRow(g.kind, r)).reduce((rs, r) => rs + r.spentCents, 0),
+        0,
+      ),
+    };
+  };
   const billsExpenses = kindTotals(["bills", "expenses"]);
   const savings = kindTotals(["savings"]);
   const debt = kindTotals(["debt"]);
@@ -184,7 +198,7 @@ export function BudgetBoard({
     // (stretch) cross-axis sizing makes the aside match the row height so
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
-    <div className="mx-auto max-w-6xl space-y-4">
+    <div className="mx-auto max-w-7xl space-y-4">
       <div className="flex items-center justify-between">
         <MonthPicker monthKey={month.key} />
         <button
@@ -196,7 +210,7 @@ export function BudgetBoard({
       </div>
       <div className="flex justify-center gap-6">
       {/* Budget column */}
-      <div className="w-full min-w-0 max-w-[620px] space-y-4">
+      <div className="w-full min-w-0 max-w-[760px] space-y-4">
         {/* Left-to-budget hero card */}
         <div ref={heroRef}>
         <SummaryHeroCard
@@ -274,7 +288,7 @@ export function BudgetBoard({
       </div>
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
-      <aside className="hidden w-[360px] shrink-0 lg:block">
+      <aside className="hidden w-[420px] shrink-0 lg:block">
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>
@@ -447,6 +461,20 @@ function RailActions({
   onAddItem: () => void;
 }) {
   const [copyPending, startCopy] = useTransition();
+  const [undoPending, startUndo] = useTransition();
+  // Snapshot of the destination month's plans BEFORE the copy, so a misclicked
+  // "Roll in <prev> planned" can be reversed. Cleared after undo or after the
+  // 20 s window elapses.
+  const [snapshot, setSnapshot] = useState<
+    Array<{ subcategory_id: string; planned_cents: number | null }> | null
+  >(null);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const t = window.setTimeout(() => setSnapshot(null), 30_000);
+    return () => window.clearTimeout(t);
+  }, [snapshot]);
+
   return (
     <div className="grid grid-cols-2 gap-2">
       <button
@@ -459,20 +487,49 @@ function RailActions({
         </svg>
         Add Item
       </button>
-      <form action={(fd) => startCopy(() => copyPlansFromPreviousMonth(fd))}>
-        <input type="hidden" name="month" value={monthFirstOfMonth} />
+      {snapshot ? (
         <button
-          type="submit"
-          disabled={copyPending}
-          title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-xs font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10 whitespace-nowrap"
+          type="button"
+          disabled={undoPending}
+          onClick={() => {
+            const snap = snapshot;
+            startUndo(async () => {
+              await restorePlansSnapshot(monthFirstOfMonth, snap);
+              setSnapshot(null);
+            });
+          }}
+          title="Restore the planned amounts that were replaced"
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand shadow-sm ring-1 ring-brand/30 transition hover:bg-brand-soft/70 disabled:opacity-60 whitespace-nowrap"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
+            <path d="M9 14L4 9l5-5" />
+            <path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9" />
           </svg>
-          {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
+          {undoPending ? "Undoing…" : "Undo roll-in"}
         </button>
-      </form>
+      ) : (
+        <form
+          action={(fd) =>
+            startCopy(async () => {
+              const res = await copyPlansFromPreviousMonth(fd);
+              if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
+            })
+          }
+        >
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <button
+            type="submit"
+            disabled={copyPending}
+            title={`Copy every planned amount from ${prevMonthLabel} into this month`}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-xs font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10 whitespace-nowrap"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
+            </svg>
+            {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

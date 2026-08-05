@@ -148,8 +148,14 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           ) : null}
         </button>
 
-        {/* Mobile-only trailing: spent taps panel, planned is inline-editable */}
+        {/* Mobile-only trailing: planned is inline-editable, spent taps panel */}
         <div className="flex shrink-0 items-baseline gap-0.5 text-xs tabular-nums sm:hidden">
+          {autoPlanned ?? row.autoPlanned ? (
+            <span className="text-muted tabular-nums">{formatMoney(row.plannedCents, currency)}</span>
+          ) : (
+            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} currency={currency} />
+          )}
+          <span className="text-muted">/ </span>
           <button
             type="button"
             onClick={onSelect}
@@ -157,12 +163,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           >
             {formatMoney(row.spentCents, currency)}
           </button>
-          <span className="text-muted"> /</span>
-          {autoPlanned ?? row.autoPlanned ? (
-            <span className="text-muted tabular-nums"> {formatMoney(row.plannedCents, currency)}</span>
-          ) : (
-            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} currency={currency} />
-          )}
         </div>
       </div>
 
@@ -173,16 +173,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           style={{ width: `${pct}%` }}
         />
       </div>
-
-      {/* Desktop: Actual — read-only, click opens the panel */}
-      <button
-        type="button"
-        onClick={onSelect}
-        className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
-        title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
-      >
-        {formatMoney(row.spentCents, currency)}
-      </button>
 
       {/* Desktop: Planned — read-only when auto-derived */}
       <div
@@ -215,6 +205,16 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
       >
         {formatMoney(remaining, currency)}
+      </button>
+
+      {/* Desktop: Actual — read-only, click opens the panel */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
+        title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
+      >
+        {formatMoney(row.spentCents, currency)}
       </button>
 
       {/* Desktop: % */}
@@ -256,7 +256,8 @@ function MobilePlannedInput({
         defaultValue={initial}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => { if (e.currentTarget.value !== initial) formRef.current?.requestSubmit(); }}
-        className={`w-16 rounded bg-transparent px-0.5 text-right text-xs text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand ${pending ? "ring-1 ring-brand" : ""}`}
+        style={{ fontSize: '16px' }}
+        className={`w-16 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand ${pending ? "ring-1 ring-brand" : ""}`}
       />
     </form>
   );
@@ -301,7 +302,7 @@ function PlannedInput({
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+        className={`w-20 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />

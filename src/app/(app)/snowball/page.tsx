@@ -135,12 +135,15 @@ export default async function SnowballPage() {
     }));
   }
 
-  // Debt line items as pickable options in the edit modal.
+  // Debt line items as pickable options in the edit modal. `remainingCents`
+  // shows the debt balance still owed, so the picker reads as "debt left".
+  const balanceBySub = new Map((debts ?? []).map((d) => [d.subcategory_id, d.current_balance_cents as number]));
   const debtSubOptions: SubOption[] = debtSubIds.map((id) => ({
     id,
     name: nameBySub.get(id) ?? "Debt",
     kind: "debt",
     linkedBucketId: null,
+    remainingCents: balanceBySub.get(id) ?? 0,
   }));
 
   const periods = (periodRows ?? []).map((p) => ({
@@ -212,13 +215,21 @@ export default async function SnowballPage() {
   );
 
   // ---- Mode 2: classic textbook Snowball — pay every minimum, throw the
-  // extra (base + any active dated periods) at the smallest balance. Doesn't
-  // look at Planned amounts at all — a pure reference method, kept so it can
-  // be shared/explained to someone else.
-  const monthlyAttack = totalMin + currentExtraCents;
+  // extra at the smallest balance. Uses the SAME monthly capacity as My Plan
+  // (plannedTotal) so the two modes are an apples-to-apples comparison; any
+  // dated extra periods still stack on top for boosts (0% promo windows, etc.).
+  const classicExtraBaseline = Math.max(0, plannedTotal - totalMin);
+  const classicExtraForMonth = (m: string) =>
+    classicExtraBaseline +
+    periods.reduce(
+      (sum, p) => (m >= p.startMonth && (p.endMonth == null || m <= p.endMonth) ? sum + p.amountCents : sum),
+      0,
+    );
+  const monthlyAttack = totalMin + classicExtraForMonth(month);
+  const classicExtraThisMonth = classicExtraForMonth(month);
   const { payoffMonth: classicPayoff, ledger: classicLedger } = projectSnowball(
     unpaid.map((r) => ({ id: r.subId, balanceCents: r.balanceCents, minCents: r.minCents, apr: r.apr })),
-    extraForMonth,
+    classicExtraForMonth,
     month,
   );
 
@@ -250,7 +261,7 @@ export default async function SnowballPage() {
         totalBalanceCents={totalBalance}
         totalMinCents={totalMin}
         plannedTotalCents={plannedTotal}
-        currentExtraCents={currentExtraCents}
+        currentExtraCents={classicExtraThisMonth}
         monthlyAttackCents={monthlyAttack}
         plannedPayoffMonth={Object.fromEntries(plannedPayoff)}
         plannedLedger={Object.fromEntries(plannedLedger)}

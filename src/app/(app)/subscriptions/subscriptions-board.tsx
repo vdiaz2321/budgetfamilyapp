@@ -114,11 +114,13 @@ export function SubscriptionsBoard({
   subscriptions,
   irregularBills,
   creditCards = [],
+  showOnly,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
+  showOnly?: "subscriptions" | "irregular";
 }) {
   const monthlyTotal = subscriptions
     .filter((s) => s.isActive && s.billingCycle === "monthly")
@@ -131,18 +133,22 @@ export function SubscriptionsBoard({
         payee search and auto-fill their category and amount.
       </p>
 
-      <SubscriptionsSection
-        subscriptions={subscriptions}
-        currency={currency}
-        monthlyTotal={monthlyTotal}
-        creditCards={creditCards}
-      />
+      {showOnly !== "irregular" && (
+        <SubscriptionsSection
+          subscriptions={subscriptions}
+          currency={currency}
+          monthlyTotal={monthlyTotal}
+          creditCards={creditCards}
+        />
+      )}
 
-      <IrregularBillsSection
-        irregularBills={irregularBills}
-        currency={currency}
-        creditCards={creditCards}
-      />
+      {showOnly !== "subscriptions" && (
+        <IrregularBillsSection
+          irregularBills={irregularBills}
+          currency={currency}
+          creditCards={creditCards}
+        />
+      )}
     </div>
   );
 }

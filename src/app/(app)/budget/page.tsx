@@ -227,7 +227,11 @@ export default async function BudgetPage({
           dueDay: s.due_day,
           plannedCents,
           spentCents,
-          autoPlanned: !hasManualPlan && (isAutoSub || isAutoIrregular),
+          // Irregular bills contribute a *suggested* planned sum, but stay
+          // editable so ad-hoc spending (rare bike repair, one-off dental)
+          // can still get a manual planned amount without first setting a
+          // "typical amount" on the source bill.
+          autoPlanned: !hasManualPlan && isAutoSub,
           sparkline: sparklineBySub.get(s.id) ?? [],
           isKids,
           savings:

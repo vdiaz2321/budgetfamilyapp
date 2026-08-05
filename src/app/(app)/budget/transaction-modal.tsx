@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
@@ -105,6 +105,15 @@ export function TransactionModal({
 
   const splitTotal = splits.reduce((s, sp) => s + sp.amountCents, 0);
   const leftToSplit = totalCents - splitTotal;
+
+  // When exactly one item is selected, auto-fill it with the full total so the
+  // user doesn't have to re-enter it after changing the amount or removing splits.
+  useEffect(() => {
+    if (isEdit) return;
+    if (splits.length !== 1) return;
+    if (splits[0].amountCents === totalCents) return;
+    setSplits([{ subId: splits[0].subId, amountCents: totalCents }]);
+  }, [isEdit, splits, totalCents]);
 
   function handlePayeeMatch(item: PayeeLineItem) {
     if (item.subcategoryId) {
@@ -245,6 +254,17 @@ export function TransactionModal({
                 </button>
               ))}
             </div>
+          ) : initialKind === "debt" ? (
+            <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+              <div
+                className={
+                  "flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-semibold bg-surface shadow-sm ring-1 ring-line " +
+                  TAB_ACTIVE_TEXT.debt
+                }
+              >
+                {KIND_TAB.debt}
+              </div>
+            </div>
           ) : (
             <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
               {(["income", "expenses"] as const).map((kind) => (
@@ -308,7 +328,7 @@ export function TransactionModal({
             />
 
             {/* Account | Budget Item(s) */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 items-start gap-2">
               <div>
                 <select
                   name="accountId"
@@ -727,13 +747,13 @@ function PayeeField({
         autoComplete="off"
         placeholder={placeholder}
         value={value}
-        onChange={(e) => { setValue(e.target.value); setOpen(true); setHighlighted(-1); }}
-        onFocus={() => setOpen(true)}
+        onChange={(e) => { setValue(e.target.value); setOpen(e.target.value.trim().length > 0); setHighlighted(-1); }}
+        onFocus={() => { if (value.trim().length > 0) setOpen(true); }}
         onBlur={() => { setOpen(false); setHighlighted(-1); }}
         onKeyDown={handleKeyDown}
         className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
       />
-      {open && matches.length > 0 ? (
+      {open && value.trim().length > 0 && matches.length > 0 ? (
         <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
           {matches.map((entry, idx) => {
             const isLineItem = "kind" in entry;

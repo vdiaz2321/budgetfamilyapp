@@ -68,6 +68,7 @@ export function TransactionsPanel({
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
   const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -108,12 +109,29 @@ export function TransactionsPanel({
   }
 
   return (
-    <div className="relative flex max-h-[calc(100vh-6rem)] min-h-[320px] flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <div>
-          <h2 className="text-sm font-bold">{title}</h2>
-          <p className="text-xs text-muted">{subtitle ?? monthLabel}</p>
-        </div>
+    <div className={`relative flex ${collapsed ? "" : "max-h-[calc(100vh-6rem)] min-h-[320px]"} flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10`}>
+      <div className={`flex items-center justify-between gap-2 ${collapsed ? "" : "border-b border-line"} px-4 py-3`}>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+            aria-hidden
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-bold">{title}</h2>
+            {collapsed ? null : (
+              <p className="truncate text-xs text-muted">{subtitle ?? monthLabel}</p>
+            )}
+          </div>
+        </button>
         <button
           type="button"
           onClick={() => setModal("new")}
@@ -126,6 +144,7 @@ export function TransactionsPanel({
         </button>
       </div>
 
+      {collapsed ? null : (<>
       <div className="border-b border-line px-3 py-2.5">
         <div className="relative">
           <svg
@@ -188,6 +207,7 @@ export function TransactionsPanel({
           ))}
         </div>
       )}
+      </>)}
     </div>
   );
 }

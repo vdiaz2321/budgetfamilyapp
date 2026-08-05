@@ -861,10 +861,12 @@ export async function deletePayee(id: string) {
 // Bulk-copy every planned amount from the previous month into the given month.
 // Overwrites existing plans for that month so a re-click stays idempotent
 // against last month's numbers.
-export async function copyPlansFromPreviousMonth(formData: FormData) {
+export async function copyPlansFromPreviousMonth(
+  formData: FormData,
+): Promise<{ snapshot: Array<{ subcategory_id: string; planned_cents: number | null }>; touchedSubIds: string[] }> {
   const { supabase, householdId } = await requireHousehold();
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01 (destination month)
-  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return { snapshot: [], touchedSubIds: [] };
 
   const [y, m] = month.slice(0, 7).split("-").map(Number);
   const prev = new Date(Date.UTC(y, m - 2, 1)); // JS month is 0-indexed; prev = m-2
@@ -885,10 +887,64 @@ export async function copyPlansFromPreviousMonth(formData: FormData) {
       planned_cents: p.planned_cents,
     }));
 
-  if (rows.length > 0) {
+  // Snapshot the destination month's current plans for the sub-ids about to be
+  // overwritten, so Undo can restore prior values (or delete rows that didn't
+  // exist before).
+  const touchedSubIds = rows.map((r) => r.subcategory_id as string);
+  let snapshot: Array<{ subcategory_id: string; planned_cents: number | null }> = [];
+  if (touchedSubIds.length > 0) {
+    const { data: existing } = await supabase
+      .from("budget_plans")
+      .select("subcategory_id, planned_cents")
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .in("subcategory_id", touchedSubIds);
+    const existingMap = new Map(
+      (existing ?? []).map((e) => [e.subcategory_id as string, e.planned_cents as number | null]),
+    );
+    snapshot = touchedSubIds.map((id) => ({
+      subcategory_id: id,
+      planned_cents: existingMap.has(id) ? (existingMap.get(id) ?? null) : null,
+    }));
+
     await supabase
       .from("budget_plans")
       .upsert(rows, { onConflict: "household_id,month,subcategory_id" });
+  }
+
+  revalidatePath("/budget");
+  return { snapshot, touchedSubIds };
+}
+
+export async function restorePlansSnapshot(
+  month: string,
+  snapshot: Array<{ subcategory_id: string; planned_cents: number | null }>,
+) {
+  const { supabase, householdId } = await requireHousehold();
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+
+  const toUpsert = snapshot
+    .filter((s) => s.planned_cents != null && s.planned_cents > 0)
+    .map((s) => ({
+      household_id: householdId,
+      month,
+      subcategory_id: s.subcategory_id,
+      planned_cents: s.planned_cents!,
+    }));
+  const toDelete = snapshot.filter((s) => s.planned_cents == null).map((s) => s.subcategory_id);
+
+  if (toUpsert.length > 0) {
+    await supabase
+      .from("budget_plans")
+      .upsert(toUpsert, { onConflict: "household_id,month,subcategory_id" });
+  }
+  if (toDelete.length > 0) {
+    await supabase
+      .from("budget_plans")
+      .delete()
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .in("subcategory_id", toDelete);
   }
 
   revalidatePath("/budget");

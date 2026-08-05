@@ -59,7 +59,7 @@ export default async function TransactionsPage({
   }
   txQuery = txQuery.order("occurred_on", { ascending: true }).order("created_at", { ascending: true });
 
-  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }] =
+  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }, { data: planRows }, { data: actualRows }] =
     await Promise.all([
       supabase
         .from("subcategories")
@@ -94,7 +94,26 @@ export default async function TransactionsPage({
         .from("irregular_bills")
         .select("name, subcategory_id")
         .eq("household_id", household.id),
+      // Planned + actuals for the current month so the picker can show
+      // "Remaining" ($planned − $spent) per budget item.
+      supabase
+        .from("budget_plans")
+        .select("subcategory_id, planned_cents")
+        .eq("household_id", household.id)
+        .eq("month", month.firstOfMonth),
+      supabase
+        .from("v_monthly_actuals")
+        .select("subcategory_id, actual_cents")
+        .eq("household_id", household.id)
+        .eq("month", month.firstOfMonth),
     ]);
+
+  const plannedBySub = new Map<string, number>(
+    (planRows ?? []).map((p) => [p.subcategory_id as string, p.planned_cents ?? 0]),
+  );
+  const actualBySub = new Map<string, number>(
+    (actualRows ?? []).map((a) => [a.subcategory_id as string, a.actual_cents ?? 0]),
+  );
 
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
   const kindBySub = new Map(
@@ -103,12 +122,17 @@ export default async function TransactionsPage({
   const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
 
-  const subOptions: SubOption[] = (subs ?? []).map((s) => ({
-    id: s.id,
-    name: s.name,
-    kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
-    linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
-  }));
+  const subOptions: SubOption[] = (subs ?? []).map((s) => {
+    const planned = plannedBySub.get(s.id) ?? 0;
+    const actual = actualBySub.get(s.id) ?? 0;
+    return {
+      id: s.id,
+      name: s.name,
+      kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
+      linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
+      remainingCents: planned - actual,
+    };
+  });
 
   const accountGroupFor = (a: { kind: string; is_kids_account?: boolean }) => {
     if (a.is_kids_account) return "Kids Funding";

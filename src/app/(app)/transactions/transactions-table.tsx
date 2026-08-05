@@ -147,7 +147,7 @@ export function TransactionsTable({
     .reduce((sum, t) => sum + t.amountCents, 0);
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4">
+    <div className="mx-auto w-full max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">
@@ -387,7 +387,7 @@ export function TransactionsTable({
                 <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
                 <span className="mx-1.5">–</span>
                 <span className="font-medium">Spent Income</span>{" "}
-                <span className="tabular-nums">{formatMoney(outflowTotal, currency)}</span>
+                <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
                 <span className="mx-1.5">–</span>
                 <span className="font-medium">Income Left</span>{" "}
                 <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
@@ -425,18 +425,19 @@ export function TransactionsTable({
         )}
 
         <div className="flex items-center justify-between gap-2 border-t border-line bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
-          <span className="whitespace-nowrap font-medium text-muted">
-            {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
+          <span className="whitespace-nowrap text-muted">
+            <span className="font-medium">Income Rc&apos;d:</span>{" "}
+            <span className="tabular-nums text-positive">{formatMoney(incomeTotal, currency)}</span>
           </span>
-          {incomeTotal > 0 && outflowTotal > 0 && (
-            <span className="truncate text-right text-muted">
-              <span className="text-positive">+{formatMoney(incomeTotal, currency)}</span>
-              {" · "}
-              <span className="text-negative">−{formatMoney(outflowTotal, currency)}</span>
+          <span className="whitespace-nowrap text-muted">
+            <span className="font-medium">Spent:</span>{" "}
+            <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
+          </span>
+          <span className="whitespace-nowrap text-muted">
+            <span className="font-medium">Left:</span>{" "}
+            <span className={`font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+              {formatMoney(incomeTotal - outflowTotal, currency)}
             </span>
-          )}
-          <span className={`whitespace-nowrap font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-            {formatMoney(incomeTotal - outflowTotal, currency)}
           </span>
         </div>
       </section>
