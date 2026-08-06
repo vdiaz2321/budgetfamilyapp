@@ -86,14 +86,50 @@ export default async function LoginPage({
             </span>
             Capitall
           </p>
-          <h1 className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-            {isSignup ? "Create your account" : "Sign in"}
+          <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-zinc-100 p-1 text-sm font-semibold dark:bg-zinc-900">
+            <a
+              href="/login"
+              className={
+                "rounded-lg py-2 text-center transition " +
+                (!isSignup
+                  ? "bg-white text-indigo-700 shadow-sm dark:bg-zinc-800 dark:text-indigo-300"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200")
+              }
+            >
+              Sign in
+            </a>
+            <a
+              href="/login?mode=signup"
+              className={
+                "rounded-lg py-2 text-center transition " +
+                (isSignup
+                  ? "bg-white text-indigo-700 shadow-sm dark:bg-zinc-800 dark:text-indigo-300"
+                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200")
+              }
+            >
+              Register
+            </a>
+          </div>
+
+          <h1 className="mt-5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+            {isSignup ? "Create your account" : "Welcome back"}
           </h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             {isSignup
               ? "Pick an email and a password. You'll use these on every device."
               : "Enter your email and password."}
           </p>
+
+          {isSignup ? (
+            <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200">
+              <p className="font-semibold">Joining someone else&apos;s household?</p>
+              <p className="mt-1">
+                Create your account first. Right after signup you&apos;ll be asked whether
+                to start a new household or <strong>Join with a code</strong> — that&apos;s
+                where you paste the invite code they shared.
+              </p>
+            </div>
+          ) : null}
 
           <form
             action={isSignup ? createAccount : signIn}
@@ -147,31 +183,19 @@ export default async function LoginPage({
             >
               {isSignup ? "Create account" : "Sign in"}
             </button>
+
+            {!isSignup ? (
+              <p className="text-right text-sm">
+                <a
+                  href="/forgot-password"
+                  className="font-medium text-indigo-700 underline hover:text-indigo-800 dark:text-indigo-400"
+                >
+                  Forgot password?
+                </a>
+              </p>
+            ) : null}
           </form>
 
-          <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">
-            {isSignup ? (
-              <>
-                Already have an account?{" "}
-                <a
-                  href="/login"
-                  className="font-medium text-indigo-700 underline hover:text-indigo-800 dark:text-indigo-400"
-                >
-                  Sign in
-                </a>
-              </>
-            ) : (
-              <>
-                First time here?{" "}
-                <a
-                  href="/login?mode=signup"
-                  className="font-medium text-indigo-700 underline hover:text-indigo-800 dark:text-indigo-400"
-                >
-                  Create an account
-                </a>
-              </>
-            )}
-          </p>
         </div>
       </main>
     </div>

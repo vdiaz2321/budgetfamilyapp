@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 
 export type SidebarAccount = {
   id: string;
@@ -53,7 +54,11 @@ function formatWhole(cents: number): string {
 // YNAB-style account list under the nav: collapsible sections with a group
 // total in the header and per-account balances, plus Add Account at the foot.
 export function SidebarAccounts({ groups }: Props) {
-  const [expanded, setExpanded] = useState(false);
+  // Collapsed on fresh login; sessionStorage remembers the toggle across pages.
+  const [state, setState] = useSessionCollapse("sidebar-networth", () => ({ open: false }));
+  const expanded = !!state.open;
+  const setExpanded = (updater: (v: boolean) => boolean) =>
+    setState((s) => ({ ...s, open: updater(!!s.open) }));
   // Net worth = every group's total, liabilities subtracted — so it stays
   // correct as groups are added (e.g. a future Real Estate group) without
   // needing to touch this calculation.

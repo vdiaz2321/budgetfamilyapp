@@ -19,7 +19,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[1.75rem_5.5rem_2.25rem_6.5rem_minmax(7rem,1.2fr)_5.5rem_minmax(7rem,1.2fr)_minmax(5rem,0.9fr)_7rem_2rem]";
+const GRID = "grid-cols-[1.75rem_5.5rem_2.25rem_6.5rem_5.5rem_minmax(7rem,1.2fr)_minmax(7rem,1.2fr)_minmax(5rem,0.9fr)_7rem_2rem]";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -345,8 +345,8 @@ export function TransactionsTable({
               </button>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Type</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Remarks</span>
@@ -534,11 +534,11 @@ function TxLine({
         {isIncome ? "+" : "−"}
         {formatMoney(tx.amountCents, currency)}
       </button>
+      <span className="truncate text-sm text-muted">{tx.kind ? KIND_LABEL[tx.kind] : "—"}</span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
         <span className="truncate text-sm">{tx.subName}</span>
       </button>
-      <span className="truncate text-sm text-muted">{tx.kind ? KIND_LABEL[tx.kind] : "—"}</span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
         {tx.payee ?? "—"}
       </button>

@@ -20,7 +20,7 @@ export default async function AppLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("household_id, display_name")
+    .select("household_id, display_name, avatar_url")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -174,6 +174,8 @@ export default async function AppLayout({
       <Sidebar
         groups={groups}
         userEmail={user.email ?? ""}
+        displayName={profile.display_name}
+        avatarUrl={profile.avatar_url}
         badges={badges}
       />
 
