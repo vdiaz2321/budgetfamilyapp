@@ -34,6 +34,17 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
       </>
     ),
   },
+  {
+    href: "/accounts",
+    label: "Accounts",
+    icon: (
+      <>
+        <path d="M3 21h18" />
+        <path d="M5 21V10l7-5 7 5v11" />
+        <path d="M9 21v-6h6v6" />
+      </>
+    ),
+  },
 ];
 
 function Icon({ children }: { children: React.ReactNode }) {

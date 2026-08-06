@@ -16,7 +16,6 @@ import {
   reopenCard,
   updateAccount,
   updateBalance,
-  recalculateBalance,
   updateBucket,
   updateBucketBalance,
   updateBucketBankGroup,
@@ -337,7 +336,7 @@ export function AccountsBoard({
       </div>
 
       {/* Net worth summary */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <SummaryStat label="Assets" value={assets} currency={currency} tone="text-positive" />
         <SummaryStat label="Debts" value={debtsTotal} currency={currency} tone="text-negative" />
         <SummaryStat
@@ -348,7 +347,7 @@ export function AccountsBoard({
         />
       </div>
 
-      <div className="flex items-center justify-end gap-2">
+      <div className="hidden items-center justify-end gap-2 sm:flex">
         <button
           type="button"
           onClick={exportCsv}
@@ -760,7 +759,13 @@ function CreditCardPanel({
         ) : null}
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => {
+          const next = !v;
+          // Collapsing must also clear the "editing" flag so a stale, unchanged
+          // Save/Cancel/Delete bar doesn't hang out below when the panel reopens.
+          if (!next) setEditing(false);
+          return next;
+        })}
         className={`flex flex-1 items-center gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-4 py-2 text-left`}
         aria-expanded={expanded}
       >
@@ -807,7 +812,7 @@ function CreditCardPanel({
             if (d?.benefitUsedOn) parts.push(<span key="fnu" className={fnUsed && fnExpired ? "text-negative" : "text-positive"}>Used/Scheduled: {d.benefitUsedOn}</span>);
             if (!parts.length) return null;
             return (
-              <p className="mt-0.5 truncate text-[11px] text-muted">
+              <p className="mt-0.5 text-[11px] text-muted sm:truncate">
                 {parts.map((p, i) => <React.Fragment key={i}>{i > 0 ? " · " : ""}{p}</React.Fragment>)}
               </p>
             );
@@ -1004,7 +1009,7 @@ function EditCreditCardForm({
             onDone();
           })
         }
-        className="space-y-3"
+        className="flex flex-col gap-3"
       >
         <input type="hidden" name="id" value={card.id} />
         <input type="hidden" name="accountId" value={card.id} />
@@ -1080,7 +1085,7 @@ function EditCreditCardForm({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between gap-2 pt-1">
+        <div className="order-first flex items-center justify-between gap-2 pt-1 sm:order-none">
           <div className="flex items-center gap-2">
             <button
               type="submit"
@@ -1323,7 +1328,7 @@ function BudgetDebtsSection({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="grid grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
         <button
           type="button"
           onClick={onToggle}
@@ -1393,9 +1398,9 @@ function SummaryStat({
   tone: string;
 }) {
   return (
-    <div className="rounded-2xl bg-surface px-4 py-3 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <div className="flex min-w-0 items-baseline justify-between gap-3 rounded-2xl bg-surface px-4 py-2.5 shadow-sm ring-1 ring-black/5 sm:block sm:text-center sm:py-3 dark:ring-white/10">
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>
+      <p className={`truncate text-base font-bold tabular-nums sm:mt-0.5 sm:text-lg ${tone}`}>
         {formatMoney(value, currency)}
       </p>
     </div>
@@ -1464,7 +1469,7 @@ function AccountSection({
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header */}
-      <div className="grid grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
         <button
           type="button"
           onClick={() => {
@@ -1475,7 +1480,7 @@ function AccountSection({
           aria-expanded={open}
         >
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-          <span className="font-semibold">{section.label}</span>
+          <span className="truncate font-semibold">{section.label}</span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -1501,13 +1506,13 @@ function AccountSection({
       {open ? (
         <div className="border-t border-line">
           {localAccounts.length > 0 ? (
-            <div className="grid grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
               <span />
               <span />
               <span />
               <span className="text-right">{monthAbbr(historyMonths[0])}</span>
-              <span className="text-right">{monthAbbr(historyMonths[1])}</span>
-              <span className="text-right">{monthAbbr(historyMonths[2])}</span>
+              <span className="hidden text-right sm:block">{monthAbbr(historyMonths[1])}</span>
+              <span className="hidden text-right sm:block">{monthAbbr(historyMonths[2])}</span>
             </div>
           ) : null}
           {localAccounts.length === 0 ? (
@@ -1600,7 +1605,7 @@ function AccountRow({
       data-drop-key={`account:${account.id}`}
       className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
-      <div className="grid grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 px-4 py-1.5">
+      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 px-4 py-1.5">
         <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
@@ -1625,7 +1630,7 @@ function AccountRow({
         <button
           type="button"
           onClick={onToggleEdit}
-          className="group/name relative inline-flex w-fit min-w-0 max-w-full items-baseline justify-self-start gap-2 text-left"
+          className="group/name relative flex w-full min-w-0 max-w-full flex-col items-start justify-self-start gap-0.5 text-left sm:inline-flex sm:w-fit sm:flex-row sm:items-baseline sm:gap-2"
         >
           <span
             role="tooltip"
@@ -1633,57 +1638,63 @@ function AccountRow({
           >
             Click to edit
           </span>
-          <span className={`truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
+          {/* Tag row: sits above the name on mobile so the name gets full width;
+              on desktop moves after the name via `sm:order-2` for the original inline look. */}
+          <span className="order-1 flex min-w-0 flex-wrap items-baseline gap-1.5 sm:order-2">
+            {account.holder ? (
+              <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+                {account.holder}
+              </span>
+            ) : null}
+            {/* With buckets, each one carries its own Checking/Savings tag
+                below (an account can hold both) — a single account-level tag
+                here would misrepresent a mixed account, so it only shows when
+                there's nothing underneath to tag instead. */}
+            {section.key === "banking" && account.bankGroup && bucketCount === 0 ? (
+              <span
+                title="Net Worth splits Savings from everyday Checking"
+                className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                  account.bankGroup === "savings"
+                    ? "bg-positive/15 text-positive"
+                    : "bg-black/5 text-muted dark:bg-white/10"
+                }`}
+              >
+                {account.bankGroup === "savings" ? "Savings" : "Checking"}
+              </span>
+            ) : null}
+            {account.subtype ? (
+              <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+                {account.subtype}
+              </span>
+            ) : null}
+            {showKind ? <span className="shrink-0 text-[11px] text-muted">{kindLabel}</span> : null}
+            {bucketCount > 0 ? (
+              <span className="shrink-0 text-[11px] text-muted">
+                {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
+              </span>
+            ) : null}
+            {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
+          </span>
+          <span className={`order-2 w-full truncate text-sm sm:order-1 sm:w-auto ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
-          {account.holder ? (
-            <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-              {account.holder}
-            </span>
-          ) : null}
-          {/* With buckets, each one carries its own Checking/Savings tag
-              below (an account can hold both) — a single account-level tag
-              here would misrepresent a mixed account, so it only shows when
-              there's nothing underneath to tag instead. */}
-          {section.key === "banking" && account.bankGroup && bucketCount === 0 ? (
-            <span
-              title="Net Worth splits Savings from everyday Checking"
-              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                account.bankGroup === "savings"
-                  ? "bg-positive/15 text-positive"
-                  : "bg-black/5 text-muted dark:bg-white/10"
-              }`}
-            >
-              {account.bankGroup === "savings" ? "Savings" : "Checking"}
-            </span>
-          ) : null}
-          {account.subtype ? (
-            <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
-              {account.subtype}
-            </span>
-          ) : null}
-          {showKind ? <span className="shrink-0 text-[11px] text-muted">{kindLabel}</span> : null}
-          {bucketCount > 0 ? (
-            <span className="shrink-0 text-[11px] text-muted">
-              {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
-            </span>
-          ) : null}
-          {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
         </button>
 
         {allowBuckets && bucketCount > 0 ? (
           <>
             <DerivedBalance balanceCents={account.balanceCents} currency={currency} />
-            <DerivedBalance
-              balanceCents={account.prevMonthCents ?? 0}
-              currency={currency}
-              muted={account.prevMonthCents == null}
-            />
-            <DerivedBalance
-              balanceCents={account.prev2MonthCents ?? 0}
-              currency={currency}
-              muted={account.prev2MonthCents == null}
-            />
+            <div className="hidden sm:contents">
+              <DerivedBalance
+                balanceCents={account.prevMonthCents ?? 0}
+                currency={currency}
+                muted={account.prevMonthCents == null}
+              />
+              <DerivedBalance
+                balanceCents={account.prev2MonthCents ?? 0}
+                currency={currency}
+                muted={account.prev2MonthCents == null}
+              />
+            </div>
           </>
         ) : (
           <>
@@ -1694,20 +1705,22 @@ function AccountRow({
               liability={section.liability}
               kind={account.kind}
             />
-            <HistoricBalanceInput
-              accountId={account.id}
-              month={historyMonths[1]}
-              balanceCents={account.prevMonthCents}
-              currency={currency}
-              liability={section.liability}
-            />
-            <HistoricBalanceInput
-              accountId={account.id}
-              month={historyMonths[2]}
-              balanceCents={account.prev2MonthCents}
-              currency={currency}
-              liability={section.liability}
-            />
+            <div className="hidden sm:contents">
+              <HistoricBalanceInput
+                accountId={account.id}
+                month={historyMonths[1]}
+                balanceCents={account.prevMonthCents}
+                currency={currency}
+                liability={section.liability}
+              />
+              <HistoricBalanceInput
+                accountId={account.id}
+                month={historyMonths[2]}
+                balanceCents={account.prev2MonthCents}
+                currency={currency}
+                liability={section.liability}
+              />
+            </div>
           </>
         )}
       </div>
@@ -1771,7 +1784,7 @@ function BucketDrawer({
   const { dragOverId, startDrag } = usePointerReorder("bucket", reorder);
 
   return (
-    <div className="border-t border-line bg-background/40 pl-11 pr-4 py-2">
+    <div className="border-t border-line bg-background/40 px-4 py-2 sm:pl-11 sm:pr-4">
       {reorderError ? <p className="pb-1.5 text-xs font-medium text-negative">{reorderError}</p> : null}
       {localBuckets.length === 0 ? (
         <p className="py-1 text-xs text-muted">
@@ -1829,35 +1842,40 @@ function BucketRow({
   return (
     <li
       data-drop-key={`bucket:${bucket.id}`}
-      className={`group grid items-center gap-1.5 py-1 ${
+      className={`group relative grid items-center gap-1.5 py-1 ${
         isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""
       } ${
         showBankGroup
-          ? "grid-cols-[1.75rem_minmax(0,1fr)_5.5rem_7.5rem_7.5rem_7.5rem_1.25rem]"
-          : "grid-cols-[1.75rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem_1.25rem]"
+          ? "grid-cols-[1.5rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_5.5rem_7.5rem_7.5rem_7.5rem_1.25rem]"
+          : "grid-cols-[1.5rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem_1.25rem]"
       }`}
     >
       <GripHandle onMouseDown={onDragStart} size="sm" />
+      <span aria-hidden className="hidden sm:block" />
       <BucketNameInput id={bucket.id} name={bucket.name} />
       {showBankGroup ? (
-        <BucketBankGroupSelect id={bucket.id} bankGroup={bucket.bankGroup} />
+        <div className="hidden sm:block">
+          <BucketBankGroupSelect id={bucket.id} bankGroup={bucket.bankGroup} />
+        </div>
       ) : null}
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
-      <HistoricBucketBalanceInput
-        bucketId={bucket.id}
-        month={historyMonths[1]}
-        balanceCents={bucket.prevMonthCents}
-        currency={currency}
-      />
-      <HistoricBucketBalanceInput
-        bucketId={bucket.id}
-        month={historyMonths[2]}
-        balanceCents={bucket.prev2MonthCents}
-        currency={currency}
-      />
+      <div className="hidden sm:contents">
+        <HistoricBucketBalanceInput
+          bucketId={bucket.id}
+          month={historyMonths[1]}
+          balanceCents={bucket.prevMonthCents}
+          currency={currency}
+        />
+        <HistoricBucketBalanceInput
+          bucketId={bucket.id}
+          month={historyMonths[2]}
+          balanceCents={bucket.prev2MonthCents}
+          currency={currency}
+        />
+      </div>
       <form
         action={(fd) => startDel(() => deleteBucket(fd))}
-        className="justify-self-end"
+        className="absolute right-1 top-1/2 -translate-y-1/2 sm:static sm:justify-self-end sm:translate-y-0"
       >
         <input type="hidden" name="id" value={bucket.id} />
         <button
@@ -1925,7 +1943,7 @@ function BucketNameInput({ id, name }: { id: string; name: string }) {
             formRef.current?.requestSubmit();
           }
         }}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-sm transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-xs transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 sm:text-sm ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1960,12 +1978,12 @@ function BucketBalanceInput({
         type="text"
         inputMode="decimal"
         defaultValue={initial}
-        size={Math.max(initial.length, 5) + 2}
+        size={Math.max(initial.length, 5)}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent py-0.5 px-1 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`min-w-0 rounded-md bg-transparent py-0.5 px-0.5 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -2201,41 +2219,11 @@ function BalanceInput({
   kind?: string;
 }) {
   const [pending, start] = useTransition();
-  const [reconciling, startReconcile] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const initial = centsToDisplay(balanceCents);
-  // Reconcile only for ledger-driven accounts (skip investment — those aren't
-  // derived from a transaction ledger).
-  const canReconcile = kind !== "investment";
 
   return (
     <div className="flex items-center gap-1 justify-self-end">
-      {canReconcile ? (
-        <form
-          action={(fd) => startReconcile(() => recalculateBalance(fd))}
-          onSubmit={(e) => {
-            if (!window.confirm("Rebuild this balance from all transactions on the account? Starting balance is treated as $0; any manual adjustments will be replaced.")) {
-              e.preventDefault();
-            }
-          }}
-        >
-          <input type="hidden" name="id" value={id} />
-          <button
-            type="submit"
-            disabled={reconciling}
-            title="Recalculate balance from transactions (starting from $0)"
-            className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-50"
-            aria-label="Reconcile from transactions"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" className={reconciling ? "animate-spin" : ""} aria-hidden>
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-              <path d="M21 3v5h-5" />
-              <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-              <path d="M3 21v-5h5" />
-            </svg>
-          </button>
-        </form>
-      ) : null}
       <form
         ref={formRef}
         action={(fd) => start(() => updateBalance(fd))}
@@ -2254,12 +2242,12 @@ function BalanceInput({
           type="text"
           inputMode="decimal"
           defaultValue={initial}
-          size={Math.max(initial.length, 5) + 2}
+          size={Math.max(initial.length, 5)}
           onFocus={(e) => e.currentTarget.select()}
           onBlur={(e) => {
             if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
           }}
-          className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+          className={`min-w-0 rounded-md bg-transparent py-1 px-0.5 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
             (liability && balanceCents > 0) || (!liability && balanceCents < 0) ? "text-negative font-semibold" : ""
           } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
         />

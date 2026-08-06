@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { deleteSubcategory, upsertPlan } from "./actions";
@@ -91,7 +91,9 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         ? 100
         : 0;
 
-  const overBudget = !isIncome && row.plannedCents > 0 && row.spentCents > row.plannedCents;
+  // Overbudget also covers "no plan set but money went out" (spent > 0, planned 0)
+  // so the sparkline bar goes red instead of green when the row wasn't planned for.
+  const overBudget = !isIncome && row.spentCents > row.plannedCents;
 
   const baseClass = selected
     ? "bg-brand-soft/50"
@@ -148,7 +150,9 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           ) : null}
         </button>
 
-        {/* Mobile-only trailing: planned is inline-editable, spent taps panel */}
+        {/* Mobile-only trailing: planned is inline-editable, spent taps panel.
+            Spent flips to negative color when it exceeds planned (mirrors the
+            desktop Remaining column's warning cue). */}
         <div className="flex shrink-0 items-baseline gap-0.5 text-xs tabular-nums sm:hidden">
           {autoPlanned ?? row.autoPlanned ? (
             <span className="text-muted tabular-nums">{formatMoney(row.plannedCents, currency)}</span>
@@ -159,7 +163,9 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           <button
             type="button"
             onClick={onSelect}
-            className={`font-semibold ${actualColorClass(kind, row.spentCents)}`}
+            className={`font-semibold ${
+              remaining < 0 ? "text-negative" : actualColorClass(kind, row.spentCents)
+            }`}
           >
             {formatMoney(row.spentCents, currency)}
           </button>
@@ -241,23 +247,43 @@ function MobilePlannedInput({
   currency: string;
 }) {
   const [pending, start] = useTransition();
+  const [editing, setEditing] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const initial = centsToDisplay(plannedCents);
+
+  // Display mode is a plain 12px span (matches "spent" size on the same row);
+  // tap swaps in a real input at 16px so iOS won't auto-zoom on focus.
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        className={`text-xs tabular-nums text-muted ${pending ? "ring-1 ring-brand rounded" : ""}`}
+      >
+        {formatMoney(plannedCents, currency)}
+      </button>
+    );
+  }
+
   return (
     <form ref={formRef} action={(fd) => start(() => upsertPlan(fd))} className="inline-flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
       <span className="pointer-events-none text-xs text-muted">{currencySymbol(currency)}</span>
       <input
+        autoFocus
         key={initial}
         name="planned"
         type="text"
         inputMode="decimal"
         defaultValue={initial}
         onFocus={(e) => e.currentTarget.select()}
-        onBlur={(e) => { if (e.currentTarget.value !== initial) formRef.current?.requestSubmit(); }}
+        onBlur={(e) => {
+          setEditing(false);
+          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
+        }}
         style={{ fontSize: '16px' }}
-        className={`w-16 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand ${pending ? "ring-1 ring-brand" : ""}`}
+        className="w-16 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
       />
     </form>
   );
