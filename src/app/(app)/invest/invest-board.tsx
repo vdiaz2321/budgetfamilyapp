@@ -253,11 +253,6 @@ export function InvestBoard({ accounts, years, currency, destAccounts }: Props) 
             <div className="border-t border-foreground/10" />
             <YearByYear accounts={accounts} years={years} currency={currency} />
           </div>
-          {kids.length > 0 ? (
-            <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <PerfTable title="Kids Funding" accounts={kids} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
-            </div>
-          ) : null}
         </>
       )}
     </div>
@@ -638,7 +633,10 @@ function PerfTable({
   noCard?: boolean;
 }) {
   const key = `invest-table-${title.toLowerCase().replace(/\s+/g, "-")}`;
-  const [collapseState, setCollapseState] = useSessionCollapse(key, () => ({ v: true }));
+  // Kids Funding starts open on login; everything else starts collapsed.
+  // Session storage remembers per-title toggles across pages.
+  const defaultCollapsed = !/kids/i.test(title);
+  const [collapseState, setCollapseState] = useSessionCollapse(key, () => ({ v: defaultCollapsed }));
   const collapsed = collapseState.v;
   const toggle = () => setCollapseState((s) => ({ ...s, v: !s.v }));
 
@@ -826,19 +824,31 @@ function PerfTable({
                       </td>
                     ) : null}
                     <td className="px-1 py-1">
-                      <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
-                        {formatMoney(eff.contributedCents, currency)}
-                      </span>
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
+                          {formatMoney(eff.contributedCents, currency)}
+                        </span>
+                      ) : (
+                        <EditCell accountId={a.id} year={year} field="contributed" cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                      )}
                     </td>
                     <td className="px-1 py-1">
-                      <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
-                        {formatMoney(eff.accruedCents, currency)}
-                      </span>
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                          {formatMoney(eff.accruedCents, currency)}
+                        </span>
+                      ) : (
+                        <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                      )}
                     </td>
                     <td className="px-1 py-1">
-                      <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
-                        {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
-                      </span>
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                          {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
+                        </span>
+                      ) : (
+                        <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
+                      )}
                     </td>
                     <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
                       {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
@@ -1150,7 +1160,11 @@ function YByAccountRows({
         <td className="px-3 py-1.5 text-muted">Contributed</td>
         {desc.map((y) => (
           <td key={y} className="px-3 py-1.5 text-center tabular-nums">
-            {formatMoney(effectiveCell(account, y).contributedCents, currency)}
+            {hasBuckets ? (
+              formatMoney(effectiveCell(account, y).contributedCents, currency)
+            ) : (
+              <EditCell accountId={account.id} year={y} field="contributed" cents={account.cells[y]?.contributedCents ?? 0} currency={currency} tone="" />
+            )}
           </td>
         ))}
       </tr>
@@ -1158,9 +1172,14 @@ function YByAccountRows({
         <td className="px-3 py-1.5 text-muted">Gain</td>
         {desc.map((y) => {
           const g = effectiveCell(account, y).accruedCents;
+          const rawG = account.cells[y]?.accruedCents ?? 0;
           return (
             <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
-              {formatMoney(g, currency)}
+              {hasBuckets ? (
+                formatMoney(g, currency)
+              ) : (
+                <EditCell accountId={account.id} year={y} field="accrued" cents={rawG} currency={currency} tone={gainTone(rawG)} />
+              )}
             </td>
           );
         })}
@@ -1173,7 +1192,7 @@ function YByAccountRows({
                 <td className="px-3 py-1 text-sm text-muted">Contributed</td>
                 {desc.map((y) => (
                   <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
-                    {formatMoney(b.cells[y]?.contributedCents ?? 0, currency)}
+                    <EditCell accountId={account.id} bucketId={b.id} year={y} field="contributed" cents={b.cells[y]?.contributedCents ?? 0} currency={currency} tone="text-muted" />
                   </td>
                 ))}
               </tr>
@@ -1183,7 +1202,7 @@ function YByAccountRows({
                   const g = b.cells[y]?.accruedCents ?? 0;
                   return (
                     <td key={y} className={`px-3 py-1 text-center text-sm tabular-nums ${gainTone(g)}`}>
-                      {formatMoney(g, currency)}
+                      <EditCell accountId={account.id} bucketId={b.id} year={y} field="accrued" cents={g} currency={currency} tone={gainTone(g)} />
                     </td>
                   );
                 })}

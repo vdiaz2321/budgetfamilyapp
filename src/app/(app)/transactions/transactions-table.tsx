@@ -283,9 +283,9 @@ export function TransactionsTable({
               </button>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Type</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Type</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Remarks</span>
               <span />
