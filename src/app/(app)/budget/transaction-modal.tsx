@@ -102,6 +102,7 @@ export function TransactionModal({
     initialSubId ? [{ subId: initialSubId, amountCents: editTx?.amountCents ?? 0 }] : []
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
 
   const splitTotal = splits.reduce((s, sp) => s + sp.amountCents, 0);
   const leftToSplit = totalCents - splitTotal;
@@ -112,6 +113,8 @@ export function TransactionModal({
     if (isEdit) return;
     if (splits.length !== 1) return;
     if (splits[0].amountCents === totalCents) return;
+    // Keep the single selected item synchronized with the entered total.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSplits([{ subId: splits[0].subId, amountCents: totalCents }]);
   }, [isEdit, splits, totalCents]);
 
@@ -213,6 +216,19 @@ export function TransactionModal({
           selectedIds={new Set(splits.map((s) => s.subId))}
           onConfirm={handlePickerConfirm}
           onClose={() => setPickerOpen(false)}
+        />
+      )}
+      {accountPickerOpen && (
+        <AccountPicker
+          accountGroups={accountGroups}
+          accountByGroup={accountByGroup}
+          selectedAccountId={selectedAccountId}
+          onSelect={(accountId) => {
+            setSelectedAccountId(accountId);
+            setSelectedBucketId("");
+            setAccountPickerOpen(false);
+          }}
+          onClose={() => setAccountPickerOpen(false)}
         />
       )}
 
@@ -330,6 +346,25 @@ export function TransactionModal({
             {/* Account | Budget Item(s) */}
             <div className="grid grid-cols-2 items-start gap-2">
               <div>
+                <input type="hidden" name="accountId" value={selectedAccountId} className="sm:hidden" />
+                <button
+                  type="button"
+                  onClick={() => setAccountPickerOpen(true)}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl bg-background px-2 py-2.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
+                >
+                  <span className={`min-w-0 flex-1 truncate ${selectedAccountId ? "text-foreground" : "text-muted"}`}>
+                    {selectedAccountId
+                      ? filteredAccounts.find((account) => account.id === selectedAccountId)?.name ?? "Choose account"
+                      : txType === "income"
+                        ? "Deposit to account"
+                        : txType === "debt"
+                          ? "Paid from account"
+                          : "Charged to / paid from"}
+                  </span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </button>
                 <select
                   name="accountId"
                   value={selectedAccountId}
@@ -337,7 +372,7 @@ export function TransactionModal({
                     setSelectedAccountId(e.target.value);
                     setSelectedBucketId("");
                   }}
-                  className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  className="hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3"
                 >
                   <option value="">
                     {txType === "income"
@@ -411,7 +446,6 @@ export function TransactionModal({
               <SplitRows
                 splits={splits}
                 options={options}
-                totalCents={totalCents}
                 leftToSplit={leftToSplit}
                 onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
                 onAmountChange={(subId, cents) =>
@@ -475,7 +509,6 @@ export function TransactionModal({
 function SplitRows({
   splits,
   options,
-  totalCents,
   leftToSplit,
   onRemove,
   onAmountChange,
@@ -483,7 +516,6 @@ function SplitRows({
 }: {
   splits: SplitEntry[];
   options: SubOption[];
-  totalCents: number;
   leftToSplit: number;
   onRemove: (subId: string) => void;
   onAmountChange: (subId: string, cents: number) => void;
@@ -556,6 +588,64 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
   );
 }
 
+// Mobile uses an app-controlled picker instead of the browser's native
+// <select> sheet. iOS controls the native sheet's typography, while this keeps
+// account names compact and lets the list scroll independently of the form.
+function AccountPicker({
+  accountGroups,
+  accountByGroup,
+  selectedAccountId,
+  onSelect,
+  onClose,
+}: {
+  accountGroups: string[];
+  accountByGroup: Map<string, AccountOption[]>;
+  selectedAccountId: string;
+  onSelect: (accountId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:hidden">
+      <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
+        <button type="button" onClick={onClose} className="text-sm font-medium text-muted hover:text-foreground">
+          Cancel
+        </button>
+        <h2 className="text-base font-bold">Choose account</h2>
+        <span className="w-12" aria-hidden />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
+        {accountGroups.map((group) => (
+          <div key={group}>
+            <div className="border-b border-line/40 bg-background/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              {group}
+            </div>
+            {accountByGroup.get(group)?.map((account) => {
+              const selected = account.id === selectedAccountId;
+              return (
+                <button
+                  key={account.id}
+                  type="button"
+                  onClick={() => onSelect(account.id)}
+                  className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3 text-left text-sm active:bg-brand-soft/40"
+                >
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+                    {selected ? (
+                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="m2 6 3 3 5-5" />
+                      </svg>
+                    ) : null}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{account.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Full-screen budget item picker with search + checkboxes + remaining amounts.
 function BudgetItemPicker({
   options,
@@ -585,8 +675,8 @@ function BudgetItemPicker({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-surface sm:items-center sm:justify-center sm:bg-black/50 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="flex flex-1 flex-col bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
+    <div className="fixed inset-0 z-[60] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:rounded-t-2xl">
         <button
@@ -614,7 +704,6 @@ function BudgetItemPicker({
           </svg>
           <input
             type="search"
-            autoFocus
             placeholder="Search…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -630,7 +719,7 @@ function BudgetItemPicker({
       </div>
 
       {/* Item list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
         {filtered.length === 0
           ? <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
           : (() => {
