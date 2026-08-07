@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { captureSnapshots } from "@/lib/snapshots";
-import { InvestBoard, type InvestAccount, type BucketRow, type YearCell } from "./invest-board";
+import { InvestBoard, type InvestAccount, type BucketRow, type InvestmentImportView, type YearCell } from "./invest-board";
 
 export const metadata = { title: "Investments · Capitall" };
 
@@ -214,5 +214,80 @@ export default async function InvestPage() {
 
   const destAccounts = (bankingRows ?? []).map((a) => ({ id: a.id, name: a.name }));
 
-  return <InvestBoard accounts={data} years={years} currency={household.currency} destAccounts={destAccounts} />;
+  const { data: importBatches } = await supabase
+    .from("investment_import_batches")
+    .select("id, account_id, bucket_id, provider, import_kind, as_of_date, source_filename, row_count, created_at")
+    .eq("household_id", household.id)
+    .order("created_at", { ascending: false })
+    .limit(12);
+
+  const batchIds = (importBatches ?? []).map((batch) => batch.id);
+  const [{ data: positionRows }, { data: performanceRows }] = batchIds.length > 0
+    ? await Promise.all([
+      supabase
+        .from("investment_position_snapshots")
+        .select("import_batch_id, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent")
+        .eq("household_id", household.id)
+        .in("import_batch_id", batchIds)
+        .order("market_value_cents", { ascending: false })
+        .limit(2000),
+      supabase
+        .from("investment_performance_snapshots")
+        .select("import_batch_id, as_of_date, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents")
+        .eq("household_id", household.id)
+        .in("import_batch_id", batchIds)
+        .order("as_of_date", { ascending: false })
+        .limit(2000),
+    ])
+    : [{ data: [] }, { data: [] }];
+
+  const accountNameById = new Map(accounts.map((account) => [account.id, account.name]));
+  const bucketNameById = new Map((bucketRows ?? []).map((bucket) => [bucket.id, bucket.name]));
+  const positionsByBatch = new Map<string, InvestmentImportView["positions"]>();
+  for (const row of positionRows ?? []) {
+    const values = positionsByBatch.get(row.import_batch_id) ?? [];
+    values.push({
+      symbol: row.symbol ?? null,
+      securityName: row.security_name,
+      quantity: row.quantity ?? null,
+      priceCents: row.price_cents ?? null,
+      marketValueCents: row.market_value_cents ?? 0,
+      costBasisCents: row.cost_basis_cents ?? null,
+      unrealizedGainCents: row.unrealized_gain_cents ?? null,
+      unrealizedGainPercent: row.unrealized_gain_percent ?? null,
+    });
+    positionsByBatch.set(row.import_batch_id, values);
+  }
+  const performanceByBatch = new Map<string, InvestmentImportView["performance"]>();
+  for (const row of performanceRows ?? []) {
+    const values = performanceByBatch.get(row.import_batch_id) ?? [];
+    values.push({
+      asOfDate: row.as_of_date,
+      beginningBalanceCents: row.beginning_balance_cents ?? null,
+      contributionsCents: row.contributions_cents ?? null,
+      withdrawalsCents: row.withdrawals_cents ?? null,
+      dividendsCents: row.dividends_cents ?? null,
+      feesCents: row.fees_cents ?? null,
+      marketChangeCents: row.market_change_cents ?? null,
+      endingBalanceCents: row.ending_balance_cents ?? 0,
+    });
+    performanceByBatch.set(row.import_batch_id, values);
+  }
+  const imports: InvestmentImportView[] = (importBatches ?? []).map((batch) => ({
+    id: batch.id,
+    accountId: batch.account_id,
+    bucketId: batch.bucket_id ?? null,
+    accountName: accountNameById.get(batch.account_id) ?? "Investment account",
+    bucketName: batch.bucket_id ? bucketNameById.get(batch.bucket_id) ?? null : null,
+    provider: batch.provider,
+    importKind: batch.import_kind === "performance" ? "performance" : "positions",
+    asOfDate: batch.as_of_date,
+    sourceFilename: batch.source_filename ?? null,
+    rowCount: batch.row_count ?? 0,
+    createdAt: batch.created_at,
+    positions: positionsByBatch.get(batch.id) ?? [],
+    performance: performanceByBatch.get(batch.id) ?? [],
+  }));
+
+  return <InvestBoard accounts={data} years={years} currency={household.currency} destAccounts={destAccounts} imports={imports} />;
 }

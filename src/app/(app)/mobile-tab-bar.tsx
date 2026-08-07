@@ -16,6 +16,17 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
     icon: <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />,
   },
   {
+    href: "/accounts",
+    label: "Accounts",
+    icon: (
+      <>
+        <path d="M3 21h18" />
+        <path d="M5 21V10l7-5 7 5v11" />
+        <path d="M9 21v-6h6v6" />
+      </>
+    ),
+  },
+  {
     href: "/savings",
     label: "Savings",
     icon: (
@@ -32,17 +43,6 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
       <>
         <path d="M12 3v18M5 8l14 8M19 8L5 16" />
         <circle cx="12" cy="12" r="9" />
-      </>
-    ),
-  },
-  {
-    href: "/accounts",
-    label: "Accounts",
-    icon: (
-      <>
-        <path d="M3 21h18" />
-        <path d="M5 21V10l7-5 7 5v11" />
-        <path d="M9 21v-6h6v6" />
       </>
     ),
   },

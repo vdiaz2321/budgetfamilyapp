@@ -2,6 +2,7 @@
 
 import { useState, useRef, type CSSProperties, type RefObject } from "react";
 import { formatMoney } from "@/lib/money";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 
 export type BreakdownLine = {
   label: string;
@@ -17,7 +18,7 @@ export type BreakdownGroup = {
 };
 
 export type BreakdownKind = {
-  kind: "income" | "expenses" | "bills" | "debt" | "savings" | "investment";
+  kind: "income" | "expenses" | "bills" | "debt" | "savings" | "investment" | "kidsFunding";
   label: string;
   groups: BreakdownGroup[];
   totalByYear: Record<number, number>;
@@ -32,7 +33,8 @@ type Props = {
 };
 
 export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Props) {
-  const [open, setOpen] = useState(false);
+  const [collapse, setCollapse] = useSessionCollapse("annual-breakdown-history", () => ({ open: false }));
+  const open = collapse.open;
   const [search, setSearch] = useState("");
   const searchLower = search.toLowerCase();
 
@@ -58,7 +60,7 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
     <section className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setCollapse({ open: !open })}
         aria-expanded={open}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
       >
@@ -177,7 +179,8 @@ function KindBlock({
   kind: BreakdownKind; years: number[]; gridStyle: CSSProperties; minW: string; currency: string; search: string;
   scrollersRef: RefObject<Set<HTMLDivElement>>; syncScrollX: (x: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [collapse, setCollapse] = useSessionCollapse(`annual-breakdown-kind-${kind.kind}`, () => ({ open: false }));
+  const open = collapse.open;
   const headerRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -199,7 +202,7 @@ function KindBlock({
     <div className="rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setCollapse({ open: !open })}
         aria-expanded={effectiveOpen}
         className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
       >

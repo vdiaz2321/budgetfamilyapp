@@ -18,7 +18,6 @@ import {
   updateBalance,
   updateBucket,
   updateBucketBalance,
-  updateBucketBankGroup,
   upsertCardDetails,
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
@@ -27,6 +26,11 @@ const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 // "2026-07-01" -> "Jul"
 function monthAbbr(firstOfMonth: string): string {
   return MONTH_ABBR[parseInt(firstOfMonth.slice(5, 7), 10) - 1] ?? "";
+}
+
+function maskAccountNumber(accountNumber: string | null): string | null {
+  const lastFour = accountNumber?.replace(/\s/g, "").slice(-4);
+  return lastFour ? `•••• ${lastFour}` : null;
 }
 
 export type BucketData = {
@@ -75,6 +79,10 @@ export type AccountData = {
   kind: string; // account_kind enum value
   subtype: string | null; // free-text label, e.g. "Roth IRA", "Trump Account", "UTMA"
   holder: string | null;
+  institution: string | null;
+  accountNumber: string | null;
+  ownership: "sole" | "joint";
+  debtTrackingMode: "budget" | "account";
   active: boolean;
   isKidsAccount: boolean;
   bankGroup: "savings" | "spending" | null;
@@ -122,9 +130,7 @@ type Section = {
   liability: boolean;
   // Which accounts belong here.
   match: (a: AccountData) => boolean;
-  // Sub-kind choices offered by the add form (label per kind). Omit for a
-  // single fixed kind (e.g. Kids Funding always creates a "checking" row —
-  // the kind doesn't matter once is_kids_account routes it here).
+  // Sub-kind choices offered by the add form (label per kind).
   kindLabels: Record<string, string>;
   fixedKind?: string;
   // Free-text "Type" field (e.g. Retirement, Roth IRA, 529, Trump Account).
@@ -139,12 +145,12 @@ const SECTIONS: Section[] = [
     label: "Banking",
     dot: "bg-brand",
     liability: false,
-    match: (a) => !a.isKidsAccount && (a.kind === "checking" || a.kind === "savings_bucket"),
-    kindLabels: { checking: "Checking", savings_bucket: "Savings" },
+    match: (a) => !a.isKidsAccount && (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "cash"),
+    kindLabels: { checking: "Checking", savings_bucket: "Savings", cash: "Cash" },
   },
   {
     key: "investments",
-    label: "Investments & Brokerages",
+    label: "Investments",
     dot: "bg-sky-500",
     liability: false,
     match: (a) => !a.isKidsAccount && a.kind === "investment",
@@ -191,11 +197,12 @@ const SECTIONS: Section[] = [
   },
   {
     key: "loans",
-    label: "Loans",
+    label: "Debts",
     dot: "bg-accent",
     liability: true,
     match: (a) => a.kind === "debt_loan",
     kindLabels: { debt_loan: "Loan" },
+    offerSubtype: true,
   },
   // Kids Funding sits last — it's the kids' money, excluded from Assets / Net
   // Worth, so it reads as a footnote beneath the household's own accounts.
@@ -205,8 +212,7 @@ const SECTIONS: Section[] = [
     dot: "bg-violet-500",
     liability: false,
     match: (a) => a.isKidsAccount,
-    kindLabels: {},
-    fixedKind: "checking",
+    kindLabels: { checking: "Checking", savings_bucket: "Savings", investment: "Investment" },
     offerSubtype: true,
     kidsGroup: true,
   },
@@ -228,19 +234,26 @@ export function AccountsBoard({
   nonCardAccounts = [],
   historyMonths,
 }: Props) {
+  const [addOpen, setAddOpen] = useState(false);
   const active = accounts.filter((a) => a.active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
 
   const assets = active
     .filter((a) => !isLiability(a.kind) && !a.isKidsAccount)
     .reduce((sum, a) => sum + a.balanceCents, 0);
-  const debtsTotal = budgetDebts.reduce((sum, d) => sum + d.balanceCents, 0);
+  const budgetDebtTotal = budgetDebts.reduce((sum, d) => sum + d.balanceCents, 0);
+  const directDebtTotal = active
+    .filter((a) => a.kind === "debt_loan" && a.debtTrackingMode === "account")
+    .reduce((sum, a) => sum + Math.abs(a.balanceCents), 0);
+  // Rewards cards are tracked separately from the Debt section. Their
+  // transaction activity must not be converted into a household debt row.
+  const debtsTotal = budgetDebtTotal + directDebtTotal;
   const net = assets - debtsTotal;
 
   const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
   const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
   const creditSections = SECTIONS.filter((s) => s.creditCard);
-  const legacySections = SECTIONS.filter(
+  const debtAccountSections = SECTIONS.filter(
     (s) => s.liability && accounts.some((a) => s.match(a)),
   );
   const excludedSections = [...kidsSections, ...creditSections];
@@ -249,7 +262,7 @@ export function AccountsBoard({
     "debts",
     ...assetSections.map((s) => s.key),
     ...excludedSections.map((s) => s.key),
-    ...legacySections.map((s) => s.key),
+    ...debtAccountSections.map((s) => s.key),
   ];
   const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
     Object.fromEntries(["debts", ...SECTIONS.map((s) => s.key)].map((k) => [k, true])),
@@ -331,7 +344,7 @@ export function AccountsBoard({
       <div>
         <h1 className="text-xl font-bold">Accounts</h1>
         <p className="text-sm text-muted">
-          Your asset accounts feed Net Worth. Debts live in Budget — enter each once, use it everywhere.
+          Track banking, investments, cards, debts, and Kids Funding in one place.
         </p>
       </div>
 
@@ -347,7 +360,14 @@ export function AccountsBoard({
         />
       </div>
 
-      <div className="hidden items-center justify-end gap-2 sm:flex">
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+        >
+          + Add account
+        </button>
         <button
           type="button"
           onClick={exportCsv}
@@ -386,7 +406,7 @@ export function AccountsBoard({
           onToggle={() => toggleSection("debts")}
         />
 
-        {legacySections.map((section) => (
+        {debtAccountSections.map((section) => (
           <AccountSection
             key={section.key}
             section={section}
@@ -397,7 +417,6 @@ export function AccountsBoard({
             onToggle={() => toggleSection(section.key)}
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
-            legacy
           />
         ))}
       </div>
@@ -445,6 +464,7 @@ export function AccountsBoard({
           );
         })}
       </div>
+      {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} /> : null}
     </div>
   );
 }
@@ -470,16 +490,18 @@ function CreditCardSection({
   open: boolean;
   onToggle: () => void;
 }) {
-  const [adding, setAdding] = useState(false);
-  const [justAddedId, setJustAddedId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
   const [localAccounts, setLocalAccounts] = useState(accounts);
-  useEffect(() => { setLocalAccounts(accounts); }, [accounts]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLocalAccounts(accounts);
+  }, [accounts]);
   const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
   const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
     const next = new Set(prev);
-    next.has(bank) ? next.delete(bank) : next.add(bank);
+    if (next.has(bank)) next.delete(bank);
+    else next.add(bank);
     return next;
   });
 
@@ -547,12 +569,8 @@ function CreditCardSection({
   const hotelValue = rewardCards
     .filter((a) => a.cardDetails?.rewardsCategory === "hotel")
     .reduce((sum, a) => sum + (a.cardDetails?.pointsValueMicros ? Math.round((a.cardDetails.currentPoints * a.cardDetails.pointsValueMicros) / 10_000) : 0), 0);
-  const five24Cutoff = new Date();
-  five24Cutoff.setMonth(five24Cutoff.getMonth() - 24);
-  const five24Count = allCreditCards.filter((a) => a.cardDetails?.five24Countable && a.dateOpened && new Date(`${a.dateOpened}T00:00:00`) >= five24Cutoff).length;
-
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5">
         <button
           type="button"
@@ -669,8 +687,6 @@ function CreditCardSection({
                               nonCardAccounts={nonCardAccounts}
                               allBuckets={allBuckets}
                               isArchived={isArchived}
-                              defaultEditing={a.id === justAddedId}
-                              onEditingOpened={() => setJustAddedId(null)}
                               onDragStart={() => startDrag(a.id)}
                               isDragOver={dragOverId === a.id}
                             />
@@ -683,28 +699,6 @@ function CreditCardSection({
               </div>
             );
           })()}
-
-          {!isArchived && (
-            adding ? (
-              <AddAccountForm
-                section={section}
-                onDone={(newId) => {
-                  setAdding(false);
-                  if (newId) setJustAddedId(newId);
-                }}
-              />
-            ) : (
-              <div className="border-t border-line px-4 py-2">
-                <button
-                  type="button"
-                  onClick={() => setAdding(true)}
-                  className="text-sm font-medium text-brand hover:text-brand-strong"
-                >
-                  + Add credit card
-                </button>
-              </div>
-            )
-          )}
         </div>
       ) : null}
     </section>
@@ -719,8 +713,6 @@ function CreditCardPanel({
   nonCardAccounts,
   allBuckets,
   isArchived,
-  defaultEditing = false,
-  onEditingOpened,
   onDragStart,
   isDragOver,
 }: {
@@ -729,21 +721,11 @@ function CreditCardPanel({
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
   isArchived: boolean;
-  defaultEditing?: boolean;
-  onEditingOpened?: () => void;
   onDragStart?: () => void;
   isDragOver?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(defaultEditing);
-  const [editing, setEditing] = useState(defaultEditing);
-  useEffect(() => {
-    if (defaultEditing) {
-      onEditingOpened?.();
-    }
-    // Fires only when a new card was just added and this panel is its
-    // freshly-mounted target — parent immediately clears the marker so this
-    // won't re-trigger.
-  }, [defaultEditing, onEditingOpened]);
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
   const [closePending, startClose] = useTransition();
   const [reopenPending, startReopen] = useTransition();
@@ -757,7 +739,7 @@ function CreditCardPanel({
   const fnUsed = d?.benefitUsedOn ?? null;
   const fnExpired = fnExpires ? fnExpires < today : false;
   const fnDaysLeft = fnExpires && !fnExpired
-    ? Math.round((new Date(fnExpires).getTime() - Date.now()) / 86_400_000)
+    ? Math.round((new Date(fnExpires).getTime() - new Date(today).getTime()) / 86_400_000)
     : null;
   const fnSoon = fnDaysLeft !== null && fnDaysLeft <= 60;
   // expires color: muted-strikethrough if used+expired (renewal due), green if used+not-expired,
@@ -1390,7 +1372,7 @@ function BudgetDebtsSection({
         <div className="border-t border-line">
           {debts.length === 0 ? (
             <p className="px-4 py-2.5 text-sm text-muted">
-              No debts yet — add credit cards and loans in the Budget Debt group.
+              No Budget-managed debts. Use Add account for a mortgage or loan.
             </p>
           ) : (
             <ul className="divide-y divide-line">
@@ -1408,9 +1390,7 @@ function BudgetDebtsSection({
             </ul>
           )}
           <div className="border-t border-line px-4 py-2">
-            <Link href="/budget" className="text-sm font-medium text-brand hover:text-brand-strong">
-              Manage debts in Budget →
-            </Link>
+            <span className="text-xs text-muted">Budget debts are managed in Budget. Account debts are listed below.</span>
           </div>
         </div>
       ) : null}
@@ -1460,7 +1440,6 @@ function AccountSection({
   onToggleBuckets: (id: string) => void;
   legacy?: boolean;
 }) {
-  const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
@@ -1538,17 +1517,18 @@ function AccountSection({
       {open ? (
         <div className="border-t border-line">
           {localAccounts.length > 0 ? (
-            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
               <span />
               <span />
               <span />
-              <span className="text-right">{monthAbbr(historyMonths[0])}</span>
-              <span className="hidden text-right sm:block">{monthAbbr(historyMonths[1])}</span>
-              <span className="hidden text-right sm:block">{monthAbbr(historyMonths[2])}</span>
+              <span className="justify-self-stretch text-center">{monthAbbr(historyMonths[0])}</span>
+              <span className="hidden justify-self-stretch text-center sm:block">{monthAbbr(historyMonths[1])}</span>
+              <span className="hidden justify-self-stretch text-center sm:block">{monthAbbr(historyMonths[2])}</span>
+              <span className="hidden sm:block" />
             </div>
           ) : null}
           {localAccounts.length === 0 ? (
-            <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — add one below.</p>
+            <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — use Add account above.</p>
           ) : (
             <ul className="divide-y divide-line">
               {localAccounts.map((a) => (
@@ -1579,19 +1559,7 @@ function AccountSection({
               </Link>{" "}
               now. Open a row above and delete it here so it isn&apos;t counted twice.
             </p>
-          ) : adding ? (
-            <AddAccountForm section={section} onDone={() => setAdding(false)} />
-          ) : (
-            <div className="border-t border-line px-4 py-2">
-              <button
-                type="button"
-                onClick={() => setAdding(true)}
-                className="text-sm font-medium text-brand hover:text-brand-strong"
-              >
-                + Add account
-              </button>
-            </div>
-          )}
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -1637,7 +1605,7 @@ function AccountRow({
       data-drop-key={`account:${account.id}`}
       className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
-      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem] items-center gap-1.5 px-4 py-1.5">
+      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
         <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
@@ -1678,13 +1646,14 @@ function AccountRow({
                 {account.holder}
               </span>
             ) : null}
-            {/* With buckets, each one carries its own Checking/Savings tag
-                below (an account can hold both) — a single account-level tag
-                here would misrepresent a mixed account, so it only shows when
-                there's nothing underneath to tag instead. */}
-            {section.key === "banking" && account.bankGroup && bucketCount === 0 ? (
+            {account.ownership === "joint" ? (
+              <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">Joint</span>
+            ) : null}
+            {account.institution ? <span className="shrink-0 text-[11px] text-muted">{account.institution}</span> : null}
+            {maskAccountNumber(account.accountNumber) ? <span className="shrink-0 text-[11px] text-muted">{maskAccountNumber(account.accountNumber)}</span> : null}
+            {section.key === "banking" && account.bankGroup ? (
               <span
-                title="Net Worth splits Savings from everyday Checking"
+                title="Net Worth uses this account-level setting"
                 className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
                   account.bankGroup === "savings"
                     ? "bg-positive/15 text-positive"
@@ -1735,7 +1704,6 @@ function AccountRow({
               balanceCents={account.balanceCents}
               currency={currency}
               liability={section.liability}
-              kind={account.kind}
             />
             <div className="hidden sm:contents">
               <HistoricBalanceInput
@@ -1755,15 +1723,15 @@ function AccountRow({
             </div>
           </>
         )}
+        <span className="hidden sm:block" aria-hidden />
       </div>
 
       {allowBuckets && bucketsOpen ? (
-        <BucketDrawer
-          account={account}
-          currency={currency}
-          historyMonths={historyMonths}
-          showBankGroup={section.key === "banking"}
-        />
+              <BucketDrawer
+                account={account}
+                currency={currency}
+                historyMonths={historyMonths}
+              />
       ) : null}
 
       {editing ? <EditAccountForm account={account} section={section} onDone={onToggleEdit} /> : null}
@@ -1779,12 +1747,10 @@ function BucketDrawer({
   account,
   currency,
   historyMonths,
-  showBankGroup,
 }: {
   account: AccountData;
   currency: string;
   historyMonths: [string, string, string];
-  showBankGroup: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -1833,14 +1799,13 @@ function BucketDrawer({
               historyMonths={historyMonths}
               onDragStart={() => startDrag(b.id)}
               isDragOver={dragOverId === b.id}
-              showBankGroup={showBankGroup}
             />
           ))}
         </ul>
       )}
 
       {adding ? (
-        <AddBucketForm accountId={account.id} onDone={() => setAdding(false)} showBankGroup={showBankGroup} />
+        <AddBucketForm accountId={account.id} onDone={() => setAdding(false)} />
       ) : (
         <button
           type="button"
@@ -1860,14 +1825,12 @@ function BucketRow({
   historyMonths,
   onDragStart,
   isDragOver,
-  showBankGroup,
 }: {
   bucket: BucketData;
   currency: string;
   historyMonths: [string, string, string];
   onDragStart: () => void;
   isDragOver: boolean;
-  showBankGroup: boolean;
 }) {
   const [delPending, startDel] = useTransition();
 
@@ -1876,20 +1839,10 @@ function BucketRow({
       data-drop-key={`bucket:${bucket.id}`}
       className={`group relative grid items-center gap-1.5 py-1 ${
         isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""
-      } ${
-        showBankGroup
-          ? "grid-cols-[1.5rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_5.5rem_7.5rem_7.5rem_7.5rem_1.25rem]"
-          : "grid-cols-[1.5rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7.5rem_7.5rem_7.5rem_1.25rem]"
-      }`}
+      } grid-cols-[1.5rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
     >
       <GripHandle onMouseDown={onDragStart} size="sm" />
-      <span aria-hidden className="hidden sm:block" />
       <BucketNameInput id={bucket.id} name={bucket.name} />
-      {showBankGroup ? (
-        <div className="hidden sm:block">
-          <BucketBankGroupSelect id={bucket.id} bankGroup={bucket.bankGroup} />
-        </div>
-      ) : null}
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
       <div className="hidden sm:contents">
         <HistoricBucketBalanceInput
@@ -1923,39 +1876,6 @@ function BucketRow({
         </button>
       </form>
     </li>
-  );
-}
-
-// Compact Checking/Savings picker for one bucket — saves immediately on
-// change, same as the balance/name fields, no separate edit mode needed.
-function BucketBankGroupSelect({
-  id,
-  bankGroup,
-}: {
-  id: string;
-  bankGroup: "savings" | "spending" | null;
-}) {
-  const [pending, start] = useTransition();
-  const formRef = useRef<HTMLFormElement>(null);
-
-  return (
-    <form ref={formRef} action={(fd) => start(() => updateBucketBankGroup(fd))}>
-      <input type="hidden" name="id" value={id} />
-      <select
-        key={bankGroup ?? ""}
-        name="bankGroup"
-        defaultValue={bankGroup ?? ""}
-        onChange={() => formRef.current?.requestSubmit()}
-        title="Checking or Savings — Net Worth splits on this"
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-[11px] font-semibold uppercase transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
-          pending ? "ring-2 ring-brand" : "focus:ring-brand"
-        } ${bankGroup === "savings" ? "text-positive" : "text-muted"}`}
-      >
-        <option value="">—</option>
-        <option value="spending">Checking</option>
-        <option value="savings">Savings</option>
-      </select>
-    </form>
   );
 }
 
@@ -2000,7 +1920,7 @@ function BucketBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => updateBucketBalance(fd))}
-      className="flex items-center justify-end gap-0.5 justify-self-end"
+      className="justify-self-center inline-flex items-center gap-0"
     >
       <input type="hidden" name="id" value={id} />
       <span className="pointer-events-none text-sm text-muted">{currencySymbol(currency)}</span>
@@ -2015,7 +1935,7 @@ function BucketBalanceInput({
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent py-0.5 px-0.5 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-0.5 px-0 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -2045,7 +1965,7 @@ function HistoricBucketBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => setBucketSnapshot(fd))}
-      className="flex items-center justify-end gap-0.5 justify-self-end"
+      className="justify-self-center inline-flex items-center gap-0"
     >
       <input type="hidden" name="bucketId" value={bucketId} />
       <input type="hidden" name="month" value={month} />
@@ -2059,14 +1979,14 @@ function HistoricBucketBalanceInput({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
-        size={Math.max(initial.length, 5) + 2}
+        size={Math.max(initial.length, 5)}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const v = e.currentTarget.value.trim();
           if (v === "" && balanceCents == null) return;
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent py-0.5 px-1 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-0.5 px-0 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -2077,11 +1997,9 @@ function HistoricBucketBalanceInput({
 function AddBucketForm({
   accountId,
   onDone,
-  showBankGroup,
 }: {
   accountId: string;
   onDone: () => void;
-  showBankGroup: boolean;
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -2107,18 +2025,6 @@ function AddBucketForm({
           onChange={() => setError(null)}
           className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
-        {showBankGroup ? (
-          <select
-            name="bankGroup"
-            defaultValue=""
-            title="Checking or Savings — Net Worth splits on this"
-            className="rounded-md bg-surface px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            <option value="">—</option>
-            <option value="spending">Checking</option>
-            <option value="savings">Savings</option>
-          </select>
-        ) : null}
         <input
           name="balance"
           type="text"
@@ -2162,7 +2068,7 @@ function DerivedBalance({
     return (
       <div
         title="No snapshot for this month yet — edit a bucket below to fill it in"
-        className="flex items-center justify-end gap-0.5 justify-self-end py-1 px-1 text-muted/60"
+        className="justify-self-center inline-flex items-center gap-0 py-1"
       >
         <span className="text-sm">—</span>
       </div>
@@ -2171,7 +2077,7 @@ function DerivedBalance({
   return (
     <div
       title="Sum of this account's buckets — edit the buckets below to change it"
-      className="flex items-center justify-end gap-0.5 justify-self-end py-1 px-1"
+      className="justify-self-center inline-flex items-center gap-0 py-1"
     >
       <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
       <span className={`text-[0.9375rem] tabular-nums ${negative ? "text-negative font-semibold" : ""}`}>
@@ -2205,7 +2111,7 @@ function HistoricBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => setAccountSnapshot(fd))}
-      className="flex items-center justify-end gap-0.5 justify-self-end"
+      className="justify-self-center inline-flex items-center gap-0"
     >
       <input type="hidden" name="accountId" value={accountId} />
       <input type="hidden" name="month" value={month} />
@@ -2219,7 +2125,7 @@ function HistoricBalanceInput({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
-        size={Math.max(initial.length, 5) + 2}
+        size={Math.max(initial.length, 5)}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const v = e.currentTarget.value.trim();
@@ -2227,7 +2133,7 @@ function HistoricBalanceInput({
           if (v === "" && balanceCents == null) return;
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent py-1 px-1 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-1 px-0 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           balanceCents != null && ((liability && balanceCents > 0) || (!liability && balanceCents < 0))
             ? "text-negative font-semibold"
             : ""
@@ -2242,24 +2148,22 @@ function BalanceInput({
   balanceCents,
   currency,
   liability,
-  kind,
 }: {
   id: string;
   balanceCents: number;
   currency: string;
   liability: boolean;
-  kind?: string;
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const initial = centsToDisplay(balanceCents);
 
   return (
-    <div className="flex items-center gap-1 justify-self-end">
+    <div className="flex w-full items-center justify-center">
       <form
         ref={formRef}
         action={(fd) => start(() => updateBalance(fd))}
-        className="flex items-center justify-end gap-0.5"
+        className="inline-flex items-center gap-0"
       >
         <input type="hidden" name="id" value={id} />
         <span className="pointer-events-none text-sm text-muted">
@@ -2279,7 +2183,7 @@ function BalanceInput({
           onBlur={(e) => {
             if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
           }}
-          className={`min-w-0 rounded-md bg-transparent py-1 px-0.5 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-1 px-0 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
             (liability && balanceCents > 0) || (!liability && balanceCents < 0) ? "text-negative font-semibold" : ""
           } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
         />
@@ -2293,7 +2197,6 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
   const [error, setError] = useState<string | null>(null);
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
-  const openEditRef = useRef(false);
 
   // Credit cards get a proper labeled "card basics" form (Card name, Holder,
   // Annual fee + waived, Date opened, Date closed) matching Edit details, so
@@ -2307,14 +2210,23 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             start(async () => {
               const result = await addAccount(fd);
               if (result?.error) setError(result.error);
-              else onDone(openEditRef.current ? (result?.id ?? null) : null);
+              else onDone(result?.id ?? null);
             })
           }
           className="grid grid-cols-1 gap-2 sm:grid-cols-2"
         >
           <input type="hidden" name="kind" value={section.fixedKind ?? kindKeys[0]} />
           <LabeledInput label="Card name" name="name" placeholder="e.g. 1175 Sapphire V" required autoFocus onChange={() => setError(null)} />
-          <LabeledInput label="Holder" name="holder" />
+          <LabeledInput label="Institution" name="institution" placeholder="e.g. Chase" />
+          <LabeledInput label="Account holder(s)" name="holder" />
+          <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Ownership
+            <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+              <option value="sole">Sole</option>
+              <option value="joint">Joint</option>
+            </select>
+          </label>
           <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" />
           <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
             <input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
@@ -2326,7 +2238,6 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             <button
               type="submit"
               disabled={pending}
-              onClick={() => { openEditRef.current = false; }}
               className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
             >
               {pending ? "Adding…" : "Add card"}
@@ -2338,17 +2249,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             >
               Cancel
             </button>
-            <span className="ml-auto text-[11px] text-muted">
-              Rewards, points, bonus, etc. →{" "}
-              <button
-                type="submit"
-                disabled={pending}
-                onClick={() => { openEditRef.current = true; }}
-                className="font-semibold text-brand underline-offset-2 hover:underline disabled:opacity-60"
-              >
-                Add &amp; open Edit details
-              </button>
-            </span>
+            <span className="ml-auto text-[11px] text-muted">You can add rewards and benefits after saving.</span>
           </div>
           {error ? (
             <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p>
@@ -2359,7 +2260,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
   }
 
   return (
-    <div className="border-t border-line">
+    <div className="border-t border-line px-5 py-4">
       <form
         action={(fd) =>
           start(async () => {
@@ -2368,92 +2269,134 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             else onDone(result?.id ?? null);
           })
         }
-        className="flex flex-wrap items-center gap-2 px-4 py-2"
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         {multiKind ? (
-          <select
-            name="kind"
-            className="rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            {kindKeys.map((k) => (
-              <option key={k} value={k}>{section.kindLabels[k]}</option>
-            ))}
-          </select>
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Account type
+            <select
+              name="kind"
+              className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              {kindKeys.map((k) => (
+                <option key={k} value={k}>{section.kindLabels[k]}</option>
+              ))}
+            </select>
+          </label>
         ) : (
           <input type="hidden" name="kind" value={section.fixedKind ?? kindKeys[0]} />
         )}
         {section.kidsGroup ? <input type="hidden" name="kidsAccount" value="on" /> : null}
         {section.offerSubtype ? (
-          <input
+          <LabeledInput
+            label={section.key === "loans" ? "Debt type" : "Investment type"}
             name="subtype"
-            placeholder={section.creditCard ? "Bank (e.g. AMEX, Chase)" : "Type… (e.g. Retirement, Roth IRA, 529, Trump Account)"}
-            className={`${section.creditCard ? "w-40" : "w-56"} rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand`}
+            placeholder={section.key === "loans" ? "e.g. Mortgage, auto loan" : "e.g. Roth IRA, brokerage, 529"}
           />
         ) : null}
-        <input
-          name="name"
-          placeholder={section.creditCard ? "Card name…" : "Account name…"}
-          required
-          autoFocus
-          onChange={() => setError(null)}
-          className="min-w-0 flex-1 rounded-md bg-background px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        <LabeledInput label="Account name" name="name" placeholder="e.g. Fidelity Roth IRA" required autoFocus onChange={() => setError(null)} />
+        <LabeledInput label="Institution" name="institution" placeholder="e.g. Fidelity, Amex, Navy Federal" />
+        <LabeledInput label="Account holder(s)" name="holder" placeholder="e.g. Victor, Johana, or Joint" />
+        <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
+        <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+          Ownership
+          <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+            <option value="sole">Sole</option>
+            <option value="joint">Joint</option>
+          </select>
+        </label>
+        <LabeledInput
+          label={section.key === "loans" ? "Current balance owed" : "Current balance"}
+          name="balance"
+          type="number"
+          step="0.01"
+          inputMode="decimal"
+          placeholder="0.00"
         />
-        <input
-          name="holder"
-          placeholder="Holder"
-          title="Whose account? (e.g. V, J, Joint)"
-          className="w-20 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        {section.creditCard ? (
-          <>
-            <input
-              name="annualFee"
-              type="number"
-              step="0.01"
-              placeholder="Annual fee"
-              className="w-28 rounded-md bg-background px-2 py-1.5 text-right text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              <input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-              Waived
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              Opened
-              <input
-                name="dateOpened"
-                type="date"
-                className="rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-            </label>
-          </>
-        ) : (
-          <input
-            name="balance"
-            type="number"
-            step="0.01"
-            inputMode="decimal"
-            placeholder="Balance"
-            className="w-28 rounded-md bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
-        )}
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
-        >
-          {pending ? "Adding…" : "Add"}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDone()}
-          className="rounded-md px-2 py-1.5 text-sm text-muted hover:text-foreground"
-        >
-          Cancel
-        </button>
+        <div className="flex items-center gap-2 sm:col-span-2">
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-md bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
+          >
+            {pending ? "Adding…" : section.key === "loans" ? "Add debt" : "Add account"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDone()}
+            className="rounded-md px-2 py-2 text-sm text-muted hover:text-foreground"
+          >
+            Cancel
+          </button>
+          <span className="ml-auto text-[11px] text-muted">Account references are masked after saving.</span>
+        </div>
       </form>
       {error ? (
-        <p className="px-4 pb-2 text-sm font-medium text-negative">{error}</p>
+        <p className="pt-3 text-sm font-medium text-negative">{error}</p>
       ) : null}
+    </div>
+  );
+}
+
+function AddAccountModal({ onClose }: { onClose: () => void }) {
+  const [sectionKey, setSectionKey] = useState<string | null>(null);
+  const choices = SECTIONS.filter((section) =>
+    ["banking", "investments", "credit", "loans", "kids"].includes(section.key),
+  );
+  const section = choices.find((choice) => choice.key === sectionKey) ?? null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/35 p-0 sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true" aria-labelledby="add-account-title">
+      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-surface shadow-2xl sm:max-w-2xl sm:rounded-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface px-5 py-4">
+          <div>
+            <h2 id="add-account-title" className="text-lg font-bold">
+              {section ? `Add ${{ banking: "banking account", investments: "investment", credit: "credit card", loans: "debt", kids: "Kids Funding account" }[section.key] ?? "account"}` : "Add account"}
+            </h2>
+            <p className="text-xs text-muted">
+              {section ? "Enter the details you want your family to be able to find later." : "Choose where this account belongs."}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-2xl leading-none text-muted hover:bg-brand-soft hover:text-foreground" aria-label="Close">×</button>
+        </div>
+
+        {!section ? (
+          <div className="grid gap-3 p-5 sm:grid-cols-2">
+            {choices.map((choice) => (
+              <button
+                key={choice.key}
+                type="button"
+                onClick={() => setSectionKey(choice.key)}
+                className="flex items-start gap-3 rounded-xl border border-line p-4 text-left transition hover:border-brand hover:bg-brand-soft/40"
+              >
+                <span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${choice.dot}`} />
+                <span>
+                  <span className="block font-semibold">{choice.label}</span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted">
+                    {choice.key === "banking" && "Checking, savings, or cash."}
+                    {choice.key === "investments" && "Brokerage, retirement, 529, HSA, crypto, and more."}
+                    {choice.key === "credit" && "Rewards cards, benefits, free nights, and card balances."}
+                    {choice.key === "loans" && "Mortgage, auto, student, personal, medical, or other debt."}
+                    {choice.key === "kids" && "Savings, investments, or 529s kept separate from household investments."}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="px-5 pt-4">
+              <button type="button" onClick={() => setSectionKey(null)} className="text-sm font-medium text-brand hover:text-brand-strong">← Choose another type</button>
+            </div>
+            <AddAccountForm section={section} onDone={() => onClose()} />
+            {section.key !== "credit" ? (
+              <p className="px-5 pb-5 text-xs leading-relaxed text-muted">
+                You can add buckets after the account is created. Account totals will always be calculated from their buckets.
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -2497,6 +2440,22 @@ function EditAccountForm({
           title="Whose account? (e.g. V, J, Joint)"
           className="w-20 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
+        <input
+          name="institution"
+          defaultValue={account.institution ?? ""}
+          placeholder="Institution"
+          className="w-32 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <input
+          name="accountNumber"
+          defaultValue={account.accountNumber ?? ""}
+          placeholder="Account reference"
+          className="w-36 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <select name="ownership" defaultValue={account.ownership} className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+          <option value="sole">Sole</option>
+          <option value="joint">Joint</option>
+        </select>
         {section.offerSubtype ? (
           <input
             name="subtype"
@@ -2555,13 +2514,22 @@ function EditAccountForm({
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setConfirmDelete(true)}
-          className="text-xs font-medium text-negative hover:underline"
-        >
-          Delete account
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="text-xs font-medium text-negative hover:underline"
+          >
+            Delete account
+          </button>
+          <button
+            type="button"
+            onClick={onDone}
+            className="text-xs font-medium text-muted hover:text-foreground hover:underline"
+          >
+            Cancel
+          </button>
+        </div>
       )}
     </div>
   );

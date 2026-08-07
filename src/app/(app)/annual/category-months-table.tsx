@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 
 export type CatMonthRow = {
   subId: string;
@@ -29,7 +30,8 @@ type Props = {
 const GRID_COLS = "grid-cols-[10rem_repeat(13,minmax(5rem,1fr))]";
 
 export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
-  const [open, setOpen] = useState(false);
+  const [collapse, setCollapse] = useSessionCollapse("annual-category-months", () => ({ open: false }));
+  const open = collapse.open;
   const scrollersRef = useRef<Set<HTMLDivElement>>(new Set());
 
   function syncScrollX(scrollLeft: number) {
@@ -42,7 +44,7 @@ export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setCollapse({ open: !open })}
         aria-expanded={open}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
       >
@@ -88,7 +90,8 @@ function Group({
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [collapse, setCollapse] = useSessionCollapse(`annual-category-kind-${group.kind}`, () => ({ open: false }));
+  const open = collapse.open;
   const headerRef = useRef<HTMLDivElement>(null);
 
   function syncHeader() {
@@ -107,7 +110,7 @@ function Group({
     >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setCollapse({ open: !open })}
         aria-expanded={open}
         className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
       >

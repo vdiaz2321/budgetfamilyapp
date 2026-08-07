@@ -5,9 +5,9 @@ import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
-// Debts live only in Budget now, so liability-kind account snapshots (legacy
-// credit-card/loan accounts) are ignored in net worth math — they'd
-// double-count against the Budget debt. Assets = asset-kind accounts only.
+// Credit cards remain rewards/spending accounts. Loan accounts explicitly
+// created from Accounts use debt_tracking_mode='account' and count once here;
+// older Budget-managed loan rows remain excluded to prevent double-counting.
 const LIABILITY_KINDS = ["credit_card", "debt_loan"];
 
 export default async function NetworthPage() {
@@ -62,7 +62,7 @@ export default async function NetworthPage() {
       .order("month"),
     supabase
       .from("accounts")
-      .select("id, name, kind, is_kids_account, bank_group, sort_order")
+      .select("id, name, kind, is_kids_account, bank_group, debt_tracking_mode, sort_order")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -93,6 +93,9 @@ export default async function NetworthPage() {
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
   const bankGroupById = new Map(
     (accountRows ?? []).map((a) => [a.id, (a as { bank_group?: string | null }).bank_group ?? null]),
+  );
+  const debtTrackingModeById = new Map(
+    (accountRows ?? []).map((a) => [a.id, (a as { debt_tracking_mode?: string | null }).debt_tracking_mode ?? "budget"]),
   );
   const isKidsAccount = new Set(
     (accountRows ?? []).filter((a) => a.is_kids_account).map((a) => a.id),
@@ -132,6 +135,12 @@ export default async function NetworthPage() {
 
   for (const s of accSnaps ?? []) {
     snapshotMonths.add(s.month);
+    if (s.kind === "debt_loan" && debtTrackingModeById.get(s.account_id) === "account") {
+      const t = derived.get(s.month) ?? zero();
+      t.debt += Math.abs(s.balance_cents);
+      derived.set(s.month, t);
+      continue;
+    }
     const slice = sliceForAccount(s.account_id, s.kind);
     if (!slice) continue;
     const t = derived.get(s.month) ?? zero();

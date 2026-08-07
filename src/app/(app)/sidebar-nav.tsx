@@ -20,6 +20,13 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    href: "/accounts",
+    label: "Accounts",
+    icon: (
+      <path d="M3 21h18M4 10h16M5 10V7l7-4 7 4v3M8 10v8M12 10v8M16 10v8" />
+    ),
+  },
+  {
     href: "/savings",
     label: "Savings",
     icon: (
@@ -37,13 +44,6 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
         <path d="M12 3v18M5 8l14 8M19 8L5 16" />
         <circle cx="12" cy="12" r="9" />
       </>
-    ),
-  },
-  {
-    href: "/accounts",
-    label: "Accounts",
-    icon: (
-      <path d="M3 21h18M4 10h16M5 10V7l7-4 7 4v3M8 10v8M12 10v8M16 10v8" />
     ),
   },
   {

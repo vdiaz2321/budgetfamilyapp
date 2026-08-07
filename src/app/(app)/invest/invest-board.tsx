@@ -3,6 +3,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { setInvestmentYear, transferFromInvestment } from "./actions";
+import { ImportInvestmentModal } from "./import-modal";
+import { moveInvestmentImport } from "./import-actions";
 import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 
@@ -31,6 +33,44 @@ export type InvestAccount = {
   sortOrder: number;
   cells: Record<number, YearCell>;
   buckets: BucketRow[];
+};
+
+export type InvestmentPositionImportRow = {
+  symbol: string | null;
+  securityName: string;
+  quantity: number | null;
+  priceCents: number | null;
+  marketValueCents: number;
+  costBasisCents: number | null;
+  unrealizedGainCents: number | null;
+  unrealizedGainPercent: number | null;
+};
+
+export type InvestmentPerformanceImportRow = {
+  asOfDate: string;
+  beginningBalanceCents: number | null;
+  contributionsCents: number | null;
+  withdrawalsCents: number | null;
+  dividendsCents: number | null;
+  feesCents: number | null;
+  marketChangeCents: number | null;
+  endingBalanceCents: number;
+};
+
+export type InvestmentImportView = {
+  id: string;
+  accountId: string;
+  bucketId: string | null;
+  accountName: string;
+  bucketName: string | null;
+  provider: string;
+  importKind: "positions" | "performance";
+  asOfDate: string;
+  sourceFilename: string | null;
+  rowCount: number;
+  createdAt: string;
+  positions: InvestmentPositionImportRow[];
+  performance: InvestmentPerformanceImportRow[];
 };
 
 // Roll up an account's cell + all its bucket cells for a given year. Historical
@@ -68,6 +108,7 @@ type Props = {
   years: number[]; // newest first
   currency: string;
   destAccounts: DestAccount[];
+  imports: InvestmentImportView[];
 };
 
 const gainTone = (cents: number) =>
@@ -85,14 +126,14 @@ function returnPct(cell: {
   return cell.accruedCents - cell.contributedCents;
 }
 
-export function InvestBoard({ accounts, years, currency, destAccounts }: Props) {
+export function InvestBoard({ accounts, years, currency, destAccounts, imports }: Props) {
   const [year, setYear] = useState<number>(years[0] ?? new Date().getFullYear());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const mine = accounts.filter((a) => !a.isKids);
-  const kids = accounts.filter((a) => a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
   const chartAccounts = selectedAccount ? [selectedAccount] : mine;
 
@@ -247,14 +288,173 @@ export function InvestBoard({ accounts, years, currency, destAccounts }: Props) 
               onClose={() => setShowTransfer(false)}
             />
           )}
+          {showImport && (
+            <ImportInvestmentModal accounts={accounts} onClose={() => setShowImport(false)} />
+          )}
           <PerformanceChart accounts={chartAccounts} years={years} currency={currency} selectedName={selectedAccount?.name ?? null} onClear={() => setSelectedId(null)} />
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
             <div className="border-t border-foreground/10" />
             <YearByYear accounts={accounts} years={years} currency={currency} />
           </div>
+          <ImportedSnapshots imports={imports} accounts={accounts} currency={currency} onImport={() => setShowImport(true)} />
         </>
       )}
+    </div>
+  );
+}
+
+function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports: InvestmentImportView[]; accounts: InvestAccount[]; currency: string; onImport: () => void }) {
+  const groups = new Map<string, InvestmentImportView[]>();
+  for (const item of imports) {
+    const key = `${item.accountId}:${item.bucketId ?? "_"}`;
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  const [groupOpen, setGroupOpen] = useSessionCollapse("invest-import-groups", () => ({}));
+
+  return (
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-center justify-between gap-3 border-b border-line bg-brand-soft/35 px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">Imported investment data</h2>
+          <p className="mt-0.5 text-xs text-muted">Saved CSV snapshots remain separate from your live account balance and can be reviewed here.</p>
+        </div>
+        <button type="button" onClick={onImport} className="shrink-0 rounded-lg bg-brand-soft px-3 py-2 text-xs font-semibold text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80">Import CSV</button>
+      </div>
+      <div className="divide-y divide-line">
+        {groups.size === 0 ? <p className="px-4 py-5 text-sm text-muted">No imported investment data yet.</p> : [...groups.entries()].map(([groupKey, items]) => {
+          const first = items[0];
+          const latestPositions = items.filter((item) => item.importKind === "positions").sort((a, b) => b.asOfDate.localeCompare(a.asOfDate))[0];
+          const latestPerformance = items.filter((item) => item.importKind === "performance").sort((a, b) => b.asOfDate.localeCompare(a.asOfDate))[0];
+          const currentValue = latestPositions
+            ? latestPositions.positions.reduce((sum, row) => sum + row.marketValueCents, 0)
+            : latestPerformance?.performance[0]?.endingBalanceCents ?? 0;
+          const kinds = [...new Set(items.map((item) => item.importKind === "positions" ? "Portfolio positions" : "Monthly performance"))].join(" · ");
+          return (
+            <details key={groupKey} open={!!groupOpen[groupKey]} className="group">
+              <summary
+                onClick={(event) => {
+                  event.preventDefault();
+                  setGroupOpen((state) => ({ ...state, [groupKey]: !state[groupKey] }));
+                }}
+                className="flex cursor-pointer list-none items-center gap-3 bg-brand-soft/25 px-4 py-3 marker:hidden transition hover:bg-brand-soft/45"
+              >
+                <span className="text-muted transition-transform group-open:rotate-90">›</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{first.provider !== "Other" ? `${first.provider} · ` : ""}{first.accountName}{first.bucketName ? ` · ${first.bucketName}` : ""}</span>
+                  <span className="block text-xs text-muted">{kinds} · {items.length} import{items.length === 1 ? "" : "s"}</span>
+                </span>
+                <span className="shrink-0 text-sm font-semibold tabular-nums">{formatMoney(currentValue, currency)}</span>
+              </summary>
+              <div className="divide-y divide-line border-t border-line bg-background/30">
+                {items.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate)).map((item) => (
+                  <details key={item.id} className="group/item">
+                    <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 pl-9 marker:hidden transition hover:bg-brand-soft/25">
+                      <span className="text-muted transition-transform group-open/item:rotate-90">›</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-semibold">{item.importKind === "positions" ? "Portfolio positions" : "Monthly performance"}</span>
+                        <span className="block text-[11px] text-muted">{item.sourceFilename ?? "Imported CSV"} · as of {item.asOfDate} · {item.rowCount} rows</span>
+                      </span>
+                    </summary>
+                    <div className="border-t border-line bg-background/40 px-4 py-3">
+                      <MoveImportForm item={item} accounts={accounts} />
+                      {item.importKind === "positions" ? <ImportedPositionsTable rows={item.positions} currency={currency} /> : <ImportedPerformanceTable rows={item.performance} currency={currency} />}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MoveImportForm({ item, accounts }: { item: InvestmentImportView; accounts: InvestAccount[] }) {
+  const [pending, start] = useTransition();
+  const [message, setMessage] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [accountId, setAccountId] = useState(item.accountId);
+  const [bucketId, setBucketId] = useState(item.bucketId ?? "");
+  const selected = accounts.find((account) => account.id === accountId);
+
+  if (!editing) {
+    return (
+      <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
+        <span className="min-w-0 truncate text-[11px] text-muted">Imported to {selected?.name ?? item.accountName}{bucketId ? ` · ${selected?.buckets.find((bucket) => bucket.id === bucketId)?.name ?? item.bucketName ?? "Bucket"}` : " · Account total"}</span>
+        <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/80">Edit destination</button>
+      </div>
+    );
+  }
+
+  return (
+    <form action={(formData) => start(async () => {
+      const result = await moveInvestmentImport(formData);
+      if (result?.error) setMessage(result.error);
+      else setEditing(false);
+    })} className="mb-3 flex flex-wrap items-end gap-2 rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
+      <input type="hidden" name="batchId" value={item.id} />
+      <label className="block min-w-48 flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+        Imported to
+        <select name="accountId" value={accountId} onChange={(event) => { setAccountId(event.target.value); setBucketId(""); }} className="mt-1 w-full rounded-md bg-background px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+          {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.isKids ? " · Kids Funding" : ""}</option>)}
+        </select>
+      </label>
+      <label className="block min-w-40 flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+        Bucket
+        <select name="bucketId" value={bucketId} onChange={(event) => setBucketId(event.target.value)} className="mt-1 w-full rounded-md bg-background px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+          <option value="">Account total</option>
+          {(selected?.buckets ?? []).map((bucket) => <option key={bucket.id} value={bucket.id}>{bucket.name}</option>)}
+        </select>
+      </label>
+      <button type="submit" disabled={pending || (accountId === item.accountId && bucketId === (item.bucketId ?? ""))} className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/80 disabled:opacity-50">{pending ? "Updating…" : "Update destination"}</button>
+      <button type="button" onClick={() => { setEditing(false); setMessage(null); }} className="rounded-md px-2 py-1.5 text-xs font-medium text-muted hover:bg-background">Cancel</button>
+      {message ? <span className={`w-full text-[11px] ${message === "Destination updated." ? "text-positive" : "text-negative"}`}>{message}</span> : null}
+    </form>
+  );
+}
+
+function ImportedPositionsTable({ rows, currency }: { rows: InvestmentPositionImportRow[]; currency: string }) {
+  return (
+    <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
+      <table className="min-w-full text-xs">
+        <thead className="sticky top-0 bg-surface text-left text-[10px] uppercase tracking-wide text-muted">
+          <tr><th className="px-3 py-2">Symbol</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Current value</th><th className="px-3 py-2 text-right">Cost basis</th><th className="px-3 py-2 text-right">Gain/loss</th><th className="px-3 py-2 text-right">Gain/loss %</th></tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {rows.map((row, index) => <tr key={`${row.symbol ?? row.securityName}-${index}`}>
+            <td className="px-3 py-2 font-medium">{row.symbol ?? row.securityName}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{row.quantity ?? "—"}</td>
+            <td className="px-3 py-2 text-right font-medium tabular-nums">{formatMoney(row.marketValueCents, currency)}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{row.costBasisCents == null ? "—" : formatMoney(row.costBasisCents, currency)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.unrealizedGainCents ?? 0)}`}>{row.unrealizedGainCents == null ? "—" : formatMoney(row.unrealizedGainCents, currency)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.unrealizedGainPercent ?? 0)}`}>{row.unrealizedGainPercent == null ? "—" : `${row.unrealizedGainPercent.toFixed(2)}%`}</td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerformanceImportRow[]; currency: string }) {
+  return (
+    <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
+      <table className="min-w-full text-xs">
+        <thead className="sticky top-0 bg-surface text-left text-[10px] uppercase tracking-wide text-muted">
+          <tr><th className="px-3 py-2">Month</th><th className="px-3 py-2 text-right">Beginning balance</th><th className="px-3 py-2 text-right">Market change</th><th className="px-3 py-2 text-right">Dividends</th><th className="px-3 py-2 text-right">Withdrawal</th><th className="px-3 py-2 text-right">Ending balance</th></tr>
+        </thead>
+        <tbody className="divide-y divide-line">
+          {rows.map((row) => <tr key={row.asOfDate}>
+            <td className="px-3 py-2">{row.asOfDate}</td>
+            <td className="px-3 py-2 text-right tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(-(row.withdrawalsCents ?? 0))}`}>{row.withdrawalsCents == null ? "—" : formatMoney(row.withdrawalsCents, currency)}</td>
+            <td className="px-3 py-2 text-right font-medium tabular-nums">{formatMoney(row.endingBalanceCents, currency)}</td>
+          </tr>)}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -358,7 +558,7 @@ function PerformanceChart({
 
   return (
     <section className="overflow-visible rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-start justify-between gap-2 px-4 pt-4 pb-2">
+      <div className="flex items-start justify-between gap-2 rounded-t-2xl bg-brand-soft/35 px-4 py-3 ring-1 ring-brand/10">
         <button
           type="button"
           onClick={() => setChartOpen(!chartOpen)}
@@ -710,7 +910,7 @@ function PerfTable({
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center gap-2 border-b border-line px-4 py-2.5 text-left hover:bg-brand-soft/20"
+        className="flex w-full items-center gap-2 border-b border-line bg-brand-soft/30 px-4 py-2.5 text-left transition hover:bg-brand-soft/50"
       >
         <svg
           width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -1026,7 +1226,7 @@ function YearByYear({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-left"
+        className="flex w-full items-center gap-2 rounded-t-2xl bg-brand-soft/30 px-4 py-2.5 text-left transition hover:bg-brand-soft/50"
         aria-expanded={open}
       >
         <svg

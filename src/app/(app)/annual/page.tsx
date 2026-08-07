@@ -97,10 +97,13 @@ export default async function AnnualOverviewPage({
     { data: actuals },
     { data: breakdownRows },
     { data: liveTxRows },
+    { data: investmentContributionRows },
+    { data: investmentAccounts },
+    { data: investmentBuckets },
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, sort_order")
+      .select("id, category_id, name, sort_order, linked_account_id, linked_bucket_id")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -124,17 +127,46 @@ export default async function AnnualOverviewPage({
       .order("line_sort"),
     supabase
       .from("transactions")
-      .select("subcategory_id, amount_cents, occurred_on, is_withdrawal")
+      .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal")
       .eq("household_id", household.id)
       .gte("occurred_on", liveRangeStart)
       .lte("occurred_on", liveRangeEnd)
       .not("subcategory_id", "is", null),
+    supabase
+      .from("v_investment_contributions")
+      .select("account_id, bucket_id, year, net_contribution_cents")
+      .eq("household_id", household.id)
+      .gte("year", 2026)
+      .lte("year", currentYear),
+    supabase
+      .from("accounts")
+      .select("id, name, kind, is_kids_account")
+      .eq("household_id", household.id),
+    supabase
+      .from("buckets")
+      .select("id, account_id, name")
+      .eq("household_id", household.id),
   ]);
 
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
+  const subcategoryInvestmentTargets = new Set(
+    (subs ?? [])
+      .filter((s) => s.linked_account_id || s.linked_bucket_id)
+      .map((s) => s.id),
+  );
+  const investmentAccountIds = new Set(
+    (investmentAccounts ?? [])
+      .filter((a) => a.kind === "investment" || a.is_kids_account)
+      .map((a) => a.id),
+  );
+  const investmentBucketIds = new Set(
+    (investmentBuckets ?? [])
+      .filter((b) => investmentAccountIds.has(b.account_id))
+      .map((b) => b.id),
+  );
 
   // Per-subcategory actuals and planned by month (cents), for the Category by Months table.
   const actualBySub = new Map<string, number[]>();
@@ -231,6 +263,9 @@ export default async function AnnualOverviewPage({
   const liveDepositsBySub = new Map<string, Map<number, number>>();
   for (const t of liveTxRows ?? []) {
     if (!t.subcategory_id) continue;
+    if (t.account_id && investmentAccountIds.has(t.account_id)) continue;
+    if (t.bucket_id && investmentBucketIds.has(t.bucket_id)) continue;
+    if (subcategoryInvestmentTargets.has(t.subcategory_id)) continue;
     const kind = kindBySub.get(t.subcategory_id);
     if (!kind) continue;
     if (kind === "savings" && t.is_withdrawal) continue;
@@ -252,6 +287,27 @@ export default async function AnnualOverviewPage({
     budgetSubsForLive.push({ id: s.id, name: s.name, kind, byYear });
   }
 
+  const accountById = new Map((investmentAccounts ?? []).map((a) => [a.id, a]));
+  const bucketById = new Map((investmentBuckets ?? []).map((b) => [b.id, b]));
+  const liveInvestmentByDestination = new Map<string, LiveBudgetSub>();
+  for (const row of investmentContributionRows ?? []) {
+    const account = accountById.get(row.account_id);
+    if (!account) continue;
+    const bucket = row.bucket_id ? bucketById.get(row.bucket_id) : null;
+    const key = `${row.account_id}:${row.bucket_id ?? "_"}`;
+    const target = liveInvestmentByDestination.get(key) ?? {
+      id: key,
+      name: bucket?.name ?? account.name,
+      kind: "savings" as CategoryKind,
+      isInvestment: true,
+      isKids: account.is_kids_account ?? false,
+      byYear: new Map<number, number>(),
+    };
+    target.byYear.set(row.year, (target.byYear.get(row.year) ?? 0) + row.net_contribution_cents);
+    liveInvestmentByDestination.set(key, target);
+  }
+  budgetSubsForLive.push(...liveInvestmentByDestination.values());
+
   // Annual Breakdown: pivot the seeded leaf rows (2018–2025) into kind → group
   // → line, then overlay 2026+ live totals from Budget transactions.
   const breakdownKinds = buildBreakdown(breakdownRows ?? [], budgetSubsForLive);
@@ -264,7 +320,7 @@ export default async function AnnualOverviewPage({
   const netByYear: Record<number, number> = {};
   for (const y of breakdownYears) {
     const get = (k: string) => breakdownKinds.find((bk) => bk.kind === k)?.totalByYear[y] ?? 0;
-    netByYear[y] = get("income") - get("bills") - get("expenses") - get("debt") - get("savings") - get("investment");
+    netByYear[y] = get("income") - get("bills") - get("expenses") - get("debt") - get("savings") - get("investment") - get("kidsFunding");
   }
 
   const currency = household.currency;
@@ -348,7 +404,7 @@ type BreakdownRow = {
   line_sort: number;
 };
 
-const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "investment", "savings"];
+const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "investment", "kidsFunding", "savings"];
 const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
   income: "Income",
   bills: "Bills",
@@ -356,6 +412,7 @@ const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
   debt: "Debt",
   savings: "Savings",
   investment: "Investment",
+  kidsFunding: "Kids Funding",
 };
 
 // Budget's 5 kinds fold into the sheet's 4 kinds. Savings is special-cased
@@ -372,6 +429,8 @@ type LiveBudgetSub = {
   id: string;
   name: string;
   kind: CategoryKind;
+  isInvestment?: boolean;
+  isKids?: boolean;
   byYear: Map<number, number>;
 };
 
@@ -424,6 +483,8 @@ function buildBreakdown(
   };
 
   const resolveSheetKind = (sub: LiveBudgetSub): BreakdownKind["kind"] => {
+    if (sub.isKids) return "kidsFunding";
+    if (sub.isInvestment) return "investment";
     if (sub.kind !== "savings") {
       // income/bills/expenses/debt map directly; the table has no null values for them.
       return BUDGET_TO_SHEET_KIND[sub.kind]!;

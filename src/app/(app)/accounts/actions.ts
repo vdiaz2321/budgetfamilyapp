@@ -9,10 +9,10 @@ import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } 
 import { adjustAccountLedger } from "@/lib/account-ledger";
 import { adjustDebtBalance } from "@/lib/debts";
 
-// Kinds the UI lets you create. Asset accounts + credit cards for card
-// management (spending tracking, subscription linking, fee tracking). Debt
-// balances still live in the Budget Debt group for net-worth purposes.
-const ALLOWED_KINDS = ["checking", "savings_bucket", "investment", "credit_card"];
+// Every account type presented in the Accounts add flow. Credit cards retain
+// their rewards-specific fields; long-term debts are account-managed so they
+// do not need a duplicate Budget debt row.
+const ALLOWED_KINDS = ["cash", "checking", "savings_bucket", "investment", "credit_card", "debt_loan"];
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -48,6 +48,9 @@ export async function addAccount(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const kind = String(formData.get("kind") ?? "");
   const holder = String(formData.get("holder") ?? "").trim() || null;
+  const institution = String(formData.get("institution") ?? "").trim() || null;
+  const accountNumber = String(formData.get("accountNumber") ?? "").trim() || null;
+  const ownership = formData.get("ownership") === "joint" ? "joint" : "sole";
   const subtype = String(formData.get("subtype") ?? "").trim() || null;
   const isKidsAccount = formData.get("kidsAccount") === "on";
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
@@ -68,18 +71,23 @@ export async function addAccount(formData: FormData) {
   // opens Edit — that gap made the badge look like it needed a Holder value
   // to "unlock" it, when the two were unrelated.
   const bankGroup =
-    kind === "savings_bucket" ? "savings" : kind === "checking" ? "spending" : null;
+    kind === "savings_bucket" ? "savings" : kind === "checking" || kind === "cash" ? "spending" : null;
 
   const isCreditCard = kind === "credit_card";
+  const isDebtAccount = kind === "debt_loan";
 
   const row: Record<string, unknown> = {
     household_id: householdId,
     name,
     kind,
     holder,
+    institution,
+    account_number: accountNumber,
+    ownership,
     subtype,
     is_kids_account: isKidsAccount,
-    include_net_worth: isCreditCard ? false : !isKidsAccount,
+    include_net_worth: isCreditCard || isDebtAccount ? false : !isKidsAccount,
+    debt_tracking_mode: isDebtAccount ? "account" : "budget",
     current_balance_cents: balanceCents,
     sort_order: sortOrder,
     bank_group: bankGroup,
@@ -119,6 +127,9 @@ export async function updateAccount(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   const holder = String(formData.get("holder") ?? "").trim() || null;
+  const institution = String(formData.get("institution") ?? "").trim() || null;
+  const accountNumber = String(formData.get("accountNumber") ?? "").trim() || null;
+  const ownership = formData.get("ownership") === "joint" ? "joint" : "sole";
   const subtype = String(formData.get("subtype") ?? "").trim() || null;
   const isKidsAccount = formData.get("kidsAccount") === "on";
   const active = formData.get("active") === "on";
@@ -129,6 +140,9 @@ export async function updateAccount(formData: FormData) {
   const update: Record<string, unknown> = {
     name,
     holder,
+    institution,
+    account_number: accountNumber,
+    ownership,
     subtype,
     is_kids_account: isKidsAccount,
     include_net_worth: isCreditCard ? false : !isKidsAccount,

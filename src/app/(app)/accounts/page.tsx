@@ -56,7 +56,7 @@ export default async function AccountsPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -203,6 +203,10 @@ export default async function AccountsPage() {
     kind: a.kind,
     subtype: a.subtype,
     holder: a.holder,
+    institution: a.institution ?? null,
+    accountNumber: a.account_number ?? null,
+    ownership: a.ownership === "joint" ? "joint" : "sole",
+    debtTrackingMode: a.debt_tracking_mode === "account" ? "account" : "budget",
     active: a.active,
     isKidsAccount: a.is_kids_account ?? false,
     bankGroup: (a.bank_group as "savings" | "spending" | null) ?? null,

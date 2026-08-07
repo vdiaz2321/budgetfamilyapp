@@ -23,8 +23,8 @@ type Props = {
 };
 
 export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCols }: Props) {
-  // Default expanded on fresh login; toggle state survives within-session nav.
-  const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: true }));
+  // Default collapsed on fresh login; toggle state survives within-session nav.
+  const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: false }));
   const open = collapse.open;
   const setOpen = (v: boolean) => setCollapse({ open: v });
 
