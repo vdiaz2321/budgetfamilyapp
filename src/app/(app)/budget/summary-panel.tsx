@@ -4,19 +4,20 @@ import { useEffect, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import type { GroupData, ViewMode } from "./types";
 
-// Distinct arc colors, assigned to outflow groups in order. Chosen to read
-// well on both light and dark surfaces (used as raw SVG stroke / CSS values).
+// Distinct arc colors, assigned to outflow groups in order. Values reference
+// the theme-aware --cat-* tokens so dark mode gets softened tones — the raw
+// #hex versions read as neon on a dim canvas.
 const PALETTE = [
-  "#6366f1", // indigo
-  "#ef4444", // red
-  "#f59e0b", // amber
-  "#22c55e", // green
-  "#0ea5e9", // sky
-  "#a855f7", // violet
-  "#ec4899", // pink
-  "#14b8a6", // teal
-  "#f97316", // orange
-  "#84cc16", // lime
+  "var(--cat-savings)",
+  "var(--cat-debt)",
+  "var(--cat-bills)",
+  "var(--cat-income)",
+  "var(--cat-sky)",
+  "var(--cat-violet)",
+  "var(--cat-pink)",
+  "var(--cat-teal)",
+  "var(--cat-orange)",
+  "var(--cat-lime)",
 ];
 
 type Props = {

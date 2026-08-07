@@ -499,6 +499,27 @@ function CreditCardSection({
     });
   };
   const { dragOverId, startDrag } = usePointerReorder("credit-card", reorder);
+
+  // Bank-group order: dragging a bank header moves its whole card block. The
+  // underlying store is still per-account sort_order — we just splice the
+  // block, then persist the flattened order.
+  const bankLabel = (a: AccountData) => a.cardDetails?.bank ?? a.subtype ?? "Other";
+  const reorderBank = (fromBank: string, toBank: string) => {
+    if (fromBank === toBank) return;
+    const fromCards = localAccounts.filter((a) => bankLabel(a) === fromBank);
+    const otherCards = localAccounts.filter((a) => bankLabel(a) !== fromBank);
+    const toIdx = otherCards.findIndex((a) => bankLabel(a) === toBank);
+    if (fromCards.length === 0 || toIdx === -1) return;
+    const next = [...otherCards.slice(0, toIdx), ...fromCards, ...otherCards.slice(toIdx)];
+    setLocalAccounts(next);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
+    startReorder(async () => {
+      const res = await reorderAccounts(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
+  const { dragOverId: dragOverBank, startDrag: startBankDrag } = usePointerReorder("credit-bank", reorderBank);
   const isArchived = section.key === "credit_archived";
   const isMain = section.key === "credit";
 
@@ -594,7 +615,6 @@ function CreditCardSection({
               {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
             </p>
           ) : (() => {
-            const bankLabel = (a: AccountData) => a.cardDetails?.bank ?? a.subtype ?? "Other";
             const groups = localAccounts.reduce<{ bank: string; cards: AccountData[] }[]>((acc, a) => {
               const b = bankLabel(a);
               const existing = acc.find((g) => g.bank === b);
@@ -605,28 +625,40 @@ function CreditCardSection({
               <div className="divide-y divide-line">
                 {groups.map((group) => {
                   const collapsed = collapsedBanks.has(group.bank);
+                  const isBankDragOver = dragOverBank === group.bank;
                   return (
-                    <div key={group.bank}>
-                      <button
-                        type="button"
-                        onClick={() => toggleBank(group.bank)}
-                        className="flex w-full items-center gap-1.5 px-4 py-1 text-left bg-black/[0.02] dark:bg-white/[0.02] hover:bg-black/[0.04] dark:hover:bg-white/[0.04]"
+                    <div
+                      key={group.bank}
+                      data-drop-key={`credit-bank:${group.bank}`}
+                      className={isBankDragOver ? "ring-2 ring-inset ring-brand/50" : ""}
+                    >
+                      <div
+                        className={`flex items-center gap-1 pl-2 pr-4 py-1.5 bg-black/[0.04] dark:bg-white/[0.05] ${
+                          isBankDragOver ? "bg-brand-soft/40" : "hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                        }`}
                       >
-                        <svg
-                          width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                          strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                          className={`shrink-0 text-muted/60 transition-transform ${collapsed ? "-rotate-90" : ""}`}
-                          aria-hidden
+                        <GripHandle size="sm" onMouseDown={() => startBankDrag(group.bank)} />
+                        <button
+                          type="button"
+                          onClick={() => toggleBank(group.bank)}
+                          className="flex flex-1 items-center gap-2 text-left"
                         >
-                          <path d="M6 9l6 6 6-6" />
-                        </svg>
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted/60">
-                          {group.bank}
-                        </span>
-                        <span className="text-[10px] text-muted/40">
-                          {group.cards.length} card{group.cards.length !== 1 ? "s" : ""}
-                        </span>
-                      </button>
+                          <svg
+                            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+                            aria-hidden
+                          >
+                            <path d="M6 9l6 6 6-6" />
+                          </svg>
+                          <span className="text-xs font-bold uppercase tracking-wide text-foreground">
+                            {group.bank}
+                          </span>
+                          <span className="text-xs font-medium text-muted">
+                            {group.cards.length} card{group.cards.length !== 1 ? "s" : ""}
+                          </span>
+                        </button>
+                      </div>
                       {!collapsed && (
                         <ul className="divide-y divide-line">
                           {group.cards.map((a) => (
@@ -1085,7 +1117,7 @@ function EditCreditCardForm({
           ) : null}
         </div>
 
-        <div className="order-first flex items-center justify-between gap-2 pt-1 sm:order-none">
+        <div className="order-first flex items-center justify-between gap-2 pt-1">
           <div className="flex items-center gap-2">
             <button
               type="submit"

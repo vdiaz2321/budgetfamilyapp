@@ -22,6 +22,20 @@
   --chart-1: #2563eb; /* blue-600 — Savings accent */
   --chart-5: #0891b2; /* cyan-600 — Unrealized gains (teal, not green) */
 
+  /* Category identity colors — used for hero progress bars, group dots, and
+     the donut. Kept saturated in light mode; softened in dark. */
+  --cat-income: #16a34a;   /* green-600 */
+  --cat-savings: #6366f1;  /* indigo-500 */
+  --cat-bills: #f59e0b;    /* amber-500 */
+  --cat-expenses: #f59e0b; /* amber-500 (bills share the same tone in the hero) */
+  --cat-debt: #ef4444;     /* red-500 */
+  --cat-sky: #0ea5e9;      /* sky-500 */
+  --cat-violet: #a855f7;
+  --cat-pink: #ec4899;
+  --cat-teal: #14b8a6;
+  --cat-orange: #f97316;
+  --cat-lime: #84cc16;
+
   /* Near-black navy sidebar; white text lives on it in both themes. */
   --sidebar: #0B0E1B;
 }
@@ -33,15 +47,29 @@
   --muted: #a1a1aa; /* zinc-400 */
   --border: #27272a; /* zinc-800 */
 
-  --brand: #818cf8; /* indigo-400 — lifts on dark */
-  --brand-strong: #6366f1; /* indigo-500 */
+  --brand: #9498d0; /* muted indigo — the old #818cf8 read as neon on dark */
+  --brand-strong: #7c82c0;
   --brand-soft: #1e1b4b; /* indigo-950 */
-  --accent: #fbbf24; /* amber-400 */
-  --positive: #22c55e;
-  --negative: #f87171;
-  --warning: #fbbf24;
-  --chart-1: #60a5fa; /* blue-400 — lifts on dark */
-  --chart-5: #22d3ee; /* cyan-400 — lifts on dark */
+  --accent: #d4a05a; /* muted amber */
+  --positive: #6db988; /* soft sage — dims the "Christmas-lights" green */
+  --negative: #c87878; /* soft rose — dims the harsh red text/borders */
+  --warning: #d4a05a;
+  --chart-1: #7ea9d1; /* muted blue */
+  --chart-5: #6dbabf; /* muted cyan */
+
+  /* Softer category tones for the hero cards + donut. Same hues as light
+     mode but pulled toward gray so nothing screams on a dim canvas. */
+  --cat-income: #6db988;
+  --cat-savings: #9498d0;
+  --cat-bills: #d4a05a;
+  --cat-expenses: #d4a05a;
+  --cat-debt: #c87878;
+  --cat-sky: #7ba6c2;
+  --cat-violet: #b08fd0;
+  --cat-pink: #d88fb0;
+  --cat-teal: #6dbabf;
+  --cat-orange: #d69368;
+  --cat-lime: #a8c078;
 
   --sidebar: #0B0E1B;
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
@@ -119,7 +118,8 @@ export function BudgetGroup({
       {/* Consolidated header: chevron + dot + name + sources chip on the left;
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}
-      <div className="flex items-center gap-2 px-4 py-2.5">
+      {/* Mobile header — flex layout */}
+      <div className="flex items-center gap-2 px-4 py-2.5 sm:hidden">
         <button
           type="button"
           onClick={onToggle}
@@ -141,37 +141,13 @@ export function BudgetGroup({
             <span className="hidden sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
-
-        <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums sm:gap-4">
-          {/* Mobile-only: $spent / $planned instead of Left */}
-          <span className="whitespace-nowrap text-xs tabular-nums sm:hidden">
+        <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
+          <span className="whitespace-nowrap text-xs tabular-nums">
             <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
             <span className="text-muted"> / {formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
-          <span className="hidden text-muted lg:inline">
-            {headerActualLabel}:{" "}
-            <span className="font-bold text-foreground">{formatMoney(visibleSpentTotal, currency)}</span>
-          </span>
-          <span className="hidden text-muted lg:inline">
-            Plan:{" "}
-            <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
-          </span>
-          <span className="hidden text-muted sm:inline">
-            <span className="hidden md:inline">Left: </span>
-            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-              {formatMoney(remainingTotal, currency)}
-            </span>
-          </span>
-          {isDebt ? (
-            <Link
-              href="/snowball"
-              className="hidden rounded-md px-2 py-0.5 text-[11px] font-semibold text-brand hover:bg-brand-soft md:inline-flex"
-            >
-              Snowball →
-            </Link>
-          ) : null}
           <button
             type="button"
             onClick={() => { if (!open) onToggle(); setAdding(true); }}
@@ -181,7 +157,62 @@ export function BudgetGroup({
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>
-            <span className="hidden sm:inline">Add</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Desktop header — 12-col grid aligned with rows below */}
+      <div className="hidden grid-cols-12 items-center gap-2 px-3 py-2.5 sm:grid">
+        <div className="col-span-4 flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex items-center gap-2.5 text-left"
+            aria-expanded={open}
+          >
+            <svg
+              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
+            <span className="font-semibold">{group.name}</span>
+            <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+              {visibleRows.length}
+              <span className="sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
+            </span>
+          </button>
+        </div>
+        <div className="col-span-2 text-right text-[11px] tabular-nums text-muted">
+          <span className="hidden lg:inline">Plan: </span>
+          <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
+        </div>
+        <div className="col-span-2 text-right text-[11px] tabular-nums text-muted">
+          <span className="hidden md:inline">Left: </span>
+          <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+            {formatMoney(remainingTotal, currency)}
+          </span>
+        </div>
+        <div className="col-span-2 text-right text-[11px] tabular-nums text-muted">
+          <span className="hidden lg:inline">{headerActualLabel}: </span>
+          <span className={`font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+            {formatMoney(visibleSpentTotal, currency)}
+          </span>
+        </div>
+        <div className="col-span-2 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => { if (!open) onToggle(); setAdding(true); }}
+            aria-label="Add item"
+            className={`flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_ACCENT[group.kind]}`}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span>Add</span>
           </button>
         </div>
       </div>
@@ -228,14 +259,14 @@ export function BudgetGroup({
                   const remaining = planned - spent;
                   return (
                     <>
-                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
+                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
                         <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
                         <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{planned > 0 ? `${Math.min(100, Math.round((spent / planned) * 1000) / 10)}%` : "0%"}</div>
                       </div>
-                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
+                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
                         <span className="truncate">{label}</span>
                         <span className="ml-auto text-xs tabular-nums">
                           <span className="text-muted">{formatMoney(planned, currency)} / </span>

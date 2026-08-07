@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { deleteTransaction, deleteTransactions, toggleCleared } from "../budget/actions";
+import { deleteTransaction, toggleCleared } from "../budget/actions";
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { ImportCsvModal } from "./import-csv-modal";
@@ -19,7 +19,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[1.75rem_5.5rem_2.25rem_6.5rem_5.5rem_minmax(7rem,1.2fr)_minmax(7rem,1.2fr)_minmax(5rem,0.9fr)_7rem_2rem]";
+const GRID = "grid-cols-[5.5rem_2.25rem_6.5rem_5.5rem_minmax(7rem,1.2fr)_minmax(7rem,1.2fr)_minmax(5rem,0.9fr)_7rem_2rem]";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -48,15 +48,13 @@ export function TransactionsTable({
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkPending, startBulk] = useTransition();
   const [query, setQuery] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
   const [fromDate, setFromDate] = useState(dateRange.from ?? "");
   const [toDate, setToDate] = useState(dateRange.to ?? "");
-  // Date sort — defaults to ascending (1st → 31st). Click header to flip.
-  const [dateSort, setDateSort] = useState<"asc" | "desc">("asc");
+  // Date sort — defaults to descending (newest first). Click header to flip.
+  const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
   const hasRange = Boolean(dateRange.from || dateRange.to);
 
@@ -81,17 +79,17 @@ export function TransactionsTable({
       return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const rows = [
-      ["Date", "Amount", "Category", "Type", "Payee", "Account", "Remarks", "Cleared"].join(","),
+      ["Date", "Cleared", "Amount", "Type", "Category", "Payee", "Account", "Remarks"].join(","),
       ...filtered.map((t) =>
         [
           qf(t.date),
+          qf(t.cleared ? "Yes" : "No"),
           qf(((t.isWithdrawal ? -1 : 1) * t.amountCents / 100).toFixed(2)),
-          qf(t.subName),
           qf(t.isCardPayment ? "Card Payment" : (t.kind ? KIND_LABEL[t.kind] : "")),
+          qf(t.subName),
           qf(t.payee),
           qf(t.accountId ? accountName.get(t.accountId) : ""),
           qf(t.memo),
-          qf(t.cleared ? "Yes" : "No"),
         ].join(",")
       ),
     ];
@@ -104,28 +102,6 @@ export function TransactionsTable({
     URL.revokeObjectURL(url);
   }
 
-  function toggleSelect(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleSelectAll() {
-    if (selected.size === filtered.length && filtered.length > 0) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(filtered.map((t) => t.id)));
-    }
-  }
-
-  function deleteSelected() {
-    const ids = [...selected];
-    setSelected(new Set());
-    startBulk(() => deleteTransactions(ids));
-  }
 
   const q = query.trim().toLowerCase();
   const filtered = transactions.filter((t) => {
@@ -283,34 +259,6 @@ export function TransactionsTable({
         ) : null}
       </div>
 
-      {/* Bulk-delete bar — shown when rows are selected */}
-      {selected.size > 0 ? (
-        <div className="flex items-center justify-between rounded-xl bg-negative/10 px-4 py-2.5 ring-1 ring-negative/20">
-          <span className="text-sm font-medium text-negative">
-            {selected.size} {selected.size === 1 ? "transaction" : "transactions"} selected
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setSelected(new Set())}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-muted hover:text-foreground"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={bulkPending}
-              onClick={deleteSelected}
-              className="flex items-center gap-1.5 rounded-lg bg-negative px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
-              </svg>
-              Delete {selected.size}
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {/* Register — desktop table */}
       <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
@@ -318,16 +266,6 @@ export function TransactionsTable({
           <div className="min-w-[52rem]">
             {/* Header */}
             <div className={`grid ${GRID} items-center gap-2 border-b border-line px-4 py-2.5`}>
-              <span className="flex justify-center">
-                <input
-                  type="checkbox"
-                  checked={filtered.length > 0 && selected.size === filtered.length}
-                  ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < filtered.length; }}
-                  onChange={toggleSelectAll}
-                  aria-label="Select all"
-                  className="h-4 w-4 rounded accent-[var(--brand)]"
-                />
-              </span>
               <button
                 type="button"
                 onClick={cycleDateSort}
@@ -370,8 +308,6 @@ export function TransactionsTable({
                     onEdit={() => {
                       if (!t.isCardPayment) setModal(t);
                     }}
-                    selected={selected.has(t.id)}
-                    onSelect={() => toggleSelect(t.id)}
                   />
                 ))}
               </ul>
@@ -470,15 +406,11 @@ function TxLine({
   currency,
   accountName,
   onEdit,
-  selected,
-  onSelect,
 }: {
   tx: TxData;
   currency: string;
   accountName: string;
   onEdit: () => void;
-  selected: boolean;
-  onSelect: () => void;
 }) {
   const [clearPending, startClear] = useTransition();
   const [delPending, startDel] = useTransition();
@@ -497,18 +429,9 @@ function TxLine({
       onDoubleClick={canEdit ? onEdit : undefined}
       title={canEdit ? "Double-click to edit" : "Card payment — delete and recreate it from the card"}
       className={`group grid ${GRID} cursor-default select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
-        selected ? "bg-brand-soft/20" : ""
-      } ${tx.cleared ? "opacity-60" : ""}`}
+        tx.cleared ? "opacity-60" : ""
+      }`}
     >
-      <span onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onSelect}
-          aria-label="Select transaction"
-          className="h-4 w-4 rounded accent-[var(--brand)]"
-        />
-      </span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>

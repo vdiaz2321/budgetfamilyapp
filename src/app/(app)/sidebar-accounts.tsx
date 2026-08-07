@@ -54,8 +54,8 @@ function formatWhole(cents: number): string {
 // YNAB-style account list under the nav: collapsible sections with a group
 // total in the header and per-account balances, plus Add Account at the foot.
 export function SidebarAccounts({ groups }: Props) {
-  // Collapsed on fresh login; sessionStorage remembers the toggle across pages.
-  const [state, setState] = useSessionCollapse("sidebar-networth", () => ({ open: false }));
+  // Expanded on fresh login; sessionStorage remembers the toggle across pages.
+  const [state, setState] = useSessionCollapse("sidebar-networth", () => ({ open: true }));
   const expanded = !!state.open;
   const setExpanded = (updater: (v: boolean) => boolean) =>
     setState((s) => ({ ...s, open: updater(!!s.open) }));
@@ -102,7 +102,7 @@ export function SidebarAccounts({ groups }: Props) {
       </div>
 
       {expanded ? (
-        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pr-2">
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {groups
             .filter((g) => g.items.length > 0)
             .map((g) => {

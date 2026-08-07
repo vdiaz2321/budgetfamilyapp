@@ -616,10 +616,10 @@ function SummaryHeroCard({
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <CategoryProgressCard label="Income" actual={actualIncome} planned={incomePlanned} dotClass="bg-positive" fillClass="bg-positive" currency={currency} />
-          <CategoryProgressCard label="Bills & Expenses" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[#f59e0b]" fillClass="bg-[#f59e0b]" currency={currency} />
-          <CategoryProgressCard label="Savings" actual={savings.spent} planned={savings.planned} dotClass="bg-[#6366f1]" fillClass="bg-[#6366f1]" currency={currency} />
-          <CategoryProgressCard label="Debt Repayment" actual={debt.spent} planned={debt.planned} dotClass="bg-[#ef4444]" fillClass="bg-[#ef4444]" currency={currency} />
+          <CategoryProgressCard label="Income" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--cat-income)]" fillClass="bg-[color:var(--cat-income)]" currency={currency} />
+          <CategoryProgressCard label="Bills & Expenses" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--cat-bills)]" fillClass="bg-[color:var(--cat-bills)]" currency={currency} />
+          <CategoryProgressCard label="Savings" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--cat-savings)]" fillClass="bg-[color:var(--cat-savings)]" currency={currency} />
+          <CategoryProgressCard label="Debt Repayment" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--cat-debt)]" fillClass="bg-[color:var(--cat-debt)]" currency={currency} />
         </div>
       </div>
 
