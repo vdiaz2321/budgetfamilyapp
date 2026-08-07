@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NavPending } from "./nav-pending";
 
 const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
   {
@@ -83,6 +84,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
           >
             <Icon>{tab.icon}</Icon>
             <span>{tab.label}</span>
+            <NavPending className="absolute right-2 top-1.5" />
             {badge ? (
               <span className="absolute right-[calc(50%-16px)] top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
                 {badge}

@@ -276,6 +276,7 @@ function MobilePlannedInput({
         name="planned"
         type="text"
         inputMode="decimal"
+        autoComplete="off"
         defaultValue={initial}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
@@ -323,6 +324,7 @@ function PlannedInput({
         name="planned"
         type="text"
         inputMode="decimal"
+        autoComplete="off"
         defaultValue={initial}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {

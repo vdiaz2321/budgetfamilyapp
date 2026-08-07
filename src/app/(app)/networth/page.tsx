@@ -157,14 +157,16 @@ export default async function NetworthPage() {
     ]),
   );
 
-  // Union of every month we know about, in order. Per-account era wins over the
-  // history fallback for any overlapping month.
+  // Union of every month we know about, in order. History wins over per-account
+  // snapshots for any overlapping month — this lets the user override a month
+  // whose imported per-account values are wrong by entering the correct totals
+  // via "Add historical data", without touching the underlying snapshots.
   const allMonths = [...new Set([...snapshotMonths, ...history.keys()])].sort((a, b) =>
     a.localeCompare(b),
   );
 
   const points: MonthPoint[] = allMonths.map((month) => {
-    const fromHistory = !snapshotMonths.has(month);
+    const fromHistory = history.has(month);
     const t = (fromHistory ? history.get(month) : derived.get(month)) ?? zero();
     const assets = t.savings + t.bank + t.stocks;
     return {

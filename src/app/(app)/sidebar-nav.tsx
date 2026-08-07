@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NavPending } from "./nav-pending";
 
 const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   {
@@ -119,6 +120,7 @@ export default function SidebarNav({
             {collapsed ? null : (
               <span className="min-w-0 flex-1 truncate">{n.label}</span>
             )}
+            <NavPending className={collapsed ? "" : "ml-auto"} />
             {collapsed || !badge ? null : n.href === "/snowball" ? (
               <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#3F1922] text-[11px] font-bold text-rose-400">
                 {badge}

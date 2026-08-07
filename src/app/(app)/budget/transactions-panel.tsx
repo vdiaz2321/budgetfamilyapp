@@ -47,6 +47,8 @@ type Props = {
   subtitle?: string;
   addLabel?: string;
   initialKind?: CategoryKind;
+  filterKind?: CategoryKind | null;
+  onClearFilter?: () => void;
 };
 
 export function TransactionsPanel({
@@ -64,6 +66,8 @@ export function TransactionsPanel({
   subtitle,
   addLabel = "Add",
   initialKind,
+  filterKind = null,
+  onClearFilter,
 }: Props) {
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
@@ -71,11 +75,14 @@ export function TransactionsPanel({
   const [collapsed, setCollapsed] = useState(false);
 
   const q = query.trim().toLowerCase();
+  const kindFiltered = filterKind
+    ? transactions.filter((t) => t.kind === filterKind)
+    : transactions;
   const filtered = q
-    ? transactions.filter((t) =>
+    ? kindFiltered.filter((t) =>
         [t.payee, t.subName, t.memo].some((f) => f?.toLowerCase().includes(q)),
       )
-    : transactions;
+    : kindFiltered;
 
   // Bucket the (already newest→oldest) list into date groups, keeping order —
   // same-date rows are contiguous, so a new group starts whenever the label
@@ -128,7 +135,9 @@ export function TransactionsPanel({
           <div className="min-w-0">
             <h2 className="truncate text-sm font-bold">{title}</h2>
             {collapsed ? null : (
-              <p className="truncate text-xs text-muted">{subtitle ?? monthLabel}</p>
+              <p className="truncate text-xs text-muted">
+                {subtitle ?? `${monthLabel} · ${transactions.length} ${transactions.length === 1 ? "transaction" : "transactions"}`}
+              </p>
             )}
           </div>
         </button>
@@ -164,6 +173,27 @@ export function TransactionsPanel({
             className="w-full rounded-lg bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
+        {filterKind ? (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand">
+              <span className={`h-2 w-2 rounded-full ${DOT[filterKind]}`} />
+              {KIND_LABEL[filterKind]}
+              <button
+                type="button"
+                onClick={onClearFilter}
+                aria-label="Clear filter"
+                className="ml-0.5 text-brand/70 hover:text-brand"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </span>
+            <span className="text-[11px] text-muted">
+              {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       {filtered.length === 0 ? (

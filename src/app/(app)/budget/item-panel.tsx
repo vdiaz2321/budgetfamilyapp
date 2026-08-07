@@ -95,54 +95,57 @@ export function ItemPanel({
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Colored header */}
-      <div className={`relative ${HEADER_ACCENT[kind]} px-5 pb-4 pt-3`}>
+      <div className={`relative ${HEADER_ACCENT[kind]} px-4 pb-3 pt-3 pr-11`}>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
+          className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-white/80">{kind}</p>
-        <div className="mt-3 flex items-end justify-between gap-2">
-          <InlineNameEdit subId={row.subId} name={row.name} />
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <InlineNameEdit subId={row.subId} name={row.name} />
+            <p className="mt-0.5 text-[11px] text-white/90 tabular-nums">
+              {formatMoney(row.spentCents, currency)} {verb} of{" "}
+              {formatMoney(row.plannedCents, currency)}
+            </p>
+          </div>
           <div className="shrink-0 text-right">
             <p className="text-[10px] uppercase tracking-wide text-white/80">
               {headerLabel}
             </p>
-            <p className="text-xl font-bold text-white tabular-nums">
+            <p className="text-xl font-bold leading-tight text-white tabular-nums">
               {formatMoney(headerValue, currency)}
             </p>
           </div>
         </div>
-        <p className="mt-0.5 text-xs text-white/90 tabular-nums">
-          {formatMoney(row.spentCents, currency)} {verb} of{" "}
-          {formatMoney(row.plannedCents, currency)}
-        </p>
       </div>
 
-      <div className="space-y-4 px-5 pb-4 pt-4">
-        {kind === "debt" && row.debt ? (
-          <DebtForm
-            key={row.subId}
-            row={row}
-            currency={currency}
-            monthKey={monthKey}
-            accountOptions={debtAccountOptions}
-            bucketOptions={bucketOptions}
-            snowballExtraCents={snowballExtraCents}
-            isSnowballFocus={isSnowballFocus}
-            onAddTransaction={onAddTransaction}
-          />
-        ) : kind === "savings" && row.savings ? (
-          <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} onAddTransaction={onAddTransaction} />
-        ) : (
-          <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} dueDay={row.dueDay} hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)} onAddTransaction={onAddTransaction} />
-        )}
-      </div>
+      {(() => {
+        const body =
+          kind === "debt" && row.debt ? (
+            <DebtForm
+              key={row.subId}
+              row={row}
+              currency={currency}
+              monthKey={monthKey}
+              accountOptions={debtAccountOptions}
+              bucketOptions={bucketOptions}
+              snowballExtraCents={snowballExtraCents}
+              isSnowballFocus={isSnowballFocus}
+              onAddTransaction={onAddTransaction}
+            />
+          ) : kind === "savings" && row.savings ? (
+            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} onAddTransaction={onAddTransaction} />
+          ) : (
+            <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} dueDay={row.dueDay} hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)} onAddTransaction={onAddTransaction} />
+          );
+        return body ? <div className="space-y-4 px-5 pb-4 pt-4">{body}</div> : null;
+      })()}
 
       <MonthTransactions
         txs={monthTxs}
@@ -151,7 +154,7 @@ export function ItemPanel({
         onEdit={onEditTransaction}
       />
 
-      <DeleteFooter subId={row.subId} onDeleted={onClose} />
+      <DeleteFooter subId={row.subId} onDeleted={onClose} onAddTransaction={onAddTransaction} />
     </div>
   );
 }
@@ -206,22 +209,39 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
   );
 }
 
-function DeleteFooter({ subId, onDeleted }: { subId: string; onDeleted: () => void }) {
+function DeleteFooter({
+  subId,
+  onDeleted,
+  onAddTransaction,
+}: {
+  subId: string;
+  onDeleted: () => void;
+  onAddTransaction: () => void;
+}) {
   const [pending, start] = useTransition();
   return (
-    <form
-      action={(fd) => start(() => deleteSubcategory(fd).then(onDeleted))}
-      className="border-t border-line/70 px-5 py-2"
-    >
-      <input type="hidden" name="id" value={subId} />
+    <div className="flex items-center gap-2 border-t border-line/70 px-5 py-2">
       <button
-        type="submit"
-        disabled={pending}
-        className="w-full rounded bg-negative/[0.06] py-1 text-xs font-medium text-negative transition hover:bg-negative/10 disabled:opacity-50"
+        type="button"
+        onClick={onAddTransaction}
+        className="flex-1 rounded bg-brand-soft py-1.5 text-xs font-semibold text-brand transition hover:bg-brand/20"
       >
-        {pending ? "Deleting…" : "Delete this item"}
+        +Transaction
       </button>
-    </form>
+      <form
+        action={(fd) => start(() => deleteSubcategory(fd).then(onDeleted))}
+        className="shrink-0"
+      >
+        <input type="hidden" name="id" value={subId} />
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded bg-negative/[0.06] px-3 py-1.5 text-xs font-medium text-negative transition hover:bg-negative/10 disabled:opacity-50"
+        >
+          {pending ? "Deleting…" : "Delete"}
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -325,11 +345,8 @@ function TxRow({
 
 function PlannedForm({
   subId,
-  monthKey,
-  plannedCents,
   dueDay,
   hasDue,
-  onAddTransaction,
 }: {
   subId: string;
   monthKey: string;
@@ -338,47 +355,24 @@ function PlannedForm({
   hasDue?: boolean;
   onAddTransaction: () => void;
 }) {
-  const [pending, start] = useTransition();
   const [, startDue] = useTransition();
+  if (!hasDue) return null;
   return (
-    <>
-      <Section title="Planned this month">
-        <form action={(fd) => start(() => upsertPlan(fd))} className="space-y-2">
-          <input type="hidden" name="subcategoryId" value={subId} />
-          <input type="hidden" name="month" value={monthKey} />
-          <input
-            key={plannedCents}
-            name="planned"
-            type="number"
-            step="0.01"
-            defaultValue={centsToDisplay(plannedCents)}
-            onFocus={(e) => e.currentTarget.select()}
-            className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
-          <div className="flex gap-2">
-            <SaveBtn pending={pending} full />
-            <AddTxBtn onClick={onAddTransaction} />
-          </div>
-        </form>
-      </Section>
-      {hasDue ? (
-        <Section title="Due day (day of month)">
-          <form action={(fd) => startDue(() => updateSubcategory(fd))} className="flex items-center gap-2">
-            <input type="hidden" name="id" value={subId} />
-            <input
-              key={dueDay ?? ""}
-              name="dueDay"
-              type="number"
-              min={1}
-              max={31}
-              placeholder="—"
-              defaultValue={dueDay ?? ""}
-              className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </form>
-        </Section>
-      ) : null}
-    </>
+    <Section title="Due day (day of month)">
+      <form action={(fd) => startDue(() => updateSubcategory(fd))} className="flex items-center gap-2">
+        <input type="hidden" name="id" value={subId} />
+        <input
+          key={dueDay ?? ""}
+          name="dueDay"
+          type="number"
+          min={1}
+          max={31}
+          placeholder="—"
+          defaultValue={dueDay ?? ""}
+          className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+      </form>
+    </Section>
   );
 }
 
@@ -527,10 +521,7 @@ function DebtForm({
             className="w-full resize-none rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
-        <div className="flex items-center gap-2">
-          <SaveBtn pending={pending} full />
-          <AddTxBtn onClick={onAddTransaction} />
-        </div>
+        <SaveBtn pending={pending} full />
       </form>
     </Section>
   );
@@ -664,10 +655,7 @@ function SavingsForm({ row, bucketOptions, monthKey, onAddTransaction }: { row: 
             </label>
           ) : null}
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <SaveBtn pending={pending} full />
-          <AddTxBtn onClick={onAddTransaction} />
-        </div>
+        <SaveBtn pending={pending} full />
       </form>
     </Section>
   );

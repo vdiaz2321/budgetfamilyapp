@@ -177,8 +177,20 @@ export function TransactionsTable({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search payee, item, or note"
-            className="w-full rounded-xl bg-surface py-2 pl-9 pr-3 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
+            className="w-full rounded-xl bg-surface py-2 pl-9 pr-9 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
           />
+          {query ? (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted transition hover:bg-brand-soft hover:text-foreground"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          ) : null}
         </div>
         <select
           value={kindFilter}
@@ -213,6 +225,19 @@ export function TransactionsTable({
             ));
           })()}
         </select>
+        {query || kindFilter || accountFilter ? (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setKindFilter("");
+              setAccountFilter("");
+            }}
+            className="rounded-xl px-3 py-2 text-sm font-medium text-muted hover:bg-brand-soft hover:text-foreground"
+          >
+            Clear filters
+          </button>
+        ) : null}
       </div>
 
       {/* Date range — searches across months instead of just the one selected above */}

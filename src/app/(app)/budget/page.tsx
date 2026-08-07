@@ -263,13 +263,19 @@ export default async function BudgetPage({
         };
       });
 
+    // Paid-off debts are hidden in the UI (BudgetGroup filters them from its
+    // visible list and subtotal); exclude their planned/spent here too so the
+    // hero card's Planned Budget agrees with the sum of visible group headers.
+    const countableRows = kind === "debt"
+      ? rows.filter((r) => (r.debt?.balanceCents ?? 0) > 0)
+      : rows;
     return {
       categoryId: cat.id,
       kind,
       name: cat.name,
       rows,
-      plannedTotal: rows.reduce((sum, r) => sum + r.plannedCents, 0),
-      spentTotal: rows.reduce((sum, r) => sum + r.spentCents, 0),
+      plannedTotal: countableRows.reduce((sum, r) => sum + r.plannedCents, 0),
+      spentTotal: countableRows.reduce((sum, r) => sum + r.spentCents, 0),
     };
   });
 

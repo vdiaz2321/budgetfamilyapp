@@ -17,6 +17,7 @@ type Props = {
   open: boolean;
   onToggle: () => void;
   compact?: boolean;
+  onFilter?: (kind: CategoryKind) => void;
 };
 
 // Per-kind accent for the "+ Add" pill so users can tell at a glance which
@@ -82,6 +83,7 @@ export function BudgetGroup({
   open,
   onToggle,
   compact,
+  onFilter,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const { dragOverId, startDrag, optimisticOrder } = usePointerReorder(group.categoryId, group.rows);
@@ -186,22 +188,30 @@ export function BudgetGroup({
             </span>
           </button>
         </div>
-        <div className="col-span-2 text-right text-[11px] tabular-nums text-muted">
-          <span className="hidden lg:inline">Plan: </span>
-          <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
-        </div>
-        <div className="col-span-2 text-right text-[11px] tabular-nums text-muted">
-          <span className="hidden md:inline">Left: </span>
-          <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-            {formatMoney(remainingTotal, currency)}
+        <button
+          type="button"
+          onClick={() => onFilter?.(group.kind)}
+          title={`Show ${group.name} transactions`}
+          disabled={!onFilter}
+          className="col-span-6 grid grid-cols-3 items-center gap-2 rounded-md px-2 py-0.5 text-[11px] tabular-nums text-muted enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+        >
+          <span className="text-right">
+            <span className="hidden lg:inline">Plan: </span>
+            <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
-        </div>
-        <div className="col-span-2 text-right text-[11px] tabular-nums text-muted">
-          <span className="hidden lg:inline">{headerActualLabel}: </span>
-          <span className={`font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
-            {formatMoney(visibleSpentTotal, currency)}
+          <span className="text-right">
+            <span className="hidden md:inline">Left: </span>
+            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+              {formatMoney(remainingTotal, currency)}
+            </span>
           </span>
-        </div>
+          <span className="text-right">
+            <span className="hidden lg:inline">{headerActualLabel}: </span>
+            <span className={`font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+              {formatMoney(visibleSpentTotal, currency)}
+            </span>
+          </span>
+        </button>
         <div className="col-span-2 flex items-center justify-center gap-2">
           <button
             type="button"

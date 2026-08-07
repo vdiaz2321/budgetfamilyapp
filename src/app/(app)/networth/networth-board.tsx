@@ -1086,12 +1086,12 @@ function SummaryBlock({
           <thead>
             <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
               <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-left" />
+              <th className="sticky left-[8rem] z-10 border-r border-line bg-surface px-3 py-2 text-center">Growth</th>
               {displayCols.map((p) => (
                 <th key={p.month} className="px-3 py-2 text-center">
                   {monthLabel(p.month)}
                 </th>
               ))}
-              <th className="border-l border-line px-3 py-2 text-center">Growth</th>
             </tr>
           </thead>
           <tbody>
@@ -1106,6 +1106,9 @@ function SummaryBlock({
                   >
                     {r.label}
                   </td>
+                  <td className={`sticky left-[8rem] z-10 border-r border-line bg-surface px-3 py-1.5 text-center tabular-nums ${r.bold ? "font-semibold" : ""} ${negCls(g)}`}>
+                    {r.growth ? (g == null ? "—" : formatMoney(g, currency)) : ""}
+                  </td>
                   {displayCols.map((p) => {
                     const v = r.cell(p);
                     return (
@@ -1119,9 +1122,6 @@ function SummaryBlock({
                       </td>
                     );
                   })}
-                  <td className={`border-l border-line px-3 py-1.5 text-center tabular-nums ${negCls(g)}`}>
-                    {r.growth ? (g == null ? "—" : formatMoney(g, currency)) : ""}
-                  </td>
                 </tr>
               );
             })}
@@ -1413,9 +1413,11 @@ function HistoricalEntry({ currency }: { currency: string }) {
             </button>
           </div>
           <p className="mb-3 text-xs text-muted">
-            For months before you started entering individual accounts. Enter each
-            section&apos;s total; leave a field at 0 if you don&apos;t have it. A month
-            that later gets per-account data will use that instead.
+            Enter each section&apos;s total for a given month; leave a field at 0
+            if you don&apos;t have it. Values entered here <span className="font-semibold">override</span>
+            {" "}any per-account snapshots for that month — useful for fixing an
+            imported month whose per-account values are off. Remove the row later
+            to fall back to the per-account totals.
           </p>
           <form
             action={(fd) =>

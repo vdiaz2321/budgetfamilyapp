@@ -90,9 +90,17 @@ export function BudgetBoard({
     sessionStorage.setItem("budget-rail-tab", railTab);
   }, [railTab]);
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
+  const [txFilterKind, setTxFilterKind] = useState<CategoryKind | null>(null);
   // Each group's open/collapsed state, persisted per-session (survives
   // navigating away and back, resets on a fresh login) — same pattern as
   // Net Worth / Accounts. Groups default open.
+  // Hero card starts collapsed on a fresh browser session (calmer landing for
+  // new users / less numbers overwhelm) but remembers your last state while
+  // you're navigating around within the session.
+  const [heroState, setHeroState] = useSessionCollapse("budget-hero", () => ({ open: false }));
+  const heroExpanded = heroState.open === true;
+  const toggleHero = () => setHeroState((s) => ({ ...s, open: !s.open }));
+
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
     Object.fromEntries([...groups.map((g) => [g.categoryId, false]), ["subscriptions", false], ["irregularBills", false]]),
   );
@@ -227,6 +235,8 @@ export function BudgetBoard({
           rollover={rollover}
           monthFirstOfMonth={month.firstOfMonth}
           currency={currency}
+          expanded={heroExpanded}
+          onToggle={toggleHero}
         />
         </div>
 
@@ -263,6 +273,10 @@ export function BudgetBoard({
                 open={openGroups[group.categoryId] ?? false}
                 onToggle={() => toggleGroup(group.categoryId)}
                 compact={true}
+                onFilter={(kind) => {
+                  setTxFilterKind(kind);
+                  setRailTab("transactions");
+                }}
               />
             ))}
 
@@ -341,6 +355,8 @@ export function BudgetBoard({
                   bucketsByAccount={bucketsByAccount}
                   payeeOptions={payeeOptions}
                   payeeLineItems={payeeLineItems}
+                  filterKind={txFilterKind}
+                  onClearFilter={() => setTxFilterKind(null)}
                 />
               )}
             </>
@@ -548,6 +564,8 @@ function SummaryHeroCard({
   rollover,
   monthFirstOfMonth,
   currency,
+  expanded,
+  onToggle,
 }: {
   actualLeft: number;
   displayLeft: number;
@@ -562,13 +580,85 @@ function SummaryHeroCard({
   rollover: Props["rollover"];
   monthFirstOfMonth: string;
   currency: string;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft);
   const toneClasses = TONE_CLASSES[tone];
 
+  if (!expanded) {
+    return (
+      <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={false}
+          className="flex w-full items-center gap-2 bg-brand-soft px-4 py-2.5 text-left transition hover:bg-brand/20"
+        >
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className="shrink-0 -rotate-90 text-brand"
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px] tabular-nums">
+              <span>
+                <span className="font-semibold text-foreground">Planned Budget: </span>
+                <span className="text-foreground">{formatMoney(outflowPlanned, currency)}</span>
+              </span>
+              <span className="text-right">
+                <span className="font-semibold text-foreground">Income Planned: </span>
+                <span className="text-positive">{formatMoney(incomePlanned, currency)}</span>
+              </span>
+              <span>
+                <span className="font-semibold text-foreground">Left to Budget: </span>
+                <span className={displayLeft < 0 ? "text-negative" : "text-foreground"}>
+                  {formatMoney(displayLeft, currency)}
+                </span>
+              </span>
+              <span className="text-right">
+                <span className="font-semibold text-foreground">Actual Spent: </span>
+                <span className={toneClasses.text}>{formatMoney(actualSpent, currency)}</span>
+              </span>
+            </div>
+            {rolloverCents > 0 ? (
+              <p className="mt-1 text-[11px] text-muted">
+                incl.{" "}
+                <span className="font-semibold text-brand">{formatMoney(rolloverCents, currency)}</span> rolled in from prior month
+              </p>
+            ) : null}
+          </div>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-6 pb-5 pt-6">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={true}
+        aria-label="Collapse summary"
+        title="Collapse summary"
+        className="flex w-full items-center gap-2 bg-brand-soft px-4 py-2 text-left transition hover:bg-brand/20"
+      >
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          className="shrink-0 text-brand"
+          aria-hidden
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-brand">
+          Summary — click to collapse
+        </span>
+      </button>
+      <div className="px-6 pb-5 pt-5">
         <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>

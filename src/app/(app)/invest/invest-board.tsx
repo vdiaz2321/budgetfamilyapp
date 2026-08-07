@@ -1059,13 +1059,13 @@ function YearByYear({
                     Investments
                   </span>
                 </td>
-                <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">{mineCollapsed ? "Contributed + Gain" : ""}</td>
+                <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain</td>
                 {desc.map((y) => {
                   const contrib = mine.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                   const gain = mine.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                   return (
                     <td key={y} className="bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
-                      {mineCollapsed ? <><span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span></> : ""}
+                      <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>
                     </td>
                   );
                 })}
@@ -1088,13 +1088,13 @@ function YearByYear({
                       Kids Funding
                     </span>
                   </td>
-                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">{kidsCollapsed ? "Contributed + Gain" : ""}</td>
+                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain</td>
                   {desc.map((y) => {
                     const contrib = kids.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                     const gain = kids.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                     return (
                       <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
-                        {kidsCollapsed ? <><span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span></> : ""}
+                        <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>
                       </td>
                     );
                   })}
@@ -1106,8 +1106,13 @@ function YearByYear({
                   account={a}
                   desc={desc}
                   currency={currency}
-                  open={!!yByBucketsOpen[a.id]}
-                  onToggle={() => setYByBucketsOpen((s) => ({ ...s, [a.id]: !s[a.id] }))}
+                  // Kids accounts always have buckets (one per kid) and the
+                  // editable Gain cells live at the bucket level. Default the
+                  // per-account expander to open (unless the user has
+                  // explicitly collapsed it this session) so the editable
+                  // cells are visible without an extra click.
+                  open={yByBucketsOpen[a.id] !== false}
+                  onToggle={() => setYByBucketsOpen((s) => ({ ...s, [a.id]: s[a.id] === false ? true : false }))}
                 />
               ))}
             </tbody>
