@@ -19,7 +19,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[5.5rem_2.25rem_6.5rem_5.5rem_minmax(7rem,1.2fr)_minmax(7rem,1.2fr)_minmax(5rem,0.9fr)_7rem_2rem]";
+const GRID = "grid-cols-[5rem_2rem_6rem_5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_6rem_2rem]";
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -289,8 +289,27 @@ export function TransactionsTable({
       <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
         <div className="overflow-x-auto">
           <div className="min-w-[52rem]">
+            {/* Totals — moved to the top so the net line is visible without scrolling */}
+            <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
+              <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
+                {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
+              </span>
+              <span className="col-span-7 whitespace-nowrap text-xs text-muted">
+                <span className="font-medium">Income Rc&apos;d</span>{" "}
+                <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
+                <span className="mx-1.5">–</span>
+                <span className="font-medium">Spent Income</span>{" "}
+                <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
+                <span className="mx-1.5">–</span>
+                <span className="font-medium">Income Left</span>{" "}
+                <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+                  {formatMoney(incomeTotal - outflowTotal, currency)}
+                </span>
+              </span>
+              <span />
+            </div>
             {/* Header */}
-            <div className={`grid ${GRID} items-center gap-2 border-b border-line px-4 py-2.5`}>
+            <div className={`grid ${GRID} items-center gap-2 border-t border-b border-line px-4 py-2.5`}>
               <button
                 type="button"
                 onClick={cycleDateSort}
@@ -338,54 +357,14 @@ export function TransactionsTable({
               </ul>
             )}
 
-            {/* Totals — same grid as the rows so the net sits under the Amount column */}
-            <div className={`grid ${GRID} items-center gap-2 border-t border-line bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-              <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
-                {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
-              </span>
-              <span className="col-span-7 whitespace-nowrap text-xs text-muted">
-                <span className="font-medium">Income Rc&apos;d</span>{" "}
-                <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
-                <span className="mx-1.5">–</span>
-                <span className="font-medium">Spent Income</span>{" "}
-                <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
-                <span className="mx-1.5">–</span>
-                <span className="font-medium">Income Left</span>{" "}
-                <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-                  {formatMoney(incomeTotal - outflowTotal, currency)}
-                </span>
-              </span>
-              <span />
-            </div>
           </div>
         </div>
       </section>
 
       {/* Register — mobile card list */}
       <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
-        {filtered.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-muted">
-            {transactions.length === 0
-              ? "No transactions this month yet — tap + Transaction to log one."
-              : "No transactions match your filters."}
-          </p>
-        ) : (
-          <ul className="divide-y divide-line">
-            {filtered.map((t) => (
-              <TxCard
-                key={t.id}
-                tx={t}
-                currency={currency}
-                accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
-                onTap={() => {
-                  if (!t.isCardPayment) setModal(t);
-                }}
-              />
-            ))}
-          </ul>
-        )}
-
-        <div className="flex items-center justify-between gap-2 border-t border-line bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
+        {/* Totals bar — moved to the top on mobile too, matches desktop */}
+        <div className="flex items-center justify-between gap-2 bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
           <span className="whitespace-nowrap text-muted">
             <span className="font-medium">Income Rc&apos;d:</span>{" "}
             <span className="tabular-nums text-positive">{formatMoney(incomeTotal, currency)}</span>
@@ -401,6 +380,27 @@ export function TransactionsTable({
             </span>
           </span>
         </div>
+        {filtered.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted">
+            {transactions.length === 0
+              ? "No transactions this month yet — tap + Transaction to log one."
+              : "No transactions match your filters."}
+          </p>
+        ) : (
+          <ul className="divide-y divide-line border-t border-line">
+            {filtered.map((t) => (
+              <TxCard
+                key={t.id}
+                tx={t}
+                currency={currency}
+                accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                onTap={() => {
+                  if (!t.isCardPayment) setModal(t);
+                }}
+              />
+            ))}
+          </ul>
+        )}
       </section>
 
       {modal ? (
@@ -535,7 +535,7 @@ function TxCard({
         type="button"
         disabled={!canEdit}
         onClick={onTap}
-        className={`flex w-full flex-col gap-1 px-4 py-3 text-left transition active:bg-brand-soft/25 disabled:cursor-default ${
+        className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition active:bg-brand-soft/25 disabled:cursor-default ${
           tx.cleared ? "opacity-60" : ""
         }`}
       >

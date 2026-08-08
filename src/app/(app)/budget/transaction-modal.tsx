@@ -30,11 +30,11 @@ const KIND_TAB: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 const PAYEE_PLACEHOLDER: Record<CategoryKind, string> = {
-  income: "Where did this money come from?",
-  savings: "Which fund or bank?",
-  bills: "Who did you pay?",
-  expenses: "Where did you spend this money?",
-  debt: "Who did you pay?",
+  income: "Merchant",
+  savings: "Merchant",
+  bills: "Merchant",
+  expenses: "Merchant",
+  debt: "Merchant",
 };
 
 const HEADER_TINT: Record<CategoryKind, string> = {
@@ -463,14 +463,33 @@ export function TransactionModal({
               defaultValue={editTx?.memo ?? ""}
               className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
-            <a
-              href="https://www.xe.com/currencyconverter/"
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                const web = "https://www.xe.com/currencyconverter/";
+                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                if (!isIOS) {
+                  window.open(web, "_blank", "noopener,noreferrer");
+                  return;
+                }
+                // iOS: try the app via URL scheme first. If the browser is
+                // still visible after ~1.5s, the app didn't take over —
+                // fall back to the web converter.
+                const start = Date.now();
+                const fallback = window.setTimeout(() => {
+                  if (Date.now() - start < 2500 && document.visibilityState === "visible") {
+                    window.location.href = web;
+                  }
+                }, 1500);
+                const onHide = () => { window.clearTimeout(fallback); document.removeEventListener("visibilitychange", onHide); };
+                document.addEventListener("visibilitychange", onHide);
+                window.location.href = "xecurrency://";
+              }}
               className="inline-flex w-fit items-center gap-1 text-xs font-semibold text-brand hover:text-brand-strong hover:underline"
             >
               ↗ Convert currency with XE
-            </a>
+            </button>
 
             {/* Footer */}
             <div className="flex items-center justify-between gap-3 border-t border-line pt-3">

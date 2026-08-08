@@ -5,7 +5,7 @@
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
-  --background: #f9fafb; /* app canvas — cool gray-50 */
+  --background: #f5efe4; /* app canvas — warm cream */
   --surface: #ffffff; /* cards */
   --foreground: #111827; /* gray-900 */
   --muted: #6b7280; /* gray-500 */

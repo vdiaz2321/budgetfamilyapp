@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { NavPending } from "./nav-pending";
 
 const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
@@ -68,9 +69,32 @@ function Icon({ children }: { children: React.ReactNode }) {
 
 export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
   const pathname = usePathname();
+  const [hidden, setHidden] = useState(false);
+  const lastY = useRef(0);
+
+  // Hide on scroll down, reveal on scroll up. Ignores small (<8px) jitter and
+  // stays visible near the top of the page so it doesn't flicker as you land.
+  useEffect(() => {
+    lastY.current = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const delta = y - lastY.current;
+      if (Math.abs(delta) < 8) return;
+      if (y < 40) setHidden(false);
+      else if (delta > 0) setHidden(true);
+      else setHidden(false);
+      lastY.current = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-white/10 bg-sidebar md:hidden">
+    <nav
+      className={`fixed bottom-0 left-0 right-0 z-40 flex border-t border-white/10 bg-sidebar transition-transform duration-200 md:hidden ${
+        hidden ? "translate-y-full" : "translate-y-0"
+      }`}
+    >
       {TABS.map((tab) => {
         const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
         const badge = badges?.[tab.href];

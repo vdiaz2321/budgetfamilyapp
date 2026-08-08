@@ -244,7 +244,7 @@ export function BudgetBoard({
           onClick={() => setShowAddModal(true)}
           className="md:hidden rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-strong"
         >
-          + Add
+          + Transaction
         </button>
       </div>
       <div className="flex w-full gap-6">
@@ -288,7 +288,11 @@ export function BudgetBoard({
           )}
 
           <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface/90 px-2.5 py-2 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-            <AddCategoryGroupButton />
+            {/* + Category Group drops to the last flex slot on mobile (below the filter chips),
+                stays inline first on desktop. */}
+            <div className="order-last w-full sm:order-none sm:w-auto">
+              <AddCategoryGroupButton />
+            </div>
             <button
               type="button"
               onClick={() => setRowFilter("all")}
@@ -310,7 +314,9 @@ export function BudgetBoard({
               Overspent ({overspentCount})
             </button>
             <div className="ml-auto flex items-center gap-1">
-              <BulkAddSubcategories groups={groups} />
+              <div className="hidden sm:block">
+                <BulkAddSubcategories groups={groups} />
+              </div>
               <div className="ml-1 hidden items-center rounded-lg bg-[#ebe8e1] p-0.5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/10 sm:flex">
                 <button
                   type="button"

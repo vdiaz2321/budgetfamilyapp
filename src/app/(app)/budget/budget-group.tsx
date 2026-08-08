@@ -164,10 +164,10 @@ export function BudgetGroup({
         {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
         <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
           <span className="whitespace-nowrap text-xs tabular-nums">
+            <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
             <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
-            <span className="text-muted"> / {formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
           <button
             type="button"
@@ -264,9 +264,9 @@ export function BudgetGroup({
             </div>
           ) : (
             <>
-              {/* Mobile column label */}
+              {/* Mobile column label — actual noun follows the kind (Spent/Saved/Received/Paid) */}
               <div className="flex items-center justify-end px-3 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:hidden">
-                Planned / Spent
+                Planned / {ACTUAL_LABEL[group.kind]}
               </div>
 
               {/* Column-label strip — desktop only, must line up with BudgetRow */}
@@ -289,14 +289,14 @@ export function BudgetGroup({
                   const remaining = planned - spent;
                   return (
                     <>
-                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
+                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
                         <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
                         <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{progressLabel(group.kind, spent, planned)}</div>
                       </div>
-                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
+                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
                         <span className="truncate">{label}</span>
                         <span className="ml-auto text-xs tabular-nums">
                           <span className="text-muted">{formatMoney(planned, currency)} / </span>
