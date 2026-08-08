@@ -110,7 +110,7 @@ export function BudgetBoard({
   // require switching to the Log tab first. `true` = new; a TxData = edit
   // (opened by clicking a row in the panel's "This month" list).
   const [quickAdd, setQuickAdd] = useState<boolean | TxData>(false);
-  // Fresh transaction modal opened from the top header's "+ Add Item"
+  // Fresh transaction modal opened from the top header's "+ Transaction"
   // button — no preselected item/kind, renders as a centered overlay so it
   // works with or without a selected budget row.
   const [showAddModal, setShowAddModal] = useState(false);
@@ -380,7 +380,7 @@ export function BudgetBoard({
         </div>
       ) : null}
 
-      {/* Centered modal: header "+ Add Item" OR item panel "+ Transaction" */}
+      {/* Centered modal: header "+ Transaction" OR item panel "+ Transaction" */}
       {(showAddModal || (quickAdd && selected)) ? (
         <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
@@ -464,8 +464,8 @@ function CategoryProgressCard({
   );
 }
 
-// Top row above the hero: title + month picker on the left. The Add Item and
-// Add Item + Roll Planned, styled as a matched pair to sit above the
+// Top row above the hero: title + month picker on the left. The + Transaction
+// and Roll Planned actions are styled as a matched pair to sit above the
 // Summary / Transactions tab strip in the right rail.
 function RailActions({
   monthFirstOfMonth,
@@ -501,7 +501,7 @@ function RailActions({
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
           <path d="M12 5v14M5 12h14" />
         </svg>
-        Add Item
+        Transaction
       </button>
       {snapshot ? (
         <button

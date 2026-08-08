@@ -155,7 +155,7 @@ export function TransactionsTable({
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>
-            Add Transaction
+            Transaction
           </button>
         </div>
       </div>
@@ -319,7 +319,7 @@ export function TransactionsTable({
             {filtered.length === 0 ? (
               <p className="px-4 py-10 text-center text-sm text-muted">
                 {transactions.length === 0
-                  ? "No transactions this month yet — click Add Transaction to log one."
+                  ? "No transactions this month yet — click + Transaction to log one."
                   : "No transactions match your filters."}
               </p>
             ) : (
@@ -366,7 +366,7 @@ export function TransactionsTable({
         {filtered.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted">
             {transactions.length === 0
-              ? "No transactions this month yet — tap Add Transaction to log one."
+              ? "No transactions this month yet — tap + Transaction to log one."
               : "No transactions match your filters."}
           </p>
         ) : (

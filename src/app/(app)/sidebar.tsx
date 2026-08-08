@@ -39,30 +39,29 @@ export function Sidebar({ groups, userEmail, displayName, avatarUrl, badges }: P
         collapsed ? "w-[4.5rem] px-3" : "w-[16.25rem] px-0"
       }`}
     >
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className="absolute -right-3.5 top-9 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-2 border-zinc-300 bg-white text-zinc-700 shadow-md transition hover:border-brand hover:text-brand dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:border-brand dark:hover:text-brand"
-      >
-        <svg
-          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`transition-transform ${collapsed ? "rotate-180" : ""}`}
-          aria-hidden
-        >
-          <path d="M15 6l-6 6 6 6" />
-        </svg>
-      </button>
-
-      <div className={`mb-5 flex items-center gap-3 ${collapsed ? "justify-center" : "px-5"}`}>
+      <div className={`mb-5 flex items-center gap-2 ${collapsed ? "justify-center px-1" : "px-5"}`}>
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-lg font-extrabold text-white shadow-[0_0_20px_rgba(139,92,246,0.45)]">
           C
         </span>
         {collapsed ? null : (
           <span className="text-xl font-bold tracking-tight text-white">Capitall</span>
         )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={`${collapsed ? "h-7 w-6" : "ml-auto h-7 w-8"} flex shrink-0 cursor-pointer items-center justify-center rounded-md border border-white/30 bg-[#e4e5f2] text-[#302e6b] shadow-sm transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 dark:border-white/20 dark:bg-[#d7d9ea] dark:text-[#302e6b] dark:hover:bg-white`}
+        >
+          <svg
+            width="18" height="18" viewBox="0 0 24 24" fill="none"
+            className={`transition-transform ${collapsed ? "rotate-180" : ""}`}
+            aria-hidden
+          >
+            <rect x="3.5" y="4" width="5" height="16" rx="1" stroke="currentColor" strokeWidth="2.5" />
+            <path d="M19 7 12 12l7 5V7Z" fill="currentColor" />
+          </svg>
+        </button>
       </div>
 
       <SidebarNav collapsed={collapsed} badges={badges} />
