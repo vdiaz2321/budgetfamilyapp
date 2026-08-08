@@ -5,13 +5,13 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
+import { currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } from "@/lib/buckets";
 import { adjustAccountLedger } from "@/lib/account-ledger";
 import { adjustDebtBalance } from "@/lib/debts";
 
-// Every account type presented in the Accounts add flow. Credit cards retain
-// their rewards-specific fields; long-term debts are account-managed so they
-// do not need a duplicate Budget debt row.
+// Every account type presented in the Accounts add flow. Rewards cards remain
+// ordinary cards unless payoff tracking is explicitly enabled in Edit details.
 const ALLOWED_KINDS = ["cash", "checking", "savings_bucket", "investment", "credit_card", "debt_loan"];
 
 async function requireHousehold() {
@@ -37,8 +37,147 @@ function revalidate() {
   revalidatePath("/budget");
   // Net Worth mirrors account names/grouping in its grid.
   revalidatePath("/networth");
+  revalidatePath("/snowball");
   // The sidebar's account totals live in the shared (app) layout.
   revalidatePath("/", "layout");
+}
+
+async function ensureDebtCategory(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+) {
+  const { data: existing } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("household_id", householdId)
+    .eq("kind", "debt")
+    .order("sort_order")
+    .limit(1)
+    .maybeSingle();
+  if (existing) return existing.id as string;
+
+  const { data: last } = await supabase
+    .from("categories")
+    .select("sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { data, error } = await supabase
+    .from("categories")
+    .insert({ household_id: householdId, name: "Debt", kind: "debt", sort_order: (last?.sort_order ?? -1) + 1 })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Couldn't create the Debt category.");
+  return data.id as string;
+}
+
+async function ensurePayoffDebt(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+  input: {
+    accountId: string;
+    name: string;
+    balanceCents: number;
+    originalBalanceCents?: number;
+    minPaymentCents: number;
+    targetPaymentCents: number;
+    apr: number;
+    dueDay: number | null;
+    debtKind: string | null;
+    escrowCents?: number;
+    termMonths?: number | null;
+    loanStartDate?: string | null;
+    promoAprEndsOn?: string | null;
+    interestMethod: "monthly_estimate" | "statement_manual";
+  },
+) {
+  const { data: linked } = await supabase
+    .from("debts")
+    .select("id, subcategory_id, original_balance_cents")
+    .eq("household_id", householdId)
+    .eq("account_id", input.accountId)
+    .maybeSingle();
+
+  let subcategoryId = linked?.subcategory_id as string | undefined;
+  if (!subcategoryId) {
+    const categoryId = await ensureDebtCategory(supabase, householdId);
+    const { data: sameName } = await supabase
+      .from("subcategories")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("category_id", categoryId)
+      .eq("name", input.name)
+      .maybeSingle();
+    if (sameName) {
+      subcategoryId = sameName.id as string;
+    } else {
+      const { data: last } = await supabase
+        .from("subcategories")
+        .select("sort_order")
+        .eq("household_id", householdId)
+        .eq("category_id", categoryId)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const { data: inserted, error } = await supabase
+        .from("subcategories")
+        .insert({
+          household_id: householdId,
+          category_id: categoryId,
+          name: input.name,
+          due_day: input.dueDay,
+          sort_order: (last?.sort_order ?? -1) + 1,
+        })
+        .select("id")
+        .single();
+      if (error || !inserted) throw new Error(error?.message ?? "Couldn't create the Budget debt item.");
+      subcategoryId = inserted.id as string;
+    }
+  }
+
+  const originalBalance = Math.max(
+    input.balanceCents,
+    input.originalBalanceCents ?? 0,
+    Number(linked?.original_balance_cents ?? 0),
+  );
+  const { error: debtError } = await supabase.from("debts").upsert({
+    household_id: householdId,
+    subcategory_id: subcategoryId,
+    account_id: input.accountId,
+    current_balance_cents: Math.max(0, input.balanceCents),
+    original_balance_cents: originalBalance,
+    min_payment_cents: Math.max(0, input.minPaymentCents),
+    target_payment_cents: Math.max(input.minPaymentCents, input.targetPaymentCents),
+    apr: Math.max(0, input.apr),
+    due_day: input.dueDay,
+    debt_kind: input.debtKind,
+    escrow_cents: Math.max(0, input.escrowCents ?? 0),
+    term_months: input.termMonths,
+    loan_start_date: input.loanStartDate,
+    promo_apr_ends_on: input.promoAprEndsOn,
+    interest_method: input.interestMethod,
+    tracking_enabled: true,
+    paid_off_at: input.balanceCents <= 0 ? new Date().toISOString().slice(0, 10) : null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "household_id,subcategory_id" });
+  if (debtError) throw new Error(debtError.message);
+
+  if (input.targetPaymentCents > 0) {
+    await supabase.from("budget_plans").upsert({
+      household_id: householdId,
+      month: currentMonthFirst(),
+      subcategory_id: subcategoryId,
+      planned_cents: input.targetPaymentCents,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "household_id,month,subcategory_id" });
+  }
+  await supabase
+    .from("subcategories")
+    .update({ active: true, due_day: input.dueDay })
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId);
+  return subcategoryId;
 }
 
 export { syncAllBucketedAccounts };
@@ -87,7 +226,9 @@ export async function addAccount(formData: FormData) {
     subtype,
     is_kids_account: isKidsAccount,
     include_net_worth: isCreditCard || isDebtAccount ? false : !isKidsAccount,
-    debt_tracking_mode: isDebtAccount ? "account" : "budget",
+    // Linked Budget debt is the canonical liability so Net Worth never counts
+    // an account-created loan twice.
+    debt_tracking_mode: "budget",
     current_balance_cents: balanceCents,
     sort_order: sortOrder,
     bank_group: bankGroup,
@@ -115,6 +256,46 @@ export async function addAccount(formData: FormData) {
         : "Couldn't save that account — please try again.",
       id: null,
     };
+  }
+
+  if (isDebtAccount && inserted?.id) {
+    const numberField = (key: string, fallback = 0) => {
+      const value = Number(String(formData.get(key) ?? "").trim());
+      return Number.isFinite(value) ? value : fallback;
+    };
+    const rawDue = numberField("dueDay", 0);
+    const dueDay = rawDue > 0 ? Math.min(31, Math.max(1, Math.trunc(rawDue))) : null;
+    const rawTerm = numberField("termMonths", 0);
+    const loanStartDate = String(formData.get("loanStartDate") ?? "").trim() || null;
+    const rawPromoAprEndsOn = String(formData.get("promoAprEndsOn") ?? "").trim();
+    const promoAprEndsOn = /^\d{4}-\d{2}-\d{2}$/.test(rawPromoAprEndsOn) ? rawPromoAprEndsOn : null;
+    const minPaymentCents = displayToCents(String(formData.get("minPayment") ?? "0"));
+    const enteredPlannedPaymentCents = displayToCents(String(formData.get("plannedPayment") ?? "0"));
+    const plannedPaymentCents = enteredPlannedPaymentCents > 0 ? enteredPlannedPaymentCents : minPaymentCents;
+    try {
+      await ensurePayoffDebt(supabase, householdId, {
+        accountId: inserted.id,
+        name,
+        balanceCents: Math.max(0, balanceCents),
+        originalBalanceCents: displayToCents(String(formData.get("originalBalance") ?? "0")),
+        minPaymentCents,
+        targetPaymentCents: plannedPaymentCents,
+        apr: Math.max(0, numberField("apr")),
+        dueDay,
+        debtKind: subtype,
+        escrowCents: displayToCents(String(formData.get("escrow") ?? "0")),
+        termMonths: rawTerm > 0 ? Math.trunc(rawTerm) : null,
+        loanStartDate,
+        promoAprEndsOn,
+        interestMethod: "monthly_estimate",
+      });
+    } catch (linkError) {
+      // Avoid leaving a half-created loan account if its linked payoff profile
+      // could not be created.
+      await supabase.from("accounts").delete().eq("id", inserted.id).eq("household_id", householdId);
+      console.error("[addAccount debt link]", linkError);
+      return { error: "The loan wasn't saved because its Budget payoff item could not be created.", id: null };
+    }
   }
 
   await captureSnapshots(supabase, householdId);
@@ -354,6 +535,21 @@ export async function upsertCardDetails(formData: FormData) {
   const accountId = String(formData.get("accountId") ?? "");
   if (!accountId) return { error: "Missing account." };
 
+  const { data: cardAccount } = await supabase
+    .from("accounts")
+    .select("id, name, kind")
+    .eq("id", accountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!cardAccount || cardAccount.kind !== "credit_card") return { error: "Card not found." };
+
+  const { data: existingDetails } = await supabase
+    .from("credit_card_details")
+    .select("debt_subcategory_id")
+    .eq("account_id", accountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+
   const optText = (k: string) => {
     const v = String(formData.get(k) ?? "").trim();
     return v || null;
@@ -379,6 +575,36 @@ export async function upsertCardDetails(formData: FormData) {
     return Number.isFinite(n) && n >= 0 ? Math.round(n * 1_000_000) : null;
   };
 
+  const trackAsPayoffDebt = formData.get("trackAsPayoffDebt") === "on";
+  let debtSubcategoryId = (existingDetails?.debt_subcategory_id as string | null) ?? null;
+  if (trackAsPayoffDebt) {
+    const aprValue = Number(String(formData.get("payoffApr") ?? "0"));
+    const rawDue = Number(String(formData.get("payoffDueDay") ?? "0"));
+    try {
+      debtSubcategoryId = await ensurePayoffDebt(supabase, householdId, {
+        accountId,
+        name: cardAccount.name,
+        balanceCents: Math.max(0, displayToCents(String(formData.get("payoffBalance") ?? "0"))),
+        minPaymentCents: Math.max(0, displayToCents(String(formData.get("payoffMinimum") ?? "0"))),
+        targetPaymentCents: Math.max(0, displayToCents(String(formData.get("payoffPlanned") ?? "0"))),
+        apr: Number.isFinite(aprValue) ? Math.max(0, aprValue) : 0,
+        dueDay: rawDue > 0 ? Math.min(31, Math.max(1, Math.trunc(rawDue))) : null,
+        debtKind: "Credit Card",
+        interestMethod: "statement_manual",
+      });
+    } catch (payoffError) {
+      console.error("[upsertCardDetails payoff]", payoffError);
+      return { error: "Card details were not saved because payoff tracking could not be linked." };
+    }
+  } else if (debtSubcategoryId) {
+    // Hide from Debt/Loans without deleting its payment or interest history.
+    await supabase
+      .from("debts")
+      .update({ tracking_enabled: false, updated_at: new Date().toISOString() })
+      .eq("household_id", householdId)
+      .eq("subcategory_id", debtSubcategoryId);
+  }
+
   const row = {
     account_id: accountId,
     household_id: householdId,
@@ -403,6 +629,8 @@ export async function upsertCardDetails(formData: FormData) {
     remarks: optText("remarks"),
     card_url: optText("cardUrl"),
     benefit_cadence: optText("benefitCadence"),
+    is_revolving_debt: trackAsPayoffDebt,
+    debt_subcategory_id: debtSubcategoryId,
     updated_at: new Date().toISOString(),
   };
 

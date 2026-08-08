@@ -1,87 +1,109 @@
-// Debt snowball amortization: monthly-compounding interest + waterfall extra
-// payments (classic snowball — smallest starting balance attacked first; once
-// a debt is paid off, its minimum payment permanently joins the extra pool for
-// whichever debt is next in the fixed attack order).
+// Payoff projections use a monthly APR estimate. Actual lender statements stay
+// authoritative, especially for credit cards that compound daily or have more
+// than one APR bucket.
 
 export type DebtInput = {
   id: string;
   balanceCents: number;
   minCents: number;
-  apr: number; // percent, e.g. 2.95
+  apr: number; // percent, e.g. 6.25
 };
 
 export type MonthlyEntry = {
   month: string; // YYYY-MM-01
   paymentCents: number;
+  interestCents: number;
+  principalCents: number;
   balanceCents: number;
 };
 
 export type SnowballResult = {
-  // Attack order fixed at the start (smallest balance first) — not re-sorted
-  // as balances change, matching the classic snowball method.
   order: string[];
-  payoffMonth: Map<string, string | null>; // null = not paid off within the cap
+  payoffMonth: Map<string, string | null>;
   ledger: Map<string, MonthlyEntry[]>;
+  totalInterestCents: Map<string, number>;
+  totalPaymentsCents: Map<string, number>;
+  negativeAmortization: Set<string>;
 };
 
-function addMonths(firstOfMonth: string, n: number): string {
+export type PayoffExtras = {
+  oneTimeMonth?: string;
+  oneTimeExtraCents?: number;
+};
+
+export function addMonths(firstOfMonth: string, n: number): string {
   const [y, m] = firstOfMonth.split("-").map(Number);
   const d = new Date(y, m - 1 + n, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
+export function monthsBetween(startMonth: string, endMonth: string | null): number | null {
+  if (!endMonth) return null;
+  const [sy, sm] = startMonth.split("-").map(Number);
+  const [ey, em] = endMonth.split("-").map(Number);
+  return Math.max(0, (ey - sy) * 12 + em - sm + 1);
+}
+
 export function projectSnowball(
   debts: DebtInput[],
-  // Either a flat monthly extra, or a function returning the extra for a given
-  // month (YYYY-MM-01) so the amount can vary over date ranges.
   monthlyExtra: number | ((month: string) => number),
   startMonth: string,
-  capMonths = 60,
-  // When true, paid-off minimums do NOT cascade to the focus debt — each debt
-  // simply pays its own minCents independently. Used by "My Plan" mode where
-  // each debt is funded at its own Planned amount with no waterfall.
+  capMonths = 480,
   noWaterfall = false,
+  extras: PayoffExtras = {},
 ): SnowballResult {
   const extraFor = typeof monthlyExtra === "function" ? monthlyExtra : () => monthlyExtra;
   const unpaid = debts.filter((d) => d.balanceCents > 0);
-  const order = [...unpaid].sort((a, b) => a.balanceCents - b.balanceCents).map((d) => d.id);
+  const order = [...unpaid]
+    .sort((a, b) => a.balanceCents - b.balanceCents)
+    .map((d) => d.id);
   const byId = new Map(unpaid.map((d) => [d.id, d]));
-
-  // Working balances in cents as floats during simulation (interest isn't a
-  // whole number of cents); rounded only when recorded.
-  const balance = new Map<string, number>(unpaid.map((d) => [d.id, d.balanceCents]));
+  const balance = new Map(unpaid.map((d) => [d.id, d.balanceCents]));
   const paidOff = new Set<string>();
   const payoffMonth = new Map<string, string | null>(order.map((id) => [id, null]));
   const ledger = new Map<string, MonthlyEntry[]>(order.map((id) => [id, []]));
+  const totalInterestCents = new Map<string, number>(order.map((id) => [id, 0]));
+  const totalPaymentsCents = new Map<string, number>(order.map((id) => [id, 0]));
+  const negativeAmortization = new Set<string>();
 
   for (let i = 0; i < capMonths && paidOff.size < order.length; i++) {
     const month = addMonths(startMonth, i);
-    // Extra pool = configured extra (may vary by month). In waterfall mode,
-    // also add minimums freed from debts paid off in prior months.
-    let extraPool = extraFor(month);
+    let extraPool = Math.max(0, extraFor(month));
+    if (month === extras.oneTimeMonth) {
+      extraPool += Math.max(0, extras.oneTimeExtraCents ?? 0);
+    }
     if (!noWaterfall) {
       for (const id of order) {
-        if (paidOff.has(id)) extraPool += byId.get(id)!.minCents;
+        if (paidOff.has(id)) extraPool += Math.max(0, byId.get(id)!.minCents);
       }
     }
 
-    // First unpaid debt in the fixed order is this month's focus.
     const focusId = order.find((id) => !paidOff.has(id));
-
     for (const id of order) {
       if (paidOff.has(id)) continue;
       const debt = byId.get(id)!;
-      const bal = balance.get(id)!;
-      const accrued = bal * (1 + debt.apr / 100 / 12);
-      const scheduled = debt.minCents + (id === focusId ? extraPool : 0);
-      const payment = Math.min(scheduled, accrued);
-      const newBalance = Math.max(0, accrued - payment);
+      const startingBalance = balance.get(id)!;
+      const interest = Math.max(0, startingBalance * Math.max(0, debt.apr) / 100 / 12);
+      const amountDue = startingBalance + interest;
+      const scheduled = Math.max(0, debt.minCents) + (id === focusId ? extraPool : 0);
+      const payment = Math.min(scheduled, amountDue);
+      const principal = payment - interest;
+      const newBalance = Math.max(0, amountDue - payment);
 
-      ledger.get(id)!.push({
+      if (startingBalance > 0 && payment <= interest && debt.apr > 0) {
+        negativeAmortization.add(id);
+      }
+
+      const entry: MonthlyEntry = {
         month,
         paymentCents: Math.round(payment),
+        interestCents: Math.round(interest),
+        principalCents: Math.round(principal),
         balanceCents: Math.round(newBalance),
-      });
+      };
+      ledger.get(id)!.push(entry);
+      totalInterestCents.set(id, (totalInterestCents.get(id) ?? 0) + entry.interestCents);
+      totalPaymentsCents.set(id, (totalPaymentsCents.get(id) ?? 0) + entry.paymentCents);
       balance.set(id, newBalance);
 
       if (newBalance <= 0.5) {
@@ -91,5 +113,13 @@ export function projectSnowball(
     }
   }
 
-  return { order, payoffMonth, ledger };
+  return {
+    order,
+    payoffMonth,
+    ledger,
+    totalInterestCents,
+    totalPaymentsCents,
+    negativeAmortization,
+  };
 }
+

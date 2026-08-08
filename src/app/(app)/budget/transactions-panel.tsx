@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction } from "./actions";
 import { TransactionModal } from "./transaction-modal";
@@ -49,6 +50,8 @@ type Props = {
   initialKind?: CategoryKind;
   filterKind?: CategoryKind | null;
   onClearFilter?: () => void;
+  collapseStorageKey?: string;
+  initialCollapsed?: boolean;
 };
 
 export function TransactionsPanel({
@@ -68,11 +71,17 @@ export function TransactionsPanel({
   initialKind,
   filterKind = null,
   onClearFilter,
+  collapseStorageKey,
+  initialCollapsed = false,
 }: Props) {
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
   const [query, setQuery] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapseState, setCollapseState] = useSessionCollapse(
+    collapseStorageKey ?? `transactions-panel:${title}`,
+    () => ({ collapsed: initialCollapsed }),
+  );
+  const collapsed = collapseState.collapsed ?? initialCollapsed;
 
   const q = query.trim().toLowerCase();
   const kindFiltered = filterKind
@@ -120,7 +129,7 @@ export function TransactionsPanel({
       <div className={`flex items-center justify-between gap-2 ${collapsed ? "" : "border-b border-line"} px-4 py-3`}>
         <button
           type="button"
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => setCollapseState((state) => ({ ...state, collapsed: !collapsed }))}
           aria-expanded={!collapsed}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >

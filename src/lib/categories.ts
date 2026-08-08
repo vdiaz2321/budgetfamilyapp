@@ -19,6 +19,7 @@ export type CategoryRow = {
   name: string;
   kind: CategoryKind;
   sort_order: number;
+  is_system: boolean;
 };
 
 // Ensure the five canonical categories exist for a household. Idempotent.
@@ -28,10 +29,10 @@ export async function ensureCategories(
 ): Promise<CategoryRow[]> {
   const { data: existing } = await supabase
     .from("categories")
-    .select("id, name, kind, sort_order")
+    .select("id, name, kind, sort_order, is_system")
     .eq("household_id", householdId);
 
-  const byKind = new Map((existing ?? []).map((c) => [c.kind, c]));
+  const byKind = new Map((existing ?? []).filter((c) => c.is_system).map((c) => [c.kind, c]));
   const missing = CATEGORY_KINDS.filter((c) => !byKind.has(c.kind));
 
   if (missing.length) {
@@ -41,13 +42,14 @@ export async function ensureCategories(
         name: c.name,
         kind: c.kind,
         sort_order: c.sortOrder,
+        is_system: true,
       })),
     );
   }
 
   const { data: fresh } = await supabase
     .from("categories")
-    .select("id, name, kind, sort_order")
+    .select("id, name, kind, sort_order, is_system")
     .eq("household_id", householdId)
     .order("sort_order");
 

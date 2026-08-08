@@ -68,7 +68,7 @@ export default async function AccountsPage() {
       .order("name"),
     supabase
       .from("debts")
-      .select("subcategory_id, current_balance_cents")
+      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, tracking_enabled")
       .eq("household_id", household.id),
     supabase
       .from("subcategories")
@@ -111,14 +111,16 @@ export default async function AccountsPage() {
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
-  const budgetDebts: BudgetDebt[] = (debtRows ?? []).map((d) => ({
+  const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false).map((d) => ({
     subcategoryId: d.subcategory_id,
     name: subName.get(d.subcategory_id) ?? "Debt",
     balanceCents: d.current_balance_cents ?? 0,
   }));
 
   const cardDetailsByAccount = new Map<string, CardDetails>();
+  const debtByAccount = new Map((debtRows ?? []).filter((debt) => debt.account_id).map((debt) => [debt.account_id as string, debt]));
   for (const d of cardDetailRows ?? []) {
+    const payoff = debtByAccount.get(d.account_id);
     cardDetailsByAccount.set(d.account_id, {
       rewardsCategory: d.rewards_category === "travel" || d.rewards_category === "hotel" ? d.rewards_category : null,
       rewardsProgram: d.rewards_program ?? null,
@@ -143,6 +145,11 @@ export default async function AccountsPage() {
       debtSubcategoryId: d.debt_subcategory_id ?? null,
       cardUrl: d.card_url ?? null,
       benefitCadence: d.benefit_cadence ?? null,
+      payoffBalanceCents: payoff?.current_balance_cents ?? 0,
+      payoffMinimumCents: payoff?.min_payment_cents ?? 0,
+      payoffPlannedCents: payoff?.target_payment_cents ?? 0,
+      payoffApr: Number(payoff?.apr ?? 0),
+      payoffDueDay: payoff?.due_day ?? null,
     });
   }
 

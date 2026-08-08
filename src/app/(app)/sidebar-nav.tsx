@@ -38,7 +38,7 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
   },
   {
     href: "/snowball",
-    label: "Debt Snowball",
+    label: "Debt/Loans",
     icon: (
       <>
         <path d="M12 3v18M5 8l14 8M19 8L5 16" />

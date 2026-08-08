@@ -50,6 +50,7 @@ type Props = {
   isEven: boolean;
   isDragOver?: boolean;
   compact?: boolean;
+  detailsExpanded?: boolean;
   onSelect: () => void;
   onDragStart: () => void;
   autoPlanned?: boolean;
@@ -77,23 +78,28 @@ function DeleteButton({ subId }: { subId: string }) {
   );
 }
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, onSelect, onDragStart, autoPlanned }: Props) {
-  const isIncome = kind === "income";
+export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, detailsExpanded, onSelect, onDragStart, autoPlanned }: Props) {
   const remaining = row.plannedCents - row.spentCents;
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
   const plannedInputRef = useRef<HTMLInputElement>(null);
 
-  const pct =
+  const rawPct =
     row.plannedCents > 0
-      ? Math.min(100, Math.round((row.spentCents / row.plannedCents) * 100))
+      ? (row.spentCents / row.plannedCents) * 100
       : row.spentCents > 0
         ? 100
         : 0;
+  const pct = Math.min(100, Math.round(rawPct));
 
   // Overbudget also covers "no plan set but money went out" (spent > 0, planned 0)
-  // so the sparkline bar goes red instead of green when the row wasn't planned for.
-  const overBudget = !isIncome && row.spentCents > row.plannedCents;
+  // so the current-month progress bar goes red when the row wasn't planned for.
+  const overBudget = (kind === "bills" || kind === "expenses") && row.spentCents > row.plannedCents;
+  const displayPct = overBudget ? -Math.floor(rawPct) : pct;
+  const greenBarPct = overBudget
+    ? row.plannedCents <= 0 ? 0 : (row.plannedCents / row.spentCents) * 100
+    : pct;
+  const redBarPct = overBudget ? 100 - greenBarPct : 0;
 
   const baseClass = selected
     ? "bg-brand-soft/50"
@@ -109,14 +115,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       ? "font-bold text-positive"
       : "text-muted";
 
-  const barFillClass = overBudget
-    ? "bg-negative"
-    : pct >= 100
-      ? "bg-positive"
-      : kind === "income"
-        ? "bg-positive/70"
-        : "bg-warning";
-
   return (
     <li
       data-drop-key={`subcat:${row.subId}`}
@@ -124,8 +122,65 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
     >
       <DeleteButton subId={row.subId} />
 
-      {/* Line 1 mobile / Name cell desktop */}
-      <div className="flex min-w-0 items-center gap-1.5 pr-6 sm:col-span-4 sm:pr-0">
+      {/* Mobile row: the progress stripe spans Category + Planned only, so it
+          stops before the Spent value instead of stretching across the row. */}
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1.5 pr-6 sm:hidden">
+        <button
+          type="button"
+          onClick={onSelect}
+          className="min-w-0 truncate text-left text-sm text-foreground"
+        >
+          {row.name}
+        </button>
+
+        <div className="text-xs tabular-nums text-muted">
+          {autoPlanned ?? row.autoPlanned ? (
+            <span>{formatMoney(row.plannedCents, currency)}</span>
+          ) : (
+            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} currency={currency} />
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onSelect}
+          className={`text-xs font-semibold tabular-nums ${
+            remaining < 0 ? "text-negative" : actualColorClass(kind, row.spentCents)
+          }`}
+        >
+          / {formatMoney(row.spentCents, currency)}
+        </button>
+
+        <div
+          className="relative col-span-2 mt-1.5 h-1.5 w-full overflow-hidden rounded-sm bg-[#eee9df] dark:bg-white/10"
+          aria-label={`Current month progress: ${displayPct}%`}
+        >
+          {greenBarPct > 0 ? (
+            <span
+              className="absolute inset-y-0 left-0"
+              style={{
+                width: `${greenBarPct}%`,
+                backgroundImage: "repeating-linear-gradient(135deg, rgba(74, 222, 128, .85) 0 2px, rgba(187, 247, 208, .65) 2px 4px)",
+              }}
+              aria-hidden
+            />
+          ) : null}
+          {redBarPct > 0 ? (
+            <span
+              className="absolute inset-y-0"
+              style={{
+                left: `${greenBarPct}%`,
+                width: `${redBarPct}%`,
+                backgroundImage: "repeating-linear-gradient(135deg, rgba(248, 113, 113, .85) 0 2px, rgba(254, 202, 202, .7) 2px 4px)",
+              }}
+              aria-hidden
+            />
+          ) : null}
+        </div>
+      </div>
+
+      {/* Desktop name cell */}
+      <div className="hidden min-w-0 items-center gap-1.5 sm:col-span-4 sm:flex">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           title="Drag to reorder"
@@ -150,34 +205,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           ) : null}
         </button>
 
-        {/* Mobile-only trailing: planned is inline-editable, spent taps panel.
-            Spent flips to negative color when it exceeds planned (mirrors the
-            desktop Remaining column's warning cue). */}
-        <div className="flex shrink-0 items-baseline gap-0.5 text-xs tabular-nums sm:hidden">
-          {autoPlanned ?? row.autoPlanned ? (
-            <span className="text-muted tabular-nums">{formatMoney(row.plannedCents, currency)}</span>
-          ) : (
-            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} currency={currency} />
-          )}
-          <span className="text-muted">/ </span>
-          <button
-            type="button"
-            onClick={onSelect}
-            className={`font-semibold ${
-              remaining < 0 ? "text-negative" : actualColorClass(kind, row.spentCents)
-            }`}
-          >
-            {formatMoney(row.spentCents, currency)}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile-only progress bar */}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-brand-soft/40 sm:hidden">
-        <div
-          className={`h-full ${barFillClass} transition-all`}
-          style={{ width: `${pct}%` }}
-        />
       </div>
 
       {/* Desktop: Planned — read-only when auto-derived */}
@@ -204,15 +231,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         )}
       </div>
 
-      {/* Desktop: Remaining */}
-      <button
-        type="button"
-        onClick={onSelect}
-        className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${remainingColorClass(kind, remaining, row.plannedCents)}`}
-      >
-        {formatMoney(remaining, currency)}
-      </button>
-
       {/* Desktop: Actual — read-only, click opens the panel */}
       <button
         type="button"
@@ -223,14 +241,61 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         {formatMoney(row.spentCents, currency)}
       </button>
 
+      {/* Desktop: Remaining */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`hidden sm:col-span-2 sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${overBudget ? "sm:flex sm:justify-end" : "sm:block"}`}
+        title={overBudget ? `Overspent by ${formatMoney(Math.abs(remaining), currency)}` : undefined}
+      >
+        {overBudget ? (
+          <span className="inline-flex rounded-full bg-negative/15 px-2 py-0.5 text-foreground ring-1 ring-negative/15">
+            {formatMoney(remaining, currency)}
+          </span>
+        ) : (
+          <span className={remainingColorClass(kind, remaining, row.plannedCents)}>{formatMoney(remaining, currency)}</span>
+        )}
+      </button>
+
       {/* Desktop: % */}
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden sm:col-span-2 sm:block sm:text-center sm:text-[11px] sm:tabular-nums ${pctClass}`}
+        className={`hidden sm:col-span-2 sm:block sm:text-center sm:text-xs sm:font-semibold sm:tabular-nums ${pctClass}`}
       >
-        {pct}%
+        {displayPct}%
       </button>
+
+      {detailsExpanded ? (
+        <div className="hidden sm:col-span-6 sm:block sm:pb-0.5 sm:pl-6 sm:pr-2">
+          <div
+            className="relative h-1.5 w-full overflow-hidden rounded-sm bg-[#eee9df] dark:bg-white/10"
+            aria-label={`Current month progress: ${displayPct}%`}
+          >
+            {greenBarPct > 0 ? (
+              <span
+                className="absolute inset-y-0 left-0"
+                style={{
+                  width: `${greenBarPct}%`,
+                  backgroundImage: "repeating-linear-gradient(135deg, rgba(74, 222, 128, .85) 0 2px, rgba(187, 247, 208, .65) 2px 4px)",
+                }}
+                aria-hidden
+              />
+            ) : null}
+            {redBarPct > 0 ? (
+              <span
+                className="absolute inset-y-0"
+                style={{
+                  left: `${greenBarPct}%`,
+                  width: `${redBarPct}%`,
+                  backgroundImage: "repeating-linear-gradient(135deg, rgba(248, 113, 113, .85) 0 2px, rgba(254, 202, 202, .7) 2px 4px)",
+                }}
+                aria-hidden
+              />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -266,10 +331,9 @@ function MobilePlannedInput({
   }
 
   return (
-    <form ref={formRef} action={(fd) => start(() => upsertPlan(fd))} className="inline-flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+    <form ref={formRef} action={(fd) => start(() => upsertPlan(fd))} className="inline-flex items-center" onClick={(e) => e.stopPropagation()}>
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
-      <span className="pointer-events-none text-xs text-muted">{currencySymbol(currency)}</span>
       <input
         autoFocus
         key={initial}
@@ -277,14 +341,14 @@ function MobilePlannedInput({
         type="text"
         inputMode="decimal"
         autoComplete="off"
-        defaultValue={initial}
+        defaultValue={`${currencySymbol(currency)}${initial}`}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           setEditing(false);
-          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
+          if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
         style={{ fontSize: '16px' }}
-        className="w-16 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
+        className="w-20 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
       />
     </form>
   );
@@ -311,13 +375,22 @@ function PlannedInput({
     <form
       ref={formRef}
       action={(fd) => start(() => upsertPlan(fd))}
-      className="flex items-center justify-end gap-0.5"
+      className="group/planned relative flex items-center justify-end gap-1"
     >
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
-      <span className="pointer-events-none text-[11px] text-muted">
-        {currencySymbol(currency)}
-      </span>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.focus()}
+        aria-label="Use planned amount calculator"
+        title="Calculator: type an expression such as $1200 + 75 - 30"
+        className="hidden rounded p-0.5 text-muted/60 hover:bg-brand-soft hover:text-brand group-focus-within/planned:block group-hover/planned:block"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="4" y="2" width="16" height="20" rx="2" />
+          <path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01" />
+        </svg>
+      </button>
       <input
         key={initial}
         ref={inputRef}
@@ -325,12 +398,13 @@ function PlannedInput({
         type="text"
         inputMode="decimal"
         autoComplete="off"
-        defaultValue={initial}
+        defaultValue={`${currencySymbol(currency)}${initial}`}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
-          if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
+          if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
-        className={`w-20 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+        title="Type a value or calculation, for example $1200 + 75 - 30"
+        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />

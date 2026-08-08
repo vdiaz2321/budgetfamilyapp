@@ -13,6 +13,7 @@ export type CatMonthRow = {
 };
 
 export type CatMonthGroup = {
+  categoryId: string;
   kind: CategoryKind;
   label: string;
   rows: CatMonthRow[];
@@ -57,7 +58,7 @@ export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
           <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
             {groups.map((g) => (
               <Group
-                key={g.kind}
+                key={g.categoryId}
                 group={g}
                 monthLabels={monthLabels}
                 currency={currency}
@@ -90,13 +91,13 @@ function Group({
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
 }) {
-  const [collapse, setCollapse] = useSessionCollapse(`annual-category-kind-${group.kind}`, () => ({ open: false }));
+  const [collapse, setCollapse] = useSessionCollapse(`annual-category-${group.categoryId}`, () => ({ open: false }));
   const open = collapse.open;
   const headerRef = useRef<HTMLDivElement>(null);
 
   function syncHeader() {
     const body = [...(scrollersRef.current ?? [])].find(
-      (el) => el.closest(`[data-kind="${group.kind}"]`) !== null,
+      (el) => el.closest(`[data-category-id="${group.categoryId}"]`) !== null,
     );
     if (headerRef.current && body) {
       headerRef.current.scrollLeft = body.scrollLeft;
@@ -105,7 +106,7 @@ function Group({
 
   return (
     <div
-      data-kind={group.kind}
+      data-category-id={group.categoryId}
       className="overflow-hidden rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10"
     >
       <button

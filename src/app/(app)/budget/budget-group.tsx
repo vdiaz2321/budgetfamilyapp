@@ -3,7 +3,14 @@
 import { useRef, useState, useTransition } from "react";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
-import { addSubcategory, reorderSubcategories } from "./actions";
+import {
+  addSubcategory,
+  deleteCategoryGroup,
+  moveCategoryGroup,
+  renameCategoryGroup,
+  reorderSubcategories,
+} from "./actions";
+import { ModalShell } from "@/components/modal-shell";
 import { ACTUAL_LABEL, actualColorClass, BudgetRow, remainingColorClass } from "./budget-row";
 import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
@@ -17,6 +24,7 @@ type Props = {
   open: boolean;
   onToggle: () => void;
   compact?: boolean;
+  detailsExpanded?: boolean;
   onFilter?: (kind: CategoryKind) => void;
 };
 
@@ -29,6 +37,14 @@ const ADD_ACCENT: Record<CategoryKind, string> = {
   expenses: "bg-accent/10 text-accent hover:bg-accent/20",
   debt: "bg-negative/10 text-negative hover:bg-negative/20",
 };
+
+function progressLabel(kind: CategoryKind, spent: number, planned: number): string {
+  if (planned <= 0) return spent > 0 && (kind === "bills" || kind === "expenses") ? "-100%" : "0%";
+  const raw = (spent / planned) * 100;
+  return spent > planned && (kind === "bills" || kind === "expenses")
+    ? `-${Math.floor(raw)}%`
+    : `${Math.min(100, Math.round(raw * 10) / 10)}%`;
+}
 
 function usePointerReorder(_categoryId: string, rows: RowData[]) {
   const dragId = useRef<string | null>(null);
@@ -83,6 +99,7 @@ export function BudgetGroup({
   open,
   onToggle,
   compact,
+  detailsExpanded,
   onFilter,
 }: Props) {
   const [adding, setAdding] = useState(false);
@@ -114,14 +131,15 @@ export function BudgetGroup({
   const visiblePlannedTotal = visibleRows.reduce((s, r) => s + r.plannedCents, 0);
   const visibleSpentTotal = visibleRows.reduce((s, r) => s + r.spentCents, 0);
   const remainingTotal = visiblePlannedTotal - visibleSpentTotal;
+  const subtotalOverspent = (group.kind === "bills" || group.kind === "expenses") && remainingTotal < 0;
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="relative overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Consolidated header: chevron + dot + name + sources chip on the left;
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}
       {/* Mobile header — flex layout */}
-      <div className="flex items-center gap-2 px-4 py-2.5 sm:hidden">
+      <div className="flex items-center gap-2 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 sm:hidden">
         <button
           type="button"
           onClick={onToggle}
@@ -143,6 +161,7 @@ export function BudgetGroup({
             <span className="hidden sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
+        {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
         <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
           <span className="whitespace-nowrap text-xs tabular-nums">
             <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
@@ -164,7 +183,7 @@ export function BudgetGroup({
       </div>
 
       {/* Desktop header — 12-col grid aligned with rows below */}
-      <div className="hidden grid-cols-12 items-center gap-2 px-3 py-2.5 sm:grid">
+      <div className="hidden grid-cols-12 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 sm:grid">
         <div className="col-span-4 flex items-center gap-2.5">
           <button
             type="button"
@@ -187,6 +206,7 @@ export function BudgetGroup({
               <span className="sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
             </span>
           </button>
+          {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
         </div>
         <button
           type="button"
@@ -200,15 +220,15 @@ export function BudgetGroup({
             <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
           <span className="text-right">
-            <span className="hidden md:inline">Left: </span>
-            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-              {formatMoney(remainingTotal, currency)}
-            </span>
-          </span>
-          <span className="text-right">
             <span className="hidden lg:inline">{headerActualLabel}: </span>
             <span className={`font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
+            </span>
+          </span>
+          <span className="text-right">
+            <span className="hidden md:inline">Left: </span>
+            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+              {formatMoney(remainingTotal, currency)}
             </span>
           </span>
         </button>
@@ -250,11 +270,11 @@ export function BudgetGroup({
               </div>
 
               {/* Column-label strip — desktop only, must line up with BudgetRow */}
-              <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1" : "py-1.5"} text-[10px] font-semibold uppercase tracking-wider text-muted sm:grid`}>
+              <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1.5" : "py-2"} text-[11px] font-bold uppercase tracking-wide text-muted sm:grid`}>
                 <div className="col-span-5 pl-6 sm:col-span-4">{nameColumnLabel}</div>
                 <div className="col-span-2 text-right">Planned</div>
-                <div className="col-span-2 text-right">Remaining</div>
                 <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
+                <div className="col-span-2 text-right">Remaining</div>
                 <div className="col-span-2 text-center">Progress</div>
               </div>
 
@@ -272,9 +292,9 @@ export function BudgetGroup({
                       <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
                         <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
-                        <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
-                        <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{planned > 0 ? `${Math.min(100, Math.round((spent / planned) * 1000) / 10)}%` : "0%"}</div>
+                        <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
+                        <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{progressLabel(group.kind, spent, planned)}</div>
                       </div>
                       <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
                         <span className="truncate">{label}</span>
@@ -300,6 +320,7 @@ export function BudgetGroup({
                         isEven={(offset + i) % 2 === 1}
                         isDragOver={dragOverId === row.subId}
                         compact={compact}
+                        detailsExpanded={detailsExpanded}
                         onSelect={() => onSelectRow(row, group.kind)}
                         onDragStart={() => startDrag(row.subId)}
                       />
@@ -317,7 +338,8 @@ export function BudgetGroup({
                   </>
                 );
               })()}
-              {/* Mobile subtotal: label + spent/planned + remaining pill */}
+              {/* Mobile subtotal: keep the planned/spent pair, then name the
+                  remaining figure explicitly so its meaning is unambiguous. */}
               <div className="flex items-center gap-2 border-t border-line bg-background/50 px-3 py-2 sm:hidden">
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -326,14 +348,19 @@ export function BudgetGroup({
                   </svg>
                   <span className="truncate">Subtotal</span>
                 </div>
-                <div className="ml-auto text-right text-xs tabular-nums">
-                  <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
-                  <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
-                    {formatMoney(visibleSpentTotal, currency)}
-                  </span>
-                  <span className={`ml-2 font-semibold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-                    ({formatMoney(remainingTotal, currency)})
-                  </span>
+                <div className="ml-auto text-right tabular-nums">
+                  <div className="text-xs">
+                    <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
+                    <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+                      {formatMoney(visibleSpentTotal, currency)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-[10px]">
+                    <span className="font-medium text-muted">Remaining: </span>
+                    <span className={`inline-flex font-semibold ${subtotalOverspent ? "rounded-full bg-negative/15 px-1.5 py-0.5 text-foreground ring-1 ring-negative/15" : remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+                      {formatMoney(remainingTotal, currency)}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -349,14 +376,22 @@ export function BudgetGroup({
                 <div className="col-span-2 text-right text-xs font-semibold tabular-nums text-foreground">
                   {formatMoney(visiblePlannedTotal, currency)}
                 </div>
-                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-                  {formatMoney(remainingTotal, currency)}
-                </div>
                 <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(group.kind, visibleSpentTotal)}`}>
                   {formatMoney(visibleSpentTotal, currency)}
                 </div>
+                <div className="col-span-2 flex justify-end text-right text-xs font-semibold tabular-nums">
+                  {subtotalOverspent ? (
+                    <span className="inline-flex rounded-full bg-negative/15 px-2 py-0.5 text-foreground ring-1 ring-negative/15">
+                      {formatMoney(remainingTotal, currency)}
+                    </span>
+                  ) : (
+                    <span className={remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}>
+                      {formatMoney(remainingTotal, currency)}
+                    </span>
+                  )}
+                </div>
                 <div className={`col-span-2 text-center text-xs font-bold tabular-nums ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-                  {visiblePlannedTotal > 0 ? `${Math.min(100, Math.round((visibleSpentTotal / visiblePlannedTotal) * 1000) / 10)}%` : "0%"}
+                  {progressLabel(group.kind, visibleSpentTotal, visiblePlannedTotal)}
                 </div>
               </div>
             </>
@@ -372,6 +407,93 @@ export function BudgetGroup({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function CategoryGroupMenu({ group }: { group: GroupData }) {
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`Manage ${group.name}`}
+        title={`Manage ${group.name}`}
+        className="rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-muted hover:bg-surface/70 hover:text-foreground"
+      >
+        ···
+      </button>
+      {open ? (
+        <ModalShell title={`Manage ${group.name}`} onClose={() => setOpen(false)}>
+          <div className="space-y-4 p-5">
+            <form
+              action={(formData) =>
+                start(async () => {
+                  setError(null);
+                  const result = await renameCategoryGroup(formData);
+                  if (result.error) setError(result.error);
+                })
+              }
+              className="space-y-2"
+            >
+              <input type="hidden" name="id" value={group.categoryId} />
+              <label className="flex flex-col gap-1.5 text-sm">
+                <span className="font-semibold">Group name</span>
+                <div className="flex gap-2">
+                  <input
+                    name="name"
+                    required
+                    defaultValue={group.name}
+                    className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                  <button type="submit" disabled={pending} className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                    Save
+                  </button>
+                </div>
+              </label>
+            </form>
+
+            <div className="flex items-center gap-2 border-t border-line pt-4">
+              <span className="mr-auto text-sm font-semibold">Position</span>
+              {(["up", "down"] as const).map((direction) => (
+                <form key={direction} action={(formData) => start(() => moveCategoryGroup(formData))}>
+                  <input type="hidden" name="id" value={group.categoryId} />
+                  <input type="hidden" name="direction" value={direction} />
+                  <button type="submit" disabled={pending} className="rounded-lg px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-soft disabled:opacity-60">
+                    Move {direction}
+                  </button>
+                </form>
+              ))}
+            </div>
+
+            <form
+              action={(formData) =>
+                start(async () => {
+                  setError(null);
+                  const result = await deleteCategoryGroup(formData);
+                  if (result.error) setError(result.error);
+                  else setOpen(false);
+                })
+              }
+              className="flex items-center gap-3 border-t border-line pt-4"
+            >
+              <input type="hidden" name="id" value={group.categoryId} />
+              <p className="mr-auto text-xs text-muted">
+                {group.rows.length === 0 ? "Empty groups can be deleted." : `Move or delete ${group.rows.length} item${group.rows.length === 1 ? "" : "s"} first.`}
+              </p>
+              <button type="submit" disabled={pending || group.rows.length > 0} className="rounded-lg px-3 py-2 text-sm font-semibold text-negative hover:bg-negative/10 disabled:cursor-not-allowed disabled:opacity-40">
+                Delete group
+              </button>
+            </form>
+
+            {error ? <p className="rounded-lg bg-negative/10 px-3 py-2 text-sm text-negative">{error}</p> : null}
+          </div>
+        </ModalShell>
+      ) : null}
+    </>
   );
 }
 

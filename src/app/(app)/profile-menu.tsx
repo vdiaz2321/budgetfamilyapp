@@ -61,6 +61,7 @@ export function ProfileMenu({ userEmail, displayName, avatarUrl, compact = false
   const signOut = () =>
     start(async () => {
       const supabase = createClient();
+      window.sessionStorage.removeItem("debt-payments-open");
       await supabase.auth.signOut();
       router.replace("/login");
       router.refresh();

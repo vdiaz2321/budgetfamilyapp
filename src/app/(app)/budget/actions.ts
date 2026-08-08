@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { displayToCents } from "@/lib/money";
+import { displayToCents, moneyExpressionToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
 import { adjustBucketBalance } from "@/lib/buckets";
 import { adjustDebtBalance } from "@/lib/debts";
@@ -94,6 +94,124 @@ async function requireHousehold() {
   return { supabase, householdId: profile.household_id };
 }
 
+const CUSTOM_GROUP_KINDS = new Set(["bills", "expenses", "savings"]);
+
+export async function addCategoryGroup(formData: FormData): Promise<{ error?: string }> {
+  const { supabase, householdId } = await requireHousehold();
+  const name = String(formData.get("name") ?? "").trim();
+  const kind = String(formData.get("kind") ?? "");
+  if (!name) return { error: "Enter a group name." };
+  if (!CUSTOM_GROUP_KINDS.has(kind)) return { error: "Choose Bills, Expenses, or Savings." };
+
+  const { data: last } = await supabase
+    .from("categories")
+    .select("sort_order")
+    .eq("household_id", householdId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { error } = await supabase.from("categories").insert({
+    household_id: householdId,
+    name,
+    kind,
+    sort_order: (last?.sort_order ?? -1) + 1,
+    is_system: false,
+  });
+  if (error) {
+    if (error.code === "23505") return { error: "A group with that name already exists." };
+    return { error: "The group could not be created." };
+  }
+
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  return {};
+}
+
+export async function renameCategoryGroup(formData: FormData): Promise<{ error?: string }> {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  if (!id || !name) return { error: "Enter a group name." };
+
+  const { error } = await supabase
+    .from("categories")
+    .update({ name })
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .eq("is_system", false);
+  if (error?.code === "23505") return { error: "A group with that name already exists." };
+  if (error) return { error: "The group could not be renamed." };
+
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  return {};
+}
+
+export async function moveCategoryGroup(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const direction = String(formData.get("direction") ?? "");
+  if (!id || !["up", "down"].includes(direction)) return;
+
+  const { data: target } = await supabase
+    .from("categories")
+    .select("id, is_system")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!target || target.is_system) return;
+
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("household_id", householdId)
+    .order("sort_order")
+    .order("name");
+  const orderedIds = (categories ?? []).map((category) => category.id);
+  const index = orderedIds.indexOf(id);
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || nextIndex < 0 || nextIndex >= orderedIds.length) return;
+  [orderedIds[index], orderedIds[nextIndex]] = [orderedIds[nextIndex], orderedIds[index]];
+
+  await Promise.all(
+    orderedIds.map((categoryId, sortOrder) =>
+      supabase
+        .from("categories")
+        .update({ sort_order: sortOrder })
+        .eq("id", categoryId)
+        .eq("household_id", householdId),
+    ),
+  );
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+}
+
+export async function deleteCategoryGroup(formData: FormData): Promise<{ error?: string }> {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "Group not found." };
+
+  const { count } = await supabase
+    .from("subcategories")
+    .select("id", { count: "exact", head: true })
+    .eq("household_id", householdId)
+    .eq("category_id", id);
+  if ((count ?? 0) > 0) return { error: "Move or delete the group’s items first." };
+
+  const { error } = await supabase
+    .from("categories")
+    .delete()
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .eq("is_system", false);
+  if (error) return { error: "The group could not be deleted." };
+
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  return {};
+}
+
 // ---------- Planned amounts (per subcategory per month) ----------
 
 export async function upsertPlan(formData: FormData) {
@@ -102,7 +220,7 @@ export async function upsertPlan(formData: FormData) {
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01
   if (!subcategoryId || !month) return;
 
-  const plannedCents = displayToCents(String(formData.get("planned") ?? "0"));
+  const plannedCents = moneyExpressionToCents(String(formData.get("planned") ?? "0"));
 
   await supabase.from("budget_plans").upsert(
     {
@@ -164,6 +282,52 @@ export async function addSubcategory(formData: FormData) {
   });
 
   revalidatePath("/budget");
+}
+
+export async function moveSubcategoryToGroup(formData: FormData): Promise<{ error?: string }> {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  const targetCategoryId = String(formData.get("categoryId") ?? "");
+  if (!subcategoryId || !targetCategoryId) return { error: "Choose a category group." };
+
+  const { data: subcategory } = await supabase
+    .from("subcategories")
+    .select("category_id")
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!subcategory || subcategory.category_id === targetCategoryId) return {};
+
+  const { data: categories } = await supabase
+    .from("categories")
+    .select("id, kind")
+    .eq("household_id", householdId)
+    .in("id", [subcategory.category_id, targetCategoryId]);
+  const kindById = new Map((categories ?? []).map((category) => [category.id, category.kind]));
+  if (!kindById.has(targetCategoryId) || kindById.get(subcategory.category_id) !== kindById.get(targetCategoryId)) {
+    return { error: "Items can move only between groups of the same type." };
+  }
+
+  const { data: last } = await supabase
+    .from("subcategories")
+    .select("sort_order")
+    .eq("household_id", householdId)
+    .eq("category_id", targetCategoryId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from("subcategories")
+    .update({ category_id: targetCategoryId, sort_order: (last?.sort_order ?? -1) + 1 })
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId);
+  if (error?.code === "23505") return { error: "That group already has an item with this name." };
+  if (error) return { error: "The item could not be moved." };
+
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  return {};
 }
 
 // Creates one subcategory per non-empty pasted line, skipping names that
@@ -878,8 +1042,23 @@ export async function copyPlansFromPreviousMonth(
     .eq("household_id", householdId)
     .eq("month", prevMonth);
 
-  const rows = (prevPlans ?? [])
-    .filter((p) => (p.planned_cents ?? 0) > 0)
+  const positivePrevPlans = (prevPlans ?? []).filter((p) => (p.planned_cents ?? 0) > 0);
+  const candidateSubIds = positivePrevPlans.map((p) => p.subcategory_id as string);
+  let paidOffDebtSubIds = new Set<string>();
+  if (candidateSubIds.length > 0) {
+    const { data: paidOffDebts } = await supabase
+      .from("debts")
+      .select("subcategory_id")
+      .eq("household_id", householdId)
+      .in("subcategory_id", candidateSubIds)
+      .lte("current_balance_cents", 0);
+    paidOffDebtSubIds = new Set((paidOffDebts ?? []).map((debt) => debt.subcategory_id as string));
+  }
+
+  // Once a card or loan reaches $0, its old payment plan must not silently
+  // reappear in a later month or cross into a new calendar year.
+  const rows = positivePrevPlans
+    .filter((p) => !paidOffDebtSubIds.has(p.subcategory_id as string))
     .map((p) => ({
       household_id: householdId,
       month,

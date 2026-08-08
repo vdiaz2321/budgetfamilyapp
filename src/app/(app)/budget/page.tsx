@@ -44,11 +44,6 @@ export default async function BudgetPage({
 
   const categories = await ensureCategories(supabase, household.id);
 
-  // 6-month lookback window for the row sparklines (this month inclusive).
-  const [sparkYear, sparkMonth1] = month.firstOfMonth.split("-").map(Number);
-  const sparkStart = new Date(Date.UTC(sparkYear, sparkMonth1 - 1 - 5, 1));
-  const sparkStartKey = `${sparkStart.getUTCFullYear()}-${String(sparkStart.getUTCMonth() + 1).padStart(2, "0")}-01`;
-
   const [
     { data: subs },
     { data: plans },
@@ -59,7 +54,6 @@ export default async function BudgetPage({
     { data: payees },
     { data: accounts },
     { data: buckets },
-    { data: sparkRows },
     { data: subscriptions },
     { data: irregularBills },
   ] = await Promise.all([
@@ -115,14 +109,6 @@ export default async function BudgetPage({
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
-    // Last 6 months of actuals per subcategory, for the row sparklines.
-    supabase
-      .from("v_monthly_actuals")
-      .select("month, subcategory_id, actual_cents")
-      .eq("household_id", household.id)
-      .gte("month", sparkStartKey)
-      .lte("month", month.firstOfMonth)
-      .order("month"),
     // Managed items — power both the transaction Payee autocomplete's
     // auto-fill AND the Subscriptions & Irregular Bills section below Debt.
     supabase
@@ -156,13 +142,6 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, (s as { linked_account_id?: string | null }).linked_account_id ?? null]),
   );
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
-  const sparklineBySub = new Map<string, number[]>();
-  for (const s of sparkRows ?? []) {
-    const list = sparklineBySub.get(s.subcategory_id) ?? [];
-    list.push(s.actual_cents);
-    sparklineBySub.set(s.subcategory_id, list);
-  }
-
   // Auto-planned totals: subcategory rows linked to subscriptions or irregular
   // bills show a derived planned amount and are not directly editable.
   const currentMonthNum = month.key.slice(5); // "MM" from "YYYY-MM"
@@ -223,6 +202,7 @@ export default async function BudgetPage({
           : false;
         return {
           subId: s.id,
+          categoryId: s.category_id,
           name: s.name,
           dueDay: s.due_day,
           plannedCents,
@@ -232,7 +212,6 @@ export default async function BudgetPage({
           // can still get a manual planned amount without first setting a
           // "typical amount" on the source bill.
           autoPlanned: !hasManualPlan && isAutoSub,
-          sparkline: sparklineBySub.get(s.id) ?? [],
           isKids,
           savings:
             kind === "savings"
@@ -273,6 +252,8 @@ export default async function BudgetPage({
       categoryId: cat.id,
       kind,
       name: cat.name,
+      isSystem: cat.is_system,
+      sortOrder: cat.sort_order,
       rows,
       plannedTotal: countableRows.reduce((sum, r) => sum + r.plannedCents, 0),
       spentTotal: countableRows.reduce((sum, r) => sum + r.spentCents, 0),

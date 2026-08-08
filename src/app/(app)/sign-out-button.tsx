@@ -11,6 +11,7 @@ export function SignOutButton({ iconOnly = false }: { iconOnly?: boolean }) {
   const onClick = () =>
     start(async () => {
       const supabase = createClient();
+      window.sessionStorage.removeItem("debt-payments-open");
       await supabase.auth.signOut();
       router.replace("/login");
       router.refresh();

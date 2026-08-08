@@ -6,6 +6,7 @@ import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
   deleteSubcategory,
   deleteTransaction,
+  moveSubcategoryToGroup,
   updateSubcategory,
   upsertDebtAndPlan,
   upsertPlan,
@@ -30,6 +31,7 @@ type Props = {
   kind: CategoryKind;
   currency: string;
   monthKey: string; // YYYY-MM-01
+  groupOptions: { id: string; name: string; kind: CategoryKind }[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
   snowballExtraCents: number;
@@ -49,6 +51,7 @@ export function ItemPanel({
   kind,
   currency,
   monthKey,
+  groupOptions,
   debtAccountOptions,
   bucketOptions,
   snowballExtraCents,
@@ -125,6 +128,8 @@ export function ItemPanel({
         </div>
       </div>
 
+      <ItemGroupSelect row={row} kind={kind} groupOptions={groupOptions} />
+
       {(() => {
         const body =
           kind === "debt" && row.debt ? (
@@ -156,6 +161,52 @@ export function ItemPanel({
 
       <DeleteFooter subId={row.subId} onDeleted={onClose} onAddTransaction={onAddTransaction} />
     </div>
+  );
+}
+
+function ItemGroupSelect({
+  row,
+  kind,
+  groupOptions,
+}: {
+  row: RowData;
+  kind: CategoryKind;
+  groupOptions: { id: string; name: string; kind: CategoryKind }[];
+}) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const compatible = groupOptions.filter((group) => group.kind === kind);
+  if (compatible.length < 2) return null;
+
+  return (
+    <form
+      action={(formData) =>
+        start(async () => {
+          setError(null);
+          const result = await moveSubcategoryToGroup(formData);
+          if (result.error) setError(result.error);
+        })
+      }
+      className="border-b border-line bg-background/50 px-5 py-3"
+    >
+      <input type="hidden" name="subcategoryId" value={row.subId} />
+      <label className="flex items-center gap-3 text-xs">
+        <span className="font-semibold text-muted">Category group</span>
+        <select
+          key={row.categoryId}
+          name="categoryId"
+          defaultValue={row.categoryId}
+          disabled={pending}
+          onChange={(event) => event.currentTarget.form?.requestSubmit()}
+          className="ml-auto max-w-[12rem] rounded-lg bg-surface px-2.5 py-1.5 font-semibold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+        >
+          {compatible.map((group) => (
+            <option key={group.id} value={group.id}>{group.name}</option>
+          ))}
+        </select>
+      </label>
+      {error ? <p className="mt-2 text-xs text-negative">{error}</p> : null}
+    </form>
   );
 }
 
@@ -478,7 +529,7 @@ function DebtForm({
         {bucketOptions.length > 0 ? (
           <label className="block">
             <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-              Linked bucket
+              Payment savings bucket (optional)
             </span>
             <select
               key={d.linkedBucketId ?? "none"}
@@ -486,7 +537,7 @@ function DebtForm({
               defaultValue={d.linkedBucketId ?? ""}
               className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
-              <option value="">Not linked</option>
+              <option value="">None — pay directly from a bank account</option>
               {(() => {
                 const family = bucketOptions.filter((b) => !b.isKids);
                 const seen: string[] = [];
@@ -503,8 +554,7 @@ function DebtForm({
               })()}
             </select>
             <span className="mt-0.5 block text-[10px] text-muted">
-              Pick the sinking-fund bucket you use for this debt (e.g. &quot;Sapphire Payments&quot; on Amex Savings).
-              Payments logged here debit that bucket automatically.
+              Most debts should stay set to None. Choose a bucket only if you intentionally save debt-payment money inside that specific savings bucket; payments will debit it automatically.
             </span>
           </label>
         ) : null}

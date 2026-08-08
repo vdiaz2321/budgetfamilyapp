@@ -21,6 +21,7 @@ import {
   upsertCardDetails,
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
+import { DEBT_KINDS } from "../budget/types";
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // "2026-07-01" -> "Jul"
@@ -71,6 +72,11 @@ export type CardDetails = {
   debtSubcategoryId: string | null;
   cardUrl: string | null;
   benefitCadence: string | null;
+  payoffBalanceCents: number;
+  payoffMinimumCents: number;
+  payoffPlannedCents: number;
+  payoffApr: number;
+  payoffDueDay: number | null;
 };
 
 export type AccountData = {
@@ -896,6 +902,7 @@ function CreditCardPanel({
               <DetailRow label="Used / scheduled" value={d.benefitUsedOn} />
             ) : null}
             <DetailRow label="Closed" value={card.dateClosed ?? "—"} />
+            <DetailRow label="Payoff tracking" value={d?.isRevolvingDebt ? "Included in Debt/Loans" : "Off"} />
             <DetailRow
               label="Spending limit"
               value={d?.spendingLimitCents ? formatMoney(d.spendingLimitCents, currency) : "—"}
@@ -1089,6 +1096,32 @@ function EditCreditCardForm({
             <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
             <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
           </div>
+          <div className="space-y-3 rounded-lg border border-line bg-background/70 p-3 sm:col-span-2">
+            <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
+              <input
+                type="checkbox"
+                name="trackAsPayoffDebt"
+                defaultChecked={d?.isRevolvingDebt ?? false}
+                className="mt-0.5 h-4 w-4 rounded accent-[var(--brand)]"
+              />
+              <span>
+                Track this card as payoff debt
+                <span className="mt-0.5 block text-xs font-normal text-muted">
+                  Off by default. Rewards, free nights, subscriptions, and Pay Card continue working either way.
+                </span>
+              </span>
+            </label>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
+              <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
+              <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
+              <LabeledInput label="Minimum" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
+              <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
+              <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
+            </div>
+            <p className="text-[11px] text-muted">
+              Credit-card projection is an estimate. Record the statement&apos;s actual interest on Debt/Loans when a balance is carried.
+            </p>
+          </div>
           {detailsError ? (
             <p className="sm:col-span-2 text-sm font-medium text-negative">{detailsError}</p>
           ) : null}
@@ -1155,8 +1188,9 @@ function EditCreditCardForm({
 function LabeledInput({
   label,
   prefix,
+  hint,
   ...inputProps
-}: { label: string; prefix?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: { label: string; prefix?: string; hint?: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -1176,6 +1210,7 @@ function LabeledInput({
           className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       )}
+      {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
     </label>
   );
 }
@@ -2287,14 +2322,19 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           <input type="hidden" name="kind" value={section.fixedKind ?? kindKeys[0]} />
         )}
         {section.kidsGroup ? <input type="hidden" name="kidsAccount" value="on" /> : null}
-        {section.offerSubtype ? (
-          <LabeledInput
-            label={section.key === "loans" ? "Debt type" : "Investment type"}
-            name="subtype"
-            placeholder={section.key === "loans" ? "e.g. Mortgage, auto loan" : "e.g. Roth IRA, brokerage, 529"}
-          />
+        {section.offerSubtype ? section.key === "loans" ? (
+          <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+            Debt type
+            <select name="subtype" defaultValue="" required className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+              <option value="">Choose a debt type</option>
+              {DEBT_KINDS.map((debtKind) => <option key={debtKind.value} value={debtKind.value}>{debtKind.label}</option>)}
+            </select>
+            <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">Used to label and filter this debt in Budget and Debt/Loans.</span>
+          </label>
+        ) : (
+          <LabeledInput label="Investment type" name="subtype" placeholder="e.g. Roth IRA, brokerage, 529" />
         ) : null}
-        <LabeledInput label="Account name" name="name" placeholder="e.g. Fidelity Roth IRA" required autoFocus onChange={() => setError(null)} />
+        <LabeledInput label="Account name" name="name" placeholder={section.key === "loans" ? "e.g. Home Mortgage" : "e.g. Fidelity Roth IRA"} required autoFocus onChange={() => setError(null)} />
         <LabeledInput label="Institution" name="institution" placeholder="e.g. Fidelity, Amex, Navy Federal" />
         <LabeledInput label="Account holder(s)" name="holder" placeholder="e.g. Victor, Johana, or Joint" />
         <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
@@ -2313,6 +2353,22 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           inputMode="decimal"
           placeholder="0.00"
         />
+        {section.key === "loans" ? (
+          <>
+            <LabeledInput label="Original loan amount" name="originalBalance" type="number" step="0.01" placeholder="Optional" />
+            <LabeledInput label="Interest rate (APR %)" name="apr" type="number" step="0.001" placeholder="0.000" hint="Enter 0 if the balance is currently on a 0% promotional offer." />
+            <LabeledInput label="0% promotional APR ends" name="promoAprEndsOn" type="date" hint="Optional. This reminder appears with the debt details so you know when regular interest may begin." />
+            <LabeledInput label="Required minimum / month" name="minPayment" type="number" step="0.01" placeholder="0.00" />
+            <LabeledInput label="Budget payment planned / month" name="plannedPayment" type="number" step="0.01" placeholder="Defaults to the minimum payment" hint="How much you intend to pay in Budget. Leave blank to use the required minimum automatically." />
+            <LabeledInput label="Payment due day" name="dueDay" type="number" min="1" max="31" step="1" placeholder="1–31" />
+            <LabeledInput label="Loan start date" name="loanStartDate" type="date" />
+            <LabeledInput label="Original term (months)" name="termMonths" type="number" min="1" step="1" placeholder="360 for a 30-year mortgage" />
+            <LabeledInput label="Escrow / month" name="escrow" type="number" min="0" step="0.01" placeholder="Taxes + insurance, not payoff debt" />
+            <p className="rounded-md bg-brand-soft/45 px-3 py-2 text-xs text-muted sm:col-span-2">
+              This creates one linked item in Budget and Debt/Loans automatically. Escrow stays separate from principal and interest.
+            </p>
+          </>
+        ) : null}
         <div className="flex items-center gap-2 sm:col-span-2">
           <button
             type="submit"
@@ -2389,7 +2445,7 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
               <button type="button" onClick={() => setSectionKey(null)} className="text-sm font-medium text-brand hover:text-brand-strong">← Choose another type</button>
             </div>
             <AddAccountForm section={section} onDone={() => onClose()} />
-            {section.key !== "credit" ? (
+            {section.key !== "credit" && section.key !== "loans" ? (
               <p className="px-5 pb-5 text-xs leading-relaxed text-muted">
                 You can add buckets after the account is created. Account totals will always be calculated from their buckets.
               </p>

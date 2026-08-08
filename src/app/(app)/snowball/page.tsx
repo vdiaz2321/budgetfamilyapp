@@ -8,7 +8,7 @@ import type { AccountOption, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
 import { SnowballSettings } from "./snowball-settings";
 
-export const metadata = { title: "Debt Snowball · Capitall" };
+export const metadata = { title: "Debt/Loan Snowball · Capitall" };
 
 export default async function SnowballPage() {
   const supabase = await createClient();
@@ -43,8 +43,9 @@ export default async function SnowballPage() {
     await Promise.all([
       supabase
         .from("debts")
-        .select("subcategory_id, current_balance_cents, min_payment_cents, apr, due_day, paid_off_at")
-        .eq("household_id", household.id),
+        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, due_day, debt_kind, paid_off_at")
+        .eq("household_id", household.id)
+        .eq("tracking_enabled", true),
       supabase
         .from("subcategories")
         .select("id, name")
@@ -93,6 +94,7 @@ export default async function SnowballPage() {
   // Every logged debt payment (all-time), newest first.
   let debtTxData: TxData[] = [];
   let accountOptions: AccountOption[] = [];
+  const accountKindById = new Map<string, string>();
   if (debtSubIds.length) {
     const [{ data: txRows }, { data: payees }, { data: accounts }] = await Promise.all([
       supabase
@@ -119,6 +121,7 @@ export default async function SnowballPage() {
         name: a.name,
         group: a.kind === "credit_card" ? "Credit Cards" : "Banking",
       }));
+    for (const account of accounts ?? []) accountKindById.set(account.id, account.kind);
     debtTxData = (txRows ?? []).map((t) => ({
       id: t.id,
       date: t.occurred_on,
@@ -153,16 +156,6 @@ export default async function SnowballPage() {
     amountCents: p.amount_cents as number,
   }));
 
-  // Extra thrown at the focus debt in a given month = flat base + every period
-  // whose range covers that month.
-  const extraForMonth = (m: string) =>
-    manualExtraCents +
-    periods.reduce(
-      (sum, p) => (m >= p.startMonth && (p.endMonth == null || m <= p.endMonth) ? sum + p.amountCents : sum),
-      0,
-    );
-  const currentExtraCents = extraForMonth(month);
-
   // A paid-off debt keeps showing here through Dec 31 of the year it was
   // paid off, then drops off once the calendar rolls into the next year —
   // it never comes back on the Budget page either way.
@@ -173,15 +166,28 @@ export default async function SnowballPage() {
       return new Date(d.paid_off_at).getFullYear() >= currentYear;
     })
     .map((d) => ({
+      debtId: d.id,
       subId: d.subcategory_id,
       name: nameBySub.get(d.subcategory_id) ?? "Debt",
       balanceCents: d.current_balance_cents,
+      originalBalanceCents: Math.max(
+        d.original_balance_cents ?? 0,
+        d.current_balance_cents,
+        d.current_balance_cents + (paidBySub.get(d.subcategory_id) ?? 0),
+      ),
       minCents: d.min_payment_cents,
-      plannedCents: plannedBySub.get(d.subcategory_id) ?? 0,
+      plannedCents: Math.max(plannedBySub.get(d.subcategory_id) ?? 0, d.target_payment_cents ?? 0),
       paidCents: paidBySub.get(d.subcategory_id) ?? 0,
       paidThisMonthCents: paidThisMonthBySub.get(d.subcategory_id) ?? 0,
+      interestPaidCents: d.interest_paid_cents ?? 0,
+      escrowCents: d.escrow_cents ?? 0,
       apr: Number(d.apr),
       dueDay: d.due_day as number | null,
+      debtKind: d.debt_kind as string | null,
+      accountKind: d.account_id
+        ? d.debt_kind === "credit_card" || accountKindById.get(d.account_id) === "credit_card" ? "credit_card" : "debt_loan"
+        : "budget",
+      interestMethod: d.interest_method === "statement_manual" ? "statement_manual" : "monthly_estimate",
     }));
 
   // Card order: smallest balance first (used by both modes, purely for
@@ -210,7 +216,7 @@ export default async function SnowballPage() {
     })),
     0,     // no shared extra — each debt's own scheduled amount is baked into minCents above
     month,
-    60,    // capMonths
+    480,   // supports long-term mortgages
     true,  // noWaterfall: each debt pays independently, no cascade when one pays off
   );
 
@@ -236,7 +242,7 @@ export default async function SnowballPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Debt Snowball</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Debt/Loan Snowball</h1>
         <Link
           href="/budget"
           className="text-sm font-medium text-brand hover:text-brand-strong"
@@ -247,16 +253,24 @@ export default async function SnowballPage() {
 
       <SnowballBoard
         rows={ordered.map((r) => ({
+          debtId: r.debtId,
           subId: r.subId,
           name: r.name,
           balanceCents: r.balanceCents,
+          originalBalanceCents: r.originalBalanceCents,
           minCents: r.minCents,
           plannedCents: r.plannedCents,
           paidCents: r.paidCents,
           paidThisMonthCents: r.paidThisMonthCents,
+          interestPaidCents: r.interestPaidCents,
+          escrowCents: r.escrowCents,
           apr: r.apr,
           dueDay: r.dueDay,
+          debtKind: r.debtKind,
+          accountKind: r.accountKind as "credit_card" | "debt_loan" | "budget",
+          interestMethod: r.interestMethod as "monthly_estimate" | "statement_manual",
         }))}
+        startMonth={month}
         focusId={focusId}
         totalBalanceCents={totalBalance}
         totalMinCents={totalMin}
@@ -292,6 +306,8 @@ export default async function SnowballPage() {
           subtitle="All debt payments — search or edit"
           addLabel="Add Payment"
           initialKind="debt"
+          collapseStorageKey="debt-payments-open"
+          initialCollapsed
         />
       ) : null}
     </div>

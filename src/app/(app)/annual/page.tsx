@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { CATEGORY_KINDS, ensureCategories, type CategoryKind } from "@/lib/categories";
+import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { formatMoney } from "@/lib/money";
 import { MonthsTable } from "./months-table";
 import { YearPicker } from "./year-picker";
@@ -80,6 +80,7 @@ export default async function AnnualOverviewPage({
 
   const categories = await ensureCategories(supabase, household.id);
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
 
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-01`;
@@ -226,19 +227,17 @@ export default async function AnnualOverviewPage({
     for (const { kind } of COLUMNS) totals[kind] += r.values[kind];
   }
   const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
-  // Category by Months: each subcategory as a row (actuals only), grouped by
-  // kind. Only include rows/groups that have at least one non-zero actual.
-  const subIdsByKind = new Map<CategoryKind, string[]>();
+  // Category by Months: preserve each Budget group while its accounting kind
+  // continues to feed the five summary totals above.
+  const subIdsByCategory = new Map<string, string[]>();
   for (const s of subs ?? []) {
-    const kind = kindBySub.get(s.id);
-    if (!kind) continue;
-    const list = subIdsByKind.get(kind) ?? [];
+    const list = subIdsByCategory.get(s.category_id) ?? [];
     list.push(s.id);
-    subIdsByKind.set(kind, list);
+    subIdsByCategory.set(s.category_id, list);
   }
 
-  const categoryGroups: CatMonthGroup[] = CATEGORY_KINDS.flatMap((c) => {
-    const rows: CatMonthRow[] = (subIdsByKind.get(c.kind) ?? [])
+  const categoryGroups: CatMonthGroup[] = categories.flatMap((category) => {
+    const rows: CatMonthRow[] = (subIdsByCategory.get(category.id) ?? [])
       .map((subId) => {
         const months = actualBySub.get(subId) ?? Array(12).fill(0);
         const total = months.reduce((sum, v) => sum + v, 0);
@@ -252,7 +251,14 @@ export default async function AnnualOverviewPage({
     for (const r of rows) for (let i = 0; i < 12; i++) monthTotals[i] += r.months[i];
     const total = monthTotals.reduce((sum, v) => sum + v, 0);
 
-    return [{ kind: c.kind, label: c.name, rows, monthTotals, total }];
+    return [{
+      categoryId: category.id,
+      kind: category.kind,
+      label: category.name,
+      rows,
+      monthTotals,
+      total,
+    }];
   });
 
   const monthLabels = MONTH_NAMES.map((m) => m.slice(0, 3));
@@ -282,9 +288,19 @@ export default async function AnnualOverviewPage({
   for (const s of subs ?? []) {
     const kind = kindBySub.get(s.id);
     if (!kind) continue;
+    const category = categoryById.get(s.category_id);
+    if (!category) continue;
     const byYear = liveDepositsBySub.get(s.id);
     if (!byYear || byYear.size === 0) continue;
-    budgetSubsForLive.push({ id: s.id, name: s.name, kind, byYear });
+    budgetSubsForLive.push({
+      id: s.id,
+      name: s.name,
+      kind,
+      byYear,
+      groupLabel: category.name,
+      groupSort: category.sort_order,
+      customGroup: !category.is_system,
+    });
   }
 
   const accountById = new Map((investmentAccounts ?? []).map((a) => [a.id, a]));
@@ -431,6 +447,9 @@ type LiveBudgetSub = {
   kind: CategoryKind;
   isInvestment?: boolean;
   isKids?: boolean;
+  groupLabel?: string;
+  groupSort?: number;
+  customGroup?: boolean;
   byYear: Map<number, number>;
 };
 
@@ -473,13 +492,13 @@ function buildBreakdown(
 
   const FROM_BUDGET = "From Budget";
   const fromBudgetSort = 9_999_999; // ensure this synthetic group sinks to the end
-  const ensureFromBudgetGroup = (sheetKind: string) => {
+  const ensureBudgetGroup = (sheetKind: string, label = FROM_BUDGET, groupSort = fromBudgetSort) => {
     if (!kinds.has(sheetKind)) kinds.set(sheetKind, new Map());
     const groups = kinds.get(sheetKind)!;
-    if (!groups.has(FROM_BUDGET)) {
-      groups.set(FROM_BUDGET, { groupSort: fromBudgetSort, lines: new Map() });
+    if (!groups.has(label)) {
+      groups.set(label, { groupSort, lines: new Map() });
     }
-    return groups.get(FROM_BUDGET)!;
+    return groups.get(label)!;
   };
 
   const resolveSheetKind = (sub: LiveBudgetSub): BreakdownKind["kind"] => {
@@ -501,14 +520,19 @@ function buildBreakdown(
   for (const sub of liveBudgetSubs) {
     const sheetKind = resolveSheetKind(sub);
     const idx = lineIndex.get(sheetKind);
-    const match = idx?.get(sub.name.toLowerCase());
+    const match = sub.customGroup ? undefined : idx?.get(sub.name.toLowerCase());
     if (match) {
       for (const [y, v] of sub.byYear) {
         match.byYear[y] = (match.byYear[y] ?? 0) + v;
         match.total += v;
       }
     } else {
-      const group = ensureFromBudgetGroup(sheetKind);
+      const useNamedBudgetGroup = !sub.isKids && !sub.isInvestment && Boolean(sub.groupLabel);
+      const group = ensureBudgetGroup(
+        sheetKind,
+        useNamedBudgetGroup ? sub.groupLabel : FROM_BUDGET,
+        useNamedBudgetGroup ? sub.groupSort : fromBudgetSort,
+      );
       // If a Budget sub already produced a "From Budget" line in a prior call
       // (shouldn't happen here — this only runs once per request — but keep
       // the accumulate semantics for safety).

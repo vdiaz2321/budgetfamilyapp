@@ -29,11 +29,11 @@ export type BucketOption = {
 };
 
 export const DEBT_KINDS = [
-  { value: "credit_card", label: "Credit Card" },
-  { value: "auto", label: "Auto" },
+  { value: "credit_card", label: "Credit Card Debt" },
+  { value: "auto", label: "Auto Loan" },
   { value: "student_loan", label: "Student Loan" },
   { value: "bank_loan", label: "Bank Loan" },
-  { value: "real_estate_loan", label: "Real Estate Loan" },
+  { value: "real_estate_loan", label: "Mortgage / Real Estate Loan" },
   { value: "medical", label: "Medical" },
   { value: "family", label: "Family" },
   { value: "other", label: "Other" },
@@ -58,6 +58,7 @@ export type DebtDetail = {
 
 export type RowData = {
   subId: string;
+  categoryId: string;
   name: string;
   dueDay: number | null;
   plannedCents: number;
@@ -65,9 +66,6 @@ export type RowData = {
   // When true the planned amount is derived from subscriptions/irregular-bills
   // data and cannot be edited directly from the budget row.
   autoPlanned?: boolean;
-  // Up to the last 6 months of actuals for this subcategory, chronological,
-  // sparse (no zero-fill) — the row hides its sparkline below 2 points.
-  sparkline: number[];
   savings: SavingsDetail | null;
   debt: DebtDetail | null;
   // True when this row's linked bucket/account belongs to a kids-marked
@@ -79,6 +77,8 @@ export type GroupData = {
   categoryId: string;
   kind: CategoryKind;
   name: string;
+  isSystem: boolean;
+  sortOrder: number;
   rows: RowData[];
   plannedTotal: number;
   spentTotal: number;

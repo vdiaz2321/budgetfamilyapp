@@ -13,6 +13,7 @@ import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
 import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
 import { BulkAddSubcategories } from "./bulk-add-subcategories";
+import { AddCategoryGroupButton } from "./category-group-controls";
 import type {
   AccountOption,
   BucketOption,
@@ -80,6 +81,9 @@ export function BudgetBoard({
   creditCards,
 }: Props) {
   const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
+  const [rowFilter, setRowFilter] = useState<"all" | "overspent">("all");
+  const [rowDetail, setRowDetail] = useSessionCollapse("budget-row-detail", () => ({ expanded: false }));
+  const detailsExpanded = rowDetail.expanded === true;
   useEffect(() => {
     const saved = sessionStorage.getItem("budget-rail-tab");
     // Browser-only preference hydration; the initial state is SSR-safe.
@@ -106,6 +110,32 @@ export function BudgetBoard({
   );
   const toggleGroup = (categoryId: string) =>
     setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? false) }));
+
+  const isOverspentRow = (kind: CategoryKind, row: RowData) =>
+    (kind === "bills" || kind === "expenses") && row.spentCents > row.plannedCents;
+  const overspentCount = groups.reduce(
+    (count, group) => count + group.rows.filter((row) => isOverspentRow(group.kind, row)).length,
+    0,
+  );
+  const displayedGroups = rowFilter === "all"
+    ? groups
+    : groups
+        .map((group) => ({
+          ...group,
+          rows: group.rows.filter((row) => isOverspentRow(group.kind, row)),
+        }))
+        .filter((group) => group.rows.length > 0);
+  const showOverspent = () => {
+    setRowFilter("overspent");
+    setOpenGroups((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        groups
+          .filter((group) => group.rows.some((row) => isOverspentRow(group.kind, row)))
+          .map((group) => [group.categoryId, true]),
+      ),
+    }));
+  };
   // Set from the item panel's "+ Add transaction" button so it doesn't
   // require switching to the Log tab first. `true` = new; a TxData = edit
   // (opened by clicking a row in the panel's "This month" list).
@@ -172,6 +202,7 @@ export function BudgetBoard({
         kind={selected.kind}
         currency={currency}
         monthKey={month.firstOfMonth}
+        groupOptions={groups.map((group) => ({ id: group.categoryId, name: group.name, kind: group.kind }))}
         debtAccountOptions={debtAccountOptions}
         bucketOptions={bucketOptions}
         snowballExtraCents={snowballExtraCents}
@@ -206,7 +237,7 @@ export function BudgetBoard({
     // (stretch) cross-axis sizing makes the aside match the row height so
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="-m-4 min-h-[calc(100vh-4rem)] space-y-4 bg-[#f5f2ec] p-4 dark:bg-background md:-m-8 md:min-h-screen md:p-8">
       <div className="flex items-center justify-between">
         <MonthPicker monthKey={month.key} />
         <button
@@ -216,9 +247,9 @@ export function BudgetBoard({
           + Add
         </button>
       </div>
-      <div className="flex justify-center gap-6">
+      <div className="flex w-full gap-6">
       {/* Budget column */}
-      <div className="w-full min-w-0 max-w-[760px] space-y-4">
+      <div className="min-w-0 flex-1 space-y-4">
         {/* Left-to-budget hero card */}
         <div ref={heroRef}>
         <SummaryHeroCard
@@ -256,13 +287,68 @@ export function BudgetBoard({
             />
           )}
 
-          <div className="flex justify-end">
-            <BulkAddSubcategories groups={groups} />
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface/90 px-2.5 py-2 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+            <AddCategoryGroupButton />
+            <button
+              type="button"
+              onClick={() => setRowFilter("all")}
+              aria-pressed={rowFilter === "all"}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${rowFilter === "all" ? "bg-brand-soft text-brand" : "text-muted hover:bg-brand-soft/60"}`}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => rowFilter === "overspent" ? setRowFilter("all") : showOverspent()}
+              aria-pressed={rowFilter === "overspent"}
+              disabled={overspentCount === 0}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
+              </svg>
+              Overspent ({overspentCount})
+            </button>
+            <div className="ml-auto flex items-center gap-1">
+              <BulkAddSubcategories groups={groups} />
+              <div className="ml-1 hidden items-center rounded-lg bg-[#ebe8e1] p-0.5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/10 sm:flex">
+                <button
+                  type="button"
+                  onClick={() => setRowDetail((current) => ({ ...current, expanded: false }))}
+                  aria-label="Progress off"
+                  aria-pressed={!detailsExpanded}
+                  className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${!detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
+                    <rect x="2" y="2" width="10" height="3" rx="1" />
+                    <rect x="2" y="6" width="10" height="3" rx="1" />
+                    <rect x="2" y="10" width="10" height="3" rx="1" />
+                  </svg>
+                  <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    Progress off
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRowDetail((current) => ({ ...current, expanded: true }))}
+                  aria-label="Progress on"
+                  aria-pressed={detailsExpanded}
+                  className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                    <path d="M2 3h10M2 7h10M2 11h10" />
+                  </svg>
+                  <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    Progress on
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Groups */}
           <div className="space-y-3">
-            {groups.map((group) => (
+            {displayedGroups.map((group) => (
               <BudgetGroup
                 key={group.categoryId}
                 group={group}
@@ -273,6 +359,7 @@ export function BudgetBoard({
                 open={openGroups[group.categoryId] ?? false}
                 onToggle={() => toggleGroup(group.categoryId)}
                 compact={true}
+                detailsExpanded={detailsExpanded}
                 onFilter={(kind) => {
                   setTxFilterKind(kind);
                   setRailTab("transactions");
@@ -280,23 +367,33 @@ export function BudgetBoard({
               />
             ))}
 
-            <SubscriptionsSummaryCard
-              currency={currency}
-              subscriptions={subscriptions}
-              irregularBills={irregularBills}
-              creditCards={creditCards}
-              open={openGroups["subscriptions"] ?? false}
-              onToggle={() => toggleGroup("subscriptions")}
-            />
+            {rowFilter === "overspent" && displayedGroups.length === 0 ? (
+              <div className="rounded-xl bg-surface px-4 py-8 text-center text-sm text-muted shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+                Nothing is overspent this month.
+              </div>
+            ) : null}
 
-            <IrregularBillsSummaryCard
-              currency={currency}
-              subscriptions={subscriptions}
-              irregularBills={irregularBills}
-              creditCards={creditCards}
-              open={openGroups["irregularBills"] ?? false}
-              onToggle={() => toggleGroup("irregularBills")}
-            />
+            {rowFilter === "all" ? (
+              <>
+                <SubscriptionsSummaryCard
+                  currency={currency}
+                  subscriptions={subscriptions}
+                  irregularBills={irregularBills}
+                  creditCards={creditCards}
+                  open={openGroups["subscriptions"] ?? false}
+                  onToggle={() => toggleGroup("subscriptions")}
+                />
+
+                <IrregularBillsSummaryCard
+                  currency={currency}
+                  subscriptions={subscriptions}
+                  irregularBills={irregularBills}
+                  creditCards={creditCards}
+                  open={openGroups["irregularBills"] ?? false}
+                  onToggle={() => toggleGroup("irregularBills")}
+                />
+              </>
+            ) : null}
           </div>
         </div>
       </div>
