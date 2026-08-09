@@ -289,11 +289,6 @@ export function BudgetBoard({
           )}
 
           <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface/90 px-2.5 py-2 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-            {/* + Category Group drops to the last flex slot on mobile (below the filter chips),
-                stays inline first on desktop. */}
-            <div className="order-last w-full sm:order-none sm:w-auto">
-              <AddCategoryGroupButton />
-            </div>
             <button
               type="button"
               onClick={() => setRowFilter("all")}
@@ -314,6 +309,9 @@ export function BudgetBoard({
               </svg>
               Overspent ({overspentCount})
             </button>
+            <div className="w-auto">
+              <AddCategoryGroupButton />
+            </div>
             <div className="ml-auto flex items-center gap-1">
               <div className="hidden sm:block">
                 <BulkAddSubcategories groups={groups} />

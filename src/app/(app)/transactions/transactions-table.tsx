@@ -193,6 +193,7 @@ export function TransactionsTable({
   const outflowTotal = filtered
     .filter((t) => t.kind !== "income" && !t.isCardPayment)
     .reduce((sum, t) => sum + t.amountCents, 0);
+  const incomeLeft = q ? 0 : incomeTotal - outflowTotal;
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4">
@@ -401,8 +402,8 @@ export function TransactionsTable({
               <span className="tabular-nums font-semibold text-negative">{formatMoney(outflowTotal, currency)}</span>
               <span className="mx-1.5">–</span>
               <span className="font-bold text-foreground">Income Left</span>{" "}
-              <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-                {formatMoney(incomeTotal - outflowTotal, currency)}
+              <span className={`tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>
+                {formatMoney(incomeLeft, currency)}
               </span>
             </span>
             <span />
@@ -428,7 +429,7 @@ export function TransactionsTable({
         <div className="flex items-center justify-between gap-2 rounded-xl bg-positive/5 px-3 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Rc&apos;d:</span>{" "}<span className="tabular-nums text-positive font-semibold">{formatMoney(incomeTotal, currency)}</span></span>
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Spent:</span>{" "}<span className="tabular-nums text-negative font-semibold">{formatMoney(outflowTotal, currency)}</span></span>
-          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeTotal - outflowTotal, currency)}</span></span>
+          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeLeft, currency)}</span></span>
         </div>
       )}
 

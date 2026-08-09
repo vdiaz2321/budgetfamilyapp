@@ -18,7 +18,7 @@ export function AddCategoryGroupButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
+        className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand-soft sm:px-2.5 sm:text-xs"
       >
         <span aria-hidden>+</span>
         Category Group
