@@ -232,7 +232,7 @@ export function TransactionModal({
         />
       )}
 
-      <div className="flex max-h-[calc(100dvh-6rem)] w-full flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:max-h-[85vh] sm:rounded-2xl dark:ring-white/10">
+      <div className="flex h-full min-h-0 max-h-none w-full flex-1 flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl dark:ring-white/10">
         {/* Top action bar — Cancel + Clear + Save/Add — replaces the old title header
             so the primary actions stay reachable when the mobile keyboard is up. */}
         <div className={"flex items-center justify-between gap-2 border-b border-line px-3 py-2.5 " + HEADER_TINT[txType]}>
@@ -286,7 +286,7 @@ export function TransactionModal({
           </button>
         </div>
 
-        <div className="overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {/* Tabs: two-way (Income / Expense) when adding new; five-way when editing */}
           {isEdit ? (
             <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
@@ -356,7 +356,25 @@ export function TransactionModal({
               />
             )}
 
-            {/* Row 1: Amount | Date */}
+            <CurrencyConverter
+              onUse={(usdCents) => {
+                if (amountRef.current) {
+                  amountRef.current.value = centsToDisplay(usdCents);
+                }
+                setTotalCents(usdCents);
+              }}
+            />
+
+            {/* Merchant */}
+            <PayeeField
+              placeholder={PAYEE_PLACEHOLDER[txType]}
+              defaultValue={editTx?.payee ?? ""}
+              payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onMatch={handlePayeeMatch}
+            />
+
+            {/* Row 2: Amount | Date */}
             <div className="flex items-center gap-2">
               <AmountInput
                 inputRef={amountRef}
@@ -459,24 +477,6 @@ export function TransactionModal({
                 ))}
               </select>
             ) : null}
-
-            {/* Payee — sits below the primary rows so the on-screen keyboard doesn't hide splits/amount */}
-            <PayeeField
-              placeholder={PAYEE_PLACEHOLDER[txType]}
-              defaultValue={editTx?.payee ?? ""}
-              payeeOptions={payeeOptions}
-              payeeLineItems={payeeLineItems}
-              onMatch={handlePayeeMatch}
-            />
-
-            <CurrencyConverter
-              onUse={(usdCents) => {
-                if (amountRef.current) {
-                  amountRef.current.value = centsToDisplay(usdCents);
-                }
-                setTotalCents(usdCents);
-              }}
-            />
 
             {/* Note */}
             <input
@@ -845,45 +845,66 @@ function BudgetItemPicker({
 
       {/* Item list */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
-        {filtered.length === 0
+        {filtered.length === 0 && checked.size === 0
           ? <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
           : (() => {
-              const multiKind = new Set(filtered.map((o) => o.kind)).size > 1;
-              return CATEGORY_KINDS
-                .filter(({ kind }) => filtered.some((o) => o.kind === kind))
-                .map(({ kind, name }) => (
-                  <Fragment key={kind}>
-                    {multiKind && (
-                      <div className="border-b border-line/40 bg-background/40 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
-                        {name}
-                      </div>
+              const selectedItems = options.filter((o) => checked.has(o.id));
+              const unselectedFiltered = filtered.filter((o) => !checked.has(o.id));
+              const multiKind = new Set(unselectedFiltered.map((o) => o.kind)).size > 1;
+
+              const renderItem = (o: SubOption) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => toggle(o.id)}
+                  className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
+                >
+                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked.has(o.id) ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+                    {checked.has(o.id) && (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M2 6l3 3 5-5" />
+                      </svg>
                     )}
-                    {filtered.filter((o) => o.kind === kind).map((o) => (
-                      <button
-                        key={o.id}
-                        type="button"
-                        onClick={() => toggle(o.id)}
-                        className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
-                      >
-                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked.has(o.id) ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
-                          {checked.has(o.id) && (
-                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                              <path d="M2 6l3 3 5-5" />
-                            </svg>
-                          )}
-                        </span>
-                        <span className="flex-1 text-sm font-medium">{o.name}</span>
-                        {o.remainingCents != null && (
-                          <span className={`shrink-0 text-sm tabular-nums ${o.remainingCents < 0 ? "rounded-full bg-negative/25 px-2 py-0.5 font-medium text-foreground" : "text-muted"}`}>
-                            {o.remainingCents < 0
-                              ? "−$" + (Math.abs(o.remainingCents) / 100).toFixed(2)
-                              : "$" + (o.remainingCents / 100).toFixed(2)}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </Fragment>
-                ));
+                  </span>
+                  <span className="flex-1 text-sm font-medium">{o.name}</span>
+                  {o.remainingCents != null && (
+                    <span className={`shrink-0 text-sm tabular-nums ${o.remainingCents < 0 ? "rounded-full bg-negative/25 px-2 py-0.5 font-medium text-foreground" : "text-muted"}`}>
+                      {o.remainingCents < 0
+                        ? "−$" + (Math.abs(o.remainingCents) / 100).toFixed(2)
+                        : "$" + (o.remainingCents / 100).toFixed(2)}
+                    </span>
+                  )}
+                </button>
+              );
+
+              return (
+                <>
+                  {selectedItems.length > 0 && (
+                    <>
+                      <div className="border-b border-line/40 bg-brand-soft/40 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-brand">
+                        Selected
+                      </div>
+                      {selectedItems.map(renderItem)}
+                    </>
+                  )}
+                  {CATEGORY_KINDS
+                    .filter(({ kind }) => unselectedFiltered.some((o) => o.kind === kind))
+                    .map(({ kind, name }) => {
+                  const categoryItems = unselectedFiltered.filter((o) => o.kind === kind);
+
+                  return (
+                    <Fragment key={kind}>
+                      {multiKind && (
+                        <div className="border-b border-line/40 bg-background/40 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                          {name}
+                        </div>
+                      )}
+                      {categoryItems.map(renderItem)}
+                    </Fragment>
+                  );
+                    })}
+                </>
+              );
             })()
         }
       </div>

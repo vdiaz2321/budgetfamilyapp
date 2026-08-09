@@ -486,7 +486,7 @@ export function BudgetBoard({
 
       {/* Centered modal: header "+ Transaction" OR item panel "+ Transaction" */}
       {(showAddModal || (quickAdd && selected)) ? (
-        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+        <div className="fixed inset-0 z-50 flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
             <TransactionModal
               editTx={quickAdd && quickAdd !== true ? quickAdd : null}
