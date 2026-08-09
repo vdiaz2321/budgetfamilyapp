@@ -279,10 +279,12 @@ export function AccountsBoard({
   );
   const excludedSections = [...kidsSections, ...creditSections];
 
+  const visibleBudgetDebts = budgetDebts.filter((d) => d.balanceCents !== 0);
   const sectionKeys = [
     ...assetSections.map((s) => s.key),
     ...excludedSections.map((s) => s.key),
     ...debtAccountSections.map((s) => s.key),
+    ...(visibleBudgetDebts.length > 0 ? ["budget_debts"] : []),
   ];
   const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
     Object.fromEntries(SECTIONS.map((s) => [s.key, true])),
@@ -433,6 +435,15 @@ export function AccountsBoard({
             onToggleBuckets={toggleBuckets}
           />
         ))}
+
+        {visibleBudgetDebts.length > 0 ? (
+          <BudgetDebtsSection
+            debts={visibleBudgetDebts}
+            currency={currency}
+            open={!collapsed.budget_debts}
+            onToggle={() => toggleSection("budget_debts")}
+          />
+        ) : null}
       </div>
 
       {/* Kids Funding + Credit Cards sit apart — not counted in Net Worth. */}
@@ -1536,6 +1547,84 @@ function AccountSection({
               now. Open a row above and delete it here so it isn&apos;t counted twice.
             </p>
           ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function BudgetDebtsSection({
+  debts,
+  currency,
+  open,
+  onToggle,
+}: {
+  debts: BudgetDebt[];
+  currency: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const total = debts.reduce((sum, d) => sum + d.balanceCents, 0);
+  const kindLabel = (kind: string | null) =>
+    DEBT_KINDS.find((k) => k.value === kind)?.label ?? "Debt";
+  return (
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-2.5 text-left"
+          aria-expanded={open}
+        >
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />
+          <span className="truncate font-semibold">Debts</span>
+          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+            {debts.length}
+          </span>
+          <svg
+            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+        <span className={`text-right text-sm font-bold tabular-nums ${total > 0 ? "text-negative" : ""}`}>
+          {formatMoney(total, currency)}
+        </span>
+      </div>
+      {open ? (
+        <div className="border-t border-line">
+          <ul className="divide-y divide-line">
+            {debts.map((d) => {
+              const excluded = isDebtExcludedFromNetWorth(d.debtKind);
+              return (
+                <li
+                  key={d.subcategoryId}
+                  className="flex items-center justify-between gap-3 px-4 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{d.name}</p>
+                    <p className="truncate text-[11px] text-muted">
+                      {kindLabel(d.debtKind)}
+                      {excluded ? " · not in net worth" : ""}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 text-sm font-semibold tabular-nums ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>
+                    {formatMoney(d.balanceCents, currency)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="border-t border-line px-4 py-2 text-[11px] text-muted">
+            Managed in{" "}
+            <Link href="/budget" className="font-medium text-brand hover:text-brand-strong">
+              Budget → Debt
+            </Link>
+            . Edit balances there.
+          </p>
         </div>
       ) : null}
     </section>
