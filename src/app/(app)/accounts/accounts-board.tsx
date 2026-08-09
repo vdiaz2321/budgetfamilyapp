@@ -607,7 +607,7 @@ function CreditCardSection({
           </svg>
         </button>
         {!open && totalOwed > 0 ? (
-          <span className="text-sm font-semibold tabular-nums text-negative">
+          <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
             {formatMoney(totalOwed, currency)} owed
           </span>
         ) : null}

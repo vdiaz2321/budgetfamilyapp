@@ -110,7 +110,7 @@ export function SummaryPanel({ groups, currency }: Props) {
     if (kids.length === 0 || mine.length === 0) return null;
     const totalOf = (rs: typeof rows) => rs.reduce((s, r) => s + r.value, 0);
     return [
-      { label: "My Savings", rows: mine, subtotal: totalOf(mine) },
+      { label: "My Savings/Investments", rows: mine, subtotal: totalOf(mine) },
       { label: "Kids Funding", rows: kids, subtotal: totalOf(kids) },
     ];
   };

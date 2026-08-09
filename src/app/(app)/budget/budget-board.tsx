@@ -549,16 +549,16 @@ export function BudgetBoard({
             onClick={() => setSelected(null)}
             className="fixed inset-0 z-40 bg-black/30"
           />
-          <div className="fixed inset-x-0 bottom-0 z-50 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-background p-2 shadow-xl">
-            <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" />
+          <div className="fixed inset-x-0 top-0 z-[70] max-h-[85vh] overflow-y-auto overscroll-contain rounded-b-2xl bg-background shadow-xl">
             {railContent}
+            <div className="mx-auto mb-2 mt-2 h-1 w-10 rounded-full bg-line" />
           </div>
         </div>
       ) : null}
 
       {/* Centered modal: header "+ Transaction" OR item panel "+ Transaction" */}
       {(showAddModal || (quickAdd && selected) || duePayment) ? (
-        <div className="fixed inset-0 z-50 flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+        <div className="fixed inset-0 z-[70] flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
             <TransactionModal
               editTx={quickAdd && quickAdd !== true ? quickAdd : null}

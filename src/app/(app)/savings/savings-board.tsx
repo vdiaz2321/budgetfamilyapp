@@ -86,7 +86,7 @@ export function SavingsBoard({ cards, currency }: Props) {
                 className={`shrink-0 text-muted transition-transform duration-200 ${statsExpanded ? "rotate-90" : ""}`}>
                 <path d="M9 18l6-6-6-6" />
               </svg>
-              <h2 className="text-base font-semibold">Annual Performance Savings</h2>
+              <h2 className="text-base font-semibold">Annual Performance Savings/Investments</h2>
             </button>
             {statsExpanded && (
               <div className="divide-y divide-line/60">
@@ -126,7 +126,7 @@ export function SavingsBoard({ cards, currency }: Props) {
                 className={`shrink-0 text-muted transition-transform duration-200 ${cardsExpanded ? "rotate-90" : ""}`}>
                 <path d="M9 18l6-6-6-6" />
               </svg>
-              <h2 className="text-base font-semibold">Total Annual Savings/Goals</h2>
+              <h2 className="text-base font-semibold">Total Annual Savings/Investment Goals</h2>
               <span className="ml-auto text-xs text-muted">{cards.length} goal{cards.length === 1 ? "" : "s"}</span>
             </button>
 

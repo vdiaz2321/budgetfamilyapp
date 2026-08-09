@@ -331,7 +331,7 @@ export function BudgetGroup({
                 if (!splitSavings) return renderRows(visibleRows, 0);
                 return (
                   <>
-                    {subtotalRow("My Savings", mineRows)}
+                    {subtotalRow("My Savings/Investments", mineRows)}
                     {renderRows(mineRows, 0)}
                     {subtotalRow("Kids Funding", kidsRows)}
                     {renderRows(kidsRows, mineRows.length)}

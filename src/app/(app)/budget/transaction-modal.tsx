@@ -357,9 +357,13 @@ export function TransactionModal({
                 options={options}
                 leftToSplit={leftToSplit}
                 onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
-                onAmountChange={(subId, cents) =>
-                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp))
-                }
+                onAmountChange={(subId, cents) => {
+                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp));
+                  if (splits.length === 1) {
+                    setTotalCents(cents);
+                    if (amountRef.current) amountRef.current.value = cents > 0 ? (cents / 100).toFixed(2) : "";
+                  }
+                }}
                 onAddSplit={() => setPickerOpen(true)}
               />
             )}
@@ -725,7 +729,7 @@ function AccountPicker({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[60] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:hidden">
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:hidden">
       <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
         <button type="button" onClick={onClose} className="text-sm font-medium text-muted hover:text-foreground">
           Cancel
@@ -746,7 +750,7 @@ function AccountPicker({
                   key={account.id}
                   type="button"
                   onClick={() => onSelect(account.id)}
-                  className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3 text-left text-sm active:bg-brand-soft/40"
+                  className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left text-base active:bg-brand-soft/40"
                 >
                   <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
                     {selected ? (
@@ -800,7 +804,7 @@ function BudgetItemPicker({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:rounded-t-2xl">

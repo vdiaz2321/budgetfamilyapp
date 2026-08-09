@@ -197,7 +197,7 @@ export function TransactionsTable({
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4">
-      <div className="sticky top-0 z-20 -mx-1 space-y-4 bg-background/95 px-1 py-3 backdrop-blur-sm">
+      <div className="sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 py-3 backdrop-blur-sm md:mx-0 md:px-0">
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">
@@ -524,7 +524,7 @@ export function TransactionsTable({
       </section>
 
       {modal ? (
-        <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+        <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
             <TransactionModal
               editTx={modal === "new" ? null : modal}

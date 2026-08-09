@@ -134,6 +134,13 @@ export function ItemPanel({
         </div>
       </div>
 
+      <DeleteFooter
+        subId={row.subId}
+        onDeleted={onClose}
+        onAddTransaction={onAddTransaction}
+        saveFormId={`plan-form-${row.subId}`}
+      />
+
       <ItemGroupSelect row={row} kind={kind} groupOptions={groupOptions} />
 
       {(() => {
@@ -176,13 +183,6 @@ export function ItemPanel({
         currency={currency}
         accountNameById={accountNameById}
         onEdit={onEditTransaction}
-      />
-
-      <DeleteFooter
-        subId={row.subId}
-        onDeleted={onClose}
-        onAddTransaction={onAddTransaction}
-        saveFormId={`plan-form-${row.subId}`}
       />
     </div>
   );
@@ -297,7 +297,7 @@ function DeleteFooter({
 }) {
   const [pending, start] = useTransition();
   return (
-    <div className="flex items-center gap-2 border-t border-line/70 px-5 py-2">
+    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line/70 bg-surface px-5 py-2">
       <button
         type="button"
         onClick={onAddTransaction}

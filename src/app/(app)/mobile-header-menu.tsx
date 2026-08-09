@@ -19,10 +19,17 @@ const THEME_ORDER: ThemeMode[] = ["light", "dark", "system"];
 export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [atTop, setAtTop] = useState(true);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [themeMounted, setThemeMounted] = useState(false);
   const [pending, start] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onScroll = () => setAtTop(window.scrollY < 56);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -66,7 +73,7 @@ export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
     });
 
   return (
-    <div ref={rootRef} className="pointer-events-auto relative md:hidden">
+    <div ref={rootRef} className={`pointer-events-auto relative md:hidden transition-opacity duration-200 ${!atTop && !open ? "opacity-0 pointer-events-none" : "opacity-100"}`}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
