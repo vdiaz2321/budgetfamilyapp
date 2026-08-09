@@ -11,6 +11,7 @@ import { ItemPanel } from "./item-panel";
 import { TransactionsPanel } from "./transactions-panel";
 import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
+import { DueThisWeekPanel } from "./due-this-week-panel";
 import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
 import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import { AddCategoryGroupButton } from "./category-group-controls";
@@ -18,6 +19,7 @@ import type {
   AccountOption,
   BucketOption,
   BucketsByAccount,
+  DueItem,
   GroupData,
   MonthNav,
   PayeeLineItem,
@@ -104,6 +106,7 @@ export function BudgetBoard({
   const [heroState, setHeroState] = useSessionCollapse("budget-hero", () => ({ open: false }));
   const heroExpanded = heroState.open === true;
   const toggleHero = () => setHeroState((s) => ({ ...s, open: !s.open }));
+  const [dueCardState, setDueCardState] = useSessionCollapse("budget-due-this-week-mobile", () => ({ open: false }));
 
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
     Object.fromEntries([...groups.map((g) => [g.categoryId, false]), ["subscriptions", false], ["irregularBills", false]]),
@@ -144,10 +147,64 @@ export function BudgetBoard({
   // button — no preselected item/kind, renders as a centered overlay so it
   // works with or without a selected budget row.
   const [showAddModal, setShowAddModal] = useState(false);
+  const [duePayment, setDuePayment] = useState<DueItem | null>(null);
 
   // Precompute account_id → name so the item panel's tx list can render each
   // row's account without re-scanning accountOptions on every entry.
   const accountNameById = new Map(accountOptions.map((a) => [a.id, a.name]));
+  const paymentAccountOptions = accountOptions.filter((a) => a.group === "Banking" || a.group === "Credit Cards");
+
+  // The card is deliberately based on the real current week, not a future or
+  // historical month that happens to be open in the picker.
+  const today = new Date();
+  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  const isCurrentMonth = month.key === currentMonthKey;
+  const dueThisWeek = (() => {
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    if (!isCurrentMonth) return [] as DueItem[];
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    const inWindow = (value: Date) => value >= start && value <= end;
+    const budgetItems = groups
+      .filter((group) => group.kind === "bills")
+      .flatMap((group) => group.rows)
+      .flatMap((row) => {
+        if (!row.dueDay) return [];
+        const due = new Date(start.getFullYear(), start.getMonth(), Math.min(row.dueDay, new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()));
+        const amountCents = Math.max(0, row.plannedCents - row.spentCents);
+        if (!inWindow(due) || amountCents <= 0) return [];
+        const dueDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
+        return [{
+          id: row.subId,
+          name: row.name,
+          kind: "bills" as const,
+          subId: row.subId,
+          dueDate,
+          amountCents,
+          accountId: row.paymentAccountId,
+          accountName: row.paymentAccountId ? accountNameById.get(row.paymentAccountId) ?? null : null,
+          source: "budget" as const,
+        }];
+      });
+    const subscriptionItems = subscriptions.flatMap((subscription) => {
+      if (!subscription.isActive || !subscription.nextRenewalDate || !subscription.subcategoryId) return [];
+      const due = new Date(`${subscription.nextRenewalDate}T00:00:00`);
+      if (!inWindow(due)) return [];
+      return [{
+        id: subscription.id,
+        name: subscription.name,
+        kind: "bills" as const,
+        subId: subscription.subcategoryId,
+        dueDate: subscription.nextRenewalDate,
+        amountCents: subscription.amountCents,
+        accountId: subscription.accountId,
+        accountName: subscription.accountId ? accountNameById.get(subscription.accountId) ?? null : null,
+        source: "subscription" as const,
+      }];
+    });
+    return [...budgetItems, ...subscriptionItems].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.name.localeCompare(b.name));
+  })();
 
   // Planned to Budget = (income planned − outflow planned) + any rolled-in
   // leftover. The rollover is real spendable money, so it always adds to the
@@ -204,6 +261,7 @@ export function BudgetBoard({
         monthKey={month.firstOfMonth}
         subOptions={subOptions}
         groupOptions={groups.map((group) => ({ id: group.categoryId, name: group.name, kind: group.kind }))}
+        paymentAccountOptions={paymentAccountOptions}
         debtAccountOptions={debtAccountOptions}
         bucketOptions={bucketOptions}
         snowballExtraCents={snowballExtraCents}
@@ -239,13 +297,13 @@ export function BudgetBoard({
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
     <div className="-m-4 min-h-[calc(100vh-4rem)] space-y-4 bg-background p-4 md:-m-8 md:min-h-screen md:p-8">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pr-8 md:pr-0">
         <MonthPicker monthKey={month.key} />
         <button
           onClick={() => setShowAddModal(true)}
-          className="md:hidden rounded-lg bg-brand px-3 py-1.5 text-sm font-semibold text-white hover:bg-brand-strong"
+          className="md:hidden h-9 rounded-lg bg-brand px-2.5 text-sm font-semibold text-white hover:bg-brand-strong"
         >
-          + Transaction
+          + Add
         </button>
       </div>
       <div className="flex w-full gap-6">
@@ -270,6 +328,18 @@ export function BudgetBoard({
           expanded={heroExpanded}
           onToggle={toggleHero}
         />
+        </div>
+
+        <div className="lg:hidden">
+          <DueThisWeekPanel
+            items={dueThisWeek}
+            currency={currency}
+            isCurrentMonth={isCurrentMonth}
+            onPay={setDuePayment}
+            collapsible
+            open={dueCardState.open === true}
+            onToggle={() => setDueCardState((state) => ({ ...state, open: !state.open }))}
+          />
         </div>
 
         {/* Wrapping this in `relative` gives the sticky footer bar below a
@@ -309,7 +379,7 @@ export function BudgetBoard({
               </svg>
               Overspent ({overspentCount})
             </button>
-            <div className="w-auto">
+            <div className="ml-auto w-auto">
               <AddCategoryGroupButton />
             </div>
             <div className="ml-auto flex items-center gap-1">
@@ -444,7 +514,10 @@ export function BudgetBoard({
               </div>
 
               {railTab === "summary" ? (
-                <SummaryPanel groups={groups} currency={currency} />
+                <>
+                  <SummaryPanel groups={groups} currency={currency} />
+                  <DueThisWeekPanel items={dueThisWeek} currency={currency} isCurrentMonth={isCurrentMonth} onPay={setDuePayment} />
+                </>
               ) : (
                 <TransactionsPanel
                   monthKey={month.key}
@@ -483,7 +556,7 @@ export function BudgetBoard({
       ) : null}
 
       {/* Centered modal: header "+ Transaction" OR item panel "+ Transaction" */}
-      {(showAddModal || (quickAdd && selected)) ? (
+      {(showAddModal || (quickAdd && selected) || duePayment) ? (
         <div className="fixed inset-0 z-50 flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
             <TransactionModal
@@ -495,9 +568,13 @@ export function BudgetBoard({
               bucketsByAccount={bucketsByAccount}
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}
-              initialKind={quickAdd && selected ? selected.kind : undefined}
-              initialSubId={quickAdd && selected ? selected.subId : undefined}
-              onClose={() => { setShowAddModal(false); setQuickAdd(false); }}
+              initialKind={duePayment?.kind ?? (quickAdd && selected ? selected.kind : undefined)}
+              initialSubId={duePayment?.subId ?? (quickAdd && selected ? selected.subId : undefined)}
+              initialAccountId={duePayment?.accountId ?? undefined}
+              initialAmountCents={duePayment?.amountCents}
+              initialPayee={duePayment?.name}
+              initialDate={duePayment?.dueDate}
+              onClose={() => { setShowAddModal(false); setQuickAdd(false); setDuePayment(null); }}
             />
           </div>
         </div>
@@ -708,22 +785,22 @@ function SummaryHeroCard({
           <div className="min-w-0 flex-1">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px] tabular-nums">
               <span>
-                <span className="font-semibold text-foreground">Planned Budget: </span>
-                <span className="text-foreground">{formatMoney(outflowPlanned, currency)}</span>
+                <span className="block font-semibold text-foreground">Planned Budget:</span>
+                <span className="block text-foreground">{formatMoney(outflowPlanned, currency)}</span>
               </span>
               <span className="text-right">
-                <span className="font-semibold text-foreground">Income Planned: </span>
-                <span className="text-positive">{formatMoney(incomePlanned, currency)}</span>
+                <span className="block font-semibold text-foreground">Income Planned:</span>
+                <span className="block text-positive">{formatMoney(incomePlanned, currency)}</span>
               </span>
               <span>
-                <span className="font-semibold text-foreground">Left to Budget: </span>
-                <span className={displayLeft < 0 ? "text-negative" : "text-foreground"}>
+                <span className="block font-semibold text-foreground">Left to Budget:</span>
+                <span className={`block ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
                   {formatMoney(displayLeft, currency)}
                 </span>
               </span>
               <span className="text-right">
-                <span className="font-semibold text-foreground">Actual Spent: </span>
-                <span className={toneClasses.text}>{formatMoney(actualSpent, currency)}</span>
+                <span className="block font-semibold text-foreground">Actual Spent:</span>
+                <span className={`block ${toneClasses.text}`}>{formatMoney(actualSpent, currency)}</span>
               </span>
             </div>
             {rolloverCents > 0 ? (

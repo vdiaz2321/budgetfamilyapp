@@ -14,8 +14,8 @@ const THEME_LABEL: Record<ThemeMode, string> = {
 
 const THEME_ORDER: ThemeMode[] = ["light", "dark", "system"];
 
-// 3-dot menu that lives in the mobile top bar, mirroring the desktop
-// ProfileMenu: theme, account settings, household & sharing, sign out.
+// 3-dot menu that lives in the compact mobile menu strip, mirroring the
+// desktop ProfileMenu: theme, account settings, household & sharing, sign out.
 export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -66,16 +66,16 @@ export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
     });
 
   return (
-    <div ref={rootRef} className="relative ml-auto md:hidden">
+    <div ref={rootRef} className="pointer-events-auto relative md:hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Settings"
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white transition hover:bg-white/10"
+        className="flex h-7 w-7 items-center justify-center text-foreground transition hover:text-brand"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <circle cx="5" cy="12" r="2" />
           <circle cx="12" cy="12" r="2" />
           <circle cx="19" cy="12" r="2" />

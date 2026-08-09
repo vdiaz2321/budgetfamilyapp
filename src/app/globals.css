@@ -41,15 +41,17 @@
 }
 
 :root[data-theme="dark"] {
-  --background: #0f1115; /* near-black canvas */
-  --surface: #18181b; /* zinc-900 cards */
-  --foreground: #ededed;
-  --muted: #a1a1aa; /* zinc-400 */
-  --border: #27272a; /* zinc-800 */
+  /* A calmer midnight navy, inspired by the softer YNAB-style dark canvas.
+     It preserves comfortable contrast without feeling like pure black. */
+  --background: #171a30;
+  --surface: #222640;
+  --foreground: #f4f6fb;
+  --muted: #b6bfd3;
+  --border: #373d59;
 
-  --brand: #9498d0; /* muted indigo — the old #818cf8 read as neon on dark */
-  --brand-strong: #7c82c0;
-  --brand-soft: #1e1b4b; /* indigo-950 */
+  --brand: #98a2ff;
+  --brand-strong: #7f89e8;
+  --brand-soft: #343963;
   --accent: #d4a05a; /* muted amber */
   --positive: #6db988; /* soft sage — dims the "Christmas-lights" green */
   --negative: #c87878; /* soft rose — dims the harsh red text/borders */
@@ -71,7 +73,7 @@
   --cat-orange: #d69368;
   --cat-lime: #a8c078;
 
-  --sidebar: #0B0E1B;
+  --sidebar: #1a1d36;
 }
 
 @theme inline {

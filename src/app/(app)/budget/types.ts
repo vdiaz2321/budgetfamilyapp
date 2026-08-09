@@ -61,6 +61,9 @@ export type RowData = {
   categoryId: string;
   name: string;
   dueDay: number | null;
+  // Optional account used when the item is manually marked Paid from the
+  // upcoming-due card. This is deliberately separate from a Savings link.
+  paymentAccountId: string | null;
   plannedCents: number;
   spentCents: number;
   // When true the planned amount is derived from subscriptions/irregular-bills
@@ -130,6 +133,20 @@ export type PayeeLineItem = {
   amountCents: number | null; // null for irregular bills (only a hint exists)
   subcategoryId: string | null;
   kind: "subscription" | "irregular";
+};
+
+// A bill or subscription that is due soon. Pressing Paid opens the normal
+// transaction form; it never creates a transaction by itself.
+export type DueItem = {
+  id: string;
+  name: string;
+  kind: CategoryKind;
+  subId: string;
+  dueDate: string; // YYYY-MM-DD
+  amountCents: number;
+  accountId: string | null;
+  accountName: string | null;
+  source: "budget" | "subscription";
 };
 
 // A transaction shown in the right-rail Log and the Transactions page.

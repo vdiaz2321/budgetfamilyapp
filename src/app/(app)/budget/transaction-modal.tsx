@@ -72,6 +72,10 @@ export function TransactionModal({
   payeeLineItems = [],
   initialKind,
   initialSubId,
+  initialAccountId,
+  initialAmountCents,
+  initialPayee,
+  initialDate,
   onClose,
 }: {
   editTx: TxData | null;
@@ -84,12 +88,16 @@ export function TransactionModal({
   payeeLineItems?: PayeeLineItem[];
   initialKind?: CategoryKind;
   initialSubId?: string;
+  initialAccountId?: string;
+  initialAmountCents?: number;
+  initialPayee?: string;
+  initialDate?: string;
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
   const isEdit = editTx != null;
   const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? "");
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? initialAccountId ?? "");
   const availableBuckets = bucketsByAccount[selectedAccountId] ?? [];
   const [selectedBucketId, setSelectedBucketId] = useState<string>("");
   const formRef = useRef<HTMLFormElement>(null);
@@ -97,9 +105,9 @@ export function TransactionModal({
   const [autoFillSubId, setAutoFillSubId] = useState<string | null>(null);
 
   // Split state — for NEW transactions only. Edit mode keeps the existing single-item flow.
-  const [totalCents, setTotalCents] = useState(editTx?.amountCents ?? 0);
+  const [totalCents, setTotalCents] = useState(editTx?.amountCents ?? initialAmountCents ?? 0);
   const [splits, setSplits] = useState<SplitEntry[]>(() =>
-    initialSubId ? [{ subId: initialSubId, amountCents: editTx?.amountCents ?? 0 }] : []
+    initialSubId ? [{ subId: initialSubId, amountCents: editTx?.amountCents ?? initialAmountCents ?? 0 }] : []
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
@@ -157,7 +165,7 @@ export function TransactionModal({
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const defaultDate = editTx?.date ?? (today.startsWith(monthKey) ? today : firstOfMonth);
+  const defaultDate = editTx?.date ?? initialDate ?? (today.startsWith(monthKey) ? today : firstOfMonth);
   // When editing (single-select) keep options scoped to the current tab.
   // When adding (multi-select picker), income stays income-only, but spend
   // kinds share the picker so one receipt can split across e.g. Bills + Expenses.
@@ -368,7 +376,7 @@ export function TransactionModal({
             {/* Merchant */}
             <PayeeField
               placeholder={PAYEE_PLACEHOLDER[txType]}
-              defaultValue={editTx?.payee ?? ""}
+              defaultValue={editTx?.payee ?? initialPayee ?? ""}
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}
               onMatch={handlePayeeMatch}
@@ -378,7 +386,7 @@ export function TransactionModal({
             <div className="flex items-center gap-2">
               <AmountInput
                 inputRef={amountRef}
-                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
+                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : initialAmountCents != null ? centsToDisplay(initialAmountCents) : ""}
                 onChangeCents={setTotalCents}
               />
               <input

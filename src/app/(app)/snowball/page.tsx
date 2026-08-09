@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { currentMonthFirst } from "@/lib/snapshots";
@@ -241,14 +240,8 @@ export default async function SnowballPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
+      <div>
         <h1 className="text-2xl font-bold tracking-tight">Debt/Loan Snowball</h1>
-        <Link
-          href="/budget"
-          className="text-sm font-medium text-brand hover:text-brand-strong"
-        >
-          ← Budget
-        </Link>
       </div>
 
       <SnowballBoard

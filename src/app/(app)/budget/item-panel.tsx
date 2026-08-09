@@ -35,6 +35,7 @@ type Props = {
   monthKey: string; // YYYY-MM-01
   subOptions: SubOption[];
   groupOptions: { id: string; name: string; kind: CategoryKind }[];
+  paymentAccountOptions: AccountOption[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
   snowballExtraCents: number;
@@ -56,6 +57,7 @@ export function ItemPanel({
   monthKey,
   subOptions,
   groupOptions,
+  paymentAccountOptions,
   debtAccountOptions,
   bucketOptions,
   snowballExtraCents,
@@ -160,6 +162,8 @@ export function ItemPanel({
               currency={currency}
               subOptions={subOptions}
               dueDay={row.dueDay}
+              paymentAccountId={row.paymentAccountId}
+              paymentAccountOptions={paymentAccountOptions}
               hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)}
               onAddTransaction={onAddTransaction}
             />
@@ -434,6 +438,8 @@ function PlannedForm({
   currency,
   subOptions,
   dueDay,
+  paymentAccountId,
+  paymentAccountOptions,
   hasDue,
 }: {
   subId: string;
@@ -444,6 +450,8 @@ function PlannedForm({
   currency: string;
   subOptions: SubOption[];
   dueDay?: number | null;
+  paymentAccountId: string | null;
+  paymentAccountOptions: AccountOption[];
   hasDue?: boolean;
   onAddTransaction: () => void;
 }) {
@@ -467,20 +475,40 @@ function PlannedForm({
           <form
             id={`plan-form-${subId}`}
             action={(fd) => startDue(() => updateSubcategory(fd))}
-            className="flex items-center gap-2"
+            className="space-y-2"
           >
             <input type="hidden" name="id" value={subId} />
-            <input
-              key={dueDay ?? ""}
-              name="dueDay"
-              type="number"
-              min={1}
-              max={31}
-              placeholder="—"
-              defaultValue={dueDay ?? ""}
-              className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-            {detailsBtn}
+            <input type="hidden" name="name" value={itemName} />
+            <div className="flex items-center gap-2">
+              <input
+                key={dueDay ?? ""}
+                name="dueDay"
+                type="number"
+                min={1}
+                max={31}
+                placeholder="—"
+                defaultValue={dueDay ?? ""}
+                className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+              {detailsBtn}
+            </div>
+            {paymentAccountOptions.length > 0 ? (
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted">Charged to (optional)</span>
+                <select
+                  key={paymentAccountId ?? "none"}
+                  name="paymentAccountId"
+                  defaultValue={paymentAccountId ?? ""}
+                  className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="">No linked account</option>
+                  {paymentAccountOptions.map((account) => (
+                    <option key={account.id} value={account.id}>{account.name}</option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-[10px] text-muted">Used to prefill the account when you mark this item Paid. Nothing charges automatically.</span>
+              </label>
+            ) : null}
           </form>
         </Section>
       ) : (

@@ -423,9 +423,28 @@ export async function updateSubcategory(formData: FormData) {
   const rawDue = String(formData.get("dueDay") ?? "").trim();
   const dueDay = rawDue === "" ? null : Math.min(31, Math.max(1, parseInt(rawDue, 10)));
 
+  const update: { name: string; due_day: number | null; payment_account_id?: string | null } = { name, due_day: dueDay };
+  // The small inline rename form does not carry this input. Only change the
+  // payment link when the full item form submitted one.
+  if (formData.has("paymentAccountId")) {
+    const rawPaymentAccountId = String(formData.get("paymentAccountId") ?? "").trim();
+    if (!rawPaymentAccountId) {
+      update.payment_account_id = null;
+    } else {
+      const { data: account } = await supabase
+        .from("accounts")
+        .select("id")
+        .eq("id", rawPaymentAccountId)
+        .eq("household_id", householdId)
+        .in("kind", ["checking", "savings_bucket", "cash", "credit_card"])
+        .maybeSingle();
+      update.payment_account_id = account?.id ?? null;
+    }
+  }
+
   await supabase
     .from("subcategories")
-    .update({ name, due_day: dueDay })
+    .update(update)
     .eq("id", id)
     .eq("household_id", householdId);
 

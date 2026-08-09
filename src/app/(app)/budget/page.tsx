@@ -59,7 +59,7 @@ export default async function BudgetPage({
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id")
+      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -205,6 +205,7 @@ export default async function BudgetPage({
           categoryId: s.category_id,
           name: s.name,
           dueDay: s.due_day,
+          paymentAccountId: (s as { payment_account_id?: string | null }).payment_account_id ?? null,
           plannedCents,
           spentCents,
           // Irregular bills contribute a *suggested* planned sum, but stay
@@ -376,7 +377,7 @@ export default async function BudgetPage({
   for (const a of accounts ?? []) nameCounts.set(a.name, (nameCounts.get(a.name) ?? 0) + 1);
   const accountGroupFor = (a: { kind: string; is_kids_account?: boolean }) => {
     if (a.is_kids_account) return "Kids Funding";
-    if (a.kind === "checking" || a.kind === "savings_bucket") return "Banking";
+    if (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "cash") return "Banking";
     if (a.kind === "investment") return "Investments";
     if (a.kind === "credit_card") return "Credit Cards";
     if (a.kind === "debt_loan") return "Loans";

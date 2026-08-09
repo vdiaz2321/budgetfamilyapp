@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "./sidebar";
@@ -186,15 +185,10 @@ export default async function AppLayout({
         badges={badges}
       />
 
-      {/* Mobile top bar */}
+      {/* Mobile menu — floats above content so it does not reserve a banner
+          row or push every page downward. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center bg-sidebar px-4 py-3 text-white md:hidden">
-          <Link href="/budget" className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-sm font-bold text-white">
-              C
-            </span>
-            <span className="text-xl font-bold tracking-tight text-white">Capitall</span>
-          </Link>
+        <header className="pointer-events-none fixed right-4 top-3 z-[60] md:hidden">
           <MobileHeaderMenu userEmail={user.email ?? ""} />
         </header>
 

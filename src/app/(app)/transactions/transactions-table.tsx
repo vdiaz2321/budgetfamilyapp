@@ -198,7 +198,7 @@ export function TransactionsTable({
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4">
       <div className="sticky top-0 z-20 -mx-1 space-y-4 bg-background/95 px-1 py-3 backdrop-blur-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">
             Custom range
@@ -224,12 +224,12 @@ export function TransactionsTable({
           <button
             type="button"
             onClick={() => setModal("new")}
-            className="flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong sm:hidden"
+            className="flex h-9 items-center gap-1 rounded-lg bg-brand px-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong sm:hidden"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
             </svg>
-            Transaction
+            Add
           </button>
         </div>
       </div>

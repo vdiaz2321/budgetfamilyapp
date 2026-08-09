@@ -11,8 +11,10 @@ export const CATEGORY_KINDS = [
 
 export type CategoryKind = (typeof CATEGORY_KINDS)[number]["kind"];
 
-// Kinds whose subcategories have a Due day (day-of-month).
-export const KINDS_WITH_DUE: CategoryKind[] = ["bills", "debt"];
+// Kinds whose subcategories can have a due/planned day (day-of-month).
+// Expenses keep the field for planning, but only Bills feed the manual
+// upcoming-due card on Budget.
+export const KINDS_WITH_DUE: CategoryKind[] = ["bills", "expenses", "debt"];
 
 export type CategoryRow = {
   id: string;

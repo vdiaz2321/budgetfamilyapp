@@ -61,7 +61,7 @@ export function SavingsBoard({ cards, currency }: Props) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-      <header>
+      <header className="pr-8 md:pr-0">
         <h1 className="text-2xl font-bold tracking-tight">Savings goals</h1>
         <p className="mt-1 text-sm text-muted">Track every goal toward its target. Set one in Budget.</p>
       </header>
