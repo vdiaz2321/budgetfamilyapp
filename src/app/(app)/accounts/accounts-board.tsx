@@ -22,6 +22,7 @@ import {
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
+import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // "2026-07-01" -> "Jul"
@@ -123,6 +124,7 @@ export type BudgetDebt = {
   subcategoryId: string;
   name: string;
   balanceCents: number;
+  debtKind: string | null;
 };
 
 // The plan's account types, mapped onto the account_kind enum. debt_loan is
@@ -248,13 +250,26 @@ export function AccountsBoard({
     .filter((a) => !isLiability(a.kind) && !a.isKidsAccount)
     .reduce((sum, a) => sum + a.balanceCents, 0);
   const budgetDebtTotal = budgetDebts.reduce((sum, d) => sum + d.balanceCents, 0);
+  const countedBudgetDebtTotal = budgetDebts.reduce(
+    (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.debtKind) ? 0 : debt.balanceCents),
+    0,
+  );
   const directDebtTotal = active
     .filter((a) => a.kind === "debt_loan" && a.debtTrackingMode === "account")
     .reduce((sum, a) => sum + Math.abs(a.balanceCents), 0);
+  const countedDirectDebtTotal = active
+    .filter(
+      (account) =>
+        account.kind === "debt_loan" &&
+        account.debtTrackingMode === "account" &&
+        !isDebtExcludedFromNetWorth(account.subtype),
+    )
+    .reduce((sum, account) => sum + Math.abs(account.balanceCents), 0);
   // Rewards cards are tracked separately from the Debt section. Their
   // transaction activity must not be converted into a household debt row.
   const debtsTotal = budgetDebtTotal + directDebtTotal;
-  const net = assets - debtsTotal;
+  const mortgageExcluded = countedBudgetDebtTotal !== budgetDebtTotal || countedDirectDebtTotal !== directDebtTotal;
+  const net = assets - countedBudgetDebtTotal - countedDirectDebtTotal;
 
   const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
   const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
@@ -265,13 +280,12 @@ export function AccountsBoard({
   const excludedSections = [...kidsSections, ...creditSections];
 
   const sectionKeys = [
-    "debts",
     ...assetSections.map((s) => s.key),
     ...excludedSections.map((s) => s.key),
     ...debtAccountSections.map((s) => s.key),
   ];
   const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
-    Object.fromEntries(["debts", ...SECTIONS.map((s) => s.key)].map((k) => [k, true])),
+    Object.fromEntries(SECTIONS.map((s) => [s.key, true])),
   );
   const allOpen = sectionKeys.every((k) => !collapsed[k]);
   const toggleSection = (key: string) =>
@@ -363,6 +377,7 @@ export function AccountsBoard({
           value={net}
           currency={currency}
           tone={net >= 0 ? "text-foreground" : "text-negative"}
+          hint={mortgageExcluded ? "Mortgage excluded" : undefined}
         />
       </div>
 
@@ -404,13 +419,6 @@ export function AccountsBoard({
             onToggleBuckets={toggleBuckets}
           />
         ))}
-
-        <BudgetDebtsSection
-          debts={budgetDebts}
-          currency={currency}
-          open={!collapsed.debts}
-          onToggle={() => toggleSection("debts")}
-        />
 
         {debtAccountSections.map((section) => (
           <AccountSection
@@ -1361,95 +1369,28 @@ function PayCardModal({
   );
 }
 
-// Read-only mirror of the Budget Debt group so you see debts alongside assets.
-function BudgetDebtsSection({
-  debts,
-  currency,
-  open,
-  onToggle,
-}: {
-  debts: BudgetDebt[];
-  currency: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const total = debts.reduce((sum, d) => sum + d.balanceCents, 0);
-
-  return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center gap-2.5 text-left"
-          aria-expanded={open}
-        >
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-negative" />
-          <span className="font-semibold">Debts</span>
-          <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase text-brand">
-            from Budget
-          </span>
-          <svg
-            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            aria-hidden
-          >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-        <span className={`text-right text-sm font-bold tabular-nums ${total > 0 ? "text-negative" : ""}`}>
-          {formatMoney(total, currency)}
-        </span>
-      </div>
-
-      {open ? (
-        <div className="border-t border-line">
-          {debts.length === 0 ? (
-            <p className="px-4 py-2.5 text-sm text-muted">
-              No Budget-managed debts. Use Add account for a mortgage or loan.
-            </p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {debts.map((d) => (
-                <li
-                  key={d.subcategoryId}
-                  className="grid grid-cols-[minmax(0,1fr)_10rem] items-center gap-2 px-4 py-1.5"
-                >
-                  <span className="truncate text-sm">{d.name}</span>
-                  <span className={`text-right text-sm tabular-nums ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>
-                    {formatMoney(d.balanceCents, currency)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="border-t border-line px-4 py-2">
-            <span className="text-xs text-muted">Budget debts are managed in Budget. Account debts are listed below.</span>
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function SummaryStat({
   label,
   value,
   currency,
   tone,
+  hint,
 }: {
   label: string;
   value: number;
   currency: string;
   tone: string;
+  hint?: string;
 }) {
   return (
-    <div className="flex min-w-0 items-baseline justify-between gap-3 rounded-2xl bg-surface px-4 py-2.5 shadow-sm ring-1 ring-black/5 sm:block sm:text-center sm:py-3 dark:ring-white/10">
+    <div className="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-surface px-4 py-2.5 shadow-sm ring-1 ring-black/5 sm:block sm:text-center sm:py-3 dark:ring-white/10">
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-      <p className={`truncate text-base font-bold tabular-nums sm:mt-0.5 sm:text-lg ${tone}`}>
-        {formatMoney(value, currency)}
-      </p>
+      <div className="min-w-0 text-right sm:text-center">
+        <p className={`truncate text-base font-bold tabular-nums sm:mt-0.5 sm:text-lg ${tone}`}>
+          {formatMoney(value, currency)}
+        </p>
+        {hint ? <p className="text-[10px] text-muted">{hint}</p> : null}
+      </div>
     </div>
   );
 }
@@ -1965,7 +1906,10 @@ function BucketBalanceInput({
         type="text"
         inputMode="decimal"
         defaultValue={initial}
-        size={Math.max(initial.length, 5)}
+        style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
+        onInput={(e) => {
+          e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
+        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
@@ -2014,7 +1958,10 @@ function HistoricBucketBalanceInput({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
-        size={Math.max(initial.length, 5)}
+        style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
+        onInput={(e) => {
+          e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
+        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const v = e.currentTarget.value.trim();
@@ -2160,7 +2107,10 @@ function HistoricBalanceInput({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
-        size={Math.max(initial.length, 5)}
+        style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
+        onInput={(e) => {
+          e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
+        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const v = e.currentTarget.value.trim();
@@ -2208,12 +2158,15 @@ function BalanceInput({
           // Remount (reset to the server value) whenever the saved amount changes.
           key={initial}
           name="balance"
-          // type=text (not number) so the `size` attr can shrink the box to fit
-          // its content — `size` is ignored on number inputs, which strands the $.
+          // Keep the field exactly as wide as its value so the currency symbol
+          // stays attached instead of sitting at the far side of empty space.
           type="text"
           inputMode="decimal"
           defaultValue={initial}
-          size={Math.max(initial.length, 5)}
+          style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
+          onInput={(e) => {
+            e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
+          }}
           onFocus={(e) => e.currentTarget.select()}
           onBlur={(e) => {
             if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();

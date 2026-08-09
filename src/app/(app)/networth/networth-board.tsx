@@ -79,7 +79,8 @@ export type GridRow = {
   liability: boolean;
   // Account is linked to a Budget debt — shown but not counted (the debt row is).
   linked: boolean;
-  // Kids Funding — shown but not counted.
+  // Shown for tracking, but excluded from Net Worth totals (for example Kids
+  // Funding or a mortgage whose matching home equity is tracked elsewhere).
   excluded?: boolean;
   // Same grouping as the sidebar, so the two views read as one system.
   section: "Banking" | "Investments" | "Kids Funding" | "Credit Cards" | "Loans";
@@ -631,7 +632,7 @@ function BalanceGrid({
     let sum = 0;
     let any = false;
     for (const r of g.rows) {
-      if (r.indent) continue;
+      if (r.indent || r.excluded) continue;
       const v = r.balances[i];
       if (v == null) continue;
       any = true;
@@ -927,7 +928,7 @@ function BalanceGrid({
 function ExcludedChip() {
   return (
     <span
-      title="Kids Funding — tracked here, excluded from every total"
+      title="Tracked here, excluded from Net Worth totals"
       className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[9px] font-semibold uppercase text-muted dark:bg-white/10"
     >
       not counted

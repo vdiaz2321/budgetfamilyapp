@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar";
 import { SessionInit } from "./session-init";
 import { MobileTabBar } from "./mobile-tab-bar";
 import type { SidebarGroup } from "./sidebar-accounts";
+import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 
 export default async function AppLayout({
   children,
@@ -137,6 +138,11 @@ export default async function AppLayout({
   };
 
   const debtTotal = (items: typeof debtItems) => items.reduce((s, d) => s + d.balanceCents, 0);
+  const netWorthDebtTotal = (items: typeof debtItems) =>
+    items.reduce(
+      (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.kind) ? 0 : debt.balanceCents),
+      0,
+    );
 
   const ccItems = debtItems.filter((d) => d.kind === "credit_card").sort(byBalanceDesc);
   const loanItems = debtItems.filter((d) => d.kind !== "credit_card").sort(byBalanceDesc);
@@ -149,14 +155,14 @@ export default async function AppLayout({
       items: ccItems,
       liability: true,
       totalCents: debtTotal(ccItems),
-      netWorthCents: debtTotal(ccItems),
+      netWorthCents: netWorthDebtTotal(ccItems),
     },
     {
       label: "Loans",
       items: loanItems,
       liability: true,
       totalCents: debtTotal(loanItems),
-      netWorthCents: debtTotal(loanItems),
+      netWorthCents: netWorthDebtTotal(loanItems),
     },
     // Kids Funding sits at the bottom — it's the kids' money, excluded from the
     // Net Worth pill, so it reads as a footnote to the household's own accounts.

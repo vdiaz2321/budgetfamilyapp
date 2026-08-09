@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { captureSnapshots } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
+import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
@@ -90,6 +91,11 @@ export default async function NetworthPage() {
     .select("subcategory_id, debt_kind")
     .eq("household_id", household.id);
   const debtKindBySub = new Map((debtRows ?? []).map((d) => [d.subcategory_id, d.debt_kind as string | null]));
+  const excludedDebtIds = new Set(
+    (debtRows ?? [])
+      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind))
+      .map((debt) => debt.subcategory_id),
+  );
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
   const bankGroupById = new Map(
     (accountRows ?? []).map((a) => [a.id, (a as { bank_group?: string | null }).bank_group ?? null]),
@@ -149,6 +155,7 @@ export default async function NetworthPage() {
   }
   for (const s of debtSnaps ?? []) {
     snapshotMonths.add(s.month);
+    if (excludedDebtIds.has(s.subcategory_id)) continue;
     const t = derived.get(s.month) ?? zero();
     t.debt += s.balance_cents;
     derived.set(s.month, t);
@@ -256,6 +263,7 @@ export default async function NetworthPage() {
         name: subName.get(s.subcategory_id) ?? "Debt",
         liability: true,
         linked: false,
+        excluded: excludedDebtIds.has(s.subcategory_id),
         section: sectionForDebt(s.subcategory_id),
         balances: months.map(() => null),
       };

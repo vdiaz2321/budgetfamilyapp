@@ -67,7 +67,9 @@ export function SnowballBoard(props: Props) {
   } = props;
   const [mode, setMode] = useState<Mode>("planned");
   const [filter, setFilter] = useState<Filter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(rows.find((row) => row.balanceCents > 0)?.subId ?? rows[0]?.subId ?? null);
+  // Start on the household-wide projection. A debt is selected only after the
+  // user clicks its card, and clicking that card again returns to this view.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(true);
   const payoffMonth = mode === "planned" ? plannedPayoffMonth : classicPayoffMonth;
@@ -313,12 +315,16 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
   compact?: boolean;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const width = 760, height = compact ? 190 : 220, padX = 46, padY = 24;
+  const width = 760, height = compact ? 190 : 220, padY = 24;
   const currentValues = [startingBalance, ...entries.map((entry) => entry.balanceCents)];
   const comparisonValues = comparisonEntries ? [startingBalance, ...comparisonEntries.map((entry) => entry.balanceCents)] : null;
   const values = [...currentValues, ...(comparisonValues ?? [])];
   const max = Math.max(1, ...values);
+  // Reserve enough room for the widest Y-axis amount. A fixed 46px gutter
+  // clipped larger balances such as $365,270.00.
+  const padX = Math.min(104, Math.max(54, formatMoney(Math.round(max), currency).length * 6 + 12));
   const longest = Math.max(entries.length, comparisonEntries?.length ?? 0, 1);
+  const longestEntries = (comparisonEntries?.length ?? 0) > entries.length ? comparisonEntries! : entries;
   const lastEntry = (comparisonEntries?.length ?? 0) > entries.length ? comparisonEntries?.at(-1) : entries.at(-1);
   const xFor = (index: number) => padX + (index / longest) * (width - padX * 2);
   const yFor = (value: number) => padY + (1 - value / max) * (height - padY * 2);
@@ -328,6 +334,19 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
     return `${x},${y}`;
   }).join(" ");
   const ticks = [0, 0.5, 1];
+  const xTickDivisions = compact ? 3 : 4;
+  const xTicks = lastEntry
+    ? Array.from(
+        new Set(
+          Array.from({ length: xTickDivisions + 1 }, (_, index) =>
+            Math.round((index / xTickDivisions) * longest),
+          ),
+        ),
+      ).map((index) => ({
+        index,
+        label: index === 0 ? "Now" : monthLabel(longestEntries[index - 1]?.month ?? lastEntry.month),
+      }))
+    : [{ index: 0, label: "Now" }];
   const hoveredCurrent = hoverIndex != null && hoverIndex < currentValues.length ? currentValues[hoverIndex] : null;
   const hoveredComparison = hoverIndex != null && comparisonValues && hoverIndex < comparisonValues.length ? comparisonValues[hoverIndex] : null;
   const hoveredMonth = hoverIndex == null
@@ -368,8 +387,16 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
           {hoverX != null ? <line x1={hoverX} x2={hoverX} y1={padY} y2={height - padY} stroke="currentColor" className="text-muted/50" strokeWidth="1" strokeDasharray="3 4" /> : null}
           {hoverX != null && hoveredCurrent != null ? <circle cx={hoverX} cy={yFor(hoveredCurrent)} r="5" fill="var(--brand)" stroke="var(--surface)" strokeWidth="2" /> : null}
           {hoverX != null && hoveredComparison != null ? <circle cx={hoverX} cy={yFor(hoveredComparison)} r="5" fill={comparisonTone === "positive" ? "#84cc16" : "#f59e0b"} stroke="var(--surface)" strokeWidth="2" /> : null}
-          <text x={padX} y={height - 4} className="fill-muted text-[10px]">Now</text>
-          {lastEntry ? <text x={width - padX} y={height - 4} textAnchor="end" className="fill-muted text-[10px]">{monthLabel(lastEntry.month)}</text> : null}
+          {xTicks.map((tick, index) => {
+            const x = xFor(tick.index);
+            const anchor = index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle";
+            return (
+              <g key={`${tick.index}-${tick.label}`}>
+                <line x1={x} x2={x} y1={height - padY} y2={height - padY + 4} stroke="currentColor" className="text-line" />
+                <text x={x} y={height - 4} textAnchor={anchor} className="fill-muted text-[10px]">{tick.label}</text>
+              </g>
+            );
+          })}
         </svg>
         {hoverX != null && hoveredMonth ? (
           <div

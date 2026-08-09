@@ -625,6 +625,7 @@ export async function addTransaction(formData: FormData) {
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
+  const cleared = formData.get("cleared") === "on";
   if (!subcategoryId || !occurredOn || amountCents <= 0) return;
 
   // Keep category_id consistent with the chosen subcategory.
@@ -688,6 +689,7 @@ export async function addTransaction(formData: FormData) {
     bucket_id: directBucketId,
     memo,
     is_withdrawal: isWithdrawal,
+    cleared,
     source: "manual",
   });
 
@@ -898,6 +900,67 @@ export async function updateTransaction(formData: FormData) {
     }
   }
   if (touchedAccount) await captureSnapshots(supabase, householdId);
+
+  revalidatePath("/budget");
+  revalidatePath("/transactions");
+  revalidatePath("/accounts");
+}
+
+// Lightweight inline edit used by the transaction register. It changes only
+// the amount while preserving the same ledger, bucket, and debt side effects
+// as the full transaction editor.
+export async function updateTransactionAmount(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  if (!id || amountCents <= 0) return;
+
+  const { data: tx } = await supabase
+    .from("transactions")
+    .select("amount_cents, subcategory_id, category_id, account_id, bucket_id, is_withdrawal")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!tx || tx.amount_cents === amountCents) return;
+
+  const deltaCents = amountCents - tx.amount_cents;
+  await supabase
+    .from("transactions")
+    .update({ amount_cents: amountCents })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  const signedDelta = tx.is_withdrawal ? -deltaCents : deltaCents;
+  let touchedSnapshot = false;
+  if (tx.subcategory_id) {
+    const linkedBucketId = await getLinkedBucketId(supabase, householdId, tx.subcategory_id);
+    if (linkedBucketId) {
+      await adjustBucketBalance(supabase, householdId, linkedBucketId, signedDelta);
+      touchedSnapshot = true;
+    }
+    if (tx.bucket_id && tx.bucket_id !== linkedBucketId) {
+      await adjustBucketBalance(supabase, householdId, tx.bucket_id, signedDelta);
+      touchedSnapshot = true;
+    }
+    if (!linkedBucketId) {
+      const linkedAccountId = await getLinkedAccountId(supabase, householdId, tx.subcategory_id);
+      if (linkedAccountId) {
+        await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, signedDelta);
+        touchedSnapshot = true;
+      }
+    }
+    if (await adjustDebtBalance(supabase, householdId, tx.subcategory_id, -deltaCents)) {
+      touchedSnapshot = true;
+      revalidatePath("/snowball");
+    }
+  }
+  if (tx.account_id) {
+    const kind = tx.category_id ? await categoryKindOf(supabase, tx.category_id) : null;
+    if (await adjustAccountLedger(supabase, householdId, tx.account_id, ledgerDelta(kind, deltaCents))) {
+      touchedSnapshot = true;
+    }
+  }
+  if (touchedSnapshot) await captureSnapshots(supabase, householdId);
 
   revalidatePath("/budget");
   revalidatePath("/transactions");

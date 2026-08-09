@@ -103,6 +103,7 @@ export function TransactionModal({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [cleared, setCleared] = useState(false);
 
   const splitTotal = splits.reduce((s, sp) => s + sp.amountCents, 0);
   const leftToSplit = totalCents - splitTotal;
@@ -200,6 +201,7 @@ export function TransactionModal({
           formRef.current?.reset();
           setSplits([]);
           setTotalCents(0);
+          setCleared(false);
         } else {
           onClose();
         }
@@ -316,7 +318,6 @@ export function TransactionModal({
                   pattern="[0-9]*\.?[0-9]*"
                   required
                   placeholder="0.00"
-                  autoFocus={!editTx}
                   defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
                   onChange={(e) => {
                     const v = parseFloat(e.target.value);
@@ -463,6 +464,23 @@ export function TransactionModal({
               defaultValue={editTx?.memo ?? ""}
               className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
+            {!isEdit ? (
+              <div className="flex items-center justify-between gap-3">
+                <input type="hidden" name="cleared" value={cleared ? "on" : ""} />
+                <span className="text-xs text-muted">Mark it cleared once it matches your bank or card.</span>
+                <button
+                  type="button"
+                  onClick={() => setCleared((value) => !value)}
+                  className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-bold transition ${
+                    cleared
+                      ? "bg-positive/15 text-positive ring-1 ring-positive/20"
+                      : "bg-background text-muted ring-1 ring-line hover:bg-positive/10 hover:text-positive"
+                  }`}
+                >
+                  {cleared ? "Cleared ✓" : "Clear"}
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={(e) => {
@@ -794,7 +812,7 @@ function BudgetItemPicker({
                         </span>
                         <span className="flex-1 text-sm font-medium">{o.name}</span>
                         {o.remainingCents != null && (
-                          <span className={`shrink-0 text-sm tabular-nums ${o.remainingCents < 0 ? "text-negative" : "text-muted"}`}>
+                          <span className={`shrink-0 text-sm tabular-nums ${o.remainingCents < 0 ? "rounded-full bg-negative/25 px-2 py-0.5 font-medium text-foreground" : "text-muted"}`}>
                             {o.remainingCents < 0
                               ? "−$" + (Math.abs(o.remainingCents) / 100).toFixed(2)
                               : "$" + (o.remainingCents / 100).toFixed(2)}

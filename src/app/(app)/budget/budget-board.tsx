@@ -238,7 +238,7 @@ export function BudgetBoard({
     // (stretch) cross-axis sizing makes the aside match the row height so
     // the sticky panel has the whole scroll range to stay pinned in.
     // See feedback: item detail panel required scrolling up to reach.
-    <div className="-m-4 min-h-[calc(100vh-4rem)] space-y-4 bg-[#f5f2ec] p-4 dark:bg-background md:-m-8 md:min-h-screen md:p-8">
+    <div className="-m-4 min-h-[calc(100vh-4rem)] space-y-4 bg-background p-4 md:-m-8 md:min-h-screen md:p-8">
       <div className="flex items-center justify-between">
         <MonthPicker monthKey={month.key} />
         <button

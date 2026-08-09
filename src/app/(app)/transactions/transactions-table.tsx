@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { deleteTransaction, toggleCleared } from "../budget/actions";
+import { deleteTransaction, toggleCleared, updateTransactionAmount } from "../budget/actions";
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { ImportCsvModal } from "./import-csv-modal";
@@ -172,7 +172,13 @@ export function TransactionsTable({
 
   const q = query.trim().toLowerCase();
   const filtered = transactions.filter((t) => {
-    if (q && ![t.payee, t.subName, t.memo].some((f) => f?.toLowerCase().includes(q))) return false;
+    const amountText = (t.amountCents / 100).toFixed(2);
+    const amountQuery = q.replace(/[$,\s]/g, "").replace("−", "-");
+    const matchesAmount = amountQuery.length > 0 && (
+      amountText.includes(amountQuery.replace(/^-/, "")) ||
+      `-${amountText}`.includes(amountQuery)
+    );
+    if (q && !matchesAmount && ![t.payee, t.subName, t.memo].some((f) => f?.toLowerCase().includes(q))) return false;
     if (accountFilter && t.accountId !== accountFilter) return false;
     if (kindFilter && t.kind !== kindFilter) return false;
     return true;
@@ -191,6 +197,7 @@ export function TransactionsTable({
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4">
+      <div className="sticky top-0 z-20 -mx-1 space-y-4 bg-background/95 px-1 py-3 backdrop-blur-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">
@@ -217,7 +224,7 @@ export function TransactionsTable({
           <button
             type="button"
             onClick={() => setModal("new")}
-            className="flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong"
+            className="flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong sm:hidden"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
@@ -262,7 +269,11 @@ export function TransactionsTable({
         <button
           type="button"
           onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-          className="shrink-0 px-2 py-2 text-sm font-semibold text-brand transition hover:text-brand-strong"
+          className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition sm:hidden ${
+            selectMode
+              ? "bg-negative/10 text-negative ring-1 ring-negative/20 hover:bg-negative/20"
+              : "text-brand hover:text-brand-strong"
+          }`}
         >
           {selectMode ? "Cancel" : "Select"}
         </button>
@@ -347,6 +358,27 @@ export function TransactionsTable({
         >
           All time
         </button>
+        <button
+          type="button"
+          onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+          className={`rounded-xl px-3 py-1.5 font-semibold transition ${
+            selectMode
+              ? "bg-negative/10 text-negative ring-1 ring-negative/20 hover:bg-negative/20"
+              : "bg-brand-soft text-brand ring-1 ring-brand/15 hover:bg-brand hover:text-white hover:shadow-sm"
+          }`}
+        >
+          {selectMode ? "Cancel" : "Select"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setModal("new")}
+          className="hidden items-center gap-1.5 rounded-xl bg-brand px-3 py-1.5 font-bold text-white shadow-sm transition hover:bg-brand-strong sm:flex"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Transaction
+        </button>
         {hasRange ? (
           <button
             type="button"
@@ -360,43 +392,76 @@ export function TransactionsTable({
 
 
       {/* Register — desktop table */}
+      <div className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
+        {selectMode && selectedIds.size > 0 ? (
+          <div className="flex items-center gap-3 bg-brand-soft px-4 py-2.5 text-xs">
+            <div className="flex items-center gap-3">
+              <span className="font-semibold text-brand">{selectedIds.size} selected</span>
+              <span className="text-muted">·</span>
+              <span className="text-muted">
+                <span className="font-medium">Selected total</span>{" "}
+                <span className={`tabular-nums font-bold ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>
+                  {formatMoney(selectedNetCents(), currency)}
+                </span>
+              </span>
+            </div>
+            <span className="text-base font-bold leading-none text-muted">/</span>
+            <BatchActionButtons
+              onClear={() => batchClear(true)}
+              onUncheck={() => batchClear(false)}
+              onExport={batchExportCsv}
+              onDelete={batchDelete}
+            />
+          </div>
+        ) : (
+          <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
+            <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
+              {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
+            </span>
+            <span className="col-span-7 whitespace-nowrap text-xs text-muted">
+              <span className="font-medium">Income Rc&apos;d</span>{" "}
+              <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
+              <span className="mx-1.5">–</span>
+              <span className="font-medium">Spent Income</span>{" "}
+              <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
+              <span className="mx-1.5">–</span>
+              <span className="font-medium">Income Left</span>{" "}
+              <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+                {formatMoney(incomeTotal - outflowTotal, currency)}
+              </span>
+            </span>
+            <span />
+          </div>
+        )}
+      </div>
+
+      {selectMode && selectedIds.size > 0 ? (
+        <div className="space-y-2 rounded-xl bg-brand-soft px-3 py-2 shadow-sm ring-1 ring-brand/15 sm:hidden">
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="font-semibold text-brand">{selectedIds.size} selected</span>
+            <span className="text-muted">Total <span className={`font-bold tabular-nums ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(selectedNetCents(), currency)}</span></span>
+          </div>
+          <BatchActionButtons
+            onClear={() => batchClear(true)}
+            onUncheck={() => batchClear(false)}
+            onExport={batchExportCsv}
+            onDelete={batchDelete}
+            mobile
+          />
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 rounded-xl bg-positive/5 px-3 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
+          <span className="whitespace-nowrap text-muted"><span className="font-medium">Rc&apos;d:</span>{" "}<span className="tabular-nums text-positive">{formatMoney(incomeTotal, currency)}</span></span>
+          <span className="whitespace-nowrap text-muted"><span className="font-medium">Spent:</span>{" "}<span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span></span>
+          <span className="whitespace-nowrap text-muted"><span className="font-medium">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeTotal - outflowTotal, currency)}</span></span>
+        </div>
+      )}
+
+      </div>
+
       <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
         <div className="overflow-x-auto">
           <div className="min-w-[52rem]">
-            {/* Totals — moved to the top so the net line is visible without scrolling */}
-            {selectMode && selectedIds.size > 0 ? (
-              <div className="flex items-center gap-3 bg-brand-soft px-4 py-2.5 text-xs">
-                <span className="font-semibold text-brand">
-                  {selectedIds.size} selected
-                </span>
-                <span className="text-muted">·</span>
-                <span className="text-muted">
-                  <span className="font-medium">Selected total</span>{" "}
-                  <span className={`tabular-nums font-bold ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>
-                    {formatMoney(selectedNetCents(), currency)}
-                  </span>
-                </span>
-              </div>
-            ) : (
-              <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-                <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
-                  {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
-                </span>
-                <span className="col-span-7 whitespace-nowrap text-xs text-muted">
-                  <span className="font-medium">Income Rc&apos;d</span>{" "}
-                  <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
-                  <span className="mx-1.5">–</span>
-                  <span className="font-medium">Spent Income</span>{" "}
-                  <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
-                  <span className="mx-1.5">–</span>
-                  <span className="font-medium">Income Left</span>{" "}
-                  <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-                    {formatMoney(incomeTotal - outflowTotal, currency)}
-                  </span>
-                </span>
-                <span />
-              </div>
-            )}
             {/* Header */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-b border-line px-4 py-2.5`}>
               <button
@@ -455,25 +520,6 @@ export function TransactionsTable({
 
       {/* Register — mobile card list */}
       <section className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
-        {/* Totals bar (filter totals only — selection totals live in the
-            floating batch bar so they don't get pushed off-screen by the
-            keyboard on mobile) */}
-        <div className="flex items-center justify-between gap-2 bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
-          <span className="whitespace-nowrap text-muted">
-            <span className="font-medium">Rc&apos;d:</span>{" "}
-            <span className="tabular-nums text-positive">{formatMoney(incomeTotal, currency)}</span>
-          </span>
-          <span className="whitespace-nowrap text-muted">
-            <span className="font-medium">Spent:</span>{" "}
-            <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
-          </span>
-          <span className="whitespace-nowrap text-muted">
-            <span className="font-medium">Left:</span>{" "}
-            <span className={`font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-              {formatMoney(incomeTotal - outflowTotal, currency)}
-            </span>
-          </span>
-        </div>
         {filtered.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted">
             {transactions.length === 0
@@ -501,55 +547,6 @@ export function TransactionsTable({
         )}
       </section>
 
-      {/* Batch action bar — floats above the mobile tab bar on phones and at
-          the bottom-center of the viewport on desktop. Shows selection total so
-          you can e.g. sum a bunch of splits to reconcile with a receipt. */}
-      {selectMode && selectedIds.size > 0 ? (
-        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-line bg-surface px-3 py-2 shadow-lg sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:px-4 sm:py-3">
-          <div className="mb-2 flex items-center justify-between gap-3 text-xs sm:text-sm">
-            <span className="font-semibold text-foreground">
-              {selectedIds.size} selected
-            </span>
-            <span className="text-muted">
-              Total{" "}
-              <span className={`font-bold tabular-nums ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>
-                {formatMoney(selectedNetCents(), currency)}
-              </span>
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => batchClear(true)}
-              className="flex-1 rounded-lg bg-positive/10 py-2 text-xs font-semibold text-positive transition hover:bg-positive/20 sm:text-sm"
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={() => batchClear(false)}
-              className="flex-1 rounded-lg bg-brand-soft py-2 text-xs font-semibold text-brand transition hover:bg-brand/20 sm:text-sm"
-            >
-              Uncheck
-            </button>
-            <button
-              type="button"
-              onClick={batchExportCsv}
-              className="flex-1 rounded-lg bg-background py-2 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-brand-soft sm:text-sm"
-            >
-              Export CSV
-            </button>
-            <button
-              type="button"
-              onClick={batchDelete}
-              className="flex-1 rounded-lg bg-negative/10 py-2 text-xs font-semibold text-negative transition hover:bg-negative/20 sm:text-sm"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      ) : null}
-
       {modal ? (
         <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
@@ -573,6 +570,33 @@ export function TransactionsTable({
   );
 }
 
+function BatchActionButtons({
+  onClear,
+  onUncheck,
+  onExport,
+  onDelete,
+  mobile = false,
+}: {
+  onClear: () => void;
+  onUncheck: () => void;
+  onExport: () => void;
+  onDelete: () => void;
+  mobile?: boolean;
+}) {
+  const buttonClass = mobile
+    ? "flex-1 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold transition"
+    : "whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition";
+
+  return (
+    <div className={`flex items-center gap-1.5 ${mobile ? "w-full" : "shrink-0"}`}>
+      <button type="button" onClick={onClear} className={`${buttonClass} bg-positive/10 text-positive hover:bg-positive/20`}>Clear</button>
+      <button type="button" onClick={onUncheck} className={`${buttonClass} bg-brand/10 text-brand hover:bg-brand/20`}>Uncheck</button>
+      <button type="button" onClick={onExport} className={`${buttonClass} bg-surface text-foreground ring-1 ring-line hover:bg-brand-soft`}>Export CSV</button>
+      <button type="button" onClick={onDelete} className={`${buttonClass} bg-negative/10 text-negative hover:bg-negative/20`}>Delete</button>
+    </div>
+  );
+}
+
 function TxLine({
   tx,
   currency,
@@ -592,8 +616,32 @@ function TxLine({
 }) {
   const [clearPending, startClear] = useTransition();
   const [delPending, startDel] = useTransition();
+  const [amountEditing, setAmountEditing] = useState(false);
+  const [amountValue, setAmountValue] = useState((tx.amountCents / 100).toFixed(2));
+  const [amountPending, startAmountSave] = useTransition();
   const isIncome = tx.kind === "income";
   const canEdit = !tx.isCardPayment;
+
+  const saveAmount = () => {
+    const normalized = Number(amountValue.replace(",", "."));
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      setAmountValue((tx.amountCents / 100).toFixed(2));
+      setAmountEditing(false);
+      return;
+    }
+    const nextValue = normalized.toFixed(2);
+    if (nextValue === (tx.amountCents / 100).toFixed(2)) {
+      setAmountEditing(false);
+      return;
+    }
+    const fd = new FormData();
+    fd.set("id", tx.id);
+    fd.set("amount", nextValue);
+    startAmountSave(async () => {
+      await updateTransactionAmount(fd);
+      setAmountEditing(false);
+    });
+  };
 
   const onToggle = (checked: boolean) => {
     const fd = new FormData();
@@ -636,17 +684,45 @@ function TxLine({
           />
         )}
       </span>
-      <button
-        type="button"
-        disabled={!canEdit}
-        onClick={onEdit}
-        className={`text-center text-sm font-semibold tabular-nums disabled:cursor-default ${
+      {amountEditing ? (
+        <input
+          autoFocus
+          type="text"
+          inputMode="decimal"
+          value={amountValue}
+          disabled={amountPending}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setAmountValue(e.target.value)}
+          onBlur={saveAmount}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setAmountValue((tx.amountCents / 100).toFixed(2));
+              setAmountEditing(false);
+            }
+          }}
+          aria-label={`Edit amount for ${tx.payee ?? tx.subName}`}
+          className="w-20 rounded-md border border-brand bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums outline-none ring-2 ring-brand/30 disabled:opacity-60"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={!canEdit}
+          onClick={(e) => {
+            e.stopPropagation();
+            setAmountEditing(true);
+          }}
+          onDoubleClick={(e) => e.stopPropagation()}
+          title={canEdit ? "Click to edit amount" : "Card payment — edit it from the card account"}
+          className={`rounded-md px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums transition hover:bg-brand-soft hover:text-brand-strong focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit ${
           isIncome ? "text-positive" : "text-foreground"
         }`}
       >
         {isIncome ? "+" : "−"}
         {formatMoney(tx.amountCents, currency)}
-      </button>
+        </button>
+      )}
       <span className="truncate text-sm text-muted">{tx.kind ? KIND_LABEL[tx.kind] : "—"}</span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
@@ -655,7 +731,7 @@ function TxLine({
       <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
         {tx.payee ?? "—"}
       </button>
-      <span className="truncate text-sm text-muted">{accountName}</span>
+      <span title={accountName} className="truncate text-xs text-muted">{accountName}</span>
       <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
       <form
         action={(fd) => startDel(() => deleteTransaction(fd))}

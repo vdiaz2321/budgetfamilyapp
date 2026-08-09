@@ -51,7 +51,7 @@ export function Sidebar({ groups, userEmail, displayName, avatarUrl, badges }: P
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className={`${collapsed ? "h-7 w-6" : "ml-auto h-7 w-8"} flex shrink-0 cursor-pointer items-center justify-center rounded-md text-white transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80`}
+          className={`${collapsed ? "h-7 w-6" : "ml-auto h-7 w-8"} flex shrink-0 cursor-pointer items-center justify-center rounded-md border border-white/70 bg-white/5 text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80`}
         >
           <svg
             width="18" height="18" viewBox="0 0 24 24" fill="none"
