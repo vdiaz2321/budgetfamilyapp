@@ -219,22 +219,22 @@ function SubscriptionsSection({
                     <span className={`font-semibold ${!s.isActive ? "line-through" : ""}`}>{s.name}</span>
                     <span className="whitespace-nowrap font-semibold tabular-nums">{formatMoney(s.amountCents, currency)}</span>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                    <span>{CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}</span>
+                  <div className="mt-1.5 flex items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    <span className="shrink-0">{CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}</span>
                     {s.nextRenewalDate ? <RenewalBadge date={s.nextRenewalDate} /> : null}
                     {s.accountId ? (
-                      <span>Card: {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}</span>
+                      <span className="min-w-0 truncate">· {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}</span>
                     ) : null}
-                  </div>
-                  <div className="mt-2 flex justify-end">
-                    <RowActions
-                      onEdit={() => setEditing(s.id)}
-                      onDelete={async () => {
-                        const fd = new FormData();
-                        fd.set("id", s.id);
-                        await deleteSubscription(fd);
-                      }}
-                    />
+                    <span className="ml-auto shrink-0">
+                      <RowActions
+                        onEdit={() => setEditing(s.id)}
+                        onDelete={async () => {
+                          const fd = new FormData();
+                          fd.set("id", s.id);
+                          await deleteSubscription(fd);
+                        }}
+                      />
+                    </span>
                   </div>
                 </div>
               ),
@@ -529,23 +529,21 @@ function IrregularBillsSection({
                       {b.typicalAmountCents ? formatMoney(b.typicalAmountCents, currency) : "—"}
                     </span>
                   </div>
-                  {(b.notes || b.accountId) && (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                      {b.notes ? <span>{b.notes}</span> : null}
-                      {b.accountId ? (
-                        <span>Card: {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}</span>
-                      ) : null}
-                    </div>
-                  )}
-                  <div className="mt-2 flex justify-end">
-                    <RowActions
-                      onEdit={() => setEditing(b.id)}
-                      onDelete={async () => {
-                        const fd = new FormData();
-                        fd.set("id", b.id);
-                        await deleteIrregularBill(fd);
-                      }}
-                    />
+                  <div className="mt-1.5 flex items-center gap-x-2 text-xs text-muted">
+                    {b.notes ? <span className="min-w-0 truncate">{b.notes}</span> : null}
+                    {b.accountId ? (
+                      <span className="min-w-0 truncate">· {creditCards.find((c) => c.id === b.accountId)?.name ?? "—"}</span>
+                    ) : null}
+                    <span className="ml-auto shrink-0">
+                      <RowActions
+                        onEdit={() => setEditing(b.id)}
+                        onDelete={async () => {
+                          const fd = new FormData();
+                          fd.set("id", b.id);
+                          await deleteIrregularBill(fd);
+                        }}
+                      />
+                    </span>
                   </div>
                 </div>
               ),
@@ -828,7 +826,7 @@ function RenewalBadge({ date }: { date: string }) {
   const upcoming = days >= 0 && days <= 30;
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+      className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${
         upcoming
           ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
           : "text-muted"

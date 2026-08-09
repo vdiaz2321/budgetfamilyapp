@@ -49,7 +49,6 @@ export function TransactionsTable({
   const [modal, setModal] = useState<"new" | TxData | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [accountFilter, setAccountFilter] = useState("");
   const [kindFilter, setKindFilter] = useState("");
   const [fromDate, setFromDate] = useState(dateRange.from ?? "");
   const [toDate, setToDate] = useState(dateRange.to ?? "");
@@ -178,8 +177,8 @@ export function TransactionsTable({
       amountText.includes(amountQuery.replace(/^-/, "")) ||
       `-${amountText}`.includes(amountQuery)
     );
-    if (q && !matchesAmount && ![t.payee, t.subName, t.memo].some((f) => f?.toLowerCase().includes(q))) return false;
-    if (accountFilter && t.accountId !== accountFilter) return false;
+    const accountLabel = t.accountId ? accountName.get(t.accountId) ?? "" : "";
+    if (q && !matchesAmount && ![t.payee, t.subName, t.memo, accountLabel].some((f) => f?.toLowerCase().includes(q))) return false;
     if (kindFilter && t.kind !== kindFilter) return false;
     return true;
   });
@@ -250,7 +249,7 @@ export function TransactionsTable({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search payee, item, or note"
+            placeholder="Search"
             className="w-full rounded-xl bg-surface py-2 pl-9 pr-9 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
           />
           {query ? (
@@ -287,36 +286,12 @@ export function TransactionsTable({
             <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>
           ))}
         </select>
-        <select
-          value={accountFilter}
-          onChange={(e) => setAccountFilter(e.target.value)}
-          className="rounded-xl bg-surface px-3 py-2 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
-        >
-          <option value="">All accounts</option>
-          {(() => {
-            const groups: string[] = [];
-            const byGroup = new Map<string, typeof accountOptions>();
-            for (const a of accountOptions) {
-              const g = a.group ?? "Other";
-              if (!byGroup.has(g)) { groups.push(g); byGroup.set(g, []); }
-              byGroup.get(g)!.push(a);
-            }
-            return groups.map((g) => (
-              <optgroup key={g} label={g}>
-                {byGroup.get(g)!.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </optgroup>
-            ));
-          })()}
-        </select>
-        {query || kindFilter || accountFilter ? (
+        {query || kindFilter ? (
           <button
             type="button"
             onClick={() => {
               setQuery("");
               setKindFilter("");
-              setAccountFilter("");
             }}
             className="rounded-xl px-3 py-2 text-sm font-medium text-muted hover:bg-brand-soft hover:text-foreground"
           >
@@ -419,13 +394,13 @@ export function TransactionsTable({
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
             <span className="col-span-7 whitespace-nowrap text-xs text-muted">
-              <span className="font-medium">Income Rc&apos;d</span>{" "}
-              <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
+              <span className="font-bold text-foreground">Income Rc&apos;d</span>{" "}
+              <span className="tabular-nums font-semibold text-positive">{formatMoney(incomeTotal, currency)}</span>
               <span className="mx-1.5">–</span>
-              <span className="font-medium">Spent Income</span>{" "}
-              <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
+              <span className="font-bold text-foreground">Spent Income</span>{" "}
+              <span className="tabular-nums font-semibold text-negative">{formatMoney(outflowTotal, currency)}</span>
               <span className="mx-1.5">–</span>
-              <span className="font-medium">Income Left</span>{" "}
+              <span className="font-bold text-foreground">Income Left</span>{" "}
               <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
                 {formatMoney(incomeTotal - outflowTotal, currency)}
               </span>
@@ -451,9 +426,9 @@ export function TransactionsTable({
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2 rounded-xl bg-positive/5 px-3 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
-          <span className="whitespace-nowrap text-muted"><span className="font-medium">Rc&apos;d:</span>{" "}<span className="tabular-nums text-positive">{formatMoney(incomeTotal, currency)}</span></span>
-          <span className="whitespace-nowrap text-muted"><span className="font-medium">Spent:</span>{" "}<span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span></span>
-          <span className="whitespace-nowrap text-muted"><span className="font-medium">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeTotal - outflowTotal, currency)}</span></span>
+          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Rc&apos;d:</span>{" "}<span className="tabular-nums text-positive font-semibold">{formatMoney(incomeTotal, currency)}</span></span>
+          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Spent:</span>{" "}<span className="tabular-nums text-negative font-semibold">{formatMoney(outflowTotal, currency)}</span></span>
+          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeTotal - outflowTotal, currency)}</span></span>
         </div>
       )}
 
@@ -868,26 +843,41 @@ function TxCard({
             tx.cleared ? "opacity-60" : ""
           }`}
         >
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="whitespace-nowrap text-xs font-medium text-muted tabular-nums">
-              {dateStr}
-            </span>
-            <span
-              className={`whitespace-nowrap text-sm font-bold tabular-nums ${
-                isIncome ? "text-positive" : "text-foreground"
-              }`}
-            >
-              {isIncome ? "+" : "−"}
-              {formatMoney(tx.amountCents, currency)}
-            </span>
-          </div>
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5">
               {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
-              <span className="truncate text-sm font-medium text-foreground">{tx.subName}</span>
+              <span className={`truncate text-sm font-semibold ${tx.cleared ? "text-muted" : "text-foreground"}`}>{tx.subName}</span>
             </div>
-            <span className="shrink-0 truncate text-xs text-muted">
-              {tx.payee ?? accountName}
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span
+                className={`whitespace-nowrap text-sm font-bold tabular-nums ${
+                  isIncome ? "text-positive" : "text-foreground"
+                }`}
+              >
+                {isIncome ? "+" : "−"}
+                {formatMoney(tx.amountCents, currency)}
+              </span>
+              <span
+                aria-label={tx.cleared ? "Cleared" : "Not cleared"}
+                title={tx.cleared ? "Cleared" : "Not cleared"}
+                className={`inline-flex h-3 w-3 items-center justify-center rounded-full text-[7px] font-bold leading-none ring-1 ${
+                  tx.cleared
+                    ? "bg-positive text-white ring-positive"
+                    : "bg-transparent text-muted/40 ring-line"
+                }`}
+              >
+                c
+              </span>
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 shrink truncate text-xs text-muted">
+              {tx.payee && accountName && accountName !== "—"
+                ? `${tx.payee} · ${accountName}`
+                : (tx.payee ?? accountName)}
+            </span>
+            <span className="shrink-0 whitespace-nowrap text-xs font-medium text-muted tabular-nums">
+              {dateStr}
             </span>
           </div>
         </button>

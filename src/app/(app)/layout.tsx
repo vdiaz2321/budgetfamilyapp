@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "./sidebar";
 import { SessionInit } from "./session-init";
 import { MobileTabBar } from "./mobile-tab-bar";
+import { MobileHeaderMenu } from "./mobile-header-menu";
 import type { SidebarGroup } from "./sidebar-accounts";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 
@@ -194,6 +195,7 @@ export default async function AppLayout({
             </span>
             <span className="text-xl font-bold tracking-tight text-white">Capitall</span>
           </Link>
+          <MobileHeaderMenu userEmail={user.email ?? ""} />
         </header>
 
         <main className="min-w-0 flex-1 px-4 py-6 pb-20 md:px-8 md:py-8 md:pb-8">

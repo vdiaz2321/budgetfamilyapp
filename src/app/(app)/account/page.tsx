@@ -8,7 +8,6 @@ import {
   signOutEverywhere,
   updateDisplayName,
 } from "./actions";
-import { AvatarCard } from "./avatar-card";
 import { DeleteAccountButton } from "./delete-account";
 
 export const metadata = {
@@ -57,11 +56,22 @@ export default async function AccountPage({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-foreground">Account</h1>
-        <p className="mt-1 text-sm text-muted">
-          Signed in as <span className="font-medium text-foreground">{user.email}</span>
-        </p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Account</h1>
+          <p className="mt-1 text-sm text-muted">
+            Signed in as <span className="font-medium text-foreground">{user.email}</span>
+          </p>
+        </div>
+        <Link
+          href="/budget"
+          aria-label="Close settings"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground md:hidden"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </Link>
       </header>
 
       {savedMsg ? (
@@ -74,15 +84,6 @@ export default async function AccountPage({
           {error}
         </div>
       ) : null}
-
-      <Card title="Profile photo" description="Shown in the sidebar chip and menu." anchor="avatar">
-        <AvatarCard
-          userId={user.id}
-          currentUrl={profile?.avatar_url ?? null}
-          displayName={profile?.display_name ?? ""}
-          email={user.email ?? ""}
-        />
-      </Card>
 
       <Card title="Profile" description="How you appear across the app.">
         <form action={updateDisplayName} className="space-y-4">

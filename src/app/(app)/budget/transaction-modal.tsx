@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { centsToDisplay } from "@/lib/money";
+import { centsToDisplay, moneyExpressionToCents } from "@/lib/money";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
@@ -148,11 +148,9 @@ export function TransactionModal({
         const kept = prev.filter((sp) => selectedIds.includes(sp.subId));
         const keptIds = new Set(kept.map((sp) => sp.subId));
         const newIds = selectedIds.filter((id) => !keptIds.has(id));
-        // New items get whatever is left unallocated, or 0.
-        const keptTotal = kept.reduce((s, sp) => s + sp.amountCents, 0);
-        const pool = Math.max(0, totalCents - keptTotal);
-        const perNew = newIds.length > 0 ? Math.round(pool / newIds.length) : 0;
-        const added = newIds.map((id) => ({ subId: id, amountCents: perNew }));
+        // Multiple splits: new items start at 0 so the user enters each amount
+        // explicitly. Single item is filled by the effect below.
+        const added = newIds.map((id) => ({ subId: id, amountCents: 0 }));
         return [...kept, ...added];
       });
     }
@@ -308,24 +306,11 @@ export function TransactionModal({
 
             {/* Row 1: Amount | Date */}
             <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
-                <input
-                  ref={amountRef}
-                  name="amount"
-                  type="text"
-                  inputMode="decimal"
-                  pattern="[0-9]*\.?[0-9]*"
-                  required
-                  placeholder="0.00"
-                  defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setTotalCents(isNaN(v) ? 0 : Math.round(v * 100));
-                  }}
-                  className="w-full rounded-xl bg-background py-2.5 pl-7 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                />
-              </div>
+              <AmountInput
+                inputRef={amountRef}
+                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
+                onChangeCents={setTotalCents}
+              />
               <input
                 name="date"
                 type="date"
@@ -355,12 +340,8 @@ export function TransactionModal({
                 >
                   <span className={`min-w-0 flex-1 truncate ${selectedAccountId ? "text-foreground" : "text-muted"}`}>
                     {selectedAccountId
-                      ? filteredAccounts.find((account) => account.id === selectedAccountId)?.name ?? "Choose account"
-                      : txType === "income"
-                        ? "Deposit to account"
-                        : txType === "debt"
-                          ? "Paid from account"
-                          : "Charged to / paid from"}
+                      ? filteredAccounts.find((account) => account.id === selectedAccountId)?.name ?? "Accounts"
+                      : "Accounts"}
                   </span>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
                     <path d="m9 18 6-6-6-6" />
@@ -375,13 +356,7 @@ export function TransactionModal({
                   }}
                   className="hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3"
                 >
-                  <option value="">
-                    {txType === "income"
-                      ? "Deposit to account"
-                      : txType === "debt"
-                        ? "Paid from account"
-                        : "Charged to / paid from account"}
-                  </option>
+                  <option value="">Accounts</option>
                   {accountGroups.map((g) => (
                     <optgroup key={g} label={g}>
                       {accountByGroup.get(g)!.map((a) => (
@@ -418,7 +393,7 @@ export function TransactionModal({
                   className="w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                 >
                   {splits.length === 0
-                    ? <span className="text-muted">Choose Budget Item…</span>
+                    ? <span className="text-muted">Budget Items</span>
                     : splits.length === 1
                       ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
                       : <span>{splits.length} items</span>
@@ -456,6 +431,15 @@ export function TransactionModal({
               />
             )}
 
+            <CurrencyConverter
+              onUse={(usdCents) => {
+                if (amountRef.current) {
+                  amountRef.current.value = centsToDisplay(usdCents);
+                }
+                setTotalCents(usdCents);
+              }}
+            />
+
             {/* Note */}
             <input
               name="memo"
@@ -467,47 +451,20 @@ export function TransactionModal({
             {!isEdit ? (
               <div className="flex items-center justify-between gap-3">
                 <input type="hidden" name="cleared" value={cleared ? "on" : ""} />
-                <span className="text-xs text-muted">Mark it cleared once it matches your bank or card.</span>
+                <span className="text-xs text-muted">Select clear once reconcile.</span>
                 <button
                   type="button"
                   onClick={() => setCleared((value) => !value)}
-                  className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-bold transition ${
+                  className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition ${
                     cleared
-                      ? "bg-positive/15 text-positive ring-1 ring-positive/20"
-                      : "bg-background text-muted ring-1 ring-line hover:bg-positive/10 hover:text-positive"
+                      ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                      : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
                   }`}
                 >
-                  {cleared ? "Cleared ✓" : "Clear"}
+                  {cleared ? "Cleared" : "Clear"}
                 </button>
               </div>
             ) : null}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                const web = "https://www.xe.com/currencyconverter/";
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-                if (!isIOS) {
-                  window.open(web, "_blank", "noopener,noreferrer");
-                  return;
-                }
-                // iOS: try the app via URL scheme first. If the browser is
-                // still visible after ~1.5s, the app didn't take over —
-                // fall back to the web converter.
-                const start = Date.now();
-                const fallback = window.setTimeout(() => {
-                  if (Date.now() - start < 2500 && document.visibilityState === "visible") {
-                    window.location.href = web;
-                  }
-                }, 1500);
-                const onHide = () => { window.clearTimeout(fallback); document.removeEventListener("visibilitychange", onHide); };
-                document.addEventListener("visibilitychange", onHide);
-                window.location.href = "xecurrency://";
-              }}
-              className="inline-flex w-fit items-center gap-1 text-xs font-semibold text-brand hover:text-brand-strong hover:underline"
-            >
-              ↗ Convert currency with XE
-            </button>
 
             {/* Footer */}
             <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
@@ -537,12 +494,15 @@ export function TransactionModal({
                         fd.set("id", editTx.id);
                         fd.set("cleared", editTx.cleared ? "false" : "true");
                         await toggleCleared(fd);
-                        onClose();
                       })
                     }
-                    className="rounded-lg px-3 py-2 text-sm font-bold text-positive transition hover:bg-positive/10 disabled:opacity-60"
+                    className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
+                      editTx.cleared
+                        ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                        : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
+                    }`}
                   >
-                    {editTx.cleared ? "Uncheck" : "Clear ✓"}
+                    {editTx.cleared ? "Uncleared" : "Clear"}
                   </button>
                 </div>
               ) : (
@@ -599,8 +559,7 @@ function SplitRows({
               −
             </button>
             <span className="flex-1 truncate text-sm font-medium">{opt?.name ?? sp.subId}</span>
-            <div className="relative shrink-0">
-              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">$</span>
+            <div className="shrink-0">
               <SplitAmountInput
                 amountCents={sp.amountCents}
                 onChange={(cents) => onAmountChange(sp.subId, cents)}
@@ -627,27 +586,132 @@ function SplitRows({
   );
 }
 
+// The main "$ amount" field. Hides the $ prefix on focus so the caret can sit
+// flush left, selects existing text on focus for easy replacement, and swallows
+// Enter so hitting return on the keypad doesn't submit the whole form.
+function AmountInput({
+  inputRef,
+  defaultValue,
+  onChangeCents,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  defaultValue: string;
+  onChangeCents: (cents: number) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div className="relative flex-1">
+      {!focused && (
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+      )}
+      <input
+        ref={inputRef}
+        name="amount"
+        type="text"
+        inputMode="decimal"
+        pattern="[0-9]*\.?[0-9]*"
+        required
+        placeholder="0.00"
+        defaultValue={defaultValue}
+        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
+        onBlur={() => setFocused(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+        }}
+        onChange={(e) => {
+          const v = parseFloat(e.target.value);
+          onChangeCents(isNaN(v) ? 0 : Math.round(v * 100));
+        }}
+        className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
+      />
+    </div>
+  );
+}
+
 // Uncontrolled-style amount input: keeps raw string while typing, formats on blur.
-// Avoids the "typing 10 → 1.00" issue caused by re-formatting on every keystroke.
+// Accepts arithmetic expressions (e.g. "45 + 12.50 - 3") — mobile keypads don't
+// expose operator keys, so operator chips appear beside the input on focus.
 function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onChange: (cents: number) => void }) {
   const [raw, setRaw] = useState(amountCents === 0 ? "" : (amountCents / 100).toFixed(2));
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const commit = (value: string) => {
+    const cents = moneyExpressionToCents(value);
+    onChange(cents);
+    setRaw(cents === 0 ? "" : (cents / 100).toFixed(2));
+  };
+
+  const insert = (ch: string) => {
+    const input = inputRef.current;
+    if (!input) return;
+    const start = input.selectionStart ?? raw.length;
+    const end = input.selectionEnd ?? raw.length;
+    const next = raw.slice(0, start) + ch + raw.slice(end);
+    setRaw(next);
+    // Re-focus and place caret after the inserted char.
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + ch.length, start + ch.length);
+    });
+  };
+
   return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={raw}
-      placeholder="0.00"
-      onChange={(e) => {
-        setRaw(e.target.value);
-        const v = parseFloat(e.target.value);
-        onChange(isNaN(v) ? 0 : Math.round(v * 100));
-      }}
-      onBlur={() => {
-        const v = parseFloat(raw);
-        setRaw(isNaN(v) || v <= 0 ? "" : v.toFixed(2));
-      }}
-      className="w-24 rounded-lg bg-background py-1.5 pl-6 pr-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-    />
+    <div className="flex flex-col items-end gap-1">
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="decimal"
+        value={raw}
+        placeholder="0.00"
+        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          const v = parseFloat(e.target.value);
+          onChange(isNaN(v) ? 0 : Math.round(v * 100));
+        }}
+        onKeyDown={(e) => {
+          // Enter evaluates the expression instead of submitting the form.
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit(raw);
+          }
+        }}
+        onBlur={() => {
+          // Delay so tapping an operator chip doesn't close the toolbar first.
+          setTimeout(() => setFocused(false), 150);
+          commit(raw);
+        }}
+        title="Type a value or expression, e.g. 45 + 12.50"
+        className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+      {focused && (
+        <div className="flex items-center gap-0.5">
+          {["+", "−", "×", "÷"].map((label) => {
+            const ch = label === "−" ? "-" : label === "×" ? "*" : label === "÷" ? "/" : "+";
+            return (
+              <button
+                key={label}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => insert(ch)}
+                className="h-5 w-5 rounded bg-brand-soft text-[11px] font-bold text-brand ring-1 ring-brand/20 active:bg-brand/20"
+              >
+                {label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => commit(raw)}
+            className="ml-0.5 h-5 rounded bg-brand px-1.5 text-[10px] font-bold text-white active:bg-brand-strong"
+          >
+            =
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -723,6 +787,7 @@ function BudgetItemPicker({
 }) {
   const [search, setSearch] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set(selectedIds));
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = search
     ? options.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
@@ -735,6 +800,10 @@ function BudgetItemPicker({
       else next.add(id);
       return next;
     });
+    // Return cursor to the search box so the user can keep typing to filter
+    // and pick the next item without an extra tap.
+    setSearch("");
+    searchRef.current?.focus({ preventScroll: true });
   }
 
   return (
@@ -766,6 +835,7 @@ function BudgetItemPicker({
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
           <input
+            ref={searchRef}
             type="search"
             placeholder="Search…"
             value={search}
@@ -995,6 +1065,115 @@ function BudgetItemField({
           />
           This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a purchase)
         </label>
+      ) : null}
+    </div>
+  );
+}
+
+// Currencies most likely to come up on travel receipts. Add more as needed —
+// the API returns rates for ~150 currencies, but a big <select> is worse UX.
+const FX_CURRENCIES = [
+  "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY",
+  "MXN", "INR", "KRW", "TRY", "BRL", "SGD", "HKD",
+  "SEK", "NOK", "DKK", "PLN", "THB", "ZAR",
+] as const;
+
+// Module-level cache so the modal doesn't re-fetch every time it opens.
+let cachedRates: { rates: Record<string, number>; fetchedAt: number } | null = null;
+
+function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [from, setFrom] = useState<string>("EUR");
+  const [rates, setRates] = useState<Record<string, number> | null>(cachedRates?.rates ?? null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || rates) return;
+    // Rates cached for the session are good enough — FX moves slowly at
+    // family-budget scale and one-tap "Use $X.XX" always shows the number.
+    setLoading(true);
+    setError(null);
+    fetch("https://open.er-api.com/v6/latest/USD")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.rates && typeof d.rates === "object") {
+          cachedRates = { rates: d.rates, fetchedAt: Date.now() };
+          setRates(d.rates);
+        } else {
+          setError("Couldn't load rates");
+        }
+      })
+      .catch(() => setError("Network error — check connection"))
+      .finally(() => setLoading(false));
+  }, [open, rates]);
+
+  const num = parseFloat(amount);
+  const rate = rates?.[from];
+  const usd = rate && !isNaN(num) && num > 0 ? num / rate : null;
+  const usdCents = usd != null ? Math.round(usd * 100) : null;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex w-fit items-center gap-1 text-xs font-semibold text-brand hover:text-brand-strong hover:underline"
+      >
+        ↗ Convert currency to USD
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-background p-3 ring-1 ring-line">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold text-muted">Convert to USD</span>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-xs font-medium text-muted hover:text-foreground"
+        >
+          Close
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          className="w-24 rounded-lg bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <select
+          value={from}
+          onChange={(e) => setFrom(e.target.value)}
+          className="rounded-lg bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        >
+          {FX_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <span className="text-sm text-muted">=</span>
+        <span className="text-sm font-bold tabular-nums text-foreground">
+          {loading ? "…" : usd != null ? `$${usd.toFixed(2)}` : "$0.00"}
+        </span>
+        {usdCents != null && (
+          <button
+            type="button"
+            onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
+            className="ml-auto rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong"
+          >
+            Use
+          </button>
+        )}
+      </div>
+      {error ? (
+        <p className="mt-2 text-xs text-negative">{error}</p>
+      ) : rate ? (
+        <p className="mt-1.5 text-[10px] text-muted">
+          1 USD = {rate.toFixed(4)} {from}
+        </p>
       ) : null}
     </div>
   );
