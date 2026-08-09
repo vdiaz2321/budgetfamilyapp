@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
@@ -57,6 +57,73 @@ export function TransactionsTable({
   const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
   const hasRange = Boolean(dateRange.from || dateRange.to);
+
+  // Mobile selection mode: tap Select to reveal checkboxes and a batch-action
+  // bar at the bottom for Clear / Delete on many transactions at once.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [, startBatch] = useTransition();
+  const toggleSelected = (id: string) => setSelectedIds((s) => {
+    const next = new Set(s);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const selectedTxs = () => transactions.filter((t) => selectedIds.has(t.id));
+  const selectedNetCents = () => selectedTxs().reduce((sum, t) => sum + (t.kind === "income" ? t.amountCents : -t.amountCents), 0);
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+  const batchDelete = () => {
+    const ids = [...selectedIds];
+    startBatch(async () => {
+      for (const id of ids) {
+        const fd = new FormData();
+        fd.append("id", id);
+        await deleteTransaction(fd);
+      }
+      exitSelectMode();
+    });
+  };
+  const batchClear = (cleared: boolean) => {
+    const ids = [...selectedIds];
+    startBatch(async () => {
+      for (const id of ids) {
+        const fd = new FormData();
+        fd.append("id", id);
+        fd.append("cleared", cleared ? "true" : "false");
+        await toggleCleared(fd);
+      }
+      exitSelectMode();
+    });
+  };
+  const batchExportCsv = () => {
+    const rows = selectedTxs();
+    if (rows.length === 0) return;
+    const qf = (v: string | number | null | undefined) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [
+      ["Date", "Cleared", "Amount", "Type", "Category", "Payee", "Account", "Remarks"].join(","),
+      ...rows.map((t) =>
+        [
+          t.date,
+          t.cleared ? "yes" : "no",
+          (t.amountCents / 100).toFixed(2),
+          t.kind ? KIND_LABEL[t.kind] : "",
+          t.subName,
+          t.payee ?? "",
+          t.accountId ? accountName.get(t.accountId) ?? "" : "",
+          t.memo ?? "",
+        ].map(qf).join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `transactions-selected-${rows.length}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   function applyRange(nextFrom: string, nextTo: string) {
     const params = new URLSearchParams();
@@ -192,6 +259,13 @@ export function TransactionsTable({
             </button>
           ) : null}
         </div>
+        <button
+          type="button"
+          onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+          className="shrink-0 px-2 py-2 text-sm font-semibold text-brand transition hover:text-brand-strong"
+        >
+          {selectMode ? "Cancel" : "Select"}
+        </button>
         <select
           value={kindFilter}
           onChange={(e) => setKindFilter(e.target.value)}
@@ -290,24 +364,39 @@ export function TransactionsTable({
         <div className="overflow-x-auto">
           <div className="min-w-[52rem]">
             {/* Totals — moved to the top so the net line is visible without scrolling */}
-            <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-              <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
-                {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
-              </span>
-              <span className="col-span-7 whitespace-nowrap text-xs text-muted">
-                <span className="font-medium">Income Rc&apos;d</span>{" "}
-                <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
-                <span className="mx-1.5">–</span>
-                <span className="font-medium">Spent Income</span>{" "}
-                <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
-                <span className="mx-1.5">–</span>
-                <span className="font-medium">Income Left</span>{" "}
-                <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
-                  {formatMoney(incomeTotal - outflowTotal, currency)}
+            {selectMode && selectedIds.size > 0 ? (
+              <div className="flex items-center gap-3 bg-brand-soft px-4 py-2.5 text-xs">
+                <span className="font-semibold text-brand">
+                  {selectedIds.size} selected
                 </span>
-              </span>
-              <span />
-            </div>
+                <span className="text-muted">·</span>
+                <span className="text-muted">
+                  <span className="font-medium">Selected total</span>{" "}
+                  <span className={`tabular-nums font-bold ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>
+                    {formatMoney(selectedNetCents(), currency)}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
+                <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
+                  {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
+                </span>
+                <span className="col-span-7 whitespace-nowrap text-xs text-muted">
+                  <span className="font-medium">Income Rc&apos;d</span>{" "}
+                  <span className="tabular-nums">{formatMoney(incomeTotal, currency)}</span>
+                  <span className="mx-1.5">–</span>
+                  <span className="font-medium">Spent Income</span>{" "}
+                  <span className="tabular-nums text-negative">{formatMoney(outflowTotal, currency)}</span>
+                  <span className="mx-1.5">–</span>
+                  <span className="font-medium">Income Left</span>{" "}
+                  <span className={`tabular-nums ${incomeTotal - outflowTotal >= 0 ? "text-positive" : "text-negative"}`}>
+                    {formatMoney(incomeTotal - outflowTotal, currency)}
+                  </span>
+                </span>
+                <span />
+              </div>
+            )}
             {/* Header */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-b border-line px-4 py-2.5`}>
               <button
@@ -349,6 +438,9 @@ export function TransactionsTable({
                     tx={t}
                     currency={currency}
                     accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                    selectMode={selectMode}
+                    selected={selectedIds.has(t.id)}
+                    onSelect={() => toggleSelected(t.id)}
                     onEdit={() => {
                       if (!t.isCardPayment) setModal(t);
                     }}
@@ -362,11 +454,13 @@ export function TransactionsTable({
       </section>
 
       {/* Register — mobile card list */}
-      <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
-        {/* Totals bar — moved to the top on mobile too, matches desktop */}
+      <section className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
+        {/* Totals bar (filter totals only — selection totals live in the
+            floating batch bar so they don't get pushed off-screen by the
+            keyboard on mobile) */}
         <div className="flex items-center justify-between gap-2 bg-positive/5 px-3 py-2 text-[11px] dark:bg-positive/10">
           <span className="whitespace-nowrap text-muted">
-            <span className="font-medium">Income Rc&apos;d:</span>{" "}
+            <span className="font-medium">Rc&apos;d:</span>{" "}
             <span className="tabular-nums text-positive">{formatMoney(incomeTotal, currency)}</span>
           </span>
           <span className="whitespace-nowrap text-muted">
@@ -394,14 +488,67 @@ export function TransactionsTable({
                 tx={t}
                 currency={currency}
                 accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                selectMode={selectMode}
+                selected={selectedIds.has(t.id)}
+                onSelect={() => toggleSelected(t.id)}
                 onTap={() => {
-                  if (!t.isCardPayment) setModal(t);
+                  if (selectMode) toggleSelected(t.id);
+                  else if (!t.isCardPayment) setModal(t);
                 }}
               />
             ))}
           </ul>
         )}
       </section>
+
+      {/* Batch action bar — floats above the mobile tab bar on phones and at
+          the bottom-center of the viewport on desktop. Shows selection total so
+          you can e.g. sum a bunch of splits to reconcile with a receipt. */}
+      {selectMode && selectedIds.size > 0 ? (
+        <div className="fixed inset-x-0 bottom-16 z-40 border-t border-line bg-surface px-3 py-2 shadow-lg sm:inset-x-auto sm:bottom-6 sm:left-1/2 sm:-translate-x-1/2 sm:rounded-2xl sm:border sm:px-4 sm:py-3">
+          <div className="mb-2 flex items-center justify-between gap-3 text-xs sm:text-sm">
+            <span className="font-semibold text-foreground">
+              {selectedIds.size} selected
+            </span>
+            <span className="text-muted">
+              Total{" "}
+              <span className={`font-bold tabular-nums ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>
+                {formatMoney(selectedNetCents(), currency)}
+              </span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => batchClear(true)}
+              className="flex-1 rounded-lg bg-positive/10 py-2 text-xs font-semibold text-positive transition hover:bg-positive/20 sm:text-sm"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => batchClear(false)}
+              className="flex-1 rounded-lg bg-brand-soft py-2 text-xs font-semibold text-brand transition hover:bg-brand/20 sm:text-sm"
+            >
+              Uncheck
+            </button>
+            <button
+              type="button"
+              onClick={batchExportCsv}
+              className="flex-1 rounded-lg bg-background py-2 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-brand-soft sm:text-sm"
+            >
+              Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={batchDelete}
+              className="flex-1 rounded-lg bg-negative/10 py-2 text-xs font-semibold text-negative transition hover:bg-negative/20 sm:text-sm"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {modal ? (
         <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
@@ -430,11 +577,17 @@ function TxLine({
   tx,
   currency,
   accountName,
+  selectMode,
+  selected,
+  onSelect,
   onEdit,
 }: {
   tx: TxData;
   currency: string;
   accountName: string;
+  selectMode: boolean;
+  selected: boolean;
+  onSelect: () => void;
   onEdit: () => void;
 }) {
   const [clearPending, startClear] = useTransition();
@@ -451,25 +604,37 @@ function TxLine({
 
   return (
     <li
-      onDoubleClick={canEdit ? onEdit : undefined}
-      title={canEdit ? "Double-click to edit" : "Card payment — delete and recreate it from the card"}
-      className={`group grid ${GRID} cursor-default select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
-        tx.cleared ? "opacity-60" : ""
-      }`}
+      onClick={selectMode ? onSelect : undefined}
+      onDoubleClick={!selectMode && canEdit ? onEdit : undefined}
+      title={selectMode ? "Click to toggle selection" : canEdit ? "Double-click to edit" : "Card payment — delete and recreate it from the card"}
+      className={`group grid ${GRID} ${selectMode ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
+        tx.cleared && !selected ? "opacity-60" : ""
+      } ${selected ? "bg-brand-soft/40" : ""}`}
     >
       <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>
-      <span onDoubleClick={(e) => e.stopPropagation()} className="flex justify-center">
-        <input
-          type="checkbox"
-          checked={tx.cleared}
-          disabled={clearPending}
-          onChange={(e) => onToggle(e.target.checked)}
-          title="Cleared — verified against your bank / card app"
-          aria-label="Cleared"
-          className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
-        />
+      <span onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} className="flex justify-center">
+        {selectMode ? (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            title="Select this transaction"
+            aria-label="Select transaction"
+            className="h-4 w-4 rounded accent-[var(--brand)]"
+          />
+        ) : (
+          <input
+            type="checkbox"
+            checked={tx.cleared}
+            disabled={clearPending}
+            onChange={(e) => onToggle(e.target.checked)}
+            title="Cleared — verified against your bank / card app"
+            aria-label="Cleared"
+            className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
+          />
+        )}
       </span>
       <button
         type="button"
@@ -518,50 +683,139 @@ function TxCard({
   tx,
   currency,
   accountName,
+  selectMode,
+  selected,
+  onSelect,
   onTap,
 }: {
   tx: TxData;
   currency: string;
   accountName: string;
+  selectMode: boolean;
+  selected: boolean;
+  onSelect: () => void;
   onTap: () => void;
 }) {
   const canEdit = !tx.isCardPayment;
   const isIncome = tx.kind === "income";
   const dateStr = `${tx.date.slice(5, 7)}/${tx.date.slice(8, 10)}`;
 
+  // Swipe gesture — dragging left reveals Delete, dragging right reveals
+  // Clear/Uncheck. Released past the threshold, the corresponding action fires;
+  // otherwise the row springs back. Disabled in select mode (tap = toggle).
+  const [dx, setDx] = useState(0);
+  const [committed, setCommitted] = useState(false);
+  const startX = useRef(0);
+  const [, startAction] = useTransition();
+  const THRESH = 72;
+  const MAX = 96;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (selectMode || !canEdit) return;
+    startX.current = e.touches[0].clientX;
+    setCommitted(false);
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (selectMode || !canEdit || startX.current === 0) return;
+    const raw = e.touches[0].clientX - startX.current;
+    setDx(Math.max(-MAX, Math.min(MAX, raw)));
+  };
+  const onTouchEnd = () => {
+    if (selectMode || !canEdit) return;
+    if (dx <= -THRESH) {
+      setDx(-MAX);
+      setCommitted(true);
+      startAction(async () => {
+        const fd = new FormData();
+        fd.append("id", tx.id);
+        await deleteTransaction(fd);
+      });
+    } else if (dx >= THRESH) {
+      setDx(MAX);
+      setCommitted(true);
+      startAction(async () => {
+        const fd = new FormData();
+        fd.append("id", tx.id);
+        fd.append("cleared", tx.cleared ? "false" : "true");
+        await toggleCleared(fd);
+        setDx(0);
+        setCommitted(false);
+      });
+    } else {
+      setDx(0);
+    }
+    startX.current = 0;
+  };
+
   return (
-    <li>
-      <button
-        type="button"
-        disabled={!canEdit}
-        onClick={onTap}
-        className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition active:bg-brand-soft/25 disabled:cursor-default ${
-          tx.cleared ? "opacity-60" : ""
-        }`}
-      >
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="whitespace-nowrap text-xs font-medium text-muted tabular-nums">
-            {dateStr}
-          </span>
-          <span
-            className={`whitespace-nowrap text-sm font-bold tabular-nums ${
-              isIncome ? "text-positive" : "text-foreground"
-            }`}
-          >
-            {isIncome ? "+" : "−"}
-            {formatMoney(tx.amountCents, currency)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
-            <span className="truncate text-sm font-medium text-foreground">{tx.subName}</span>
+    <li className="relative overflow-hidden">
+      {/* Swipe backgrounds */}
+      {!selectMode && (
+        <>
+          {/* right-swipe (Clear) */}
+          <div className={`pointer-events-none absolute inset-0 flex items-center bg-positive px-4 text-sm font-semibold text-white ${dx > 0 ? "opacity-100" : "opacity-0"} transition-opacity`}>
+            {tx.cleared ? "Uncheck" : "Clear ✓"}
           </div>
-          <span className="shrink-0 truncate text-xs text-muted">
-            {tx.payee ?? accountName}
-          </span>
-        </div>
-      </button>
+          {/* left-swipe (Delete) */}
+          <div className={`pointer-events-none absolute inset-0 flex items-center justify-end bg-negative px-4 text-sm font-semibold text-white ${dx < 0 ? "opacity-100" : "opacity-0"} transition-opacity`}>
+            Delete
+          </div>
+        </>
+      )}
+
+      <div
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{ transform: `translateX(${dx}px)`, transition: committed ? "transform 200ms ease" : startX.current ? "none" : "transform 200ms ease" }}
+        className="relative flex items-center gap-2 bg-surface"
+      >
+        {selectMode ? (
+          <button
+            type="button"
+            onClick={onSelect}
+            aria-label={selected ? "Deselect" : "Select"}
+            className={`ml-3 flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 ${selected ? "border-brand bg-brand text-white" : "border-line bg-surface"}`}
+          >
+            {selected ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+            ) : null}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          disabled={!canEdit && !selectMode}
+          onClick={onTap}
+          className={`flex w-full flex-col gap-1.5 px-4 py-3.5 text-left transition active:bg-brand-soft/25 disabled:cursor-default ${
+            tx.cleared ? "opacity-60" : ""
+          }`}
+        >
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="whitespace-nowrap text-xs font-medium text-muted tabular-nums">
+              {dateStr}
+            </span>
+            <span
+              className={`whitespace-nowrap text-sm font-bold tabular-nums ${
+                isIncome ? "text-positive" : "text-foreground"
+              }`}
+            >
+              {isIncome ? "+" : "−"}
+              {formatMoney(tx.amountCents, currency)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
+              <span className="truncate text-sm font-medium text-foreground">{tx.subName}</span>
+            </div>
+            <span className="shrink-0 truncate text-xs text-muted">
+              {tx.payee ?? accountName}
+            </span>
+          </div>
+        </button>
+      </div>
     </li>
   );
 }

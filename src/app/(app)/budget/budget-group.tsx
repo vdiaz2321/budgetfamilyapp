@@ -134,7 +134,7 @@ export function BudgetGroup({
   const subtotalOverspent = (group.kind === "bills" || group.kind === "expenses") && remainingTotal < 0;
 
   return (
-    <section className="relative overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
       {/* Consolidated header: chevron + dot + name + sources chip on the left;
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}

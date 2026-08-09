@@ -235,6 +235,44 @@ export async function upsertPlan(formData: FormData) {
   revalidatePath("/budget");
 }
 
+// Move `amountCents` of planned budget from one subcategory to another for a
+// given month. Both rows in budget_plans are updated atomically-ish (best effort
+// — Supabase JS lacks true multi-row transactions from the client; we upsert in
+// sequence and swallow no errors). Read the source's current planned amount,
+// subtract, then upsert both.
+export async function reassignPlanned(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const fromSubId = String(formData.get("fromSubId") ?? "");
+  const toSubId = String(formData.get("toSubId") ?? "");
+  const month = String(formData.get("month") ?? ""); // YYYY-MM-01
+  const amountCents = moneyExpressionToCents(String(formData.get("amount") ?? "0"));
+
+  if (!fromSubId || !toSubId || !month || amountCents <= 0 || fromSubId === toSubId) {
+    return { error: "Missing or invalid inputs" };
+  }
+
+  const { data: existing } = await supabase
+    .from("budget_plans")
+    .select("subcategory_id, planned_cents")
+    .eq("household_id", householdId)
+    .eq("month", month)
+    .in("subcategory_id", [fromSubId, toSubId]);
+
+  const fromPlan = existing?.find((r) => r.subcategory_id === fromSubId)?.planned_cents ?? 0;
+  const toPlan = existing?.find((r) => r.subcategory_id === toSubId)?.planned_cents ?? 0;
+
+  await supabase.from("budget_plans").upsert(
+    [
+      { household_id: householdId, month, subcategory_id: fromSubId, planned_cents: Math.max(0, fromPlan - amountCents) },
+      { household_id: householdId, month, subcategory_id: toSubId, planned_cents: toPlan + amountCents },
+    ],
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+
+  revalidatePath("/budget");
+  return { ok: true };
+}
+
 // ---------- Subcategories (the budget rows) ----------
 
 export async function reorderSubcategories(formData: FormData) {

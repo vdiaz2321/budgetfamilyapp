@@ -1,18 +1,20 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
   deleteSubcategory,
   deleteTransaction,
   moveSubcategoryToGroup,
+  reassignPlanned,
   updateSubcategory,
   upsertDebtAndPlan,
   upsertPlan,
   upsertSavingsGoalAndLink,
 } from "./actions";
-import type { AccountOption, BucketOption, RowData, TxData } from "./types";
+import type { AccountOption, BucketOption, RowData, SubOption, TxData } from "./types";
 import { DEBT_KINDS } from "./types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
@@ -31,6 +33,7 @@ type Props = {
   kind: CategoryKind;
   currency: string;
   monthKey: string; // YYYY-MM-01
+  subOptions: SubOption[];
   groupOptions: { id: string; name: string; kind: CategoryKind }[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
@@ -51,6 +54,7 @@ export function ItemPanel({
   kind,
   currency,
   monthKey,
+  subOptions,
   groupOptions,
   debtAccountOptions,
   bucketOptions,
@@ -147,7 +151,18 @@ export function ItemPanel({
           ) : kind === "savings" && row.savings ? (
             <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} onAddTransaction={onAddTransaction} />
           ) : (
-            <PlannedForm subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} dueDay={row.dueDay} hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)} onAddTransaction={onAddTransaction} />
+            <PlannedForm
+              subId={row.subId}
+              monthKey={monthKey}
+              plannedCents={row.plannedCents}
+              spentCents={row.spentCents}
+              itemName={row.name}
+              currency={currency}
+              subOptions={subOptions}
+              dueDay={row.dueDay}
+              hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)}
+              onAddTransaction={onAddTransaction}
+            />
           );
         return body ? <div className="space-y-4 px-5 pb-4 pt-4">{body}</div> : null;
       })()}
@@ -159,7 +174,12 @@ export function ItemPanel({
         onEdit={onEditTransaction}
       />
 
-      <DeleteFooter subId={row.subId} onDeleted={onClose} onAddTransaction={onAddTransaction} />
+      <DeleteFooter
+        subId={row.subId}
+        onDeleted={onClose}
+        onAddTransaction={onAddTransaction}
+        saveFormId={`plan-form-${row.subId}`}
+      />
     </div>
   );
 }
@@ -264,10 +284,12 @@ function DeleteFooter({
   subId,
   onDeleted,
   onAddTransaction,
+  saveFormId,
 }: {
   subId: string;
   onDeleted: () => void;
   onAddTransaction: () => void;
+  saveFormId?: string;
 }) {
   const [pending, start] = useTransition();
   return (
@@ -279,6 +301,15 @@ function DeleteFooter({
       >
         +Transaction
       </button>
+      {saveFormId ? (
+        <button
+          type="submit"
+          form={saveFormId}
+          className="shrink-0 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
+        >
+          Save
+        </button>
+      ) : null}
       <form
         action={(fd) => start(() => deleteSubcategory(fd).then(onDeleted))}
         className="shrink-0"
@@ -396,34 +427,234 @@ function TxRow({
 
 function PlannedForm({
   subId,
+  monthKey,
+  plannedCents,
+  spentCents,
+  itemName,
+  currency,
+  subOptions,
   dueDay,
   hasDue,
 }: {
   subId: string;
   monthKey: string;
   plannedCents: number;
+  spentCents: number;
+  itemName: string;
+  currency: string;
+  subOptions: SubOption[];
   dueDay?: number | null;
   hasDue?: boolean;
   onAddTransaction: () => void;
 }) {
   const [, startDue] = useTransition();
-  if (!hasDue) return null;
+  const [showDetails, setShowDetails] = useState(false);
+
+  const detailsBtn = (
+    <button
+      type="button"
+      onClick={() => setShowDetails(true)}
+      className="shrink-0 rounded-lg bg-brand-soft px-5 py-2 text-xs font-semibold text-brand transition hover:bg-brand/20"
+    >
+      Details
+    </button>
+  );
+
   return (
-    <Section title="Due day (day of month)">
-      <form action={(fd) => startDue(() => updateSubcategory(fd))} className="flex items-center gap-2">
-        <input type="hidden" name="id" value={subId} />
-        <input
-          key={dueDay ?? ""}
-          name="dueDay"
-          type="number"
-          min={1}
-          max={31}
-          placeholder="—"
-          defaultValue={dueDay ?? ""}
-          className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    <>
+      {hasDue ? (
+        <Section title="Due day (day of month)">
+          <form
+            id={`plan-form-${subId}`}
+            action={(fd) => startDue(() => updateSubcategory(fd))}
+            className="flex items-center gap-2"
+          >
+            <input type="hidden" name="id" value={subId} />
+            <input
+              key={dueDay ?? ""}
+              name="dueDay"
+              type="number"
+              min={1}
+              max={31}
+              placeholder="—"
+              defaultValue={dueDay ?? ""}
+              className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            {detailsBtn}
+          </form>
+        </Section>
+      ) : (
+        <div className="flex justify-end">{detailsBtn}</div>
+      )}
+
+      {showDetails ? (
+        <ItemDetailsPopover
+          subId={subId}
+          itemName={itemName}
+          monthKey={monthKey}
+          plannedCents={plannedCents}
+          spentCents={spentCents}
+          currency={currency}
+          subOptions={subOptions}
+          onClose={() => setShowDetails(false)}
         />
-      </form>
-    </Section>
+      ) : null}
+    </>
+  );
+}
+
+function ItemDetailsPopover({
+  subId,
+  itemName,
+  monthKey,
+  plannedCents,
+  spentCents,
+  currency,
+  subOptions,
+  onClose,
+}: {
+  subId: string;
+  itemName: string;
+  monthKey: string;
+  plannedCents: number;
+  spentCents: number;
+  currency: string;
+  subOptions: SubOption[];
+  onClose: () => void;
+}) {
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [toSubId, setToSubId] = useState<string>("");
+  const [amount, setAmount] = useState<string>(centsToDisplay(Math.max(0, plannedCents - spentCents)));
+  const available = plannedCents - spentCents;
+  const monthLabel = new Date(`${monthKey}T00:00:00`).toLocaleString("en-US", { month: "short", year: "numeric" });
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-2xl bg-surface shadow-xl ring-1 ring-black/10 dark:ring-white/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{itemName}</p>
+            <p className="text-sm font-bold text-foreground">Details · {monthLabel}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-muted hover:bg-brand-soft hover:text-foreground"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <dl className="grid grid-cols-3 gap-2 px-4 py-3 text-center">
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-muted">Assigned</dt>
+            <dd className="mt-0.5 text-sm font-bold text-foreground tabular-nums">{formatMoney(plannedCents, currency)}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-muted">Spent</dt>
+            <dd className="mt-0.5 text-sm font-bold text-negative tabular-nums">{formatMoney(spentCents, currency)}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] uppercase tracking-wide text-muted">Available</dt>
+            <dd className={`mt-0.5 text-sm font-bold tabular-nums ${available < 0 ? "text-negative" : "text-positive"}`}>
+              {formatMoney(available, currency)}
+            </dd>
+          </div>
+        </dl>
+
+        {!reassignOpen ? (
+          <div className="border-t border-line px-4 py-3">
+            <button
+              type="button"
+              disabled={available <= 0}
+              onClick={() => setReassignOpen(true)}
+              className="w-full rounded-lg bg-brand py-2 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
+            >
+              Reassign available funds
+            </button>
+            {available <= 0 ? (
+              <p className="mt-1.5 text-center text-[11px] text-muted">Nothing available to reassign.</p>
+            ) : null}
+          </div>
+        ) : (
+          <form
+            className="space-y-3 border-t border-line px-4 py-3"
+            action={(fd) =>
+              start(async () => {
+                setError(null);
+                const res = await reassignPlanned(fd);
+                if (res && "error" in res && res.error) setError(res.error);
+                else onClose();
+              })
+            }
+          >
+            <input type="hidden" name="fromSubId" value={subId} />
+            <input type="hidden" name="month" value={monthKey} />
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Reassign to</span>
+              <select
+                name="toSubId"
+                value={toSubId}
+                onChange={(e) => setToSubId(e.target.value)}
+                required
+                className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Pick a budget item…</option>
+                {subOptions.filter((s) => s.id !== subId).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Amount (max {formatMoney(available, currency)})
+              </span>
+              <input
+                name="amount"
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            </label>
+            {error ? <p className="text-xs font-medium text-negative">{error}</p> : null}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setReassignOpen(false)}
+                className="flex-1 rounded-lg bg-background py-2 text-sm font-medium text-muted ring-1 ring-line transition hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pending || !toSubId}
+                className="flex-1 rounded-lg bg-brand py-2 text-sm font-semibold text-white transition hover:bg-brand-strong disabled:opacity-50"
+              >
+                {pending ? "Moving…" : "Move funds"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

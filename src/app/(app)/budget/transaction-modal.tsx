@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay } from "@/lib/money";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, updateTransaction, deleteTransaction, deletePayee } from "./actions";
+import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
 
 // Header title (verbose) vs. button label (short), plus tab labels.
@@ -316,7 +316,7 @@ export function TransactionModal({
                   pattern="[0-9]*\.?[0-9]*"
                   required
                   placeholder="0.00"
-                  autoFocus
+                  autoFocus={!editTx}
                   defaultValue={editTx ? centsToDisplay(editTx.amountCents) : ""}
                   onChange={(e) => {
                     const v = parseFloat(e.target.value);
@@ -494,21 +494,39 @@ export function TransactionModal({
             {/* Footer */}
             <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
               {isEdit ? (
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() =>
-                    start(async () => {
-                      const fd = new FormData();
-                      fd.set("id", editTx.id);
-                      await deleteTransaction(fd);
-                      onClose();
-                    })
-                  }
-                  className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
-                >
-                  Delete
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() =>
+                      start(async () => {
+                        const fd = new FormData();
+                        fd.set("id", editTx.id);
+                        await deleteTransaction(fd);
+                        onClose();
+                      })
+                    }
+                    className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() =>
+                      start(async () => {
+                        const fd = new FormData();
+                        fd.set("id", editTx.id);
+                        fd.set("cleared", editTx.cleared ? "false" : "true");
+                        await toggleCleared(fd);
+                        onClose();
+                      })
+                    }
+                    className="rounded-lg px-3 py-2 text-sm font-bold text-positive transition hover:bg-positive/10 disabled:opacity-60"
+                  >
+                    {editTx.cleared ? "Uncheck" : "Clear ✓"}
+                  </button>
+                </div>
               ) : (
                 <span />
               )}

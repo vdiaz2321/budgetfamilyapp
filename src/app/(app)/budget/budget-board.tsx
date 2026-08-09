@@ -202,6 +202,7 @@ export function BudgetBoard({
         kind={selected.kind}
         currency={currency}
         monthKey={month.firstOfMonth}
+        subOptions={subOptions}
         groupOptions={groups.map((group) => ({ id: group.categoryId, name: group.name, kind: group.kind }))}
         debtAccountOptions={debtAccountOptions}
         bucketOptions={bucketOptions}
@@ -691,7 +692,7 @@ function SummaryHeroCard({
 
   if (!expanded) {
     return (
-      <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
         <button
           type="button"
           onClick={onToggle}
@@ -740,7 +741,7 @@ function SummaryHeroCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <div className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
       <button
         type="button"
         onClick={onToggle}

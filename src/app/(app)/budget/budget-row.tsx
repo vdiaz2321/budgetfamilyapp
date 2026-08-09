@@ -152,7 +152,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         </button>
 
         <div
-          className="relative col-span-2 mt-1.5 h-1.5 w-full overflow-hidden rounded-sm bg-[#eee9df] dark:bg-white/10"
+          className="relative -ml-3 -mr-9 col-span-full mt-1.5 h-1.5 overflow-hidden rounded-none bg-[#eee9df] dark:bg-white/10"
           aria-label={`Current month progress: ${displayPct}%`}
         >
           {greenBarPct > 0 ? (
