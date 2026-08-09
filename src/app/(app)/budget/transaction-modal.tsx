@@ -232,21 +232,57 @@ export function TransactionModal({
         />
       )}
 
-      <div className="flex max-h-[calc(100vh-6rem)] w-full flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:max-h-[85vh] sm:rounded-2xl dark:ring-white/10">
-        {/* Header */}
-        <div className={"relative px-5 py-3.5 text-center transition-colors " + HEADER_TINT[txType]}>
-          <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">
-            {isEdit ? "Edit" : "Add"} {KIND_TITLE[txType]}
-          </h2>
+      <div className="flex max-h-[calc(100dvh-6rem)] w-full flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:max-h-[85vh] sm:rounded-2xl dark:ring-white/10">
+        {/* Top action bar — Cancel + Clear + Save/Add — replaces the old title header
+            so the primary actions stay reachable when the mobile keyboard is up. */}
+        <div className={"flex items-center justify-between gap-2 border-b border-line px-3 py-2.5 " + HEADER_TINT[txType]}>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
+            className="rounded-lg px-2 py-1.5 text-sm font-bold text-brand transition hover:bg-brand-soft"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
+            Cancel
+          </button>
+          {!isEdit ? (
+            <button
+              type="button"
+              onClick={() => setCleared((value) => !value)}
+              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition ${
+                cleared
+                  ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                  : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
+              }`}
+            >
+              {cleared ? "Cleared" : "Clear"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  const fd = new FormData();
+                  fd.set("id", editTx.id);
+                  fd.set("cleared", editTx.cleared ? "false" : "true");
+                  await toggleCleared(fd);
+                })
+              }
+              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
+                editTx.cleared
+                  ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                  : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
+              }`}
+            >
+              {editTx.cleared ? "Uncleared" : "Clear"}
+            </button>
+          )}
+          <button
+            type="submit"
+            form="tx-form"
+            disabled={pending || (!isEdit && splits.length === 0)}
+            className={"rounded-xl px-3.5 py-1.5 text-sm font-bold text-white transition-colors disabled:opacity-60 " + BTN_COLOR[txType]}
+          >
+            {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
           </button>
         </div>
 
@@ -301,8 +337,24 @@ export function TransactionModal({
             </div>
           )}
 
-          <form ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
+          <form id="tx-form" ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
+            {!isEdit ? <input type="hidden" name="cleared" value={cleared ? "on" : ""} /> : null}
+
+            {/* Split rows moved to the top — with splits above the amount, the
+                mobile keyboard doesn't hide them when editing a split amount. */}
+            {!isEdit && splits.length > 0 && (
+              <SplitRows
+                splits={splits}
+                options={options}
+                leftToSplit={leftToSplit}
+                onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
+                onAmountChange={(subId, cents) =>
+                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp))
+                }
+                onAddSplit={() => setPickerOpen(true)}
+              />
+            )}
 
             {/* Row 1: Amount | Date */}
             <div className="flex items-center gap-2">
@@ -319,15 +371,6 @@ export function TransactionModal({
                 className="flex-1 rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               />
             </div>
-
-            {/* Payee */}
-            <PayeeField
-              placeholder={PAYEE_PLACEHOLDER[txType]}
-              defaultValue={editTx?.payee ?? ""}
-              payeeOptions={payeeOptions}
-              payeeLineItems={payeeLineItems}
-              onMatch={handlePayeeMatch}
-            />
 
             {/* Account | Budget Item(s) */}
             <div className="grid grid-cols-2 items-start gap-2">
@@ -417,19 +460,14 @@ export function TransactionModal({
               </select>
             ) : null}
 
-            {/* Split rows — shown for new transactions with ≥1 item selected */}
-            {!isEdit && splits.length > 0 && (
-              <SplitRows
-                splits={splits}
-                options={options}
-                leftToSplit={leftToSplit}
-                onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
-                onAmountChange={(subId, cents) =>
-                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp))
-                }
-                onAddSplit={() => setPickerOpen(true)}
-              />
-            )}
+            {/* Payee — sits below the primary rows so the on-screen keyboard doesn't hide splits/amount */}
+            <PayeeField
+              placeholder={PAYEE_PLACEHOLDER[txType]}
+              defaultValue={editTx?.payee ?? ""}
+              payeeOptions={payeeOptions}
+              payeeLineItems={payeeLineItems}
+              onMatch={handlePayeeMatch}
+            />
 
             <CurrencyConverter
               onUse={(usdCents) => {
@@ -448,79 +486,26 @@ export function TransactionModal({
               defaultValue={editTx?.memo ?? ""}
               className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
-            {!isEdit ? (
-              <div className="flex items-center justify-between gap-3">
-                <input type="hidden" name="cleared" value={cleared ? "on" : ""} />
-                <span className="text-xs text-muted">Select clear once reconcile.</span>
+            {/* Edit-mode only: Delete lives here at the bottom of the form */}
+            {isEdit ? (
+              <div className="flex justify-start border-t border-line pt-3">
                 <button
                   type="button"
-                  onClick={() => setCleared((value) => !value)}
-                  className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition ${
-                    cleared
-                      ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
-                      : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
-                  }`}
+                  disabled={pending}
+                  onClick={() =>
+                    start(async () => {
+                      const fd = new FormData();
+                      fd.set("id", editTx.id);
+                      await deleteTransaction(fd);
+                      onClose();
+                    })
+                  }
+                  className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
                 >
-                  {cleared ? "Cleared" : "Clear"}
+                  Delete transaction
                 </button>
               </div>
             ) : null}
-
-            {/* Footer */}
-            <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-              {isEdit ? (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() =>
-                      start(async () => {
-                        const fd = new FormData();
-                        fd.set("id", editTx.id);
-                        await deleteTransaction(fd);
-                        onClose();
-                      })
-                    }
-                    className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() =>
-                      start(async () => {
-                        const fd = new FormData();
-                        fd.set("id", editTx.id);
-                        fd.set("cleared", editTx.cleared ? "false" : "true");
-                        await toggleCleared(fd);
-                      })
-                    }
-                    className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
-                      editTx.cleared
-                        ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
-                        : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
-                    }`}
-                  >
-                    {editTx.cleared ? "Uncleared" : "Clear"}
-                  </button>
-                </div>
-              ) : (
-                <span />
-              )}
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-sm font-bold text-brand transition hover:bg-brand-soft hover:text-brand-strong">
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={pending || (!isEdit && splits.length === 0)}
-                  className={"rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-60 " + BTN_COLOR[txType]}
-                >
-                  {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
-                </button>
-              </div>
-            </div>
           </form>
         </div>
       </div>
@@ -818,7 +803,14 @@ function BudgetItemPicker({
         >
           Cancel
         </button>
-        <h2 className="text-base font-bold">Select Budget Item(s)</h2>
+        <h2 className="text-base font-bold">
+          Select Budget Item(s)
+          {checked.size > 0 ? (
+            <span className="ml-2 rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900 tabular-nums dark:bg-amber-300 dark:text-amber-950">
+              {checked.size}
+            </span>
+          ) : null}
+        </h2>
         <button
           type="button"
           onClick={() => onConfirm([...checked])}
