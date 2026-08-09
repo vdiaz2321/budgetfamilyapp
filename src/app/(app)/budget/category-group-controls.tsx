@@ -21,7 +21,7 @@ export function AddCategoryGroupButton() {
         className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[13px] font-semibold text-brand transition hover:bg-brand-soft sm:px-2.5 sm:text-xs"
       >
         <span aria-hidden>+</span>
-        Category Group
+        Cat Group
       </button>
       {open ? <AddCategoryGroupModal onClose={() => setOpen(false)} /> : null}
     </>

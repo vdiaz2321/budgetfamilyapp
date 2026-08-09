@@ -92,7 +92,7 @@ export function SavingsBoard({ cards, currency }: Props) {
               <div className="divide-y divide-line/60">
                 <div className="px-4 py-3">
                   <p className="mb-2 text-xs font-medium text-muted">Overall Total Savings w/ Kids Funding</p>
-                  <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-background ring-1 ring-black/5 sm:grid-cols-4 dark:ring-white/10">
+                  <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-surface ring-1 ring-black/5 sm:grid-cols-4 dark:bg-white/[0.04] dark:ring-white/10">
                     <Stat label="Planned this month" amount={formatMoney(planned, currency)} sub="budgeted" />
                     <Stat label="Total goal" amount={formatMoney(goal, currency)} sub={`across ${cards.length} goal${cards.length === 1 ? "" : "s"}`} />
                     <Stat label="Total saved" amount={formatMoney(saved, currency)} amountTone="text-positive" sub="across all goals" />
@@ -102,7 +102,7 @@ export function SavingsBoard({ cards, currency }: Props) {
                 {familyCards.length > 0 && (
                   <div className="px-4 py-3">
                     <p className="mb-2 text-xs font-medium text-muted">Only Family Total Savings w/out Kids Funding</p>
-                    <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-background ring-1 ring-black/5 sm:grid-cols-4 dark:ring-white/10">
+                    <div className="grid grid-cols-2 overflow-hidden rounded-xl bg-surface ring-1 ring-black/5 sm:grid-cols-4 dark:bg-white/[0.04] dark:ring-white/10">
                       <Stat label="Planned this month" amount={formatMoney(f.planned, currency)} sub="budgeted" />
                       <Stat label="Total goal" amount={formatMoney(f.goal, currency)} sub={`across ${familyCards.length} goal${familyCards.length === 1 ? "" : "s"}`} />
                       <Stat label="Total saved" amount={formatMoney(f.saved, currency)} amountTone="text-positive" sub="across all goals" />

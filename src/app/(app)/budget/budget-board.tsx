@@ -299,12 +299,6 @@ export function BudgetBoard({
     <div className="-m-4 min-h-[calc(100vh-4rem)] space-y-4 bg-background p-4 md:-m-8 md:min-h-screen md:p-8">
       <div className="flex items-center justify-between pr-8 md:pr-0">
         <MonthPicker monthKey={month.key} />
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="md:hidden h-9 rounded-lg bg-brand px-2.5 text-sm font-semibold text-white hover:bg-brand-strong"
-        >
-          + Add
-        </button>
       </div>
       <div className="flex w-full gap-6">
       {/* Budget column */}
@@ -358,7 +352,7 @@ export function BudgetBoard({
             />
           )}
 
-          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface/90 px-2.5 py-2 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+          <div className="flex flex-nowrap items-center gap-1.5 rounded-xl px-0.5 py-1 sm:flex-wrap sm:gap-2 sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
             <button
               type="button"
               onClick={() => setRowFilter("all")}
@@ -372,7 +366,7 @@ export function BudgetBoard({
               onClick={() => rowFilter === "overspent" ? setRowFilter("all") : showOverspent()}
               aria-pressed={rowFilter === "overspent"}
               disabled={overspentCount === 0}
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 ${overspentCount === 0 ? "hidden sm:inline-flex" : ""} ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
@@ -382,6 +376,13 @@ export function BudgetBoard({
             <div className="ml-auto w-auto">
               <AddCategoryGroupButton />
             </div>
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="h-7 shrink-0 rounded-lg bg-brand px-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong md:hidden"
+            >
+              + Add
+            </button>
             <div className="ml-auto flex items-center gap-1">
               <div className="hidden sm:block">
                 <BulkAddSubcategories groups={groups} />

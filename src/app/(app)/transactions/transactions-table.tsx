@@ -221,22 +221,12 @@ export function TransactionsTable({
           >
             Import CSV
           </button>
-          <button
-            type="button"
-            onClick={() => setModal("new")}
-            className="flex h-9 items-center gap-1 rounded-lg bg-brand px-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong sm:hidden"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Add
-          </button>
         </div>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[12rem] flex-1">
+        <div className="relative min-w-[8rem] flex-1">
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -276,6 +266,16 @@ export function TransactionsTable({
           }`}
         >
           {selectMode ? "Cancel" : "Select"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setModal("new")}
+          className="flex h-9 shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong sm:hidden"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Add
         </button>
         <select
           value={kindFilter}
@@ -426,7 +426,7 @@ export function TransactionsTable({
           />
         </div>
       ) : (
-        <div className="flex items-center justify-between gap-2 rounded-xl bg-positive/5 px-3 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
+        <div className="-mx-4 flex items-center justify-between gap-2 bg-positive/5 px-4 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Rc&apos;d:</span>{" "}<span className="tabular-nums text-positive font-semibold">{formatMoney(incomeTotal, currency)}</span></span>
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Spent:</span>{" "}<span className="tabular-nums text-negative font-semibold">{formatMoney(outflowTotal, currency)}</span></span>
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeLeft, currency)}</span></span>
