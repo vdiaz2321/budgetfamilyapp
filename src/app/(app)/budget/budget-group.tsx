@@ -216,11 +216,11 @@ export function BudgetGroup({
           className="col-span-6 grid grid-cols-3 items-center gap-2 rounded-md px-2 py-0.5 text-[11px] tabular-nums text-muted enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
         >
           <span className="text-right">
-            <span className="hidden lg:inline">Plan: </span>
+            <span className="hidden sm:inline">Plan: </span>
             <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
           <span className="text-right">
-            <span className="hidden lg:inline">{headerActualLabel}: </span>
+            <span className="hidden sm:inline">{headerActualLabel}: </span>
             <span className={`font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
@@ -289,7 +289,7 @@ export function BudgetGroup({
                   const remaining = planned - spent;
                   return (
                     <>
-                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
+                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[13px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
                         <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>

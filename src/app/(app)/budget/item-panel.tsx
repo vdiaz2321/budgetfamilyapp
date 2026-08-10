@@ -68,6 +68,8 @@ export function ItemPanel({
   onAddTransaction,
   onEditTransaction,
 }: Props) {
+  const [showItemDetails, setShowItemDetails] = useState(false);
+  const isPlainForm = !(kind === "debt" && row.debt) && !(kind === "savings" && row.savings);
   // Filter txs to this row's subcategory and the currently-viewed month. The
   // month is a "first of the month" ISO date; a tx belongs if its YYYY-MM
   // prefix matches.
@@ -139,6 +141,7 @@ export function ItemPanel({
         onDeleted={onClose}
         onAddTransaction={onAddTransaction}
         saveFormId={`plan-form-${row.subId}`}
+        onDetails={isPlainForm ? () => setShowItemDetails(true) : undefined}
       />
 
       <ItemGroupSelect row={row} kind={kind} groupOptions={groupOptions} />
@@ -172,6 +175,9 @@ export function ItemPanel({
               paymentAccountId={row.paymentAccountId}
               paymentAccountOptions={paymentAccountOptions}
               hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)}
+              autoPlanned={row.autoPlanned}
+              showDetails={showItemDetails}
+              onCloseDetails={() => setShowItemDetails(false)}
               onAddTransaction={onAddTransaction}
             />
           );
@@ -289,19 +295,30 @@ function DeleteFooter({
   onDeleted,
   onAddTransaction,
   saveFormId,
+  onDetails,
 }: {
   subId: string;
   onDeleted: () => void;
   onAddTransaction: () => void;
   saveFormId?: string;
+  onDetails?: () => void;
 }) {
   const [pending, start] = useTransition();
   return (
     <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line/70 bg-surface px-5 py-2">
+      {onDetails ? (
+        <button
+          type="button"
+          onClick={onDetails}
+          className="shrink-0 rounded bg-brand-soft/60 px-3 py-1.5 text-xs font-semibold text-brand transition hover:bg-brand/20"
+        >
+          Details
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onAddTransaction}
-        className="flex-1 rounded bg-brand-soft py-1.5 text-xs font-semibold text-brand transition hover:bg-brand/20"
+        className="flex-1 rounded bg-positive/15 py-1.5 text-xs font-semibold text-positive transition hover:bg-positive/25"
       >
         +Transaction
       </button>
@@ -441,6 +458,9 @@ function PlannedForm({
   paymentAccountId,
   paymentAccountOptions,
   hasDue,
+  autoPlanned,
+  showDetails,
+  onCloseDetails,
 }: {
   subId: string;
   monthKey: string;
@@ -453,44 +473,64 @@ function PlannedForm({
   paymentAccountId: string | null;
   paymentAccountOptions: AccountOption[];
   hasDue?: boolean;
+  autoPlanned?: boolean;
+  showDetails: boolean;
+  onCloseDetails: () => void;
   onAddTransaction: () => void;
 }) {
   const [, startDue] = useTransition();
-  const [showDetails, setShowDetails] = useState(false);
 
-  const detailsBtn = (
-    <button
-      type="button"
-      onClick={() => setShowDetails(true)}
-      className="shrink-0 rounded-lg bg-brand-soft px-5 py-2 text-xs font-semibold text-brand transition hover:bg-brand/20"
-    >
-      Details
-    </button>
+  const plannedInput = (
+    <label className="block flex-1 min-w-0">
+      <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">Planned ($)</span>
+      <input
+        key={plannedCents}
+        name="planned"
+        type="number"
+        step="0.01"
+        min="0"
+        defaultValue={centsToDisplay(plannedCents)}
+        onFocus={(e) => e.currentTarget.select()}
+        disabled={autoPlanned}
+        placeholder="0.00"
+        className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
+      />
+    </label>
   );
 
   return (
     <>
-      {hasDue ? (
-        <Section title="Due day (day of month)">
-          <form
-            id={`plan-form-${subId}`}
-            action={(fd) => startDue(() => updateSubcategory(fd))}
-            className="space-y-2"
-          >
-            <input type="hidden" name="id" value={subId} />
-            <input type="hidden" name="name" value={itemName} />
-            <div className="flex items-center gap-2">
-              <input
-                key={dueDay ?? ""}
-                name="dueDay"
-                type="number"
-                min={1}
-                max={31}
-                placeholder="—"
-                defaultValue={dueDay ?? ""}
-                className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-              {detailsBtn}
+      <form
+        id={`plan-form-${subId}`}
+        action={(fd) => startDue(async () => {
+          if (!autoPlanned) await upsertPlan(fd);
+          await updateSubcategory(fd);
+        })}
+        className="space-y-2"
+      >
+        <input type="hidden" name="id" value={subId} />
+        <input type="hidden" name="name" value={itemName} />
+        <input type="hidden" name="subcategoryId" value={subId} />
+        <input type="hidden" name="month" value={monthKey} />
+
+        {hasDue ? (
+          <Section title="Planned & due day">
+            <div className="flex items-end gap-2">
+              {plannedInput}
+              <label className="block flex-1 min-w-0">
+                <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">Due day</span>
+                <input
+                  key={dueDay ?? ""}
+                  name="dueDay"
+                  type="number"
+                  min={1}
+                  max={31}
+                  placeholder="—"
+                  defaultValue={dueDay ?? ""}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </label>
             </div>
             {paymentAccountOptions.length > 0 ? (
               <label className="block">
@@ -509,11 +549,13 @@ function PlannedForm({
                 <span className="mt-1 block text-[10px] text-muted">Used to prefill the account when you mark this item Paid. Nothing charges automatically.</span>
               </label>
             ) : null}
-          </form>
-        </Section>
-      ) : (
-        <div className="flex justify-end">{detailsBtn}</div>
-      )}
+          </Section>
+        ) : (
+          <Section title="Planned amount">
+            {plannedInput}
+          </Section>
+        )}
+      </form>
 
       {showDetails ? (
         <ItemDetailsPopover
@@ -524,7 +566,7 @@ function PlannedForm({
           spentCents={spentCents}
           currency={currency}
           subOptions={subOptions}
-          onClose={() => setShowDetails(false)}
+          onClose={onCloseDetails}
         />
       ) : null}
     </>

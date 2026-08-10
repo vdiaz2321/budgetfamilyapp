@@ -106,7 +106,6 @@ export function BudgetBoard({
   const [heroState, setHeroState] = useSessionCollapse("budget-hero", () => ({ open: false }));
   const heroExpanded = heroState.open === true;
   const toggleHero = () => setHeroState((s) => ({ ...s, open: !s.open }));
-  const [dueCardState, setDueCardState] = useSessionCollapse("budget-due-this-week-mobile", () => ({ open: false }));
 
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
     Object.fromEntries([...groups.map((g) => [g.categoryId, false]), ["subscriptions", false], ["irregularBills", false]]),
@@ -321,19 +320,9 @@ export function BudgetBoard({
           currency={currency}
           expanded={heroExpanded}
           onToggle={toggleHero}
+          dueThisWeek={dueThisWeek}
+          onPayDue={setDuePayment}
         />
-        </div>
-
-        <div className="lg:hidden">
-          <DueThisWeekPanel
-            items={dueThisWeek}
-            currency={currency}
-            isCurrentMonth={isCurrentMonth}
-            onPay={setDuePayment}
-            collapsible
-            open={dueCardState.open === true}
-            onToggle={() => setDueCardState((state) => ({ ...state, open: !state.open }))}
-          />
         </div>
 
         {/* Wrapping this in `relative` gives the sticky footer bar below a
@@ -366,14 +355,15 @@ export function BudgetBoard({
               onClick={() => rowFilter === "overspent" ? setRowFilter("all") : showOverspent()}
               aria-pressed={rowFilter === "overspent"}
               disabled={overspentCount === 0}
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 ${overspentCount === 0 ? "hidden sm:inline-flex" : ""} ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
               </svg>
               Overspent ({overspentCount})
             </button>
-            <div className="ml-auto w-auto">
+            {/* Mobile only: +Cat Group sits right of All, left of +Add */}
+            <div className="ml-auto w-auto sm:hidden">
               <AddCategoryGroupButton />
             </div>
             <button
@@ -383,7 +373,11 @@ export function BudgetBoard({
             >
               + Add
             </button>
-            <div className="ml-auto flex items-center gap-1">
+            <div className="sm:ml-auto flex items-center gap-1">
+              {/* Desktop only: +Cat Group sits next to +Bulk add items */}
+              <div className="hidden sm:block">
+                <AddCategoryGroupButton />
+              </div>
               <div className="hidden sm:block">
                 <BulkAddSubcategories groups={groups} />
               </div>
@@ -610,6 +604,8 @@ function getBudgetStatus(
 
 function CategoryProgressCard({
   label,
+  actualLabel,
+  actualColorClass,
   actual,
   planned,
   dotClass,
@@ -617,6 +613,8 @@ function CategoryProgressCard({
   currency,
 }: {
   label: string;
+  actualLabel: string;
+  actualColorClass: string;
   actual: number;
   planned: number;
   dotClass: string;
@@ -630,8 +628,9 @@ function CategoryProgressCard({
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
         <span className="truncate text-xs text-muted">{label}</span>
         <span className="ml-auto whitespace-nowrap text-xs tabular-nums">
-          <span className="font-semibold text-foreground">{formatMoney(actual, currency)}</span>{" "}
-          <span className="text-muted">/ {formatMoney(planned, currency)}</span>
+          <span className="font-semibold text-foreground">{formatMoney(planned, currency)}</span>
+          <span className="text-muted"> / {actualLabel} </span>
+          <span className={`font-semibold ${actualColorClass}`}>{formatMoney(actual, currency)}</span>
         </span>
       </div>
       <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
@@ -746,6 +745,8 @@ function SummaryHeroCard({
   currency,
   expanded,
   onToggle,
+  dueThisWeek = [],
+  onPayDue,
 }: {
   actualLeft: number;
   displayLeft: number;
@@ -762,6 +763,8 @@ function SummaryHeroCard({
   currency: string;
   expanded: boolean;
   onToggle: () => void;
+  dueThisWeek?: DueItem[];
+  onPayDue?: (item: DueItem) => void;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft);
   const toneClasses = TONE_CLASSES[tone];
@@ -868,7 +871,7 @@ function SummaryHeroCard({
           <div className="min-w-0 text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
             <div className="mt-0.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
-              <p className={`whitespace-nowrap text-xl font-bold tabular-nums ${toneClasses.text}`}>
+              <p className="whitespace-nowrap text-xl font-bold tabular-nums text-negative">
                 {formatMoney(actualSpent, currency)}
               </p>
               {tone !== "good" && (
@@ -886,100 +889,157 @@ function SummaryHeroCard({
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <CategoryProgressCard label="Income" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--cat-income)]" fillClass="bg-[color:var(--cat-income)]" currency={currency} />
-          <CategoryProgressCard label="Bills & Expenses" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--cat-bills)]" fillClass="bg-[color:var(--cat-bills)]" currency={currency} />
-          <CategoryProgressCard label="Savings" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--cat-savings)]" fillClass="bg-[color:var(--cat-savings)]" currency={currency} />
-          <CategoryProgressCard label="Debt Repayment" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--cat-debt)]" fillClass="bg-[color:var(--cat-debt)]" currency={currency} />
+          <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--cat-income)]" fillClass="bg-[color:var(--cat-income)]" currency={currency} />
+          <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--cat-bills)]" fillClass="bg-[color:var(--cat-bills)]" currency={currency} />
+          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--cat-savings)]" fillClass="bg-[color:var(--cat-savings)]" currency={currency} />
+          <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--cat-debt)]" fillClass="bg-[color:var(--cat-debt)]" currency={currency} />
         </div>
       </div>
 
-      <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+      <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} dueItems={dueThisWeek} onPayDue={onPayDue} />
     </div>
   );
 }
 
-// Slim footer inside the hero card. Shows one clear button:
-// "Roll in {prev} unspent income" (or Undo). The other action —
-// copying planned amounts — lives in the top header, so users don't
-// have to guess which does what.
+function dueItemDateLabel(date: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(`${date}T00:00:00`);
+  const days = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  return target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+// Footer row: [Due this week pill] ... [rollover amount] [Rollover/Remove btn]
+// Due pill expands an inline list above the row.
 function RolloverFooter({
   rollover,
   monthFirstOfMonth,
   currency,
+  dueItems = [],
+  onPayDue,
 }: {
   rollover: Props["rollover"];
   monthFirstOfMonth: string;
   currency: string;
+  dueItems?: DueItem[];
+  onPayDue?: (item: DueItem) => void;
 }) {
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
+  const [showDue, setShowDue] = useState(false);
   const { availableCents, liveAvailableCents, enabled, prevMonthLabel } = rollover;
   const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
   const amount = formatMoney(Math.max(0, availableCents), currency);
 
   return (
-    <div
-      className={`flex items-center justify-between gap-3 border-t px-6 py-3 text-sm ${
-        enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"
-      }`}
-    >
-      <span className={`flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-xs ${enabled ? "text-brand" : "text-muted"}`}>
-        {hasRollover ? (
-          enabled ? (
-            <>
-              Using{" "}
-              {editing ? (
-                <OverrideInput
-                  monthFirstOfMonth={monthFirstOfMonth}
-                  currentCents={availableCents}
-                  liveLabel={formatMoney(liveAvailableCents, currency)}
-                  onDone={() => setEditing(false)}
-                />
-              ) : (
-                <>
-                  <span className="font-semibold tabular-nums">{amount}</span>
+    <div className={`border-t ${enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"}`}>
+      {/* Expandable due-this-week list */}
+      {showDue && dueItems.length > 0 && (
+        <ul className="divide-y divide-line border-b border-line">
+          {dueItems.map((item) => (
+            <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="shrink-0 text-xs font-semibold text-brand">{dueItemDateLabel(item.dueDate)}</span>
+                  <span className="truncate text-sm font-semibold">{item.name}</span>
+                </div>
+                <p className="mt-0.5 truncate text-[11px] text-muted">
+                  {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
+                {onPayDue && (
                   <button
                     type="button"
-                    onClick={() => setEditing(true)}
-                    title="Manually adjust the rollover amount"
-                    className="rounded p-0.5 opacity-40 hover:opacity-100 hover:text-foreground"
+                    onClick={() => onPayDue(item)}
+                    className="mt-1 rounded-md bg-brand-soft px-2 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
-                    </svg>
+                    Paid
                   </button>
-                </>
-              )}{" "}
-              unspent income from {prevMonthLabel}.
-            </>
-          ) : (
-            <>
-              <span className="font-semibold tabular-nums">{amount}</span> unspent income from {prevMonthLabel} available.
-            </>
-          )
-        ) : (
-          <>Nothing unspent to roll from {prevMonthLabel}.</>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Single combined footer row */}
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        {/* Due this week pill */}
+        {dueItems.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowDue((v) => !v)}
+            className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+              showDue ? "bg-negative/30 text-foreground" : "bg-negative/20 text-foreground hover:bg-negative/30"
+            }`}
+          >
+            Due this week
+            <span className="text-[10px] font-bold text-foreground">
+              {dueItems.length}
+            </span>
+          </button>
         )}
-      </span>
-      <form action={(fd) => start(() => setRollover(fd))}>
-        <input type="hidden" name="month" value={monthFirstOfMonth} />
-        <input type="hidden" name="enable" value={enabled ? "" : "on"} />
-        <button
-          type="submit"
-          disabled={pending}
-          title={enabled
-            ? `Stop including ${prevMonthLabel}'s unspent income`
-            : `Add ${prevMonthLabel}'s unspent income to this month`}
-          className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
-            enabled
-              ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-              : "bg-brand text-white hover:bg-brand-strong"
-          }`}
-        >
-          {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
-        </button>
-      </form>
+
+        {/* Rollover amount — pushed to the right */}
+        <span className={`ml-auto flex min-w-0 items-center gap-1 text-xs ${enabled ? "text-brand" : "text-muted"}`}>
+          {hasRollover ? (
+            enabled ? (
+              <>
+                {editing ? (
+                  <OverrideInput
+                    monthFirstOfMonth={monthFirstOfMonth}
+                    currentCents={availableCents}
+                    liveLabel={formatMoney(liveAvailableCents, currency)}
+                    onDone={() => setEditing(false)}
+                  />
+                ) : (
+                  <>
+                    <span className="font-semibold tabular-nums">{amount}</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(true)}
+                      title="Manually adjust the rollover amount"
+                      className="rounded p-0.5 opacity-40 hover:opacity-100 hover:text-foreground"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+                {" "}· {prevMonthLabel}
+              </>
+            ) : (
+              <><span className="font-semibold tabular-nums">{amount}</span> · {prevMonthLabel}</>
+            )
+          ) : null}
+        </span>
+
+        {/* Rollover / Remove button */}
+        <form action={(fd) => start(() => setRollover(fd))}>
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <input type="hidden" name="enable" value={enabled ? "" : "on"} />
+          <button
+            type="submit"
+            disabled={pending}
+            title={enabled
+              ? `Stop including ${prevMonthLabel}'s unspent income`
+              : `Add ${prevMonthLabel}'s unspent income to this month`}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
+              enabled
+                ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
+                : "bg-brand text-white hover:bg-brand-strong"
+            }`}
+          >
+            {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
