@@ -2272,6 +2272,7 @@ function BalanceInput({
 function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?: string | null) => void }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [debtSubtype, setDebtSubtype] = useState("");
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
 
@@ -2367,7 +2368,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
         {section.offerSubtype ? section.key === "loans" ? (
           <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Debt type
-            <select name="subtype" defaultValue="" required className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+            <select name="subtype" defaultValue="" required onChange={(e) => setDebtSubtype(e.target.value)} className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
               <option value="">Choose a debt type</option>
               {DEBT_KINDS.map((debtKind) => <option key={debtKind.value} value={debtKind.value}>{debtKind.label}</option>)}
             </select>
@@ -2403,11 +2404,17 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             <LabeledInput label="Required minimum / month" name="minPayment" type="number" step="0.01" placeholder="0.00" />
             <LabeledInput label="Budget payment planned / month" name="plannedPayment" type="number" step="0.01" placeholder="Defaults to the minimum payment" hint="How much you intend to pay in Budget. Leave blank to use the required minimum automatically." />
             <LabeledInput label="Payment due day" name="dueDay" type="number" min="1" max="31" step="1" placeholder="1–31" />
-            <LabeledInput label="Loan start date" name="loanStartDate" type="date" />
-            <LabeledInput label="Original term (months)" name="termMonths" type="number" min="1" step="1" placeholder="360 for a 30-year mortgage" />
-            <LabeledInput label="Escrow / month" name="escrow" type="number" min="0" step="0.01" placeholder="Taxes + insurance, not payoff debt" />
+            {debtSubtype !== "credit_card" && (
+              <LabeledInput label="Loan start date" name="loanStartDate" type="date" />
+            )}
+            {debtSubtype === "real_estate_loan" && (
+              <>
+                <LabeledInput label="Original term (months)" name="termMonths" type="number" min="1" step="1" placeholder="360 for a 30-year mortgage" />
+                <LabeledInput label="Escrow / month" name="escrow" type="number" min="0" step="0.01" placeholder="Taxes + insurance, not payoff debt" />
+              </>
+            )}
             <p className="rounded-md bg-brand-soft/45 px-3 py-2 text-xs text-muted sm:col-span-2">
-              This creates one linked item in Budget and Debt/Loans automatically. Escrow stays separate from principal and interest.
+              This creates one linked item in Budget and Debt/Loans automatically.{debtSubtype === "real_estate_loan" ? " Escrow stays separate from principal and interest." : ""}
             </p>
           </>
         ) : null}

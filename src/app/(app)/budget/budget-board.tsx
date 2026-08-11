@@ -11,7 +11,6 @@ import { ItemPanel } from "./item-panel";
 import { TransactionsPanel } from "./transactions-panel";
 import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
-import { DueThisWeekPanel } from "./due-this-week-panel";
 import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
 import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import { AddCategoryGroupButton } from "./category-group-controls";
@@ -346,7 +345,7 @@ export function BudgetBoard({
               type="button"
               onClick={() => setRowFilter("all")}
               aria-pressed={rowFilter === "all"}
-              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${rowFilter === "all" ? "bg-brand-soft text-brand" : "text-muted hover:bg-brand-soft/60"}`}
+              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${rowFilter === "all" ? "bg-foreground/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-foreground/8 dark:hover:bg-white/10"}`}
             >
               All
             </button>
@@ -369,7 +368,7 @@ export function BudgetBoard({
             <button
               type="button"
               onClick={() => setShowAddModal(true)}
-              className="h-7 shrink-0 rounded-lg bg-brand px-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong md:hidden"
+              className="h-7 shrink-0 rounded-lg bg-zinc-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-zinc-500 dark:bg-zinc-400 dark:text-zinc-900 dark:hover:bg-zinc-300 md:hidden"
             >
               + Add
             </button>
@@ -511,7 +510,6 @@ export function BudgetBoard({
               {railTab === "summary" ? (
                 <>
                   <SummaryPanel groups={groups} currency={currency} />
-                  <DueThisWeekPanel items={dueThisWeek} currency={currency} isCurrentMonth={isCurrentMonth} onPay={setDuePayment} />
                 </>
               ) : (
                 <TransactionsPanel
@@ -804,7 +802,7 @@ function SummaryHeroCard({
               </span>
               <span className="text-right">
                 <span className="block font-semibold text-foreground">Actual Spent:</span>
-                <span className={`block ${toneClasses.text}`}>{formatMoney(actualSpent, currency)}</span>
+                <span className="block text-negative">{formatMoney(actualSpent, currency)}</span>
               </span>
             </div>
             {rolloverCents > 0 ? (
@@ -957,7 +955,7 @@ function RolloverFooter({
                     onClick={() => onPayDue(item)}
                     className="mt-1 rounded-md bg-brand-soft px-2 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
                   >
-                    Paid
+                    Pay / Edit
                   </button>
                 )}
               </div>

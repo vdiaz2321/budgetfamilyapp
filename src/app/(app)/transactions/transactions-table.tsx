@@ -412,9 +412,9 @@ export function TransactionsTable({
       </div>
 
       {selectMode && selectedIds.size > 0 ? (
-        <div className="space-y-2 rounded-xl bg-brand-soft px-3 py-2 shadow-sm ring-1 ring-brand/15 sm:hidden">
+        <div className="-mx-4 space-y-2 border-y border-line bg-surface px-4 py-2 shadow-sm sm:hidden">
           <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="font-semibold text-brand">{selectedIds.size} selected</span>
+            <span className="font-semibold text-foreground">{selectedIds.size} selected</span>
             <span className="text-muted">Total <span className={`font-bold tabular-nums ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(selectedNetCents(), currency)}</span></span>
           </div>
           <BatchActionButtons
@@ -566,8 +566,8 @@ function BatchActionButtons({
   return (
     <div className={`flex items-center gap-1.5 ${mobile ? "w-full" : "shrink-0"}`}>
       <button type="button" onClick={onClear} className={`${buttonClass} bg-positive/10 text-positive hover:bg-positive/20`}>Clear</button>
-      <button type="button" onClick={onUncheck} className={`${buttonClass} bg-brand/10 text-brand hover:bg-brand/20`}>Uncheck</button>
-      <button type="button" onClick={onExport} className={`${buttonClass} bg-surface text-foreground ring-1 ring-line hover:bg-brand-soft`}>Export CSV</button>
+      <button type="button" onClick={onUncheck} className={`${buttonClass} bg-line/60 text-foreground hover:bg-line`}>Uncheck</button>
+      {!mobile && <button type="button" onClick={onExport} className={`${buttonClass} bg-surface text-foreground ring-1 ring-line hover:bg-line/60`}>Export CSV</button>}
       <button type="button" onClick={onDelete} className={`${buttonClass} bg-negative/10 text-negative hover:bg-negative/20`}>Delete</button>
     </div>
   );
@@ -755,9 +755,13 @@ function TxCard({
   // Swipe gesture — dragging left reveals Delete, dragging right reveals
   // Clear/Uncheck. Released past the threshold, the corresponding action fires;
   // otherwise the row springs back. Disabled in select mode (tap = toggle).
+  // Direction lock: if the first significant movement is more vertical than
+  // horizontal we treat it as a scroll and don't intercept the gesture.
   const [dx, setDx] = useState(0);
   const [committed, setCommitted] = useState(false);
   const startX = useRef(0);
+  const startY = useRef(0);
+  const direction = useRef<"h" | "v" | null>(null);
   const [, startAction] = useTransition();
   const THRESH = 72;
   const MAX = 96;
@@ -765,12 +769,20 @@ function TxCard({
   const onTouchStart = (e: React.TouchEvent) => {
     if (selectMode || !canEdit) return;
     startX.current = e.touches[0].clientX;
+    startY.current = e.touches[0].clientY;
+    direction.current = null;
     setCommitted(false);
   };
   const onTouchMove = (e: React.TouchEvent) => {
     if (selectMode || !canEdit || startX.current === 0) return;
-    const raw = e.touches[0].clientX - startX.current;
-    setDx(Math.max(-MAX, Math.min(MAX, raw)));
+    const rawX = e.touches[0].clientX - startX.current;
+    const rawY = e.touches[0].clientY - startY.current;
+    if (direction.current === null) {
+      if (Math.abs(rawX) < 6 && Math.abs(rawY) < 6) return;
+      direction.current = Math.abs(rawX) >= Math.abs(rawY) ? "h" : "v";
+    }
+    if (direction.current === "v") return;
+    setDx(Math.max(-MAX, Math.min(MAX, rawX)));
   };
   const onTouchEnd = () => {
     if (selectMode || !canEdit) return;
@@ -845,10 +857,9 @@ function TxCard({
           }`}
         >
           <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5">
-              {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
-              <span className={`truncate text-sm font-semibold ${tx.cleared ? "text-muted" : "text-foreground"}`}>{tx.subName}</span>
-            </div>
+            <span className={`truncate text-sm font-semibold ${tx.cleared ? "text-muted" : "text-foreground"}`}>
+              {tx.payee ?? tx.subName}
+            </span>
             <span className="flex shrink-0 items-center gap-1.5">
               <span
                 className={`whitespace-nowrap text-sm font-bold tabular-nums ${
@@ -872,10 +883,13 @@ function TxCard({
             </span>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 shrink truncate text-xs text-muted">
-              {tx.payee && accountName && accountName !== "—"
-                ? `${tx.payee} · ${accountName}`
-                : (tx.payee ?? accountName)}
+            <span className="flex min-w-0 shrink items-center gap-1.5 truncate text-xs text-muted">
+              {tx.kind ? <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
+              {tx.payee
+                ? accountName && accountName !== "—"
+                  ? `${tx.subName} · ${accountName}`
+                  : tx.subName
+                : accountName}
             </span>
             <span className="shrink-0 whitespace-nowrap text-xs font-medium text-muted tabular-nums">
               {dateStr}

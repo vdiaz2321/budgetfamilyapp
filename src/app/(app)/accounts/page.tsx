@@ -111,7 +111,7 @@ export default async function AccountsPage() {
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
-  const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false).map((d) => ({
+  const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false && !d.account_id).map((d) => ({
     subcategoryId: d.subcategory_id,
     name: subName.get(d.subcategory_id) ?? "Debt",
     balanceCents: d.current_balance_cents ?? 0,

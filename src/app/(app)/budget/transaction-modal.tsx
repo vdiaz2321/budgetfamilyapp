@@ -38,25 +38,32 @@ const PAYEE_PLACEHOLDER: Record<CategoryKind, string> = {
 };
 
 const HEADER_TINT: Record<CategoryKind, string> = {
-  income: "bg-emerald-100 dark:bg-emerald-950",
-  savings: "bg-sky-100 dark:bg-sky-950",
-  bills: "bg-indigo-100 dark:bg-indigo-950",
-  expenses: "bg-amber-100 dark:bg-amber-950",
-  debt: "bg-rose-100 dark:bg-rose-950",
+  income: "bg-surface",
+  savings: "bg-surface",
+  bills: "bg-surface",
+  expenses: "bg-surface",
+  debt: "bg-surface",
 };
 const BTN_COLOR: Record<CategoryKind, string> = {
-  income: "bg-emerald-600 hover:bg-emerald-700",
+  income: "bg-emerald-300 hover:bg-emerald-400 dark:bg-emerald-700 dark:hover:bg-emerald-600",
   savings: "bg-sky-600 hover:bg-sky-700",
-  bills: "bg-indigo-600 hover:bg-indigo-700",
-  expenses: "bg-amber-500 hover:bg-amber-600",
+  bills: "bg-slate-700 hover:bg-slate-800 dark:bg-slate-500 dark:hover:bg-slate-400",
+  expenses: "bg-rose-100 hover:bg-rose-200 dark:bg-rose-900/50 dark:hover:bg-rose-900/70",
   debt: "bg-rose-600 hover:bg-rose-700",
 };
+const BTN_TEXT: Record<CategoryKind, string> = {
+  income: "text-foreground",
+  savings: "text-white",
+  bills: "text-white",
+  expenses: "text-foreground dark:text-foreground",
+  debt: "text-white",
+};
 const TAB_ACTIVE_TEXT: Record<CategoryKind, string> = {
-  income: "text-emerald-600 dark:text-emerald-400",
-  savings: "text-sky-600 dark:text-sky-400",
-  bills: "text-indigo-600 dark:text-indigo-400",
-  expenses: "text-amber-600 dark:text-amber-400",
-  debt: "text-rose-600 dark:text-rose-400",
+  income: "bg-surface text-emerald-600 dark:text-emerald-400",
+  savings: "bg-surface text-sky-600 dark:text-sky-400",
+  bills: "bg-surface text-indigo-600 dark:text-indigo-400",
+  expenses: "bg-rose-100 text-foreground dark:bg-rose-900/50 dark:text-foreground",
+  debt: "bg-surface text-rose-600 dark:text-rose-400",
 };
 
 type SplitEntry = { subId: string; amountCents: number };
@@ -111,7 +118,6 @@ export function TransactionModal({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
-  const [cleared, setCleared] = useState(false);
 
   const splitTotal = splits.reduce((s, sp) => s + sp.amountCents, 0);
   const leftToSplit = totalCents - splitTotal;
@@ -207,7 +213,6 @@ export function TransactionModal({
           formRef.current?.reset();
           setSplits([]);
           setTotalCents(0);
-          setCleared(false);
         } else {
           onClose();
         }
@@ -241,57 +246,58 @@ export function TransactionModal({
       )}
 
       <div className="flex h-full min-h-0 max-h-none w-full flex-1 flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl dark:ring-white/10">
-        {/* Top action bar — Cancel + Clear + Save/Add — replaces the old title header
-            so the primary actions stay reachable when the mobile keyboard is up. */}
+        {/* Top action bar */}
         <div className={"flex items-center justify-between gap-2 border-b border-line px-3 py-2.5 " + HEADER_TINT[txType]}>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1.5 text-sm font-bold text-brand transition hover:bg-brand-soft"
+            className="rounded-lg px-2 py-1.5 text-sm font-bold text-muted transition hover:text-foreground"
           >
             Cancel
           </button>
-          {!isEdit ? (
+          <div className="flex items-center gap-2">
             <button
-              type="button"
-              onClick={() => setCleared((value) => !value)}
-              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition ${
-                cleared
-                  ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
-                  : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
-              }`}
+              type="submit"
+              form="tx-form"
+              disabled={pending || (!isEdit && splits.length === 0)}
+              className={"rounded-xl px-3.5 py-1.5 text-sm font-bold transition-colors disabled:opacity-60 " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
-              {cleared ? "Cleared" : "Clear"}
+              {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
             </button>
-          ) : (
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() =>
-                start(async () => {
-                  const fd = new FormData();
-                  fd.set("id", editTx.id);
-                  fd.set("cleared", editTx.cleared ? "false" : "true");
-                  await toggleCleared(fd);
-                })
-              }
-              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
-                editTx.cleared
-                  ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
-                  : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
-              }`}
-            >
-              {editTx.cleared ? "Uncleared" : "Clear"}
-            </button>
-          )}
-          <button
-            type="submit"
-            form="tx-form"
-            disabled={pending || (!isEdit && splits.length === 0)}
-            className={"rounded-xl px-3.5 py-1.5 text-sm font-bold text-white transition-colors disabled:opacity-60 " + BTN_COLOR[txType]}
-          >
-            {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
-          </button>
+            {!isEdit ? (
+              <button
+                type="submit"
+                form="tx-form"
+                name="cleared"
+                value="on"
+                disabled={pending || splits.length === 0}
+                className="whitespace-nowrap rounded-full bg-orange-100 px-3 py-1.5 text-sm font-bold text-foreground transition hover:bg-orange-200 hover:text-emerald-700 disabled:opacity-60 dark:bg-orange-900/40 dark:text-foreground dark:hover:bg-orange-900/60 dark:hover:text-emerald-400"
+              >
+                Clear
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const fd = new FormData();
+                    fd.set("id", editTx.id);
+                    fd.set("cleared", editTx.cleared ? "false" : "true");
+                    await toggleCleared(fd);
+                    onClose();
+                  })
+                }
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
+                  editTx.cleared
+                    ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                    : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
+                }`}
+              >
+                {editTx.cleared ? "Uncleared" : "Clear"}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
@@ -306,8 +312,8 @@ export function TransactionModal({
                   className={
                     "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
                     (txType === kind
-                      ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
-                      : "text-muted hover:text-foreground")
+                      ? "shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
+                      : "text-muted hover:bg-foreground/8 hover:text-foreground")
                   }
                 >
                   {KIND_TAB[kind]}
@@ -318,7 +324,7 @@ export function TransactionModal({
             <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
               <div
                 className={
-                  "flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-semibold bg-surface shadow-sm ring-1 ring-line " +
+                  "flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-semibold shadow-sm ring-1 ring-line " +
                   TAB_ACTIVE_TEXT.debt
                 }
               >
@@ -335,8 +341,8 @@ export function TransactionModal({
                   className={
                     "flex-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
                     (txType === kind || (kind === "expenses" && txType !== "income")
-                      ? "bg-surface shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
-                      : "text-muted hover:text-foreground")
+                      ? "shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
+                      : "text-muted hover:bg-foreground/8 hover:text-foreground")
                   }
                 >
                   {kind === "income" ? "Income" : "Expense"}
@@ -347,26 +353,6 @@ export function TransactionModal({
 
           <form id="tx-form" ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
-            {!isEdit ? <input type="hidden" name="cleared" value={cleared ? "on" : ""} /> : null}
-
-            {/* Split rows moved to the top — with splits above the amount, the
-                mobile keyboard doesn't hide them when editing a split amount. */}
-            {!isEdit && splits.length > 0 && (
-              <SplitRows
-                splits={splits}
-                options={options}
-                leftToSplit={leftToSplit}
-                onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
-                onAmountChange={(subId, cents) => {
-                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp));
-                  if (splits.length === 1) {
-                    setTotalCents(cents);
-                    if (amountRef.current) amountRef.current.value = cents > 0 ? (cents / 100).toFixed(2) : "";
-                  }
-                }}
-                onAddSplit={() => setPickerOpen(true)}
-              />
-            )}
 
             <CurrencyConverter
               onUse={(usdCents) => {
@@ -377,6 +363,54 @@ export function TransactionModal({
               }}
             />
 
+            {/* Amount | Budget Item(s) */}
+            <div className="grid grid-cols-2 items-start gap-2">
+              <AmountInput
+                inputRef={amountRef}
+                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : initialAmountCents != null ? centsToDisplay(initialAmountCents) : ""}
+                onChangeCents={setTotalCents}
+              />
+
+              {/* Budget item: single select for edit, multi-select for new */}
+              {isEdit ? (
+                <BudgetItemField
+                  key={txType + "-" + (autoFillSubId ?? "")}
+                  kindLabel={KIND_TAB[txType]}
+                  options={options}
+                  showLabel={false}
+                  defaultValue={
+                    autoFillSubId ??
+                    (editTx && editTx.kind === txType ? editTx.subId ?? "" : "")
+                  }
+                  defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
+                />
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  >
+                    {splits.length === 0
+                      ? <span className="text-muted">Budget Items</span>
+                      : splits.length === 1
+                        ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
+                        : <span>{splits.length} items</span>
+                    }
+                  </button>
+                  {splits.length === 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setPickerOpen(true)}
+                      className="text-left text-xs font-semibold text-brand px-1"
+                    >
+                      + Add Split
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Merchant */}
             <PayeeField
               placeholder={PAYEE_PLACEHOLDER[txType]}
@@ -386,23 +420,7 @@ export function TransactionModal({
               onMatch={handlePayeeMatch}
             />
 
-            {/* Row 2: Amount | Date */}
-            <div className="flex items-center gap-2">
-              <AmountInput
-                inputRef={amountRef}
-                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : initialAmountCents != null ? centsToDisplay(initialAmountCents) : ""}
-                onChangeCents={setTotalCents}
-              />
-              <input
-                name="date"
-                type="date"
-                required
-                defaultValue={defaultDate}
-                className="flex-1 rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
-              />
-            </div>
-
-            {/* Account | Budget Item(s) */}
+            {/* Account | Date */}
             <div className="grid grid-cols-2 items-start gap-2">
               <div>
                 <input type="hidden" name="accountId" value={selectedAccountId} className="sm:hidden" />
@@ -445,35 +463,28 @@ export function TransactionModal({
                 ) : null}
               </div>
 
-              {/* Budget item: single select for edit, multi-select for new */}
-              {isEdit ? (
-                <BudgetItemField
-                  key={txType + "-" + (autoFillSubId ?? "")}
-                  kindLabel={KIND_TAB[txType]}
-                  options={options}
-                  showLabel={false}
-                  defaultValue={
-                    autoFillSubId ??
-                    (editTx && editTx.kind === txType ? editTx.subId ?? "" : "")
-                  }
-                  defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
-                />
-              ) : (
-                // Trigger button for the full-screen picker
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen(true)}
-                  className="w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
-                >
-                  {splits.length === 0
-                    ? <span className="text-muted">Budget Items</span>
-                    : splits.length === 1
-                      ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
-                      : <span>{splits.length} items</span>
-                  }
-                </button>
-              )}
+              <input
+                name="date"
+                type="date"
+                required
+                defaultValue={defaultDate}
+                className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+              />
             </div>
+
+            {/* Split rows — only shown when 2+ splits exist */}
+            {!isEdit && splits.length > 1 && (
+              <SplitRows
+                splits={splits}
+                options={options}
+                leftToSplit={leftToSplit}
+                onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
+                onAmountChange={(subId, cents) => {
+                  setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp));
+                }}
+                onAddSplit={() => setPickerOpen(true)}
+              />
+            )}
 
             {/* Bucket picker */}
             {availableBuckets.length > 0 ? (
@@ -583,9 +594,8 @@ function SplitRows({
   );
 }
 
-// The main "$ amount" field. Hides the $ prefix on focus so the caret can sit
-// flush left, selects existing text on focus for easy replacement, and swallows
-// Enter so hitting return on the keypad doesn't submit the whole form.
+// The main "$ amount" field. Supports arithmetic expressions (e.g. "26.10 + 8.19")
+// — operator chips appear on focus so mobile keypads can insert them.
 function AmountInput({
   inputRef,
   defaultValue,
@@ -595,32 +605,74 @@ function AmountInput({
   defaultValue: string;
   onChangeCents: (cents: number) => void;
 }) {
+  const [raw, setRaw] = useState(defaultValue);
   const [focused, setFocused] = useState(false);
+
+  const commit = (value: string) => {
+    const cents = moneyExpressionToCents(value);
+    onChangeCents(cents);
+    const display = cents === 0 ? "" : (cents / 100).toFixed(2);
+    setRaw(display);
+    if (inputRef.current) inputRef.current.value = display;
+  };
+
+  const insert = (ch: string) => {
+    const input = inputRef.current;
+    if (!input) return;
+    const start = input.selectionStart ?? raw.length;
+    const end = input.selectionEnd ?? raw.length;
+    const next = raw.slice(0, start) + ch + raw.slice(end);
+    setRaw(next);
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(start + ch.length, start + ch.length);
+    });
+  };
+
   return (
-    <div className="relative flex-1">
-      {!focused && (
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+    <div className="flex flex-col gap-1">
+      <div className="relative">
+        {!focused && (
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted">$</span>
+        )}
+        <input
+          ref={inputRef}
+          name="amount"
+          type="text"
+          inputMode="decimal"
+          required
+          placeholder="0.00"
+          value={raw}
+          onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
+          onBlur={() => { setTimeout(() => setFocused(false), 150); commit(raw); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(raw); e.currentTarget.blur(); }
+          }}
+          onChange={(e) => {
+            setRaw(e.target.value);
+            const v = parseFloat(e.target.value);
+            onChangeCents(isNaN(v) ? 0 : Math.round(v * 100));
+          }}
+          className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
+        />
+      </div>
+      {focused && (
+        <div className="flex items-center gap-1">
+          {["+", "−", "×", "÷"].map((label) => {
+            const ch = label === "−" ? "-" : label === "×" ? "*" : label === "÷" ? "/" : "+";
+            return (
+              <button
+                key={label}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); insert(` ${ch} `); }}
+                className="flex h-8 flex-1 items-center justify-center rounded-lg bg-background text-sm font-bold ring-1 ring-line hover:bg-brand-soft hover:text-brand"
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       )}
-      <input
-        ref={inputRef}
-        name="amount"
-        type="text"
-        inputMode="decimal"
-        pattern="[0-9]*\.?[0-9]*"
-        required
-        placeholder="0.00"
-        defaultValue={defaultValue}
-        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
-        onBlur={() => setFocused(false)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
-        }}
-        onChange={(e) => {
-          const v = parseFloat(e.target.value);
-          onChangeCents(isNaN(v) ? 0 : Math.round(v * 100));
-        }}
-        className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
-      />
     </div>
   );
 }
@@ -737,7 +789,7 @@ function AccountPicker({
         <h2 className="text-base font-bold">Choose account</h2>
         <span className="w-12" aria-hidden />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
         {accountGroups.map((group) => (
           <div key={group}>
             <div className="border-b border-line/40 bg-background/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -750,16 +802,16 @@ function AccountPicker({
                   key={account.id}
                   type="button"
                   onClick={() => onSelect(account.id)}
-                  className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left text-base active:bg-brand-soft/40"
+                  className="flex w-full items-center gap-4 border-b border-line/40 px-4 py-4 text-left active:bg-brand-soft/40"
                 >
-                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
                     {selected ? (
-                      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="m2 6 3 3 5-5" />
                       </svg>
                     ) : null}
                   </span>
-                  <span className="min-w-0 flex-1 truncate font-medium">{account.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-lg font-medium">{account.name}</span>
                 </button>
               );
             })}
@@ -856,7 +908,7 @@ function BudgetItemPicker({
       </div>
 
       {/* Item list */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
         {filtered.length === 0 && checked.size === 0
           ? <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
           : (() => {

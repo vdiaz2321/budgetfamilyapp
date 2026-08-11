@@ -4,7 +4,7 @@ import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import { currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setNetworthHistory, upsertNetworthYear } from "./actions";
-import { reorderAccounts, reorderBuckets, renameAccount, updateBucket } from "../accounts/actions";
+import { reorderAccounts, reorderBuckets, updateBucket } from "../accounts/actions";
 
 export type MonthPoint = {
   month: string; // YYYY-MM-01
@@ -131,6 +131,24 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
   );
   const [year, setYear] = useState<string>(years[0] ?? "");
 
+  // Chart open state lifted here so selecting an account can auto-open it.
+  const [chartState, setChartState] = useSessionCollapse("networth-chart-open", () => ({ open: false }));
+  const chartOpen = !!chartState.open;
+  const setChartOpen = (v: boolean) => setChartState((s) => ({ ...s, open: v }));
+
+  // Clicking an account row filters the chart; Ctrl+click adds/removes from selection.
+  const [selectedRows, setSelectedRows] = useState<GridRow[]>([]);
+  const handleSelectAccount = (row: GridRow, ctrlKey: boolean) => {
+    setSelectedRows((prev) => {
+      const already = prev.some((r) => r.accountId === row.accountId);
+      if (ctrlKey) {
+        return already ? prev.filter((r) => r.accountId !== row.accountId) : [...prev, row];
+      }
+      return already && prev.length === 1 ? [] : [row];
+    });
+    if (!chartOpen) setChartOpen(true);
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <div>
@@ -159,7 +177,17 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
       </div>
 
       {/* Over-time chart */}
-      <ChartSection points={points} currency={currency} />
+      <div>
+        <ChartSection
+          points={points}
+          currency={currency}
+          open={chartOpen}
+          onToggle={setChartOpen}
+          selectedRows={selectedRows}
+          gridMonths={gridMonths}
+          onClearFilter={() => setSelectedRows([])}
+        />
+      </div>
 
       {/* Transposed summary — the sheet's top block (Total Assets → NW w/out Invest) */}
       {points.length > 0 ? (
@@ -174,7 +202,13 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
 
       {/* Monthly balances by account — the sheet's per-account grid */}
       {gridRows.length > 0 ? (
-        <BalanceGrid months={gridMonths} rows={gridRows} currency={currency} />
+        <BalanceGrid
+          months={gridMonths}
+          rows={gridRows}
+          currency={currency}
+          selectedAccountIds={selectedRows.map((r) => r.accountId!).filter(Boolean)}
+          onSelectAccount={handleSelectAccount}
+        />
       ) : null}
 
       {/* Monthly Net Worth analytics — the sheet's YearlyNetWorth tab */}
@@ -212,34 +246,83 @@ function Stat({
   );
 }
 
-function ChartSection({ points, currency }: { points: MonthPoint[]; currency: string }) {
-  const [chartState, setChartState] = useSessionCollapse("networth-chart-open", () => ({ open: false }));
-  const open = chartState.open;
-  const setOpen = (v: boolean) => setChartState((s) => ({ ...s, open: v }));
+const CHART_COLORS = [
+  "#22c55e", // green
+  "#6366f1", // indigo
+  "#f59e0b", // amber
+  "#ec4899", // pink
+  "#0ea5e9", // sky
+  "#a855f7", // purple
+];
+
+function ChartSection({
+  points,
+  currency,
+  open,
+  onToggle,
+  selectedRows,
+  gridMonths,
+  onClearFilter,
+}: {
+  points: MonthPoint[];
+  currency: string;
+  open: boolean;
+  onToggle: (v: boolean) => void;
+  selectedRows: GridRow[];
+  gridMonths: string[];
+  onClearFilter: () => void;
+}) {
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
-      >
-        <svg
-          width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-          aria-hidden
+      <div className="flex items-center justify-between border-b border-line">
+        <button
+          type="button"
+          onClick={() => onToggle(!open)}
+          aria-expanded={open}
+          className="flex flex-1 items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
         >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-        <h2 className="font-semibold">Net Worth Graph Breakdown</h2>
-      </button>
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+          <h2 className="font-semibold">Net Worth Graph Breakdown</h2>
+        </button>
+        {selectedRows.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 pr-4">
+            {selectedRows.map((r, i) => (
+              <span
+                key={r.accountId}
+                className="rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+                style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+              >
+                {r.name}
+              </span>
+            ))}
+            <button
+              type="button"
+              onClick={onClearFilter}
+              className="rounded p-0.5 text-muted hover:text-foreground"
+              aria-label="Clear filter"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
+      </div>
       {open ? (
         points.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
             No history yet — it starts accruing as soon as you enter account balances.
             Each month freezes automatically; check back as months pass.
           </p>
+        ) : selectedRows.length > 0 ? (
+          <AccountChart rows={selectedRows} months={gridMonths} currency={currency} colors={CHART_COLORS} />
         ) : (
           <NetworthChart points={points} currency={currency} />
         )
@@ -393,8 +476,140 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
   );
 }
 
-// One editable snapshot cell — reads like text until focused, saves on blur.
-// Mirrors the Accounts page balance input, sized down for the grid.
+function AccountChart({ rows, months, currency, colors }: { rows: GridRow[]; months: string[]; currency: string; colors: string[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+
+  // Build per-row reversed pairs; find the union of all months with data.
+  const seriesData = rows.map((row) =>
+    months
+      .map((m, i) => ({ month: m, value: row.balances[i] }))
+      .filter((p) => p.value != null)
+      .reverse() as { month: string; value: number }[]
+  );
+
+  // Use the longest series to drive X axis labels.
+  const refSeries = seriesData.reduce((a, b) => (b.length > a.length ? b : a), []);
+
+  if (refSeries.length === 0) {
+    return <p className="px-4 py-8 text-center text-sm text-muted">No balance history for these accounts yet.</p>;
+  }
+
+  // All non-null values across all series for Y range.
+  const allVals = seriesData.flatMap((s) => s.map((p) => p.value));
+  const ticks = makeTicks(Math.min(0, ...allVals), Math.max(0, ...allVals));
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+
+  const W = 640, H = 180;
+  const M = { l: 56, r: 20, t: 16, b: 26 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const n = refSeries.length;
+
+  const xForIdx = (i: number) => M.l + (n === 1 ? iw / 2 : (i / (n - 1)) * iw);
+  const y = (v: number) => M.t + ih - ((v - yMin) / (yMax - yMin || 1)) * ih;
+
+  // Map each series to ref-series indices by month.
+  const seriesPoints = seriesData.map((s) =>
+    refSeries.map((ref) => s.find((p) => p.month === ref.month)?.value ?? null)
+  );
+
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * W;
+    const rel = (px - M.l) / (n === 1 ? 1 : iw);
+    setHover(Math.max(0, Math.min(n - 1, Math.round(rel * (n - 1)))));
+  };
+
+  const lastIdx = n - 1;
+  const labelEvery = Math.max(1, Math.ceil(n / 6));
+  const pxPerMonth = n > 1 ? iw / (n - 1) : iw;
+  const showXLabel = (i: number) => i === lastIdx || (i % labelEvery === 0 && (lastIdx - i) * pxPerMonth >= 50);
+  const tooltipPct = hover != null ? (xForIdx(hover) / W) * 100 : 50;
+  const tooltipTransform = tooltipPct < 20 ? "translateX(0)" : tooltipPct > 80 ? "translateX(-100%)" : "translateX(-50%)";
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="block w-full"
+        onPointerMove={onMove}
+        onPointerLeave={() => setHover(null)}
+      >
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={M.l} x2={W - M.r} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth="1" strokeDasharray="2 4" />
+            <text x={M.l - 8} y={y(t) + 3.5} textAnchor="end" fontSize="11" fill="var(--muted)">{compactMoney(t, currency)}</text>
+          </g>
+        ))}
+        {yMin < 0 ? <line x1={M.l} x2={W - M.r} y1={y(0)} y2={y(0)} stroke="var(--muted)" strokeWidth="1" /> : null}
+
+        {seriesPoints.map((pts, si) => {
+          const color = colors[si % colors.length];
+          // Build path segments skipping null gaps.
+          let path = "";
+          let inPath = false;
+          for (let i = 0; i < pts.length; i++) {
+            const v = pts[i];
+            if (v == null) { inPath = false; continue; }
+            path += `${inPath ? "L" : "M"}${xForIdx(i)},${y(v)} `;
+            inPath = true;
+          }
+          const lastNonNull = pts.reduceRight<number | null>((acc, v, i) => (acc == null && v != null ? i : acc), null);
+          const lastVal = lastNonNull != null ? pts[lastNonNull] : null;
+          return (
+            <g key={si}>
+              <path d={path.trim()} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              {lastNonNull != null && lastVal != null ? (
+                <>
+                  <circle cx={xForIdx(lastNonNull)} cy={y(lastVal)} r="6" fill="var(--surface)" />
+                  <circle cx={xForIdx(lastNonNull)} cy={y(lastVal)} r="4" fill={color} />
+                </>
+              ) : null}
+              {hover != null && hover !== lastNonNull && pts[hover] != null ? (
+                <>
+                  <circle cx={xForIdx(hover)} cy={y(pts[hover]!)} r="6" fill="var(--surface)" />
+                  <circle cx={xForIdx(hover)} cy={y(pts[hover]!)} r="4" fill={color} />
+                </>
+              ) : null}
+            </g>
+          );
+        })}
+
+        {hover != null ? (
+          <line x1={xForIdx(hover)} x2={xForIdx(hover)} y1={M.t} y2={M.t + ih} stroke="var(--muted)" strokeWidth="1" />
+        ) : null}
+
+        {refSeries.map((p, i) =>
+          showXLabel(i) ? (
+            <text key={p.month} x={xForIdx(i)} y={H - 8} textAnchor={i === lastIdx ? "end" : i === 0 ? "start" : "middle"} fontSize="9" fill="var(--muted)">
+              {monthLabel(p.month)}
+            </text>
+          ) : null,
+        )}
+      </svg>
+
+      {hover != null ? (
+        <div
+          className="pointer-events-none absolute top-2 z-10 min-w-[10rem] rounded-lg bg-surface px-3 py-2 shadow-md ring-1 ring-black/10 dark:ring-white/15"
+          style={{ left: `${tooltipPct}%`, transform: tooltipTransform }}
+        >
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">{monthLabel(refSeries[hover].month)}</p>
+          {rows.map((row, si) => {
+            const v = seriesPoints[si][hover];
+            if (v == null) return null;
+            return (
+              <div key={si} className="flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors[si % colors.length] }} />
+                <span className="text-xs text-muted truncate">{row.name}</span>
+                <span className="ml-auto pl-2 text-xs font-bold tabular-nums">{formatMoney(v, currency)}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // Inline-editable account/bucket name — reads like text until clicked, saves
 // on blur. `rename` is renameAccount or updateBucket from the Accounts
 // actions, both of which take just {id, name} form fields.
@@ -468,10 +683,14 @@ function BalanceGrid({
   months,
   rows,
   currency,
+  selectedAccountIds,
+  onSelectAccount,
 }: {
   months: string[];
   rows: GridRow[];
   currency: string;
+  selectedAccountIds?: string[] | null;
+  onSelectAccount?: (row: GridRow, ctrlKey: boolean) => void;
 }) {
   // Reorder optimistically — a drag updates this local copy immediately;
   // `rows` (from the server) wins once it's revalidated.
@@ -840,7 +1059,13 @@ function BalanceGrid({
                                       </svg>
                                     </button>
                                     {r.accountId ? (
-                                      <GridNameCell id={r.accountId} name={r.name} rename={renameAccount} />
+                                      <button
+                                        type="button"
+                                        onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
+                                        className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:text-brand ${selectedAccountIds?.includes(r.accountId ?? "") ? "text-brand" : ""}`}
+                                      >
+                                        {r.name}
+                                      </button>
                                     ) : (
                                       <span className="min-w-0 truncate">{r.name}</span>
                                     )}
@@ -857,7 +1082,13 @@ function BalanceGrid({
                                       title="Drag to reorder"
                                       onMouseDown={() => startAccountDrag(g.section, r.accountId!)}
                                     />
-                                    <GridNameCell id={r.accountId} name={r.name} rename={renameAccount} />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
+                                      className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:text-brand ${selectedAccountIds?.includes(r.accountId ?? "") ? "text-brand" : ""}`}
+                                    >
+                                      {r.name}
+                                    </button>
                                     {r.excluded ? <ExcludedChip /> : null}
                                   </div>
                                 ) : r.bucketId ? (

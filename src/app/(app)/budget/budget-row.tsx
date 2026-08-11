@@ -29,7 +29,7 @@ export function remainingColorClass(kind: CategoryKind, remaining: number, plann
 // as "money in" / "money out" instantly, matching the group dot colors.
 export function actualColorClass(kind: CategoryKind, spentCents: number): string {
   if (spentCents === 0) return "text-muted";
-  if (kind === "income" || kind === "savings" || kind === "debt") return "text-positive";
+  if (kind === "income" || kind === "savings") return "text-positive";
   return "text-negative"; // bills / expenses
 }
 

@@ -58,7 +58,7 @@ export function Sidebar({ groups, userEmail, displayName, avatarUrl, badges }: P
             className={`transition-transform ${collapsed ? "rotate-180" : ""}`}
             aria-hidden
           >
-            <rect x="3.5" y="4" width="5" height="16" rx="1" stroke="currentColor" strokeWidth="2.5" />
+            <rect x="3.5" y="4" width="5" height="16" rx="1" fill="currentColor" stroke="currentColor" strokeWidth="2.5" />
             <path d="M19 7 12 12l7 5V7Z" fill="currentColor" />
           </svg>
         </button>
