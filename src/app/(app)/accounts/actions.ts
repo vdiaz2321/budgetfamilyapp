@@ -581,6 +581,8 @@ export async function upsertCardDetails(formData: FormData) {
     const aprValue = Number(String(formData.get("payoffApr") ?? "0"));
     const rawDue = Number(String(formData.get("payoffDueDay") ?? "0"));
     try {
+      const rawPromo = String(formData.get("promoAprEndsOn") ?? "").trim();
+      const promoAprEndsOn = /^\d{4}-\d{2}-\d{2}$/.test(rawPromo) ? rawPromo : null;
       debtSubcategoryId = await ensurePayoffDebt(supabase, householdId, {
         accountId,
         name: cardAccount.name,
@@ -591,6 +593,7 @@ export async function upsertCardDetails(formData: FormData) {
         dueDay: rawDue > 0 ? Math.min(31, Math.max(1, Math.trunc(rawDue))) : null,
         debtKind: "Credit Card",
         interestMethod: "statement_manual",
+        promoAprEndsOn,
       });
     } catch (payoffError) {
       console.error("[upsertCardDetails payoff]", payoffError);

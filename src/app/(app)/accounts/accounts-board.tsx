@@ -78,6 +78,7 @@ export type CardDetails = {
   payoffPlannedCents: number;
   payoffApr: number;
   payoffDueDay: number | null;
+  promoAprEndsOn: string | null;
 };
 
 export type AccountData = {
@@ -125,6 +126,7 @@ export type BudgetDebt = {
   name: string;
   balanceCents: number;
   debtKind: string | null;
+  accountId: string | null;
 };
 
 // The plan's account types, mapped onto the account_kind enum. debt_loan is
@@ -249,22 +251,29 @@ export function AccountsBoard({
   const assets = active
     .filter((a) => !isLiability(a.kind) && !a.isKidsAccount)
     .reduce((sum, a) => sum + a.balanceCents, 0);
-  const budgetDebtTotal = budgetDebts.reduce((sum, d) => sum + d.balanceCents, 0);
-  const countedBudgetDebtTotal = budgetDebts.reduce(
-    (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.debtKind) ? 0 : debt.balanceCents),
-    0,
-  );
+  // Build a map so we can tell which debts are already shown as debt_loan account rows.
+  const accountKindById = new Map(active.map((a) => [a.id, a.kind]));
+  const isDebtLoanLinked = (d: BudgetDebt) =>
+    !!d.accountId && accountKindById.get(d.accountId) === "debt_loan";
+
+  // debt_loan accounts are counted directly from the accounts array.
   const directDebtTotal = active
-    .filter((a) => a.kind === "debt_loan" && a.debtTrackingMode === "account")
+    .filter((a) => a.kind === "debt_loan")
     .reduce((sum, a) => sum + Math.abs(a.balanceCents), 0);
   const countedDirectDebtTotal = active
-    .filter(
-      (account) =>
-        account.kind === "debt_loan" &&
-        account.debtTrackingMode === "account" &&
-        !isDebtExcludedFromNetWorth(account.subtype),
-    )
-    .reduce((sum, account) => sum + Math.abs(account.balanceCents), 0);
+    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype))
+    .reduce((sum, a) => sum + Math.abs(a.balanceCents), 0);
+
+  // Budget debts only count rows NOT already represented as a debt_loan account
+  // (e.g. credit cards flagged as revolving/payoff debt).
+  const budgetDebtTotal = budgetDebts.reduce(
+    (sum, d) => (isDebtLoanLinked(d) ? sum : sum + d.balanceCents),
+    0,
+  );
+  const countedBudgetDebtTotal = budgetDebts.reduce(
+    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind) ? sum : sum + d.balanceCents),
+    0,
+  );
   // Rewards cards are tracked separately from the Debt section. Their
   // transaction activity must not be converted into a household debt row.
   const debtsTotal = budgetDebtTotal + directDebtTotal;
@@ -279,7 +288,8 @@ export function AccountsBoard({
   );
   const excludedSections = [...kidsSections, ...creditSections];
 
-  const visibleBudgetDebts = budgetDebts.filter((d) => d.balanceCents !== 0);
+  // Only show orphan debts (no linked account) — linked debts are already shown in their account section.
+  const visibleBudgetDebts = budgetDebts.filter((d) => d.balanceCents !== 0 && !d.accountId);
   const sectionKeys = [
     ...assetSections.map((s) => s.key),
     ...excludedSections.map((s) => s.key),
@@ -1115,7 +1125,7 @@ function EditCreditCardForm({
             <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
             <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
           </div>
-          <div className="space-y-3 rounded-lg border border-line bg-background/70 p-3 sm:col-span-2">
+          <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 sm:col-span-2 dark:border-rose-900/50 dark:bg-rose-950/20">
             <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
               <input
                 type="checkbox"
@@ -1126,19 +1136,20 @@ function EditCreditCardForm({
               <span>
                 Track this card as payoff debt
                 <span className="mt-0.5 block text-xs font-normal text-muted">
-                  Off by default. Rewards, free nights, subscriptions, and Pay Card continue working either way.
+                  Off by default. Syncs balance, rate, and payment plan with Budget → Debt/Loans.
                 </span>
               </span>
             </label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
               <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
-              <LabeledInput label="Minimum" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
+              <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" defaultValue={d?.promoAprEndsOn ?? ""} />
+              <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
               <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
               <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
             </div>
             <p className="text-[11px] text-muted">
-              Credit-card projection is an estimate. Record the statement&apos;s actual interest on Debt/Loans when a balance is carried.
+              Balance and payment plan sync to Budget → Debt/Loans. Record actual interest charges there when carrying a balance past the promo period.
             </p>
           </div>
           {detailsError ? (

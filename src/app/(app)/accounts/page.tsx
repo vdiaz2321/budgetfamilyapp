@@ -68,7 +68,7 @@ export default async function AccountsPage() {
       .order("name"),
     supabase
       .from("debts")
-      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled")
+      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled, promo_apr_ends_on")
       .eq("household_id", household.id),
     supabase
       .from("subcategories")
@@ -111,11 +111,12 @@ export default async function AccountsPage() {
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
-  const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false && !d.account_id).map((d) => ({
+  const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false).map((d) => ({
     subcategoryId: d.subcategory_id,
     name: subName.get(d.subcategory_id) ?? "Debt",
     balanceCents: d.current_balance_cents ?? 0,
     debtKind: d.debt_kind ?? null,
+    accountId: d.account_id ?? null,
   }));
 
   const cardDetailsByAccount = new Map<string, CardDetails>();
@@ -151,6 +152,7 @@ export default async function AccountsPage() {
       payoffPlannedCents: payoff?.target_payment_cents ?? 0,
       payoffApr: Number(payoff?.apr ?? 0),
       payoffDueDay: payoff?.due_day ?? null,
+      promoAprEndsOn: payoff?.promo_apr_ends_on ?? null,
     });
   }
 
