@@ -283,17 +283,22 @@ export function AccountsBoard({
   const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
   const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
   const creditSections = SECTIONS.filter((s) => s.creditCard);
-  const debtAccountSections = SECTIONS.filter(
-    (s) => s.liability && accounts.some((a) => s.match(a)),
-  );
   const excludedSections = [...kidsSections, ...creditSections];
 
-  // Only show orphan debts (no linked account) — linked debts are already shown in their account section.
-  const visibleBudgetDebts = budgetDebts.filter((d) => d.balanceCents !== 0 && !d.accountId);
+  // Hide only debts linked to a debt_loan account (those show as their own account row).
+  // Payoff-tracked credit-card debts still list here so the Debts section stays the single view of what's owed.
+  const visibleBudgetDebts = budgetDebts.filter(
+    (d) => d.balanceCents !== 0 && !isDebtLoanLinked(d),
+  );
+  const debtSectionsToRender = SECTIONS.filter(
+    (s) =>
+      s.liability &&
+      (accounts.some((a) => s.match(a)) || (s.key === "loans" && visibleBudgetDebts.length > 0)),
+  );
   const sectionKeys = [
     ...assetSections.map((s) => s.key),
     ...excludedSections.map((s) => s.key),
-    ...debtAccountSections.map((s) => s.key),
+    ...debtSectionsToRender.map((s) => s.key),
     ...(visibleBudgetDebts.length > 0 ? ["budget_debts"] : []),
   ];
   const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
@@ -403,13 +408,6 @@ export function AccountsBoard({
         </button>
         <button
           type="button"
-          onClick={exportCsv}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-muted shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft hover:text-brand dark:ring-white/15"
-        >
-          Export CSV
-        </button>
-        <button
-          type="button"
           onClick={toggleAll}
           className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
         >
@@ -432,11 +430,12 @@ export function AccountsBoard({
           />
         ))}
 
-        {debtAccountSections.map((section) => (
+        {debtSectionsToRender.map((section) => (
           <AccountSection
             key={section.key}
             section={section}
             accounts={accounts.filter((a) => section.match(a))}
+            extraDebts={section.key === "loans" ? visibleBudgetDebts : []}
             currency={currency}
             historyMonths={historyMonths}
             open={!collapsed[section.key]}
@@ -445,15 +444,6 @@ export function AccountsBoard({
             onToggleBuckets={toggleBuckets}
           />
         ))}
-
-        {visibleBudgetDebts.length > 0 ? (
-          <BudgetDebtsSection
-            debts={visibleBudgetDebts}
-            currency={currency}
-            open={!collapsed.budget_debts}
-            onToggle={() => toggleSection("budget_debts")}
-          />
-        ) : null}
       </div>
 
       {/* Kids Funding + Credit Cards sit apart — not counted in Net Worth. */}
@@ -560,7 +550,7 @@ function CreditCardSection({
   // Bank-group order: dragging a bank header moves its whole card block. The
   // underlying store is still per-account sort_order — we just splice the
   // block, then persist the flattened order.
-  const bankLabel = (a: AccountData) => a.cardDetails?.bank ?? a.subtype ?? "Other";
+  const bankLabel = (a: AccountData) => a.cardDetails?.bank ?? a.institution ?? a.subtype ?? "Other";
   const reorderBank = (fromBank: string, toBank: string) => {
     if (fromBank === toBank) return;
     const fromCards = localAccounts.filter((a) => bankLabel(a) === fromBank);
@@ -792,7 +782,7 @@ function CreditCardPanel({
   const monthLabel = monthNames[new Date().getMonth()];
   const monthSpend = card.monthSpendCents ?? 0;
 
-  const bank = d?.bank ?? card.subtype ?? null;
+  const bank = d?.bank ?? card.institution ?? card.subtype ?? null;
 
   return (
     <li
@@ -819,8 +809,8 @@ function CreditCardPanel({
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-baseline gap-1.5">
-            <span className="truncate text-sm font-medium">{card.name}</span>
+          <span className="block truncate text-sm font-medium">{card.name}</span>
+          <span className="mt-0.5 flex flex-wrap items-baseline gap-1.5">
             {card.holder ? (
               <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
                 {card.holder}
@@ -964,7 +954,7 @@ function CreditCardPanel({
                     onClick={() => setPaying(true)}
                     className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong"
                   >
-                    {owed > 0 ? "Pay full balance" : "Pay Card"}
+                    {owed > 0 ? "Pay Balance" : "Pay Card"}
                   </button>
                 ) : null}
                 {!isArchived && !card.dateClosed ? (
@@ -1082,7 +1072,7 @@ function EditCreditCardForm({
 
         {/* Rewards details */}
         <div className="grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2">
-          <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
+          <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.institution ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
           <label className="block">
             <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span>
             <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
@@ -1149,8 +1139,24 @@ function EditCreditCardForm({
               <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
             </div>
             <p className="text-[11px] text-muted">
-              Balance and payment plan sync to Budget → Debt/Loans. Record actual interest charges there when carrying a balance past the promo period.
+              APR % should be <span className="font-semibold">0</span> during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.
             </p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="submit"
+                disabled={savePending}
+                className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+              >
+                {savePending ? "Saving…" : "Save all changes"}
+              </button>
+              <button
+                type="button"
+                onClick={onDone}
+                className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
           {detailsError ? (
             <p className="sm:col-span-2 text-sm font-medium text-negative">{detailsError}</p>
@@ -1182,16 +1188,20 @@ function EditCreditCardForm({
           {confirmDelete ? (
             <span className="flex items-center gap-2">
               <span className="text-xs text-muted">Delete &quot;{card.name}&quot;?</span>
-              <form action={(fd) => startDel(() => deleteAccount(fd))}>
-                <input type="hidden" name="id" value={card.id} />
-                <button
-                  type="submit"
-                  disabled={delPending}
-                  className="text-xs font-bold text-negative hover:underline disabled:opacity-60"
-                >
-                  {delPending ? "Deleting…" : "Yes, delete"}
-                </button>
-              </form>
+              <button
+                type="button"
+                disabled={delPending}
+                onClick={() =>
+                  startDel(async () => {
+                    const fd = new FormData();
+                    fd.set("id", card.id);
+                    await deleteAccount(fd);
+                  })
+                }
+                className="text-xs font-bold text-negative hover:underline disabled:opacity-60"
+              >
+                {delPending ? "Deleting…" : "Yes, delete"}
+              </button>
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
@@ -1427,6 +1437,7 @@ function AccountSection({
   isBucketsOpen,
   onToggleBuckets,
   legacy = false,
+  extraDebts = [],
 }: {
   section: Section;
   accounts: AccountData[];
@@ -1437,6 +1448,7 @@ function AccountSection({
   isBucketsOpen: (id: string) => boolean;
   onToggleBuckets: (id: string) => void;
   legacy?: boolean;
+  extraDebts?: BudgetDebt[];
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -1452,9 +1464,11 @@ function AccountSection({
     setLocalAccounts(accounts);
   }, [accounts]);
 
-  const total = localAccounts
+  const accountsTotal = localAccounts
     .filter((a) => a.active)
     .reduce((sum, a) => sum + a.balanceCents, 0);
+  const extraDebtsTotal = extraDebts.reduce((sum, d) => sum + d.balanceCents, 0);
+  const total = accountsTotal + extraDebtsTotal;
 
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
@@ -1514,8 +1528,8 @@ function AccountSection({
 
       {open ? (
         <div className="border-t border-line">
-          {localAccounts.length > 0 ? (
-            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+          {localAccounts.length > 0 || extraDebts.length > 0 ? (
+            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
               <span />
               <span />
               <span />
@@ -1525,7 +1539,7 @@ function AccountSection({
               <span className="hidden sm:block" />
             </div>
           ) : null}
-          {localAccounts.length === 0 ? (
+          {localAccounts.length === 0 && extraDebts.length === 0 ? (
             <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — use Add account above.</p>
           ) : (
             <ul className="divide-y divide-line">
@@ -1548,6 +1562,27 @@ function AccountSection({
               ))}
             </ul>
           )}
+          {extraDebts.length > 0 ? (
+            <ul className="border-t-0">
+              {extraDebts.map((d) => (
+                <li
+                  key={`debt:${d.subcategoryId}`}
+                  className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] items-center gap-1.5 border-0 px-4 py-1.5 sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem]"
+                >
+                  <span />
+                  <span />
+                  <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
+                  <span className="flex w-full items-center justify-center gap-0 text-sm font-semibold tabular-nums text-negative">
+                    <span className="text-muted">{currencySymbol(currency)}</span>
+                    <span className="tabular-nums">{centsToDisplay(d.balanceCents)}</span>
+                  </span>
+                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted sm:flex">$—</span>
+                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted sm:flex">$—</span>
+                  <span className="hidden sm:block" />
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
           {legacy ? (
             <p className="border-t border-line px-4 py-2 text-xs text-muted">
@@ -1681,7 +1716,7 @@ function AccountRow({
       data-drop-key={`account:${account.id}`}
       className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
-      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
+      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
         <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
@@ -1706,7 +1741,7 @@ function AccountRow({
         <button
           type="button"
           onClick={onToggleEdit}
-          className="group/name relative flex w-full min-w-0 max-w-full flex-col items-start justify-self-start gap-0.5 text-left sm:inline-flex sm:w-fit sm:flex-row sm:items-baseline sm:gap-2"
+          className="group/name relative flex w-full min-w-0 max-w-full flex-col items-start justify-self-start gap-0.5 text-left"
         >
           <span
             role="tooltip"
@@ -1714,9 +1749,8 @@ function AccountRow({
           >
             Click to edit
           </span>
-          {/* Tag row: sits above the name on mobile so the name gets full width;
-              on desktop moves after the name via `sm:order-2` for the original inline look. */}
-          <span className="order-1 flex min-w-0 flex-wrap items-baseline gap-1.5 sm:order-2">
+          {/* Tag row: always sits below the name so the title gets full width at every breakpoint. */}
+          <span className="order-2 flex min-w-0 flex-wrap items-baseline gap-1.5">
             {account.holder ? (
               <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
                 {account.holder}
@@ -1752,7 +1786,7 @@ function AccountRow({
             ) : null}
             {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
           </span>
-          <span className={`order-2 w-full truncate text-sm sm:order-1 sm:w-auto ${account.active ? "text-foreground" : "text-negative"}`}>
+          <span className={`order-1 w-full truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
         </button>

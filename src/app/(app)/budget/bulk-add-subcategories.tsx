@@ -13,7 +13,7 @@ export function BulkAddSubcategories({ groups }: { groups: GroupData[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-lg px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
+        className="whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
       >
         + Bulk add items
       </button>

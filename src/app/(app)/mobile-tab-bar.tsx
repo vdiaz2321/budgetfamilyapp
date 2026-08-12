@@ -71,19 +71,18 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
   const pathname = usePathname();
   const [hidden, setHidden] = useState(false);
   const lastY = useRef(0);
+  const accumulated = useRef(0);
 
-  // Hide on scroll down, reveal on scroll up. Ignores small (<8px) jitter and
-  // stays visible near the top of the page so it doesn't flicker as you land.
   useEffect(() => {
     lastY.current = window.scrollY;
     const onScroll = () => {
       const y = window.scrollY;
       const delta = y - lastY.current;
-      if (Math.abs(delta) < 8) return;
-      if (y < 40) setHidden(false);
-      else if (delta > 0) setHidden(true);
-      else setHidden(false);
       lastY.current = y;
+      if (y < 60) { setHidden(false); accumulated.current = 0; return; }
+      accumulated.current += delta;
+      if (accumulated.current > 60) { setHidden(true); accumulated.current = 0; }
+      else if (accumulated.current < -30) { setHidden(false); accumulated.current = 0; }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -91,7 +90,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
 
   return (
     <nav
-      className={`fixed bottom-0 left-0 right-0 z-40 flex border-t border-white/10 bg-sidebar transition-transform duration-200 md:hidden ${
+      className={`fixed bottom-0 left-0 right-0 z-40 flex border-t border-white/10 bg-sidebar transition-transform duration-300 md:hidden ${
         hidden ? "translate-y-full" : "translate-y-0"
       }`}
     >

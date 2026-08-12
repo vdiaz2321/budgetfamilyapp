@@ -480,6 +480,21 @@ export async function deleteAccount(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
+  // Remove any linked payoff/loan debt (and its budget subcategory) so
+  // the debts don't linger in Debt/Loans, Budget, and the sidebar totals.
+  const { data: linkedDebts } = await supabase
+    .from("debts")
+    .select("subcategory_id")
+    .eq("household_id", householdId)
+    .eq("account_id", id);
+  const subIds = (linkedDebts ?? [])
+    .map((d) => d.subcategory_id as string | null)
+    .filter((s): s is string => !!s);
+  if (subIds.length > 0) {
+    await supabase.from("debts").delete().eq("household_id", householdId).in("subcategory_id", subIds);
+    await supabase.from("subcategories").delete().eq("household_id", householdId).in("id", subIds);
+  }
+
   // transactions.account_id is ON DELETE SET NULL, so past transactions keep
   // their history — they just lose the account link. buckets/bucket_snapshots
   // cascade-delete with the account.
@@ -591,7 +606,7 @@ export async function upsertCardDetails(formData: FormData) {
         targetPaymentCents: Math.max(0, displayToCents(String(formData.get("payoffPlanned") ?? "0"))),
         apr: Number.isFinite(aprValue) ? Math.max(0, aprValue) : 0,
         dueDay: rawDue > 0 ? Math.min(31, Math.max(1, Math.trunc(rawDue))) : null,
-        debtKind: "Credit Card",
+        debtKind: "credit_card",
         interestMethod: "statement_manual",
         promoAprEndsOn,
       });

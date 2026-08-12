@@ -340,7 +340,7 @@ export function BudgetBoard({
             />
           )}
 
-          <div className="flex flex-nowrap items-center gap-1.5 rounded-xl px-0.5 py-1 sm:flex-wrap sm:gap-2 sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
+          <div className="flex flex-nowrap items-center gap-1.5 rounded-xl px-0.5 py-1 sm:flex-wrap sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
             <button
               type="button"
               onClick={() => setRowFilter("all")}
@@ -354,64 +354,71 @@ export function BudgetBoard({
               onClick={() => rowFilter === "overspent" ? setRowFilter("all") : showOverspent()}
               aria-pressed={rowFilter === "overspent"}
               disabled={overspentCount === 0}
-              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
               </svg>
               Overspent ({overspentCount})
             </button>
-            {/* Mobile only: +Cat Group sits right of All, left of +Add */}
-            <div className="ml-auto w-auto sm:hidden">
+            {/* Mobile only: Cat Group + compact Add grouped and pushed right */}
+            <div className="ml-auto flex items-center gap-1.5 sm:hidden">
               <AddCategoryGroupButton />
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="h-7 shrink-0 rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
+              >
+                + Add
+              </button>
             </div>
+            {/* Desktop only: + Transaction */}
             <button
               type="button"
               onClick={() => setShowAddModal(true)}
-              className="h-7 shrink-0 rounded-lg bg-zinc-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-zinc-500 dark:bg-zinc-400 dark:text-zinc-900 dark:hover:bg-zinc-300 md:hidden"
+              className="hidden h-7 shrink-0 items-center rounded-lg bg-brand px-3 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:flex"
             >
-              + Add
+              + Transaction
             </button>
-            <div className="sm:ml-auto flex items-center gap-1">
-              {/* Desktop only: +Cat Group sits next to +Bulk add items */}
-              <div className="hidden sm:block">
-                <AddCategoryGroupButton />
-              </div>
-              <div className="hidden sm:block">
-                <BulkAddSubcategories groups={groups} />
-              </div>
-              <div className="ml-1 hidden items-center rounded-lg bg-[#ebe8e1] p-0.5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/10 sm:flex">
-                <button
-                  type="button"
-                  onClick={() => setRowDetail((current) => ({ ...current, expanded: false }))}
-                  aria-label="Progress off"
-                  aria-pressed={!detailsExpanded}
-                  className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${!detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-                    <rect x="2" y="2" width="10" height="3" rx="1" />
-                    <rect x="2" y="6" width="10" height="3" rx="1" />
-                    <rect x="2" y="10" width="10" height="3" rx="1" />
-                  </svg>
-                  <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                    Progress off
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRowDetail((current) => ({ ...current, expanded: true }))}
-                  aria-label="Progress on"
-                  aria-pressed={detailsExpanded}
-                  className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                    <path d="M2 3h10M2 7h10M2 11h10" />
-                  </svg>
-                  <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                    Progress on
-                  </span>
-                </button>
-              </div>
+            {/* Desktop only: +Cat Group + +Bulk add items inline after +Transaction */}
+            <div className="hidden sm:block">
+              <AddCategoryGroupButton />
+            </div>
+            <div className="hidden sm:block">
+              <BulkAddSubcategories groups={groups} />
+            </div>
+            {/* Progress toggle — pinned to far right on desktop */}
+            <div className="ml-auto hidden items-center rounded-lg bg-[#ebe8e1] p-0.5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/10 sm:flex">
+              <button
+                type="button"
+                onClick={() => setRowDetail((current) => ({ ...current, expanded: false }))}
+                aria-label="Progress off"
+                aria-pressed={!detailsExpanded}
+                className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${!detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
+                  <rect x="2" y="2" width="10" height="3" rx="1" />
+                  <rect x="2" y="6" width="10" height="3" rx="1" />
+                  <rect x="2" y="10" width="10" height="3" rx="1" />
+                </svg>
+                <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                  Progress off
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRowDetail((current) => ({ ...current, expanded: true }))}
+                aria-label="Progress on"
+                aria-pressed={detailsExpanded}
+                className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+                  <path d="M2 3h10M2 7h10M2 11h10" />
+                </svg>
+                <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                  Progress on
+                </span>
+              </button>
             </div>
           </div>
 
@@ -472,11 +479,6 @@ export function BudgetBoard({
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>
-              <RailActions
-                monthFirstOfMonth={month.firstOfMonth}
-                prevMonthLabel={rollover.prevMonthLabel}
-                onAddItem={() => setShowAddModal(true)}
-              />
               {/* Summary | Transactions toggle */}
               <div className="grid grid-cols-2 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
                 <button
@@ -645,31 +647,12 @@ function CategoryProgressCard({
 // and Roll Planned actions are styled as a matched pair to sit above the
 // Summary / Transactions tab strip in the right rail.
 function RailActions({
-  monthFirstOfMonth,
-  prevMonthLabel,
   onAddItem,
 }: {
-  monthFirstOfMonth: string;
-  prevMonthLabel: string;
   onAddItem: () => void;
 }) {
-  const [copyPending, startCopy] = useTransition();
-  const [undoPending, startUndo] = useTransition();
-  // Snapshot of the destination month's plans BEFORE the copy, so a misclicked
-  // "Roll in <prev> planned" can be reversed. Cleared after undo or after the
-  // 20 s window elapses.
-  const [snapshot, setSnapshot] = useState<
-    Array<{ subcategory_id: string; planned_cents: number | null }> | null
-  >(null);
-
-  useEffect(() => {
-    if (!snapshot) return;
-    const t = window.setTimeout(() => setSnapshot(null), 30_000);
-    return () => window.clearTimeout(t);
-  }, [snapshot]);
-
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-2">
       <button
         type="button"
         onClick={onAddItem}
@@ -680,49 +663,6 @@ function RailActions({
         </svg>
         Transaction
       </button>
-      {snapshot ? (
-        <button
-          type="button"
-          disabled={undoPending}
-          onClick={() => {
-            const snap = snapshot;
-            startUndo(async () => {
-              await restorePlansSnapshot(monthFirstOfMonth, snap);
-              setSnapshot(null);
-            });
-          }}
-          title="Restore the planned amounts that were replaced"
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-brand-soft px-3.5 py-2 text-xs font-semibold text-brand shadow-sm ring-1 ring-brand/30 transition hover:bg-brand-soft/70 disabled:opacity-60 whitespace-nowrap"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M9 14L4 9l5-5" />
-            <path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9" />
-          </svg>
-          {undoPending ? "Undoing…" : "Undo roll-in"}
-        </button>
-      ) : (
-        <form
-          action={(fd) =>
-            startCopy(async () => {
-              const res = await copyPlansFromPreviousMonth(fd);
-              if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
-            })
-          }
-        >
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <button
-            type="submit"
-            disabled={copyPending}
-            title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-surface px-3.5 py-2 text-xs font-semibold text-foreground shadow-sm ring-1 ring-black/5 transition hover:bg-brand-soft disabled:opacity-60 dark:ring-white/10 whitespace-nowrap"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
-            </svg>
-            {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
-          </button>
-        </form>
-      )}
     </div>
   );
 }
@@ -785,24 +725,24 @@ function SummaryHeroCard({
             <path d="M6 9l6 6 6-6" />
           </svg>
           <div className="min-w-0 flex-1">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13px] tabular-nums">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 tabular-nums">
               <span>
-                <span className="block font-semibold text-foreground">Planned Budget:</span>
-                <span className="block text-foreground">{formatMoney(outflowPlanned, currency)}</span>
+                <span className="block text-[11px] font-semibold text-foreground">Planned Budget:</span>
+                <span className="block text-[15px] font-semibold text-foreground">{formatMoney(outflowPlanned, currency)}</span>
               </span>
               <span className="text-right">
-                <span className="block font-semibold text-foreground">Income Planned:</span>
-                <span className="block text-positive">{formatMoney(incomePlanned, currency)}</span>
+                <span className="block text-[11px] font-semibold text-foreground">Income Planned:</span>
+                <span className="block text-[15px] font-semibold text-positive">{formatMoney(incomePlanned, currency)}</span>
               </span>
               <span>
-                <span className="block font-semibold text-foreground">Left to Budget:</span>
-                <span className={`block ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+                <span className="block text-[11px] font-semibold text-foreground">Left to Budget:</span>
+                <span className={`block text-[15px] font-semibold ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
                   {formatMoney(displayLeft, currency)}
                 </span>
               </span>
               <span className="text-right">
-                <span className="block font-semibold text-foreground">Actual Spent:</span>
-                <span className="block text-negative">{formatMoney(actualSpent, currency)}</span>
+                <span className="block text-[11px] font-semibold text-foreground">Actual Spent:</span>
+                <span className="block text-[15px] font-semibold text-negative">{formatMoney(actualSpent, currency)}</span>
               </span>
             </div>
             {rolloverCents > 0 ? (
@@ -843,19 +783,19 @@ function SummaryHeroCard({
         <div className="grid grid-cols-2 gap-x-4 gap-y-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>
-            <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-foreground">
+            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
           </div>
           <div className="min-w-0 text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
-            <p className="mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums text-positive">
+            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
             </p>
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left to Budget</p>
-            <p className={`mt-0.5 whitespace-nowrap text-xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+            <p className={`mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
             {rolloverCents > 0 && (
@@ -869,7 +809,7 @@ function SummaryHeroCard({
           <div className="min-w-0 text-right">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
             <div className="mt-0.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
-              <p className="whitespace-nowrap text-xl font-bold tabular-nums text-negative">
+              <p className="whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
                 {formatMoney(actualSpent, currency)}
               </p>
               {tone !== "good" && (
@@ -925,9 +865,20 @@ function RolloverFooter({
   onPayDue?: (item: DueItem) => void;
 }) {
   const [pending, start] = useTransition();
+  const [copyPending, startCopy] = useTransition();
+  const [undoPending, startUndo] = useTransition();
   const [editing, setEditing] = useState(false);
   const [showDue, setShowDue] = useState(false);
+  const [snapshot, setSnapshot] = useState<
+    Array<{ subcategory_id: string; planned_cents: number | null }> | null
+  >(null);
   const { availableCents, liveAvailableCents, enabled, prevMonthLabel } = rollover;
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const t = window.setTimeout(() => setSnapshot(null), 30_000);
+    return () => window.clearTimeout(t);
+  }, [snapshot]);
   const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
   const amount = formatMoney(Math.max(0, availableCents), currency);
 
@@ -1018,25 +969,63 @@ function RolloverFooter({
           ) : null}
         </span>
 
-        {/* Rollover / Remove button */}
-        <form action={(fd) => start(() => setRollover(fd))}>
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <input type="hidden" name="enable" value={enabled ? "" : "on"} />
-          <button
-            type="submit"
-            disabled={pending}
-            title={enabled
-              ? `Stop including ${prevMonthLabel}'s unspent income`
-              : `Add ${prevMonthLabel}'s unspent income to this month`}
-            className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
-              enabled
-                ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-                : "bg-brand text-white hover:bg-brand-strong"
-            }`}
-          >
-            {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
-          </button>
-        </form>
+        {/* Rollover / Remove button + Roll-in planned */}
+        <div className="flex shrink-0 items-center gap-0">
+          <form action={(fd) => start(() => setRollover(fd))}>
+            <input type="hidden" name="month" value={monthFirstOfMonth} />
+            <input type="hidden" name="enable" value={enabled ? "" : "on"} />
+            <button
+              type="submit"
+              disabled={pending}
+              title={enabled
+                ? `Stop including ${prevMonthLabel}'s unspent income`
+                : `Add ${prevMonthLabel}'s unspent income to this month`}
+              className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
+                enabled
+                  ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
+                  : "bg-brand text-white hover:bg-brand-strong"
+              }`}
+            >
+              {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
+            </button>
+          </form>
+          <span className="mx-1.5 text-[11px] text-muted">/</span>
+          {snapshot ? (
+            <button
+              type="button"
+              disabled={undoPending}
+              onClick={() => {
+                const snap = snapshot;
+                startUndo(async () => {
+                  await restorePlansSnapshot(monthFirstOfMonth, snap);
+                  setSnapshot(null);
+                });
+              }}
+              className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-brand transition hover:bg-white/40 disabled:opacity-60 dark:hover:bg-white/10"
+            >
+              {undoPending ? "Undoing…" : "Undo roll-in"}
+            </button>
+          ) : (
+            <form
+              action={(fd) =>
+                startCopy(async () => {
+                  const res = await copyPlansFromPreviousMonth(fd);
+                  if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
+                })
+              }
+            >
+              <input type="hidden" name="month" value={monthFirstOfMonth} />
+              <button
+                type="submit"
+                disabled={copyPending}
+                title={`Copy every planned amount from ${prevMonthLabel} into this month`}
+                className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-muted transition hover:bg-white/40 hover:text-foreground disabled:opacity-60 dark:hover:bg-white/10"
+              >
+                {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
