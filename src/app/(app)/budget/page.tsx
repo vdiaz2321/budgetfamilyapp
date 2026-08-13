@@ -142,12 +142,24 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, (s as { linked_account_id?: string | null }).linked_account_id ?? null]),
   );
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  // Match a bill row's tokens against payee names so ad-hoc naming
+  // ("BOC Bike Repair" tx vs "Bike Repairs" bill) still credits the row.
+  const billTokens = (name: string) =>
+    name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/i)
+      .filter((t) => t.length >= 3)
+      .map((t) => (t.endsWith("s") ? t.slice(0, -1) : t));
   const irregularMonthDetailById = new Map<string, { spentCents: number; accountNames: string[] }>();
   for (const bill of irregularBills ?? []) {
-    const matchingTransactions = (txRows ?? []).filter((tx) =>
-      tx.subcategory_id === bill.subcategory_id &&
-      (payeeById.get(tx.payee_id ?? "") ?? "").trim().toLowerCase() === bill.name.trim().toLowerCase(),
-    );
+    const tokens = billTokens(bill.name);
+    const matchingTransactions = (txRows ?? []).filter((tx) => {
+      if (tx.subcategory_id !== bill.subcategory_id) return false;
+      const payee = (payeeById.get(tx.payee_id ?? "") ?? "").toLowerCase();
+      if (!payee) return false;
+      if (payee === bill.name.trim().toLowerCase()) return true;
+      return tokens.length > 0 && tokens.every((t) => payee.includes(t));
+    });
     const accountNames = [...new Set(
       matchingTransactions
         .map((tx) => tx.account_id ? accountNameById.get(tx.account_id) ?? null : null)
@@ -194,17 +206,20 @@ export default async function BudgetPage({
       .map((s) => {
         const isAutoSub = autoPlannedBySub.has(s.id);
         const isAutoIrregular = irregularAutoPlannedBySub.has(s.id);
-        // A budget_plans row for the current month overrides the auto-derived
-        // amount — lets a subscription/irregular row absorb monthly variance
-        // (e.g. an off-cycle charge) without touching the source table's
-        // typical/renewal figure.
+        // For subscriptions, a budget_plans row overrides the auto-derived amount
+        // (absorbs off-cycle variance). Irregular Bills is authoritative — its
+        // sum from the Irregular Bills card always wins, so the budget row stays
+        // in sync and can't be edited from two places.
         const hasManualPlan = plannedBySub.has(s.id);
-        const plannedCents = hasManualPlan
-          ? plannedBySub.get(s.id)!
+        // Both irregular bills and subscriptions are authoritative sources —
+        // their cards are the single place to update planned amounts, so we
+        // never let a stale budget_plans row override them.
+        const plannedCents = isAutoIrregular
+          ? irregularAutoPlannedBySub.get(s.id)!
           : isAutoSub
             ? autoPlannedBySub.get(s.id)!
-            : isAutoIrregular
-              ? irregularAutoPlannedBySub.get(s.id)!
+            : hasManualPlan
+              ? plannedBySub.get(s.id)!
               : 0;
         const spentCents = spentBySub.get(s.id) ?? 0;
         const g = goalBySub.get(s.id);
@@ -228,7 +243,7 @@ export default async function BudgetPage({
           // editable so ad-hoc spending (rare bike repair, one-off dental)
           // can still get a manual planned amount without first setting a
           // "typical amount" on the source bill.
-          autoPlanned: !hasManualPlan && isAutoSub,
+          autoPlanned: isAutoIrregular || isAutoSub,
           isKids,
           savings:
             kind === "savings"
@@ -511,6 +526,20 @@ export default async function BudgetPage({
     .filter((a) => a.kind === "credit_card")
     .map((a) => ({ id: a.id, name: a.name }));
 
+  // Subscription month totals — sum across all sub subcategories so the card
+  // header can show Plan/Spent matching what the Bills group row shows.
+  const subSubcategoryIds = new Set(
+    (subscriptions ?? []).filter((s) => s.subcategory_id).map((s) => s.subcategory_id!),
+  );
+  const subscriptionMonthPlanned = [...subSubcategoryIds].reduce(
+    (sum, id) => sum + (autoPlannedBySub.get(id) ?? 0),
+    0,
+  );
+  const subscriptionMonthSpent = [...subSubcategoryIds].reduce(
+    (sum, id) => sum + (spentBySub.get(id) ?? 0),
+    0,
+  );
+
   // Buckets grouped by parent account, restricted to investment accounts —
   // used by the transaction modal to offer a bucket picker (Fidelity → Roth
   // IRA Vic). Other kinds of accounts don't need it.
@@ -556,6 +585,8 @@ export default async function BudgetPage({
       subscriptions={subscriptionRows}
       irregularBills={irregularBillRows}
       creditCards={creditCards}
+      subscriptionMonthPlanned={subscriptionMonthPlanned}
+      subscriptionMonthSpent={subscriptionMonthSpent}
     />
   );
 }

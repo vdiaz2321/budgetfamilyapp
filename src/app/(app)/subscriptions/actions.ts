@@ -196,6 +196,19 @@ export async function upsertIrregularBill(formData: FormData) {
   revalidate();
 }
 
+export async function updateIrregularBillTypical(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return;
+  const typicalAmountCents = displayToCents(String(formData.get("typicalAmount") ?? "0"));
+  await supabase
+    .from("irregular_bills")
+    .update({ typical_amount_cents: typicalAmountCents, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+  revalidate();
+}
+
 export async function deleteIrregularBill(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");

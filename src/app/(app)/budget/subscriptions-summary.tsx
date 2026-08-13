@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { DOT } from "./category-icons";
 import { SubscriptionsModal } from "../subscriptions/subscriptions-modal";
-import { reorderIrregularBills, reorderSubscriptions, updateSubscriptionDueDate } from "../subscriptions/actions";
+import { reorderIrregularBills, reorderSubscriptions, updateIrregularBillTypical, updateSubscriptionDueDate } from "../subscriptions/actions";
 import { type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 
@@ -41,6 +41,8 @@ export function SubscriptionsSummaryCard({
   creditCards,
   open,
   onToggle,
+  monthPlannedCents,
+  monthSpentCents,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
@@ -48,6 +50,8 @@ export function SubscriptionsSummaryCard({
   creditCards?: CreditCardOption[];
   open: boolean;
   onToggle: () => void;
+  monthPlannedCents: number;
+  monthSpentCents: number;
 }) {
   const [managing, setManaging] = useState(false);
   const [rows, setRows] = useState(subscriptions);
@@ -66,7 +70,7 @@ export function SubscriptionsSummaryCard({
   const annualBilledTotal = activeSubs
     .filter((s) => s.billingCycle === "annual")
     .reduce((sum, s) => sum + s.amountCents, 0);
-  const annualizedTotal = Math.round(monthlyTotal * 12);
+  const annualizedTotal = Math.round(monthlyTotal * 12) + annualBilledTotal;
   const cardMap = new Map((creditCards ?? []).map((c) => [c.id, c.name]));
 
   return (
@@ -83,12 +87,13 @@ export function SubscriptionsSummaryCard({
           <Chevron open={open} />
         </button>
 
-        <div className="flex items-center gap-3">
-          {!open ? (
-            <span className="text-sm font-bold tabular-nums text-muted">
-              {formatMoney(Math.round(monthlyTotal), currency)}/mo
-            </span>
-          ) : null}
+        <div className="flex items-center gap-4 text-xs tabular-nums">
+          <span className="text-muted">
+            Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span>
+          </span>
+          <span className="text-muted">
+            Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span>
+          </span>
           <button
             type="button"
             onClick={() => setManaging(true)}
@@ -117,8 +122,8 @@ export function SubscriptionsSummaryCard({
             <>
               <div className="grid grid-cols-3 divide-x divide-line border-b border-line bg-background/40">
                 <SummaryMetric label="Monthly total" value={formatMoney(Math.round(monthlyTotal), currency)} />
-                <SummaryMetric label="Annual billed" value={formatMoney(annualBilledTotal, currency)} />
-                <SummaryMetric label="Total annual" value={formatMoney(annualizedTotal, currency)} />
+                <SummaryMetric label="Annual Total" value={formatMoney(annualBilledTotal, currency)} />
+                <SummaryMetric label="Total Combined Annual" value={formatMoney(annualizedTotal, currency)} />
               </div>
               <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
                 <span className="w-3" aria-hidden />
@@ -310,7 +315,6 @@ export function IrregularBillsSummaryCard({
   open: boolean;
   onToggle: () => void;
 }) {
-  const [managing, setManaging] = useState(false);
   const [rows, setRows] = useState(irregularBills);
   const [, startReorder] = useTransition();
   useEffect(() => {
@@ -320,6 +324,9 @@ export function IrregularBillsSummaryCard({
     setRows(next);
     startReorder(() => reorderIrregularBills(next.map((r) => r.id)));
   });
+
+  const totalPlanned = irregularBills.reduce((sum, b) => sum + b.typicalAmountCents, 0);
+  const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0);
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -335,15 +342,13 @@ export function IrregularBillsSummaryCard({
           <Chevron open={open} />
         </button>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setManaging(true)}
-            aria-label="Manage irregular bills"
-            className="rounded-lg p-1.5 text-muted transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
-          >
-            {GearIcon}
-          </button>
+        <div className="flex items-center gap-4 text-xs tabular-nums">
+          <span className="text-muted">
+            Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span>
+          </span>
+          <span className="text-muted">
+            Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span>
+          </span>
         </div>
       </div>
 
@@ -351,14 +356,7 @@ export function IrregularBillsSummaryCard({
         <div className="border-t border-line">
           {irregularBills.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-              <p className="text-sm text-muted">No irregular bills yet.</p>
-              <button
-                type="button"
-                onClick={() => setManaging(true)}
-                className="rounded-lg px-3 py-1.5 text-sm font-semibold text-brand transition hover:bg-brand-soft"
-              >
-                + Add one
-              </button>
+              <p className="text-sm text-muted">No irregular bills yet. Add items via the budget settings.</p>
             </div>
           ) : (
             <div className="divide-y divide-line">
@@ -366,8 +364,8 @@ export function IrregularBillsSummaryCard({
                 <span className="w-3" aria-hidden />
                 <span>Item</span>
                 <span className="text-right">Planned</span>
-                <span className="text-right">Spent</span>
-                <span>Card used</span>
+                <span className="pl-6 text-right">Spent</span>
+                <span className="pl-4">Card used</span>
               </div>
               {rows.map((b) => {
                 const dragOver = dragOverId === b.id;
@@ -385,38 +383,30 @@ export function IrregularBillsSummaryCard({
                       {DragHandle}
                     </span>
                     <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                    <span className="hidden text-right font-medium tabular-nums sm:block">
-                      {formatMoney(b.typicalAmountCents, currency)}
-                    </span>
-                    <span className="hidden text-right font-medium tabular-nums sm:block">
+                    <div className="hidden justify-end sm:flex">
+                      <IrregularPlannedInput id={b.id} typicalAmountCents={b.typicalAmountCents} currency={currency} />
+                    </div>
+                    <span className="hidden pl-6 text-right font-medium tabular-nums sm:block">
                       {formatMoney(b.monthSpentCents ?? 0, currency)}
                     </span>
-                    <span className="hidden min-w-0 truncate text-xs text-muted sm:block">
+                    <span className="hidden min-w-0 truncate pl-4 text-xs text-muted sm:block">
                       {b.monthAccountNames?.join(", ") || "—"}
                     </span>
                     <div className="flex shrink-0 items-center gap-2 sm:hidden">
                       <span className="text-xs text-muted">Plan</span>
-                      <span className="font-medium tabular-nums">{formatMoney(b.typicalAmountCents, currency)}</span>
+                      <IrregularPlannedInput id={b.id} typicalAmountCents={b.typicalAmountCents} currency={currency} />
                       <span className="text-xs text-muted">Spent</span>
                       <span className="font-medium tabular-nums">{formatMoney(b.monthSpentCents ?? 0, currency)}</span>
                     </div>
                   </div>
                 );
               })}
+              <p className="px-4 py-2 text-[11px] text-muted">
+                Spent amounts are pulled automatically from transactions. Set a Planned amount per item to budget ahead for occasional expenses — totals sync to the Bills category above.
+              </p>
             </div>
           )}
         </div>
-      ) : null}
-
-      {managing ? (
-        <SubscriptionsModal
-          currency={currency}
-          subscriptions={subscriptions}
-          irregularBills={irregularBills}
-          creditCards={creditCards}
-          onClose={() => setManaging(false)}
-          showOnly="irregular"
-        />
       ) : null}
     </section>
   );
@@ -445,6 +435,47 @@ function RenewalBadge({
     </button>
   ) : (
     <span className={className}>{displayLabel}</span>
+  );
+}
+
+function IrregularPlannedInput({
+  id,
+  typicalAmountCents,
+  currency,
+}: {
+  id: string;
+  typicalAmountCents: number;
+  currency: string;
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  const initial = centsToDisplay(typicalAmountCents);
+  const initialValue = `${currencySymbol(currency)}${initial}`;
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) => start(() => updateIrregularBillTypical(fd))}
+      className="flex items-center"
+    >
+      <input type="hidden" name="id" value={id} />
+      <input
+        key={initial}
+        name="typicalAmount"
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        defaultValue={initialValue}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={(e) => {
+          if (e.currentTarget.value !== initialValue) formRef.current?.requestSubmit();
+        }}
+        title="Type a value or calculation, for example $1200 + 75 - 30"
+        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-sm font-medium text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+          pending ? "ring-2 ring-brand" : "focus:ring-brand"
+        }`}
+      />
+    </form>
   );
 }
 

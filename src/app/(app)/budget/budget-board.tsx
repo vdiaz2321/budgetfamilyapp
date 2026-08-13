@@ -57,6 +57,8 @@ type Props = {
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
+  subscriptionMonthPlanned: number;
+  subscriptionMonthSpent: number;
 };
 
 export function BudgetBoard({
@@ -80,6 +82,8 @@ export function BudgetBoard({
   subscriptions,
   irregularBills,
   creditCards,
+  subscriptionMonthPlanned,
+  subscriptionMonthSpent,
 }: Props) {
   const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
   const [rowFilter, setRowFilter] = useState<"all" | "overspent">("all");
@@ -458,6 +462,8 @@ export function BudgetBoard({
                   creditCards={creditCards}
                   open={openGroups["subscriptions"] ?? false}
                   onToggle={() => toggleGroup("subscriptions")}
+                  monthPlannedCents={subscriptionMonthPlanned}
+                  monthSpentCents={subscriptionMonthSpent}
                 />
 
                 <IrregularBillsSummaryCard
@@ -735,14 +741,14 @@ function SummaryHeroCard({
                 <span className="block text-[15px] font-semibold text-positive">{formatMoney(incomePlanned, currency)}</span>
               </span>
               <span>
+                <span className="block text-[11px] font-semibold text-foreground">Actual Spent:</span>
+                <span className="block text-[15px] font-semibold text-negative">{formatMoney(actualSpent, currency)}</span>
+              </span>
+              <span className="text-right">
                 <span className="block text-[11px] font-semibold text-foreground">Left to Budget:</span>
                 <span className={`block text-[15px] font-semibold ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
                   {formatMoney(displayLeft, currency)}
                 </span>
-              </span>
-              <span className="text-right">
-                <span className="block text-[11px] font-semibold text-foreground">Actual Spent:</span>
-                <span className="block text-[15px] font-semibold text-negative">{formatMoney(actualSpent, currency)}</span>
               </span>
             </div>
             {rolloverCents > 0 ? (
@@ -1121,13 +1127,13 @@ function StickyFooterBar({
         <p className="text-[10px] text-muted sm:text-xs">Planned</p>
       </div>
       <div className="min-w-0 border-l border-line px-1 text-center">
-        <p className={`truncate text-sm font-medium tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+        <p className={`truncate text-sm font-medium tabular-nums sm:text-lg ${displayLeft < 0 ? "text-negative" : "text-positive"}`}>
           {formatMoney(displayLeft, currency)}
         </p>
         <p className="text-[10px] text-muted sm:text-xs">Income Left to Budget</p>
       </div>
-      <div className={`min-w-0 border-l border-line px-1 text-center ${toneClasses.text}`}>
-        <p className="truncate text-sm font-medium tabular-nums sm:text-lg">{formatMoney(actualSpent, currency)}</p>
+      <div className="min-w-0 border-l border-line px-1 text-center">
+        <p className="truncate text-sm font-medium tabular-nums text-negative sm:text-lg">{formatMoney(actualSpent, currency)}</p>
         <p className="text-[10px] text-muted sm:text-xs">Actual Spent</p>
       </div>
     </div>
