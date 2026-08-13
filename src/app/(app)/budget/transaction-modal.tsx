@@ -110,6 +110,7 @@ export function TransactionModal({
   const formRef = useRef<HTMLFormElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
   const [autoFillSubId, setAutoFillSubId] = useState<string | null>(null);
+  const [convertedCents, setConvertedCents] = useState<number | null>(null);
 
   // Split state — for NEW transactions only. Edit mode keeps the existing single-item flow.
   const [totalCents, setTotalCents] = useState(editTx?.amountCents ?? initialAmountCents ?? 0);
@@ -245,61 +246,7 @@ export function TransactionModal({
         />
       )}
 
-      <div className="flex h-full min-h-0 max-h-none w-full flex-1 flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl dark:ring-white/10">
-        {/* Top action bar */}
-        <div className={"flex items-center justify-between gap-2 border-b border-line px-3 py-2.5 " + HEADER_TINT[txType]}>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-2 py-1.5 text-sm font-bold text-muted transition hover:text-foreground"
-          >
-            Cancel
-          </button>
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              form="tx-form"
-              disabled={pending || (!isEdit && splits.length === 0)}
-              className={"rounded-xl px-3.5 py-1.5 text-sm font-bold transition-colors disabled:opacity-60 " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
-            >
-              {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
-            </button>
-            {!isEdit ? (
-              <button
-                type="submit"
-                form="tx-form"
-                name="cleared"
-                value="on"
-                disabled={pending || splits.length === 0}
-                className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-foreground ring-1 ring-slate-200 transition hover:bg-rose-100 hover:text-rose-700 disabled:opacity-60 dark:bg-slate-800/70 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-rose-900/40 dark:hover:text-rose-200"
-              >
-                Clear
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  start(async () => {
-                    const fd = new FormData();
-                    fd.set("id", editTx.id);
-                    fd.set("cleared", editTx.cleared ? "false" : "true");
-                    await toggleCleared(fd);
-                    onClose();
-                  })
-                }
-                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
-                  editTx.cleared
-                    ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
-                    : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
-                }`}
-              >
-                {editTx.cleared ? "Uncleared" : "Clear"}
-              </button>
-            )}
-          </div>
-        </div>
-
+      <div className="flex max-h-[92dvh] min-h-0 w-full flex-1 flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl dark:ring-white/10">
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {/* Tabs: two-way (Income / Expense) when adding new; five-way when editing */}
           {isEdit ? (
@@ -356,9 +303,7 @@ export function TransactionModal({
 
             <CurrencyConverter
               onUse={(usdCents) => {
-                if (amountRef.current) {
-                  amountRef.current.value = centsToDisplay(usdCents);
-                }
+                setConvertedCents(usdCents);
                 setTotalCents(usdCents);
               }}
             />
@@ -369,6 +314,7 @@ export function TransactionModal({
                 inputRef={amountRef}
                 defaultValue={editTx ? centsToDisplay(editTx.amountCents) : initialAmountCents != null ? centsToDisplay(initialAmountCents) : ""}
                 onChangeCents={setTotalCents}
+                forcedCents={convertedCents}
               />
 
               {/* Budget item: single select for edit, multi-select for new */}
@@ -531,6 +477,61 @@ export function TransactionModal({
             ) : null}
           </form>
         </div>
+
+        {/* Bottom action bar */}
+        <div className={"flex items-center justify-between gap-2 border-t border-line px-3 py-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))]  " + HEADER_TINT[txType]}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-2 py-1.5 text-sm font-bold text-muted transition hover:text-foreground"
+          >
+            Cancel
+          </button>
+          <div className="flex items-center gap-2">
+            {!isEdit ? (
+              <button
+                type="submit"
+                form="tx-form"
+                name="cleared"
+                value="on"
+                disabled={pending || splits.length === 0}
+                className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-foreground ring-1 ring-slate-200 transition hover:bg-positive/15 hover:text-positive disabled:opacity-60 dark:bg-slate-800/70 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-positive/20 dark:hover:text-positive"
+              >
+                Clear
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              form="tx-form"
+              disabled={pending || (!isEdit && splits.length === 0)}
+              className={"rounded-xl px-3.5 py-1.5 text-sm font-bold transition-colors disabled:opacity-60 " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
+            >
+              {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
+            </button>
+            {isEdit ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const fd = new FormData();
+                    fd.set("id", editTx.id);
+                    fd.set("cleared", editTx.cleared ? "false" : "true");
+                    await toggleCleared(fd);
+                    onClose();
+                  })
+                }
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
+                  editTx.cleared
+                    ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                    : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
+                }`}
+              >
+                {editTx.cleared ? "Uncleared" : "Clear"}
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
     </>
   );
@@ -600,13 +601,22 @@ function AmountInput({
   inputRef,
   defaultValue,
   onChangeCents,
+  forcedCents,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   defaultValue: string;
   onChangeCents: (cents: number) => void;
+  forcedCents?: number | null;
 }) {
   const [raw, setRaw] = useState(defaultValue);
   const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (forcedCents != null && forcedCents > 0) {
+      const display = (forcedCents / 100).toFixed(2);
+      setRaw(display);
+    }
+  }, [forcedCents]);
 
   const commit = (value: string) => {
     const cents = moneyExpressionToCents(value);
@@ -1205,16 +1215,7 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
 
   return (
     <div className="rounded-xl bg-background p-3 ring-1 ring-line">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted">Convert to USD</span>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="text-xs font-medium text-muted hover:text-foreground"
-        >
-          Close
-        </button>
-      </div>
+      <p className="mb-2 text-xs font-semibold text-muted">Convert to USD</p>
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
@@ -1235,15 +1236,24 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
         <span className="text-sm font-bold tabular-nums text-foreground">
           {loading ? "…" : usd != null ? `$${usd.toFixed(2)}` : "$0.00"}
         </span>
-        {usdCents != null && (
+        <div className="ml-auto flex items-center gap-4">
+          {usdCents != null && (
+            <button
+              type="button"
+              onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
+              className="rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong"
+            >
+              Use
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
-            className="ml-auto rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong"
+            onClick={() => setOpen(false)}
+            className="text-xs font-medium text-muted hover:text-foreground"
           >
-            Use
+            Close
           </button>
-        )}
+        </div>
       </div>
       {error ? (
         <p className="mt-2 text-xs text-negative">{error}</p>

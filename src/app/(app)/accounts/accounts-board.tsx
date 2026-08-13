@@ -416,62 +416,46 @@ export function AccountsBoard({
         </button>
       </div>
 
-      <div className="space-y-3">
-        {assetSections.map((section) => (
+      {/* 2×2: Banking + Debts on the left, Investments + Kids Funding on the right.
+          Two independent flex columns so opening one card doesn't leave dead space next to it. */}
+      {(() => {
+        const items = [
+          ...assetSections.map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
+          ...debtSectionsToRender.map((s) => ({
+            section: s,
+            extras: s.key === "loans" ? visibleBudgetDebts : ([] as BudgetDebt[]),
+          })),
+          ...kidsSections
+            .filter((s) => accounts.some((a) => s.match(a)) || s.key === "kids")
+            .map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
+        ];
+        const leftKeys = new Set(["banking", "loans"]);
+        const left = items.filter((i) => leftKeys.has(i.section.key));
+        const right = items.filter((i) => !leftKeys.has(i.section.key));
+        const renderCard = ({ section, extras }: (typeof items)[number]) => (
           <AccountSection
             key={section.key}
             section={section}
             accounts={accounts.filter((a) => section.match(a))}
+            extraDebts={extras}
             currency={currency}
             historyMonths={historyMonths}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
+            headerBadge={section.kidsGroup ? "Not in net worth" : undefined}
           />
-        ))}
+        );
+        return (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+            <div className="flex flex-1 flex-col gap-3">{left.map(renderCard)}</div>
+            <div className="flex flex-1 flex-col gap-3">{right.map(renderCard)}</div>
+          </div>
+        );
+      })()}
 
-        {debtSectionsToRender.map((section) => (
-          <AccountSection
-            key={section.key}
-            section={section}
-            accounts={accounts.filter((a) => section.match(a))}
-            extraDebts={section.key === "loans" ? visibleBudgetDebts : []}
-            currency={currency}
-            historyMonths={historyMonths}
-            open={!collapsed[section.key]}
-            onToggle={() => toggleSection(section.key)}
-            isBucketsOpen={isBucketsOpen}
-            onToggleBuckets={toggleBuckets}
-          />
-        ))}
-      </div>
-
-      {/* Kids Funding + Credit Cards sit apart — not counted in Net Worth. */}
       <div className="space-y-3 pt-2">
-        <div className="flex items-center gap-3 px-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Not counted in net worth
-          </span>
-          <span className="h-px flex-1 bg-line" />
-        </div>
-        {kidsSections.map((section) => {
-          const sectionAccounts = accounts.filter((a) => section.match(a));
-          if (sectionAccounts.length === 0 && section.key !== "kids") return null;
-          return (
-            <AccountSection
-              key={section.key}
-              section={section}
-              accounts={sectionAccounts}
-              currency={currency}
-              historyMonths={historyMonths}
-              open={!collapsed[section.key]}
-              onToggle={() => toggleSection(section.key)}
-              isBucketsOpen={isBucketsOpen}
-              onToggleBuckets={toggleBuckets}
-            />
-          );
-        })}
         {creditSections.map((section) => {
           const sectionAccounts = accounts.filter((a) => section.match(a));
           if (sectionAccounts.length === 0 && section.key !== "credit") return null;
@@ -651,9 +635,9 @@ function CreditCardSection({
           ) : null}
           {isMain && rewardCards.length > 0 ? (
             <span>
+              {totalPoints > 0 ? <><span className="font-semibold">Current Pts:</span> <span className="font-semibold text-foreground">{totalPoints.toLocaleString()}</span> · </> : null}
               <span className="font-semibold">Rewards value:</span>{" "}
               <span className="font-semibold text-positive">{formatMoney(pointsValue + freeNightValue, currency)}</span>
-              {totalPoints > 0 ? <> · <span className="font-semibold">Current Pts:</span> <span className="font-semibold text-foreground">{totalPoints.toLocaleString()}</span></> : null}
               {travelValue > 0 ? <> · Travel {formatMoney(travelValue, currency)}</> : null}
               {hotelValue > 0 ? <> · Hotel {formatMoney(hotelValue, currency)}</> : null}
               {freeNightValue > 0 ? <> · Free nights {formatMoney(freeNightValue, currency)}</> : null}
@@ -781,17 +765,13 @@ function CreditCardPanel({
     ? Math.round((new Date(fnExpires).getTime() - new Date(today).getTime()) / 86_400_000)
     : null;
   const fnSoon = fnDaysLeft !== null && fnDaysLeft <= 60;
-  // expires color: muted-strikethrough if used+expired (renewal due), green if used+not-expired,
-  // red if expired+unused (missed), amber if soon+unused, else normal
   const fnExpiresColor = fnUsed && fnExpired
     ? "text-muted line-through"
-    : fnUsed
-      ? "text-positive"
-      : fnExpired
+    : fnExpired
+      ? "text-negative font-semibold"
+      : fnSoon
         ? "text-negative font-semibold"
-        : fnSoon
-          ? "text-amber-600 dark:text-amber-400 font-semibold"
-          : "";
+        : "text-negative";
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const monthLabel = monthNames[new Date().getMonth()];
   const monthSpend = card.monthSpendCents ?? 0;
@@ -823,8 +803,8 @@ function CreditCardPanel({
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{card.name}</span>
-          <span className="mt-0.5 flex flex-wrap items-baseline gap-1.5">
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="shrink-0 truncate text-sm font-medium">{card.name}</span>
             {card.holder ? (
               <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
                 {card.holder}
@@ -833,11 +813,6 @@ function CreditCardPanel({
             {bank ? (
               <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
                 {bank}
-              </span>
-            ) : null}
-            {d?.authUser ? (
-              <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                {d.authUser}
               </span>
             ) : null}
             {card.dateClosed ? (
@@ -850,26 +825,36 @@ function CreditCardPanel({
                 {d.currentPoints.toLocaleString()} pts
               </span>
             ) : null}
-            {card.dateOpened ? (
-              <span className="shrink-0 text-[10px] text-muted">
-                Opened {card.dateOpened}
+            {card.annualFeeCents && !card.feeWaived ? (
+              <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-muted ring-1 ring-line">
+                {formatMoney(card.annualFeeCents, currency)}/yr
               </span>
             ) : null}
           </span>
-          {(() => {
-            const parts: React.ReactNode[] = [];
-            if (card.annualFeeCents && !card.feeWaived) parts.push(<span key="fee">{formatMoney(card.annualFeeCents, currency)}/yr fee</span>);
-            if (d?.freeNightCreditCents) parts.push(<span key="fnc">Free-Night Credit: {formatMoney(d.freeNightCreditCents, currency)}</span>);
-            if (d?.freeNightPointsLimit) parts.push(<span key="fnp">Free Night: {d.freeNightPointsLimit.toLocaleString()} pts</span>);
-            if (d?.freeNightExpiresOn) parts.push(<span key="fne" className={fnExpiresColor}>Free-Night Expires: {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}</span>);
-            if (d?.benefitUsedOn) parts.push(<span key="fnu" className={fnUsed && fnExpired ? "text-negative" : "text-positive"}>Used/Scheduled: {d.benefitUsedOn}</span>);
-            if (!parts.length) return null;
-            return (
-              <p className="mt-0.5 text-[11px] text-muted sm:truncate">
-                {parts.map((p, i) => <React.Fragment key={i}>{i > 0 ? " · " : ""}{p}</React.Fragment>)}
-              </p>
-            );
-          })()}
+          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn) ? (
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              {d?.freeNightCreditCents ? (
+                <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+                  Free night ${(d.freeNightCreditCents / 100).toFixed(0)}
+                </span>
+              ) : null}
+              {d?.freeNightPointsLimit ? (
+                <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
+                  Free night {d.freeNightPointsLimit.toLocaleString()} pts
+                </span>
+              ) : null}
+              {d?.freeNightExpiresOn ? (
+                <span className={`text-[11px] ${fnExpiresColor}`}>
+                  Expires {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}
+                </span>
+              ) : null}
+              {d?.benefitUsedOn ? (
+                <span className={`text-[11px] ${fnUsed && fnExpired ? "text-negative" : "text-positive"}`}>
+                  Used/Scheduled: {d.benefitUsedOn}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
         </span>
         <span className={`w-24 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
           {owed !== 0 ? formatMoney(owed, currency) : "—"}
@@ -1452,6 +1437,7 @@ function AccountSection({
   onToggleBuckets,
   legacy = false,
   extraDebts = [],
+  headerBadge,
 }: {
   section: Section;
   accounts: AccountData[];
@@ -1463,6 +1449,7 @@ function AccountSection({
   onToggleBuckets: (id: string) => void;
   legacy?: boolean;
   extraDebts?: BudgetDebt[];
+  headerBadge?: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -1504,24 +1491,24 @@ function AccountSection({
   const { dragOverId, startDrag } = usePointerReorder("account", reorder);
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header */}
-      <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5">
         <button
           type="button"
           onClick={() => {
             if (open) setEditingId(null);
             onToggle();
           }}
-          className="flex items-center gap-2.5 text-left"
+          className="flex min-w-0 items-center gap-2.5 text-left"
           aria-expanded={open}
         >
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-          <span className="truncate font-semibold">{section.label}</span>
+          <span className="truncate font-semibold leading-tight">{section.label}</span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
@@ -1543,14 +1530,20 @@ function AccountSection({
       {open ? (
         <div className="border-t border-line">
           {localAccounts.length > 0 || extraDebts.length > 0 ? (
-            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
-              <span />
-              <span />
-              <span />
+            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              {headerBadge ? (
+                <span className="col-span-3 truncate text-[10px] font-medium uppercase tracking-wide text-muted">{headerBadge}</span>
+              ) : (
+                <>
+                  <span />
+                  <span />
+                  <span />
+                </>
+              )}
               <span className="justify-self-stretch text-center">{monthAbbr(historyMonths[0])}</span>
-              <span className="hidden justify-self-stretch text-center sm:block">{monthAbbr(historyMonths[1])}</span>
-              <span className="hidden justify-self-stretch text-center sm:block">{monthAbbr(historyMonths[2])}</span>
-              <span className="hidden sm:block" />
+              <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[1])}</span>
+              <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[2])}</span>
+              <span className="hidden @[560px]:block" />
             </div>
           ) : null}
           {localAccounts.length === 0 && extraDebts.length === 0 ? (
@@ -1581,7 +1574,7 @@ function AccountSection({
               {extraDebts.map((d) => (
                 <li
                   key={`debt:${d.subcategoryId}`}
-                  className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] items-center gap-1.5 border-0 px-4 py-1.5 sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem]"
+                  className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] items-center gap-1.5 border-0 px-4 py-1.5 @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem]"
                 >
                   <span />
                   <span />
@@ -1590,9 +1583,9 @@ function AccountSection({
                     <span className="text-muted">{currencySymbol(currency)}</span>
                     <span className="tabular-nums">{centsToDisplay(d.balanceCents)}</span>
                   </span>
-                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted sm:flex">$—</span>
-                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted sm:flex">$—</span>
-                  <span className="hidden sm:block" />
+                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted @[560px]:flex">$—</span>
+                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted @[560px]:flex">$—</span>
+                  <span className="hidden @[560px]:block" />
                 </li>
               ))}
             </ul>
@@ -1730,7 +1723,7 @@ function AccountRow({
       data-drop-key={`account:${account.id}`}
       className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
-      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
+      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
         <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
@@ -1755,7 +1748,7 @@ function AccountRow({
         <button
           type="button"
           onClick={onToggleEdit}
-          className="group/name relative flex w-full min-w-0 max-w-full flex-col items-start justify-self-start gap-0.5 text-left"
+          className="group/name relative flex min-w-0 items-center gap-1.5 justify-self-start text-left"
         >
           <span
             role="tooltip"
@@ -1763,52 +1756,47 @@ function AccountRow({
           >
             Click to edit
           </span>
-          {/* Tag row: always sits below the name so the title gets full width at every breakpoint. */}
-          <span className="order-2 flex min-w-0 flex-wrap items-baseline gap-1.5">
-            {account.holder ? (
-              <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-                {account.holder}
-              </span>
-            ) : null}
-            {account.ownership === "joint" ? (
-              <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">Joint</span>
-            ) : null}
-            {account.institution ? <span className="shrink-0 text-[11px] text-muted">{account.institution}</span> : null}
-            {maskAccountNumber(account.accountNumber) ? <span className="shrink-0 text-[11px] text-muted">{maskAccountNumber(account.accountNumber)}</span> : null}
-            {section.key === "banking" && account.bankGroup ? (
-              <span
-                title="Net Worth uses this account-level setting"
-                className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                  account.bankGroup === "savings"
-                    ? "bg-positive/15 text-positive"
-                    : "bg-black/5 text-muted dark:bg-white/10"
-                }`}
-              >
-                {account.bankGroup === "savings" ? "Savings" : "Checking"}
-              </span>
-            ) : null}
-            {account.subtype ? (
-              <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
-                {account.subtype}
-              </span>
-            ) : null}
-            {showKind ? <span className="shrink-0 text-[11px] text-muted">{kindLabel}</span> : null}
-            {bucketCount > 0 ? (
-              <span className="shrink-0 text-[11px] text-muted">
-                {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
-              </span>
-            ) : null}
-            {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
-          </span>
-          <span className={`order-1 w-full truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
+          <span className={`shrink-0 truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
+          {account.holder ? (
+            <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+              {account.holder}
+            </span>
+          ) : null}
+          {account.ownership === "joint" ? (
+            <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">Joint</span>
+          ) : null}
+          {section.key === "banking" && account.bankGroup ? (
+            <span
+              title="Net Worth uses this account-level setting"
+              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                account.bankGroup === "savings"
+                  ? "bg-positive/15 text-positive"
+                  : "bg-black/5 text-muted dark:bg-white/10"
+              }`}
+            >
+              {account.bankGroup === "savings" ? "Savings" : "Checking"}
+            </span>
+          ) : null}
+          {account.subtype ? (
+            <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+              {account.subtype}
+            </span>
+          ) : null}
+          {bucketCount > 0 ? (
+            <span className="shrink-0 text-[11px] text-muted">
+              {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
+            </span>
+          ) : null}
+          {maskAccountNumber(account.accountNumber) ? <span className="shrink-0 text-[11px] text-muted">{maskAccountNumber(account.accountNumber)}</span> : null}
+          {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
         </button>
 
         {allowBuckets && bucketCount > 0 ? (
           <>
             <DerivedBalance balanceCents={account.balanceCents} currency={currency} />
-            <div className="hidden sm:contents">
+            <div className="hidden @[560px]:contents">
               <DerivedBalance
                 balanceCents={account.prevMonthCents ?? 0}
                 currency={currency}
@@ -1829,7 +1817,7 @@ function AccountRow({
               currency={currency}
               liability={section.liability}
             />
-            <div className="hidden sm:contents">
+            <div className="hidden @[560px]:contents">
               <HistoricBalanceInput
                 accountId={account.id}
                 month={historyMonths[1]}
@@ -1847,7 +1835,7 @@ function AccountRow({
             </div>
           </>
         )}
-        <span className="hidden sm:block" aria-hidden />
+        <span className="hidden @[560px]:block" aria-hidden />
       </div>
 
       {allowBuckets && bucketsOpen ? (
@@ -1906,7 +1894,7 @@ function BucketDrawer({
   const { dragOverId, startDrag } = usePointerReorder("bucket", reorder);
 
   return (
-    <div className="border-t border-line bg-background/40 px-4 py-2 sm:pl-11 sm:pr-4">
+    <div className="border-t border-line bg-background/40 px-4 py-1 sm:pl-11 sm:pr-4">
       {reorderError ? <p className="pb-1.5 text-xs font-medium text-negative">{reorderError}</p> : null}
       {localBuckets.length === 0 ? (
         <p className="py-1 text-xs text-muted">
@@ -1914,7 +1902,7 @@ function BucketDrawer({
           Vehicle, Real Estate). Leave empty for accounts you don&apos;t need to break down.
         </p>
       ) : (
-        <ul className="divide-y divide-line/60">
+        <ul className="divide-y divide-line/40">
           {localBuckets.map((b) => (
             <BucketRow
               key={b.id}
@@ -1961,14 +1949,14 @@ function BucketRow({
   return (
     <li
       data-drop-key={`bucket:${bucket.id}`}
-      className={`group relative grid items-center gap-1.5 py-1 ${
+      className={`group relative grid h-7 items-center gap-1.5 ${
         isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""
-      } grid-cols-[1.5rem_minmax(0,1fr)_6rem] sm:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
+      } grid-cols-[1.5rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
     >
       <GripHandle onMouseDown={onDragStart} size="sm" />
       <BucketNameInput id={bucket.id} name={bucket.name} />
       <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
-      <div className="hidden sm:contents">
+      <div className="hidden @[560px]:contents">
         <HistoricBucketBalanceInput
           bucketId={bucket.id}
           month={historyMonths[1]}
@@ -2019,7 +2007,7 @@ function BucketNameInput({ id, name }: { id: string; name: string }) {
             formRef.current?.requestSubmit();
           }
         }}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-xs transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 sm:text-sm ${
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0 text-sm transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -2062,7 +2050,7 @@ function BucketBalanceInput({
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-0.5 px-0 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-0 px-0 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -2472,7 +2460,6 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           <LabeledInput label="Investment type" name="subtype" placeholder="e.g. Roth IRA, brokerage, 529" />
         ) : null}
         <LabeledInput label="Account name" name="name" placeholder={section.key === "loans" ? "e.g. Home Mortgage" : "e.g. Fidelity Roth IRA"} required autoFocus onChange={() => setError(null)} />
-        <LabeledInput label="Institution" name="institution" placeholder="e.g. Fidelity, Amex, Navy Federal" />
         <LabeledInput label="Account holder(s)" name="holder" placeholder="e.g. Victor, Johana, or Joint" />
         <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
         <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -2622,74 +2609,74 @@ function EditAccountForm({
             onDone();
           })
         }
-        className="flex flex-wrap items-center gap-2"
+        className="flex flex-col gap-2"
       >
         <input type="hidden" name="id" value={account.id} />
         {section.kidsGroup ? <input type="hidden" name="kidsAccount" value="on" /> : null}
-        <input
-          name="name"
-          defaultValue={account.name}
-          required
-          className="min-w-0 flex-1 rounded-md bg-surface px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        <input
-          name="holder"
-          defaultValue={account.holder ?? ""}
-          placeholder="Holder"
-          title="Whose account? (e.g. V, J, Joint)"
-          className="w-20 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        <input
-          name="institution"
-          defaultValue={account.institution ?? ""}
-          placeholder="Institution"
-          className="w-32 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        <input
-          name="accountNumber"
-          defaultValue={account.accountNumber ?? ""}
-          placeholder="Account reference"
-          className="w-36 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        <select name="ownership" defaultValue={account.ownership} className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-          <option value="sole">Sole</option>
-          <option value="joint">Joint</option>
-        </select>
-        {section.offerSubtype ? (
+        {/* Row 1: name, holder, account reference */}
+        <div className="flex items-center gap-2">
           <input
-            name="subtype"
-            defaultValue={account.subtype ?? ""}
-            placeholder="Type… (e.g. Retirement, Roth IRA, 529, Trump Account)"
-            className="w-56 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            name="name"
+            defaultValue={account.name}
+            required
+            className="min-w-0 flex-1 rounded-md bg-surface px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
-        ) : null}
-        {section.key === "banking" ? (
-          <select
-            name="bankGroup"
-            defaultValue={account.bankGroup ?? "spending"}
-            title="Net Worth splits long-term Savings from everyday Bank Accounts"
-            className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            <option value="spending">Checking</option>
-            <option value="savings">Savings</option>
+          <input
+            name="holder"
+            defaultValue={account.holder ?? ""}
+            placeholder="Holder"
+            title="Whose account? (e.g. V, J, Joint)"
+            className="w-20 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <input
+            name="accountNumber"
+            defaultValue={account.accountNumber ?? ""}
+            placeholder="Account reference"
+            className="w-36 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </div>
+        {/* Row 2: ownership, kind/subtype, active, save */}
+        <div className="flex items-center gap-2">
+          <select name="ownership" defaultValue={account.ownership} className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+            <option value="sole">Sole</option>
+            <option value="joint">Joint</option>
           </select>
-        ) : null}
-        <label className="flex items-center gap-1.5 text-xs text-muted">
-          <input
-            type="checkbox"
-            name="active"
-            defaultChecked={account.active}
-            className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
-          />
-          Active
-        </label>
-        <button
-          type="submit"
-          disabled={savePending}
-          className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
-        >
-          {savePending ? "Saving…" : "Save"}
-        </button>
+          {section.offerSubtype ? (
+            <input
+              name="subtype"
+              defaultValue={account.subtype ?? ""}
+              placeholder="Type… (e.g. Roth IRA, 529)"
+              className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          ) : null}
+          {section.key === "banking" ? (
+            <select
+              name="bankGroup"
+              defaultValue={account.bankGroup ?? "spending"}
+              title="Net Worth splits long-term Savings from everyday Bank Accounts"
+              className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="spending">Checking</option>
+              <option value="savings">Savings</option>
+            </select>
+          ) : null}
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            <input
+              type="checkbox"
+              name="active"
+              defaultChecked={account.active}
+              className="h-3.5 w-3.5 rounded accent-[var(--brand)]"
+            />
+            Active
+          </label>
+          <button
+            type="submit"
+            disabled={savePending}
+            className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
+          >
+            {savePending ? "Saving…" : "Save"}
+          </button>
+        </div>
       </form>
       {confirmDelete ? (
         <div className="flex items-center gap-2">

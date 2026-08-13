@@ -165,9 +165,19 @@ export function BudgetBoard({
     const start = new Date(today);
     start.setHours(0, 0, 0, 0);
     if (!isCurrentMonth) return [] as DueItem[];
+    const startOfMonth = new Date(start.getFullYear(), start.getMonth(), 1);
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
-    const inWindow = (value: Date) => value >= start && value <= end;
+    // Show items from start of month (not just today) so overdue unpaid items
+    // stay visible until Pay/Edit is clicked, not just until the date passes.
+    const inWindow = (value: Date) => value >= startOfMonth && value <= end;
+    // Build a lookup of spentCents by subcategory id for subscription "paid" check.
+    const spentBySubId = new Map<string, number>();
+    for (const group of groups) {
+      for (const row of group.rows) {
+        spentBySubId.set(row.subId, row.spentCents);
+      }
+    }
     const budgetItems = groups
       .filter((group) => group.kind === "bills")
       .flatMap((group) => group.rows)
@@ -193,6 +203,9 @@ export function BudgetBoard({
       if (!subscription.isActive || !subscription.nextRenewalDate || !subscription.subcategoryId) return [];
       const due = new Date(`${subscription.nextRenewalDate}T00:00:00`);
       if (!inWindow(due)) return [];
+      // Considered paid this month if spend in the matching budget row covers the amount.
+      const spentCents = spentBySubId.get(subscription.subcategoryId) ?? 0;
+      if (spentCents >= subscription.amountCents) return [];
       return [{
         id: subscription.id,
         name: subscription.name,
@@ -893,31 +906,42 @@ function RolloverFooter({
       {/* Expandable due-this-week list */}
       {showDue && dueItems.length > 0 && (
         <ul className="divide-y divide-line border-b border-line">
-          {dueItems.map((item) => (
-            <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="shrink-0 text-xs font-semibold text-brand">{dueItemDateLabel(item.dueDate)}</span>
-                  <span className="truncate text-sm font-semibold">{item.name}</span>
+          {dueItems.map((item) => {
+            const dueTarget = new Date(`${item.dueDate}T00:00:00`);
+            const todayMidnight = new Date();
+            todayMidnight.setHours(0, 0, 0, 0);
+            const isOverdue = dueTarget < todayMidnight;
+            return (
+              <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>{dueItemDateLabel(item.dueDate)}</span>
+                    <span className="truncate text-sm font-semibold">{item.name}</span>
+                    {isOverdue && (
+                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-negative">
+                        Overdue
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 truncate text-[11px] text-muted">
+                    {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
+                  </p>
                 </div>
-                <p className="mt-0.5 truncate text-[11px] text-muted">
-                  {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
-                {onPayDue && (
-                  <button
-                    type="button"
-                    onClick={() => onPayDue(item)}
-                    className="mt-1 rounded-md bg-brand-soft px-2 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand/20"
-                  >
-                    Pay / Edit
-                  </button>
-                )}
-              </div>
-            </li>
-          ))}
+                <div className="shrink-0 text-right">
+                  <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
+                  {onPayDue && (
+                    <button
+                      type="button"
+                      onClick={() => onPayDue(item)}
+                      className={`mt-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${isOverdue ? "bg-negative/15 text-negative hover:bg-negative/25" : "bg-brand-soft text-brand hover:bg-brand/20"}`}
+                    >
+                      Pay / Edit
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 

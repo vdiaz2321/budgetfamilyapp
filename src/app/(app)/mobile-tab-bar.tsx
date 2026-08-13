@@ -107,7 +107,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
           >
             <Icon>{tab.icon}</Icon>
             {tab.href === "/transactions" && badge ? (
-              <span className="absolute right-3 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
+              <span className="absolute right-6 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
                 {badge}
               </span>
             ) : null}

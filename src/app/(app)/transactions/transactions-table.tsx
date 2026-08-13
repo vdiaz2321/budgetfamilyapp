@@ -278,8 +278,8 @@ export function TransactionsTable({
         </div>
 
       {/* Date range — searches across months instead of just the one selected above */}
-        <div className="order-3 flex w-full items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:w-auto sm:gap-1.5">
-        <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
+        <div className="order-3 grid w-full grid-cols-[1fr_1fr_auto] items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:flex sm:w-auto sm:gap-1.5">
+        <div className="relative min-w-0 sm:w-40 sm:flex-none">
           <button type="button" onClick={() => openDatePicker(fromDateInputRef.current)} className="absolute inset-0 z-10 rounded-lg" aria-label="Choose from date" />
           {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-20 flex items-center text-xs font-semibold text-muted">From</span> : null}
           <input
@@ -295,7 +295,7 @@ export function TransactionsTable({
             className={`pointer-events-none w-full rounded-lg bg-background py-1.5 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
         </div>
-        <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
+        <div className="relative min-w-0 sm:w-40 sm:flex-none">
           <button type="button" onClick={() => openDatePicker(toDateInputRef.current)} className="absolute inset-0 z-10 rounded-lg" aria-label="Choose to date" />
           {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-20 flex items-center text-xs font-semibold text-muted">To</span> : null}
           <input
@@ -453,7 +453,7 @@ export function TransactionsTable({
                   {dateSort === "desc" ? "▼" : "▲"}
                 </span>
               </button>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Clear</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">{selectMode ? "Select" : "Clear"}</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Type</span>
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
@@ -565,7 +565,6 @@ function BatchActionButtons({
     <div className={`flex items-center gap-1.5 ${mobile ? "w-full" : "shrink-0"}`}>
       <button type="button" onClick={onClear} className={`${buttonClass} bg-positive/10 text-positive hover:bg-positive/20`}>Clear</button>
       <button type="button" onClick={onUncheck} className={`${buttonClass} bg-line/60 text-foreground hover:bg-line`}>Uncheck</button>
-      {!mobile && <button type="button" onClick={onExport} className={`${buttonClass} bg-surface text-foreground ring-1 ring-line hover:bg-line/60`}>Export CSV</button>}
       <button type="button" onClick={onDelete} className={`${buttonClass} bg-negative/10 text-negative hover:bg-negative/20`}>Delete</button>
     </div>
   );
