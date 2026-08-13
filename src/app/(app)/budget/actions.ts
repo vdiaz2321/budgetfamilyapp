@@ -650,7 +650,7 @@ export async function addTransaction(formData: FormData) {
   // Keep category_id consistent with the chosen subcategory.
   const { data: sub } = await supabase
     .from("subcategories")
-    .select("category_id")
+    .select("category_id, name")
     .eq("id", subcategoryId)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -679,6 +679,37 @@ export async function addTransaction(formData: FormData) {
       .eq("household_id", householdId)
       .maybeSingle();
     accountId = account?.id ?? null;
+  }
+
+  // Choosing the shared Irregular Bills budget item is intentionally enough to
+  // start tracking a one-off bill. The entered payee becomes a managed detail
+  // row automatically, while its transaction still posts to the single Bills
+  // subcategory that Budget and Annual Overview already use.
+  if (sub.name.toLowerCase() === "irregular bills" && payeeName) {
+    const { data: existingBill } = await supabase
+      .from("irregular_bills")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("subcategory_id", subcategoryId)
+      .ilike("name", payeeName)
+      .maybeSingle();
+    if (!existingBill) {
+      const { data: lastBill } = await supabase
+        .from("irregular_bills")
+        .select("sort_order")
+        .eq("household_id", householdId)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      await supabase.from("irregular_bills").insert({
+        household_id: householdId,
+        name: payeeName,
+        typical_amount_cents: amountCents,
+        subcategory_id: subcategoryId,
+        account_id: accountId,
+        sort_order: (lastBill?.sort_order ?? 0) + 1,
+      });
+    }
   }
 
   // Optional direct bucket attribution (investment sub-accounts like
@@ -757,6 +788,7 @@ export async function addTransaction(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/annual");
 }
 
 export async function updateTransaction(formData: FormData) {
@@ -923,6 +955,7 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/annual");
 }
 
 // Lightweight inline edit used by the transaction register. It changes only
@@ -984,6 +1017,7 @@ export async function updateTransactionAmount(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/annual");
 }
 
 export async function deleteTransaction(formData: FormData) {
@@ -1046,6 +1080,7 @@ export async function deleteTransaction(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/annual");
 }
 
 export async function deleteTransactions(ids: string[]) {

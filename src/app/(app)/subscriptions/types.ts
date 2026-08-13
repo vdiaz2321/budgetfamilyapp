@@ -20,4 +20,9 @@ export type IrregularBillRow = {
   accountId: string | null;
   notes: string | null;
   sortOrder: number;
+  // Derived from this month's logged transactions. These values are display
+  // detail only; the shared Budget "Irregular Bills" row remains the source
+  // that rolls into Bills and the Annual Overview.
+  monthSpentCents?: number;
+  monthAccountNames?: string[];
 };

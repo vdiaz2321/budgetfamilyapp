@@ -45,7 +45,7 @@ const HEADER_TINT: Record<CategoryKind, string> = {
   debt: "bg-surface",
 };
 const BTN_COLOR: Record<CategoryKind, string> = {
-  income: "bg-emerald-300 hover:bg-emerald-400 dark:bg-emerald-700 dark:hover:bg-emerald-600",
+  income: "bg-emerald-200 hover:bg-emerald-300 dark:bg-emerald-800/70 dark:hover:bg-emerald-700",
   savings: "bg-sky-600 hover:bg-sky-700",
   bills: "bg-slate-700 hover:bg-slate-800 dark:bg-slate-500 dark:hover:bg-slate-400",
   expenses: "bg-rose-100 hover:bg-rose-200 dark:bg-rose-900/50 dark:hover:bg-rose-900/70",
@@ -59,7 +59,7 @@ const BTN_TEXT: Record<CategoryKind, string> = {
   debt: "text-white",
 };
 const TAB_ACTIVE_TEXT: Record<CategoryKind, string> = {
-  income: "bg-surface text-emerald-600 dark:text-emerald-400",
+  income: "bg-emerald-200 text-foreground dark:bg-emerald-800/70 dark:text-foreground",
   savings: "bg-surface text-sky-600 dark:text-sky-400",
   bills: "bg-surface text-indigo-600 dark:text-indigo-400",
   expenses: "bg-rose-100 text-foreground dark:bg-rose-900/50 dark:text-foreground",
@@ -271,7 +271,7 @@ export function TransactionModal({
                 name="cleared"
                 value="on"
                 disabled={pending || splits.length === 0}
-                className="whitespace-nowrap rounded-full bg-orange-100 px-3 py-1.5 text-sm font-bold text-foreground transition hover:bg-orange-200 hover:text-emerald-700 disabled:opacity-60 dark:bg-orange-900/40 dark:text-foreground dark:hover:bg-orange-900/60 dark:hover:text-emerald-400"
+                className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-foreground ring-1 ring-slate-200 transition hover:bg-rose-100 hover:text-rose-700 disabled:opacity-60 dark:bg-slate-800/70 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-rose-900/40 dark:hover:text-rose-200"
               >
                 Clear
               </button>

@@ -142,6 +142,22 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, (s as { linked_account_id?: string | null }).linked_account_id ?? null]),
   );
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  const irregularMonthDetailById = new Map<string, { spentCents: number; accountNames: string[] }>();
+  for (const bill of irregularBills ?? []) {
+    const matchingTransactions = (txRows ?? []).filter((tx) =>
+      tx.subcategory_id === bill.subcategory_id &&
+      (payeeById.get(tx.payee_id ?? "") ?? "").trim().toLowerCase() === bill.name.trim().toLowerCase(),
+    );
+    const accountNames = [...new Set(
+      matchingTransactions
+        .map((tx) => tx.account_id ? accountNameById.get(tx.account_id) ?? null : null)
+        .filter((name): name is string => Boolean(name)),
+    )];
+    irregularMonthDetailById.set(bill.id, {
+      spentCents: matchingTransactions.reduce((sum, tx) => sum + tx.amount_cents, 0),
+      accountNames,
+    });
+  }
   // Auto-planned totals: subcategory rows linked to subscriptions or irregular
   // bills show a derived planned amount and are not directly editable.
   const currentMonthNum = month.key.slice(5); // "MM" from "YYYY-MM"
@@ -487,6 +503,8 @@ export default async function BudgetPage({
     accountId: b.account_id ?? null,
     notes: b.notes,
     sortOrder: (b as { sort_order?: number }).sort_order ?? 0,
+    monthSpentCents: irregularMonthDetailById.get(b.id)?.spentCents ?? 0,
+    monthAccountNames: irregularMonthDetailById.get(b.id)?.accountNames ?? [],
   }));
 
   const creditCards = (accounts ?? [])

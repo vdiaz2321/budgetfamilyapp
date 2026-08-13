@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
-import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
+import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction, toggleCleared, updateTransactionAmount } from "../budget/actions";
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
@@ -49,13 +49,26 @@ export function TransactionsTable({
   const [modal, setModal] = useState<"new" | TxData | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchToolbarRef = useRef<HTMLDivElement>(null);
   const [fromDate, setFromDate] = useState(dateRange.from ?? "");
   const [toDate, setToDate] = useState(dateRange.to ?? "");
   // Date sort — defaults to descending (newest first). Click header to flip.
   const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
   const hasRange = Boolean(dateRange.from || dateRange.to);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !searchToolbarRef.current?.contains(target)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [searchOpen]);
 
   // Mobile selection mode: tap Select to reveal checkboxes and a batch-action
   // bar at the bottom for Clear / Delete on many transactions at once.
@@ -169,17 +182,16 @@ export function TransactionsTable({
   }
 
 
-  const q = query.trim().toLowerCase();
+  const searchTerms = query.toLowerCase().split(/[;,\s]+/).map((term) => term.trim()).filter(Boolean);
   const filtered = transactions.filter((t) => {
     const amountText = (t.amountCents / 100).toFixed(2);
-    const amountQuery = q.replace(/[$,\s]/g, "").replace("−", "-");
-    const matchesAmount = amountQuery.length > 0 && (
-      amountText.includes(amountQuery.replace(/^-/, "")) ||
-      `-${amountText}`.includes(amountQuery)
-    );
     const accountLabel = t.accountId ? accountName.get(t.accountId) ?? "" : "";
-    if (q && !matchesAmount && ![t.payee, t.subName, t.memo, accountLabel].some((f) => f?.toLowerCase().includes(q))) return false;
-    if (kindFilter && t.kind !== kindFilter) return false;
+    const searchableText = [t.payee, t.subName, t.memo, accountLabel].filter(Boolean).join(" ").toLowerCase();
+    const matchesSearch = searchTerms.every((term) => {
+      const amountQuery = term.replace(/[$,]/g, "");
+      return searchableText.includes(term) || amountText.includes(amountQuery.replace(/^-/, "")) || `-${amountText}`.includes(amountQuery);
+    });
+    if (!matchesSearch) return false;
     return true;
   });
   {
@@ -193,7 +205,7 @@ export function TransactionsTable({
   const outflowTotal = filtered
     .filter((t) => t.kind !== "income" && !t.isCardPayment)
     .reduce((sum, t) => sum + t.amountCents, 0);
-  const incomeLeft = q ? 0 : incomeTotal - outflowTotal;
+  const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4">
@@ -224,105 +236,60 @@ export function TransactionsTable({
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[8rem] flex-1">
-          <svg
-            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-            aria-hidden
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m21 21-4.3-4.3" />
+      {/* Search popover + date range controls */}
+      <div ref={searchToolbarRef} className="relative flex flex-wrap items-center gap-1.5 text-sm sm:gap-2">
+        <button
+          type="button"
+          onClick={() => setSearchOpen((open) => !open)}
+          aria-label="Search transactions"
+          aria-expanded={searchOpen}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${searchOpen || query ? "bg-brand text-white shadow-sm" : "bg-surface text-brand ring-1 ring-brand/15 hover:bg-brand-soft"}`}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+            <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
           </svg>
+        </button>
+      {searchOpen ? (
+        <div className="absolute left-0 top-11 z-30 w-full rounded-xl bg-surface p-2 shadow-lg ring-1 ring-black/10 dark:ring-white/10 sm:max-w-md">
           <input
+            autoFocus
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            className="w-full rounded-xl bg-surface py-2 pl-9 pr-9 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
+            placeholder="Search categories, payees, accounts, or amounts"
+            className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
-          {query ? (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              aria-label="Clear search"
-              className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted transition hover:bg-brand-soft hover:text-foreground"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
-          ) : null}
         </div>
-        <button
-          type="button"
-          onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-          className={`shrink-0 rounded-xl px-3 py-2 text-sm font-semibold transition sm:hidden ${
-            selectMode
-              ? "bg-negative/10 text-negative ring-1 ring-negative/20 hover:bg-negative/20"
-              : "text-brand hover:text-brand-strong"
-          }`}
-        >
-          {selectMode ? "Cancel" : "Select"}
-        </button>
-        <button
-          type="button"
-          onClick={() => setModal("new")}
-          className="flex h-9 shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-brand-strong sm:hidden"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Add
-        </button>
-        <select
-          value={kindFilter}
-          onChange={(e) => setKindFilter(e.target.value)}
-          className="hidden rounded-xl bg-surface px-3 py-2 text-sm shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand sm:block dark:ring-white/10"
-        >
-          <option value="">All types</option>
-          {CATEGORY_KINDS.map(({ kind }) => (
-            <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>
-          ))}
-        </select>
-        {query || kindFilter ? (
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("");
-              setKindFilter("");
-            }}
-            className="rounded-xl px-3 py-2 text-sm font-medium text-muted hover:bg-brand-soft hover:text-foreground"
-          >
-            Clear filters
-          </button>
-        ) : null}
-      </div>
+      ) : null}
 
       {/* Date range — searches across months instead of just the one selected above */}
-      <div className="hidden flex-wrap items-center gap-2 text-sm sm:flex">
-        <span className="text-muted">From</span>
-        <input
-          type="date"
-          value={fromDate}
-          onChange={(e) => {
-            setFromDate(e.target.value);
-            applyRange(e.target.value, toDate);
-          }}
-          className="rounded-xl bg-surface px-3 py-1.5 shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
-        />
-        <span className="text-muted">To</span>
-        <input
-          type="date"
-          value={toDate}
-          onChange={(e) => {
-            setToDate(e.target.value);
-            applyRange(fromDate, e.target.value);
-          }}
-          className="rounded-xl bg-surface px-3 py-1.5 shadow-sm ring-1 ring-black/5 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/10"
-        />
+        <div className="order-3 flex w-full items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:w-auto sm:gap-1.5">
+        <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
+          <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">From</span>
+          <input
+            type="date"
+            aria-label="From date"
+            value={fromDate}
+            onChange={(e) => {
+              setFromDate(e.target.value);
+              applyRange(e.target.value, toDate);
+            }}
+            className={`w-full rounded-lg bg-background py-1.5 pl-12 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${fromDate ? "" : "[&::-webkit-datetime-edit]:text-transparent"}`}
+          />
+        </div>
+        <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
+          <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">To</span>
+          <input
+            type="date"
+            aria-label="To date"
+            value={toDate}
+            onChange={(e) => {
+              setToDate(e.target.value);
+              applyRange(fromDate, e.target.value);
+            }}
+            className={`w-full rounded-lg bg-background py-1.5 pl-7 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${toDate ? "" : "[&::-webkit-datetime-edit]:text-transparent"}`}
+          />
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -330,17 +297,18 @@ export function TransactionsTable({
             setToDate("");
             applyRange("2000-01-01", "");
           }}
-          className="rounded-xl px-3 py-1.5 font-medium text-brand hover:bg-brand-soft"
+          className="shrink-0 rounded-lg bg-black/10 px-2 py-1.5 font-medium text-foreground ring-1 ring-black/10 transition hover:bg-black/20 sm:px-3 dark:bg-white/15 dark:ring-white/15 dark:hover:bg-white/25"
         >
           All time
         </button>
+        </div>
         <button
           type="button"
           onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
-          className={`rounded-xl px-3 py-1.5 font-semibold transition ${
+          className={`order-1 rounded-xl px-2 py-1.5 font-semibold transition sm:px-3 ${
             selectMode
               ? "bg-negative/10 text-negative ring-1 ring-negative/20 hover:bg-negative/20"
-              : "bg-brand-soft text-brand ring-1 ring-brand/15 hover:bg-brand hover:text-white hover:shadow-sm"
+              : "bg-positive/10 text-positive ring-1 ring-positive/20 hover:bg-positive/30 hover:shadow-sm"
           }`}
         >
           {selectMode ? "Cancel" : "Select"}
@@ -348,13 +316,22 @@ export function TransactionsTable({
         <button
           type="button"
           onClick={() => setModal("new")}
-          className="hidden items-center gap-1.5 rounded-xl bg-brand px-3 py-1.5 font-bold text-white shadow-sm transition hover:bg-brand-strong sm:flex"
+          className="order-2 flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white hover:shadow-sm sm:px-3"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
             <path d="M12 5v14M5 12h14" />
           </svg>
           Transaction
         </button>
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            className="rounded-xl px-2 py-1.5 font-medium text-muted hover:bg-brand-soft hover:text-foreground sm:px-3"
+          >
+            Clear search
+          </button>
+        ) : null}
         {hasRange ? (
           <button
             type="button"
@@ -395,7 +372,7 @@ export function TransactionsTable({
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
             <span className="col-span-7 whitespace-nowrap text-xs text-muted">
-              <span className="font-bold text-foreground">Income Rc&apos;d</span>{" "}
+              <span className="font-bold text-foreground">Income Received</span>{" "}
               <span className="tabular-nums font-semibold text-positive">{formatMoney(incomeTotal, currency)}</span>
               <span className="mx-1.5">–</span>
               <span className="font-bold text-foreground">Spent Income</span>{" "}
@@ -427,7 +404,7 @@ export function TransactionsTable({
         </div>
       ) : (
         <div className="-mx-4 flex items-center justify-between gap-2 bg-positive/5 px-4 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
-          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Rc&apos;d:</span>{" "}<span className="tabular-nums text-positive font-semibold">{formatMoney(incomeTotal, currency)}</span></span>
+          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Received:</span>{" "}<span className="tabular-nums text-positive font-semibold">{formatMoney(incomeTotal, currency)}</span></span>
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Spent:</span>{" "}<span className="tabular-nums text-negative font-semibold">{formatMoney(outflowTotal, currency)}</span></span>
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeLeft, currency)}</span></span>
         </div>
