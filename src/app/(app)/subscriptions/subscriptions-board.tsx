@@ -128,11 +128,6 @@ export function SubscriptionsBoard({
 
   return (
     <div className="space-y-4 p-5">
-      <p className="text-sm text-muted">
-        Manage recurring services and one-off bills here. They show up in the transaction
-        payee search and auto-fill their category and amount.
-      </p>
-
       {showOnly !== "irregular" && (
         <SubscriptionsSection
           subscriptions={subscriptions}
@@ -211,9 +206,11 @@ function SubscriptionsSection({
                   onDone={() => setEditing(null)}
                 />
               ) : (
-                <div
+                <button
+                  type="button"
+                  onClick={() => setEditing(s.id)}
                   key={s.id}
-                  className={`rounded-lg border border-line bg-background/40 p-3 ${!s.isActive ? "opacity-60" : ""}`}
+                  className={`w-full rounded-lg border border-line bg-background/40 p-3 text-left transition hover:bg-brand-soft/30 ${!s.isActive ? "opacity-60" : ""}`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className={`font-semibold ${!s.isActive ? "line-through" : ""}`}>{s.name}</span>
@@ -225,18 +222,8 @@ function SubscriptionsSection({
                     {s.accountId ? (
                       <span className="min-w-0 truncate">· {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}</span>
                     ) : null}
-                    <span className="ml-auto shrink-0">
-                      <RowActions
-                        onEdit={() => setEditing(s.id)}
-                        onDelete={async () => {
-                          const fd = new FormData();
-                          fd.set("id", s.id);
-                          await deleteSubscription(fd);
-                        }}
-                      />
-                    </span>
                   </div>
-                </div>
+                </button>
               ),
             )}
             {editing === "new" ? (
@@ -274,10 +261,13 @@ function SubscriptionsSection({
                   <tr
                     key={s.id}
                     data-reorder-id={s.id}
-                    className={`border-t border-line ${!s.isActive ? "opacity-50" : ""} ${dragOverId === s.id ? "bg-brand-soft/40" : ""}`}
+                    onClick={() => setEditing(s.id)}
+                    className={`cursor-pointer border-t border-line transition hover:bg-brand-soft/30 ${!s.isActive ? "opacity-50" : ""} ${dragOverId === s.id ? "bg-brand-soft/40" : ""}`}
                   >
                     <td className="px-1 py-1">
-                      <DragHandle onStart={() => startDrag(s.id)} label={`Drag ${s.name} to reorder`} />
+                      <span onClick={(event) => event.stopPropagation()}>
+                        <DragHandle onStart={() => startDrag(s.id)} label={`Drag ${s.name} to reorder`} />
+                      </span>
                     </td>
                     <td className="whitespace-nowrap px-2 py-1 font-medium">
                       <span className={!s.isActive ? "line-through" : ""}>{s.name}</span>
@@ -298,16 +288,7 @@ function SubscriptionsSection({
                     <td className="px-2 py-1 text-left text-muted">
                       {creditCards.find((c) => c.id === s.accountId)?.name ?? "—"}
                     </td>
-                    <td className="px-2 py-1 text-right">
-                      <RowActions
-                        onEdit={() => setEditing(s.id)}
-                        onDelete={async () => {
-                          const fd = new FormData();
-                          fd.set("id", s.id);
-                          await deleteSubscription(fd);
-                        }}
-                      />
-                    </td>
+                    <td className="px-2 py-1" />
                   </tr>
                 ),
               )}
@@ -348,6 +329,16 @@ function SubscriptionForm({
   const [pending, start] = useTransition();
   const [cycle, setCycle] = useState<string>(row?.billingCycle ?? "monthly");
 
+  function remove() {
+    if (!row) return;
+    const fd = new FormData();
+    fd.set("id", row.id);
+    start(async () => {
+      await deleteSubscription(fd);
+      onDone();
+    });
+  }
+
   return (
     <form
       action={(fd) =>
@@ -356,20 +347,21 @@ function SubscriptionForm({
           onDone();
         })
       }
-      className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end"
+      className="space-y-2"
     >
       {row ? <input type="hidden" name="id" value={row.id} /> : null}
-      <label className="flex flex-col gap-1 text-xs text-muted">
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end">
+        <label className="flex flex-col gap-1 text-xs text-muted">
         Name
         <input
           name="name"
           type="text"
           required
           defaultValue={row?.name ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
         />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-muted">
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
         Amount
         <input
           name="amount"
@@ -378,24 +370,39 @@ function SubscriptionForm({
           min="0"
           inputMode="decimal"
           defaultValue={row ? centsToDisplay(row.amountCents) : ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-24 md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-24 md:text-sm"
         />
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-muted">
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted">
         Cycle
         <select
           name="billingCycle"
           defaultValue={row?.billingCycle ?? "monthly"}
           onChange={(e) => setCycle(e.target.value)}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
         >
           {Object.entries(CYCLE_LABEL).map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
           ))}
         </select>
-      </label>
-      <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} cycle={cycle} />
-      <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
+        </label>
+        <RenewalDatePicker defaultValue={row?.nextRenewalDate ?? ""} cycle={cycle} />
+        {creditCards.length > 0 && (
+          <label className="flex flex-col gap-1 text-xs text-muted">
+            Card
+            <select
+              name="accountId"
+              defaultValue={row?.accountId ?? ""}
+              className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+            >
+              <option value="">None</option>
+              {creditCards.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
         <input
           type="checkbox"
           name="isActive"
@@ -403,32 +410,30 @@ function SubscriptionForm({
           className="h-4 w-4 rounded accent-[var(--brand)]"
         />
         Active
-      </label>
-      <label className="flex flex-col gap-1 text-xs text-muted">
-        Notes
-        <input
-          name="notes"
-          type="text"
-          defaultValue={row?.notes ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-32 md:text-sm"
-        />
-      </label>
-      {creditCards.length > 0 && (
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Card
-          <select
-            name="accountId"
-            defaultValue={row?.accountId ?? ""}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
-          >
-            <option value="">None</option>
-            {creditCards.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
         </label>
-      )}
-      <div className="mt-1 flex items-center justify-end gap-2 pb-0.5 md:ml-auto md:mt-0">
+      </div>
+      <div className="flex flex-col gap-2 md:flex-row md:items-end">
+        <label className="flex flex-col gap-1 text-xs text-muted">
+          Notes
+          <input
+            name="notes"
+            type="text"
+            defaultValue={row?.notes ?? ""}
+            autoComplete="off"
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-[432px] md:text-sm"
+          />
+        </label>
+        <div className="flex items-center justify-end gap-2 pb-0.5 md:ml-auto md:mt-0">
+        {row ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={remove}
+            className="mr-auto rounded-lg bg-negative/10 px-3 py-1.5 text-sm font-semibold text-negative transition hover:bg-negative/20 disabled:opacity-60"
+          >
+            Delete
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onDone}
@@ -443,6 +448,7 @@ function SubscriptionForm({
         >
           {pending ? "Saving…" : "Save"}
         </button>
+        </div>
       </div>
     </form>
   );
@@ -662,7 +668,7 @@ function IrregularBillForm({
           type="text"
           required
           defaultValue={row?.name ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-muted">
@@ -674,7 +680,7 @@ function IrregularBillForm({
           min="0"
           inputMode="decimal"
           defaultValue={row ? centsToDisplay(row.typicalAmountCents) : ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-28 md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-28 md:text-sm"
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-muted">
@@ -683,7 +689,7 @@ function IrregularBillForm({
           name="notes"
           type="text"
           defaultValue={row?.notes ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-40 md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-40 md:text-sm"
         />
       </label>
       {creditCards.length > 0 && (
@@ -692,7 +698,7 @@ function IrregularBillForm({
           <select
             name="accountId"
             defaultValue={row?.accountId ?? ""}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
           >
             <option value="">None</option>
             {creditCards.map((c) => (
@@ -797,7 +803,7 @@ function RenewalDatePicker({ defaultValue, cycle }: { defaultValue?: string; cyc
           placeholder="1–31"
           value={dayDisplay}
           onChange={(e) => setDayDisplay(e.target.value)}
-          className="w-16 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-16 rounded-lg bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </div>
     );
@@ -815,7 +821,7 @@ function RenewalDatePicker({ defaultValue, cycle }: { defaultValue?: string; cyc
           const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
           setFullDisplay(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
         }}
-        className="w-20 rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-20 rounded-lg bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </div>
   );

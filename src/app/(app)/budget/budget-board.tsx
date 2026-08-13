@@ -481,7 +481,7 @@ export function BudgetBoard({
       </div>
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
-      <aside className="hidden w-[420px] shrink-0 lg:block">
+      <aside className="hidden w-[380px] shrink-0 lg:block">
         <div className="sticky top-20 space-y-3">
           {railContent ?? (
             <>

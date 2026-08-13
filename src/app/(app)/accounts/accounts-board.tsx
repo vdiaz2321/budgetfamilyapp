@@ -6,6 +6,7 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
   addAccount,
+  addCreditCardWithDetails,
   addBucket,
   closeCard,
   deleteAccount,
@@ -550,7 +551,20 @@ function CreditCardSection({
   // Bank-group order: dragging a bank header moves its whole card block. The
   // underlying store is still per-account sort_order — we just splice the
   // block, then persist the flattened order.
-  const bankLabel = (a: AccountData) => a.cardDetails?.bank ?? a.institution ?? a.subtype ?? "Other";
+  const bankLabel = (a: AccountData) => {
+    const raw = (a.cardDetails?.bank ?? a.institution ?? a.subtype ?? "Other").trim();
+    if (!raw) return "Other";
+    // Keep institution sections together even when entries use different
+    // capitalization or spacing, while preserving the first card's display.
+    const normalized = raw.replace(/\s+/g, " ").toLowerCase();
+    const existing = localAccounts.find((candidate) => {
+      const candidateRaw = (candidate.cardDetails?.bank ?? candidate.institution ?? candidate.subtype ?? "Other").trim();
+      return candidateRaw.replace(/\s+/g, " ").toLowerCase() === normalized;
+    });
+    return existing
+      ? (existing.cardDetails?.bank ?? existing.institution ?? existing.subtype ?? "Other").trim().replace(/\s+/g, " ")
+      : raw.replace(/\s+/g, " ");
+  };
   const reorderBank = (fromBank: string, toBank: string) => {
     if (fromBank === toBank) return;
     const fromCards = localAccounts.filter((a) => bankLabel(a) === fromBank);
@@ -2321,17 +2335,15 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
 
-  // Credit cards get a proper labeled "card basics" form (Card name, Holder,
-  // Annual fee + waived, Date opened, Date closed) matching Edit details, so
-  // fields are clear up front. Rewards details (bank, points, bonus, etc.)
-  // are still filled in via Edit details after the card is created.
+  // Credit cards are created with their basics and rewards/benefits together,
+  // avoiding a second save and a trip back to find the new card in the list.
   if (section.creditCard) {
     return (
       <div className="border-t border-line px-4 py-3">
         <form
           action={(fd) =>
             start(async () => {
-              const result = await addAccount(fd);
+              const result = await addCreditCardWithDetails(fd);
               if (result?.error) setError(result.error);
               else onDone(result?.id ?? null);
             })
@@ -2357,6 +2369,44 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           </label>
           <LabeledInput label="Date opened" name="dateOpened" type="date" />
           <LabeledInput label="Date closed" name="dateClosed" type="date" />
+          <div className="col-span-full grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2">
+            <LabeledInput label="Bank" name="bank" placeholder="AMEX / Chase / Cap 1" />
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Rewards category
+              <select name="rewardsCategory" defaultValue="" className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
+              </select>
+            </label>
+            <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
+            <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" placeholder="0.0020" />
+            <LabeledInput label="Current points" name="currentPoints" type="text" placeholder="0" />
+            <LabeledInput label="Bonus info" name="bonusInfo" placeholder="60,000 pts" />
+            <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" placeholder="3000" />
+            <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" />
+            <LabeledInput label="Free-night credit" name="freeNightCredit" type="number" step="0.01" prefix="$" />
+            <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" />
+            <LabeledInput label="Free night (pts limit)" name="freeNightPointsLimit" type="number" step="1" />
+            <LabeledInput label="Benefits reset" name="benefitCadence" placeholder="Annual" />
+            <div className="sm:col-span-2"><LabeledInput label="Remarks" name="remarks" /></div>
+            <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 sm:col-span-2 dark:border-rose-900/50 dark:bg-rose-950/20">
+              <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
+                <input type="checkbox" name="trackAsPayoffDebt" className="mt-0.5 h-4 w-4 rounded accent-[var(--brand)]" />
+                <span>
+                  Track this card as payoff debt
+                  <span className="mt-0.5 block text-xs font-normal text-muted">Off by default. Syncs balance, rate, and payment plan with Budget → Debt/Loans.</span>
+                </span>
+              </label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" />
+                <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" />
+                <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" />
+                <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" />
+                <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" />
+                <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" />
+              </div>
+              <p className="text-[11px] text-muted">Set APR to 0 during a 0% promo period; add the regular rate when the promo ends.</p>
+            </div>
+          </div>
           <div className="flex items-center gap-2 sm:col-span-2">
             <button
               type="submit"
@@ -2372,7 +2422,6 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             >
               Cancel
             </button>
-            <span className="ml-auto text-[11px] text-muted">You can add rewards and benefits after saving.</span>
           </div>
           {error ? (
             <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p>
@@ -2497,11 +2546,11 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/35 p-0 sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true" aria-labelledby="add-account-title">
-      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-surface shadow-2xl sm:max-w-2xl sm:rounded-2xl">
+      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-surface shadow-2xl sm:max-w-xl sm:rounded-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface px-5 py-4">
           <div>
             <h2 id="add-account-title" className="text-lg font-bold">
-              {section ? `Add ${{ banking: "banking account", investments: "investment", credit: "credit card", loans: "debt", kids: "Kids Funding account" }[section.key] ?? "account"}` : "Add account"}
+              {section ? `Add ${{ banking: "banking account", investments: "investment", credit: "credit card details", loans: "debt", kids: "Kids Funding account" }[section.key] ?? "account"}` : "Add account"}
             </h2>
             <p className="text-xs text-muted">
               {section ? "Enter the details you want your family to be able to find later." : "Choose where this account belongs."}

@@ -94,6 +94,10 @@ export function SubscriptionsSummaryCard({
           <span className="text-muted">
             Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span>
           </span>
+          <span className="hidden items-center gap-1 whitespace-nowrap text-[10px] text-muted sm:inline-flex">
+            <span className="h-2 w-2 rounded-full bg-amber-200 ring-1 ring-amber-300" />
+            Within 30 days
+          </span>
           <button
             type="button"
             onClick={() => setManaging(true)}

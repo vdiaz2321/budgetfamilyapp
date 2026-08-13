@@ -303,6 +303,23 @@ export async function addAccount(formData: FormData) {
   return { error: null, id: inserted?.id ?? null };
 }
 
+// Credit cards are created with their rewards details in one save so the
+// Accounts screen does not have to refresh between a basic card and its setup.
+export async function addCreditCardWithDetails(formData: FormData) {
+  const result = await addAccount(formData);
+  if (result?.error || !result?.id) return result;
+
+  formData.set("accountId", result.id);
+  formData.set("id", result.id);
+  formData.set("isCreditCard", "on");
+  formData.set("active", "on");
+  const detailsResult = await upsertCardDetails(formData);
+  if (detailsResult?.error) {
+    return { error: `Card was created, but its details could not be saved: ${detailsResult.error}`, id: result.id };
+  }
+  return { error: null, id: result.id };
+}
+
 export async function updateAccount(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");

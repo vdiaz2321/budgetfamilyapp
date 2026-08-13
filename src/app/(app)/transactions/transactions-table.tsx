@@ -51,12 +51,24 @@ export function TransactionsTable({
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchToolbarRef = useRef<HTMLDivElement>(null);
+  const fromDateInputRef = useRef<HTMLInputElement>(null);
+  const toDateInputRef = useRef<HTMLInputElement>(null);
   const [fromDate, setFromDate] = useState(dateRange.from ?? "");
   const [toDate, setToDate] = useState(dateRange.to ?? "");
   // Date sort — defaults to descending (newest first). Click header to flip.
   const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
   const hasRange = Boolean(dateRange.from || dateRange.to);
+
+  const openDatePicker = (input: HTMLInputElement | null) => {
+    if (!input) return;
+    try {
+      input.showPicker?.();
+    } catch {
+      // Some mobile browsers only open their native calendar after focus.
+      input.focus({ preventScroll: true });
+    }
+  };
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -147,6 +159,7 @@ export function TransactionsTable({
   function clearRange() {
     setFromDate("");
     setToDate("");
+    setSearchOpen(false);
     router.push(`/transactions?month=${month.key}`);
   }
 
@@ -237,8 +250,9 @@ export function TransactionsTable({
       </div>
 
       {/* Search popover + date range controls */}
-      <div ref={searchToolbarRef} className="relative flex flex-wrap items-center gap-1.5 text-sm sm:gap-2">
-        <button
+      <div className="relative flex flex-wrap items-center gap-1.5 text-sm sm:gap-2">
+        <div ref={searchToolbarRef} className="relative contents">
+          <button
           type="button"
           onClick={() => setSearchOpen((open) => !open)}
           aria-label="Search transactions"
@@ -260,34 +274,41 @@ export function TransactionsTable({
             className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
-      ) : null}
+          ) : null}
+        </div>
 
       {/* Date range — searches across months instead of just the one selected above */}
         <div className="order-3 flex w-full items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:w-auto sm:gap-1.5">
         <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
-          <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">From</span>
+          <button type="button" onClick={() => openDatePicker(fromDateInputRef.current)} className="absolute inset-0 z-10 rounded-lg" aria-label="Choose from date" />
+          {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-20 flex items-center text-xs font-semibold text-muted">From</span> : null}
           <input
+            ref={fromDateInputRef}
             type="date"
             aria-label="From date"
             value={fromDate}
+            onKeyDown={(event) => event.preventDefault()}
             onChange={(e) => {
               setFromDate(e.target.value);
               applyRange(e.target.value, toDate);
             }}
-            className={`w-full rounded-lg bg-background py-1.5 pl-12 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${fromDate ? "" : "[&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`pointer-events-none w-full rounded-lg bg-background py-1.5 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
         </div>
         <div className="relative min-w-0 flex-1 sm:w-40 sm:flex-none">
-          <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">To</span>
+          <button type="button" onClick={() => openDatePicker(toDateInputRef.current)} className="absolute inset-0 z-10 rounded-lg" aria-label="Choose to date" />
+          {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-20 flex items-center text-xs font-semibold text-muted">To</span> : null}
           <input
+            ref={toDateInputRef}
             type="date"
             aria-label="To date"
             value={toDate}
+            onKeyDown={(event) => event.preventDefault()}
             onChange={(e) => {
               setToDate(e.target.value);
               applyRange(fromDate, e.target.value);
             }}
-            className={`w-full rounded-lg bg-background py-1.5 pl-7 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${toDate ? "" : "[&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`pointer-events-none w-full rounded-lg bg-background py-1.5 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
         </div>
         <button
