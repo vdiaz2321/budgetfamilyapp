@@ -53,6 +53,7 @@ export default async function AccountsPage() {
     { data: cardDetailRowsInitial, error: cardDetailsError },
     { data: acctSnapshotRows },
     { data: bktSnapshotRows },
+    { data: debtSnapshotRows },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -88,6 +89,11 @@ export default async function AccountsPage() {
       .select("bucket_id, month, balance_cents")
       .eq("household_id", household.id)
       .in("month", historyMonths),
+    supabase
+      .from("debt_snapshots")
+      .select("subcategory_id, month, balance_cents")
+      .eq("household_id", household.id)
+      .in("month", historyMonths),
   ]);
 
   // Keep the Accounts page usable before the user applies the new SQL in
@@ -111,10 +117,16 @@ export default async function AccountsPage() {
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
+  const debtHistory = new Map<string, number>();
+  for (const s of debtSnapshotRows ?? []) {
+    debtHistory.set(`${s.subcategory_id}:${s.month}`, s.balance_cents ?? 0);
+  }
   const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false).map((d) => ({
     subcategoryId: d.subcategory_id,
     name: subName.get(d.subcategory_id) ?? "Debt",
     balanceCents: d.current_balance_cents ?? 0,
+    prevMonthCents: debtHistory.get(`${d.subcategory_id}:${prevMonth}`) ?? null,
+    prev2MonthCents: debtHistory.get(`${d.subcategory_id}:${prev2Month}`) ?? null,
     debtKind: d.debt_kind ?? null,
     accountId: d.account_id ?? null,
   }));

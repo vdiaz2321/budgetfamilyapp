@@ -153,6 +153,42 @@ export async function deleteSubscription(formData: FormData) {
   revalidate();
 }
 
+// Advances a subscription's next_renewal_date forward by one billing cycle.
+// Called when the user marks it Paid from the Due-this-week panel so the
+// next-due date reflects reality without them opening the edit modal.
+export async function advanceSubscriptionRenewal(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return;
+
+  const { data: row } = await supabase
+    .from("subscriptions")
+    .select("next_renewal_date, billing_cycle")
+    .eq("id", id)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!row?.next_renewal_date) return;
+
+  const [y, m, d] = row.next_renewal_date.split("-").map(Number);
+  const current = new Date(y, m - 1, d);
+  const next = new Date(current);
+  switch (row.billing_cycle) {
+    case "weekly":    next.setDate(current.getDate() + 7); break;
+    case "quarterly": next.setMonth(current.getMonth() + 3); break;
+    case "annual":    next.setFullYear(current.getFullYear() + 1); break;
+    case "monthly":
+    default:          next.setMonth(current.getMonth() + 1); break;
+  }
+  const iso = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+
+  await supabase
+    .from("subscriptions")
+    .update({ next_renewal_date: iso, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+  revalidate();
+}
+
 export async function updateSubscriptionDueDate(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "").trim();

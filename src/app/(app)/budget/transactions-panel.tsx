@@ -48,7 +48,10 @@ type Props = {
   subtitle?: string;
   addLabel?: string;
   initialKind?: CategoryKind;
-  filterKind?: CategoryKind | null;
+  filterKinds?: CategoryKind[];
+  filterSubs?: { id: string; label: string }[];
+  onRemoveKind?: (kind: CategoryKind) => void;
+  onRemoveSub?: (id: string) => void;
   onClearFilter?: () => void;
   collapseStorageKey?: string;
   initialCollapsed?: boolean;
@@ -69,7 +72,10 @@ export function TransactionsPanel({
   subtitle,
   addLabel = "Add",
   initialKind,
-  filterKind = null,
+  filterKinds = [],
+  filterSubs = [],
+  onRemoveKind,
+  onRemoveSub,
   onClearFilter,
   collapseStorageKey,
   initialCollapsed = false,
@@ -84,8 +90,15 @@ export function TransactionsPanel({
   const collapsed = collapseState.collapsed ?? initialCollapsed;
 
   const q = query.trim().toLowerCase();
-  const kindFiltered = filterKind
-    ? transactions.filter((t) => t.kind === filterKind)
+  const hasKindFilter = filterKinds.length > 0;
+  const hasSubFilter = filterSubs.length > 0;
+  const subIdSet = new Set(filterSubs.map((s) => s.id));
+  const kindSet = new Set(filterKinds);
+  const kindFiltered = (hasKindFilter || hasSubFilter)
+    ? transactions.filter((t) =>
+        (hasSubFilter && t.subId && subIdSet.has(t.subId)) ||
+        (hasKindFilter && t.kind && kindSet.has(t.kind))
+      )
     : transactions;
   const filtered = q
     ? kindFiltered.filter((t) =>
@@ -182,25 +195,51 @@ export function TransactionsPanel({
             className="w-full rounded-lg bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
-        {filterKind ? (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand">
-              <span className={`h-2 w-2 rounded-full ${DOT[filterKind]}`} />
-              {KIND_LABEL[filterKind]}
-              <button
-                type="button"
-                onClick={onClearFilter}
-                aria-label="Clear filter"
-                className="ml-0.5 text-brand/70 hover:text-brand"
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </span>
+        {hasKindFilter || hasSubFilter ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {filterKinds.map((k) => (
+              <span key={`k:${k}`} className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand">
+                <span className={`h-2 w-2 rounded-full ${DOT[k]}`} />
+                {KIND_LABEL[k]}
+                <button
+                  type="button"
+                  onClick={() => onRemoveKind?.(k)}
+                  aria-label={`Remove ${KIND_LABEL[k]} filter`}
+                  className="ml-0.5 text-brand/70 hover:text-brand"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            ))}
+            {filterSubs.map((s) => (
+              <span key={`s:${s.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-semibold text-brand">
+                {s.label}
+                <button
+                  type="button"
+                  onClick={() => onRemoveSub?.(s.id)}
+                  aria-label={`Remove ${s.label} filter`}
+                  className="ml-0.5 text-brand/70 hover:text-brand"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            ))}
             <span className="text-[11px] text-muted">
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
+            {(filterKinds.length + filterSubs.length) > 1 && onClearFilter ? (
+              <button
+                type="button"
+                onClick={onClearFilter}
+                className="text-[11px] font-semibold text-muted hover:text-brand"
+              >
+                Clear all
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

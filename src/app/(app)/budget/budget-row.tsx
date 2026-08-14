@@ -198,11 +198,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
             {row.name}
           </span>
-          {row.dueDay ? (
-            <span className="hidden shrink-0 rounded bg-brand-soft/50 px-1.5 py-0.5 text-[9px] font-medium text-muted md:inline">
-              due {row.dueDay}
-            </span>
-          ) : null}
         </button>
 
       </div>

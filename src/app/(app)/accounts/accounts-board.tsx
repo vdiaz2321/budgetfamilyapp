@@ -126,6 +126,8 @@ export type BudgetDebt = {
   subcategoryId: string;
   name: string;
   balanceCents: number;
+  prevMonthCents: number | null;
+  prev2MonthCents: number | null;
   debtKind: string | null;
   accountId: string | null;
 };
@@ -387,7 +389,7 @@ export function AccountsBoard({
       </div>
 
       {/* Net worth summary */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <SummaryStat label="Assets" value={assets} currency={currency} tone="text-positive" />
         <SummaryStat label="Debts" value={debtsTotal} currency={currency} tone="text-negative" />
         <SummaryStat
@@ -508,6 +510,8 @@ function CreditCardSection({
     setLocalAccounts(accounts);
   }, [accounts]);
   const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
+  const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
+  const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
   const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
     const next = new Set(prev);
     if (next.has(bank)) next.delete(bank);
@@ -567,9 +571,10 @@ function CreditCardSection({
   const { dragOverId: dragOverBank, startDrag: startBankDrag } = usePointerReorder("credit-bank", reorderBank);
   const isArchived = section.key === "credit_archived";
   const isMain = section.key === "credit";
-  const travelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel");
-  const hotelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel");
-  const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory);
+  const feeFilter = (a: AccountData) => !showOnlyFeeCards || hasActiveFee(a);
+  const travelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel" && feeFilter(a));
+  const hotelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel" && feeFilter(a));
+  const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && feeFilter(a));
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const renderCards = (cards: AccountData[]) => (
@@ -601,18 +606,17 @@ function CreditCardSection({
   const feesAll = feesPaid + feesWaived;
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
   const rewardCards = allCreditCards.filter((a) => a.cardDetails);
-  const pointsValue = rewardCards.reduce((sum, a) => {
-    const d = a.cardDetails;
-    return sum + (d?.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0);
-  }, 0);
-  const freeNightValue = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.freeNightCreditCents ?? 0), 0);
   const totalPoints = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
-  const travelValue = rewardCards
-    .filter((a) => a.cardDetails?.rewardsCategory === "travel")
-    .reduce((sum, a) => sum + (a.cardDetails?.pointsValueMicros ? Math.round((a.cardDetails.currentPoints * a.cardDetails.pointsValueMicros) / 10_000) : 0), 0);
-  const hotelValue = rewardCards
-    .filter((a) => a.cardDetails?.rewardsCategory === "hotel")
-    .reduce((sum, a) => sum + (a.cardDetails?.pointsValueMicros ? Math.round((a.cardDetails.currentPoints * a.cardDetails.pointsValueMicros) / 10_000) : 0), 0);
+  const redeemableForCategory = (cat: "travel" | "hotel") =>
+    rewardCards
+      .filter((a) => a.cardDetails?.rewardsCategory === cat)
+      .reduce((sum, a) => {
+        const d = a.cardDetails!;
+        const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
+        return sum + pts + (d.freeNightCreditCents ?? 0);
+      }, 0);
+  const travelRedeemable = redeemableForCategory("travel");
+  const hotelRedeemable = redeemableForCategory("hotel");
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5">
@@ -645,16 +649,44 @@ function CreditCardSection({
 
       {/* Summary strip — only on the main section, hidden when empty */}
       {open && isMain && (feesAll > 0 || totalOwed > 0 || rewardCards.length > 0 || allCreditCards.length > 0) ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs">
           {isMain && rewardCards.length > 0 ? (
-            <span>
-              {totalPoints > 0 ? <><span className="font-semibold">Current Pts:</span> <span className="font-semibold text-foreground">{totalPoints.toLocaleString()}</span> · </> : null}
-              <span className="font-semibold">Rewards value:</span>{" "}
-              <span className="font-semibold text-positive">{formatMoney(pointsValue + freeNightValue, currency)}</span>
-              {travelValue > 0 ? <> · Travel {formatMoney(travelValue, currency)}</> : null}
-              {hotelValue > 0 ? <> · Hotel {formatMoney(hotelValue, currency)}</> : null}
-              {freeNightValue > 0 ? <> · Free nights {formatMoney(freeNightValue, currency)}</> : null}
-            </span>
+            <>
+              {totalPoints > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 dark:bg-white/[0.06]">
+                  <span className="font-semibold text-foreground">Current Pts:</span>
+                  <span className="font-semibold text-foreground tabular-nums">{totalPoints.toLocaleString()}</span>
+                </span>
+              ) : null}
+              {travelRedeemable > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 dark:bg-white/[0.06]">
+                  <span className="font-semibold text-foreground">Travel Redeemable:</span>
+                  <span className="font-semibold text-positive tabular-nums">{formatMoney(travelRedeemable, currency)}</span>
+                </span>
+              ) : null}
+              {hotelRedeemable > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 dark:bg-white/[0.06]">
+                  <span className="font-semibold text-foreground">Hotel Redeemable:</span>
+                  <span className="font-semibold text-positive tabular-nums">{formatMoney(hotelRedeemable, currency)}</span>
+                </span>
+              ) : null}
+            </>
+          ) : null}
+          {feesPaid > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowOnlyFeeCards((v) => !v)}
+              title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
+              className={`inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 ring-1 transition ${
+                showOnlyFeeCards
+                  ? "bg-amber-500/25 ring-amber-500"
+                  : "bg-amber-500/10 ring-amber-500/30 hover:bg-amber-500/20"
+              }`}
+            >
+              <span className="font-semibold text-foreground">Active Fees:</span>
+              <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{formatMoney(feesPaid, currency)}/yr</span>
+              {showOnlyFeeCards ? <span className="ml-0.5 font-semibold text-amber-700 dark:text-amber-400">×</span> : null}
+            </button>
           ) : null}
         </div>
       ) : null}
@@ -676,18 +708,18 @@ function CreditCardSection({
                     <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
                     <span className="text-sm font-semibold">Travel rewards</span>
                     <span className="text-xs text-muted">{travelCards.length} card{travelCards.length !== 1 ? "s" : ""}</span>
-                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums sm:text-sm ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
                   </div>
                   {travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
                 </section>
                 <section>
-                  <div className="flex items-center gap-2 bg-violet-500/10 px-4 py-2.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
+                  <div className="flex items-center gap-2 bg-teal-500/10 px-4 py-2.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-teal-500" />
                     <span className="text-sm font-semibold">Hotel rewards</span>
                     <span className="text-xs text-muted">{hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}</span>
-                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums sm:text-sm ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
                   </div>
@@ -849,7 +881,7 @@ function CreditCardPanel({
           if (!next) setEditing(false);
           return next;
         })}
-        className={`flex min-w-0 flex-1 items-center gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
+        className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
@@ -870,18 +902,13 @@ function CreditCardPanel({
                 Closed {card.dateClosed}
               </span>
             ) : null}
-            {d && d.currentPoints > 0 ? (
-              <span className="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                {d.currentPoints.toLocaleString()} pts
-              </span>
-            ) : null}
-            {card.annualFeeCents && !card.feeWaived ? (
-              <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-muted ring-1 ring-line">
-                {formatMoney(card.annualFeeCents, currency)}/yr
+            {d?.isRevolvingDebt ? (
+              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
+                Debt
               </span>
             ) : null}
           </span>
-          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn) ? (
+          {(d?.benefitUsedOn || d?.freeNightExpiresOn) ? (
             <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
               {d?.benefitUsedOn ? (
                 <span className={`text-[11px] ${fnUsed && fnExpired ? "text-negative" : "text-positive"}`}>
@@ -893,26 +920,35 @@ function CreditCardPanel({
                   Expires {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}
                 </span>
               ) : null}
-              {d?.freeNightCreditCents ? (
-                <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
-                  Free night ${(d.freeNightCreditCents / 100).toFixed(0)}
-                </span>
-              ) : null}
-              {d?.freeNightPointsLimit ? (
-                <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
-                  Free night {d.freeNightPointsLimit.toLocaleString()} pts
-                </span>
+            </p>
+          ) : null}
+          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || (card.annualFeeCents && !card.feeWaived)) ? (
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-foreground">
+              {d?.freeNightCreditCents
+                ? <span>Free night: ${(d.freeNightCreditCents / 100).toFixed(0)}</span>
+                : d?.freeNightPointsLimit
+                  ? <span>Free night: {d.freeNightPointsLimit.toLocaleString()} pts</span>
+                  : null}
+              {card.annualFeeCents && !card.feeWaived ? (
+                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">Fee: ${Math.round(card.annualFeeCents / 100)}/yr</span>
               ) : null}
             </p>
           ) : null}
         </span>
-        <span className={`w-20 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
-          {owed !== 0 ? formatMoney(owed, currency) : "—"}
+        <span className="ml-2 flex shrink-0 flex-col items-end gap-0.5 py-0.5">
+          {d && d.currentPoints > 0 ? (
+            <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-emerald-600 dark:text-emerald-400">
+              {d.currentPoints.toLocaleString()} pts
+            </span>
+          ) : null}
+          <span className={`text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
+            {owed !== 0 ? formatMoney(owed, currency) : "—"}
+          </span>
         </span>
         <svg
           width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`shrink-0 text-muted transition-transform ${expanded ? "" : "-rotate-90"}`}
+          className={`mt-1 shrink-0 text-muted transition-transform ${expanded ? "" : "-rotate-90"}`}
           aria-hidden
         >
           <path d="M6 9l6 6 6-6" />
@@ -925,26 +961,17 @@ function CreditCardPanel({
           {/* Two-column detail grid */}
           <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
             <DetailRow label="Bank" value={bank} />
-            <DetailRow label="Rewards" value={[d?.rewardsCategory, d?.rewardsProgram].filter(Boolean).join(" · ") || "—"} />
-            <DetailRow label="Points" value={d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : "—"} />
-            <DetailRow
-              label="Points value"
-              value={d?.pointsValueMicros ? <>{(d.pointsValueMicros / 1_000_000).toFixed(4)} / point · {formatMoney(Math.round((d.currentPoints * d.pointsValueMicros) / 10_000), currency)} <a href="https://www.dailydrop.com/calculator" target="_blank" rel="noreferrer" className="ml-1 text-brand hover:underline">Verify ↗</a></> : "—"}
-            />
+            <DetailRow label="Charging" value={d?.charging ?? "—"} />
+            <DetailRow label="Current Pts" value={d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : "—"} />
             <DetailRow label="Auth user" value={d?.authUser ?? "—"} />
             <DetailRow
-              label="Bonus"
+              label="Rewards cat"
               value={
-                d?.bonusInfo
-                  ? d.bonusEarned
-                    ? `${d.bonusInfo} ✓ met`
-                    : d.bonusSpendCents
-                      ? `${d.bonusInfo} · ${formatMoney(d.bonusSpendCents, currency)} spend${d.bonusSpendDeadline ? ` by ${d.bonusSpendDeadline}` : ""}`
-                      : d.bonusInfo
+                d?.rewardsCategory
+                  ? d.rewardsCategory.charAt(0).toUpperCase() + d.rewardsCategory.slice(1)
                   : "—"
               }
             />
-            <DetailRow label="Charging" value={d?.charging ?? "—"} />
             <DetailRow
               label="Annual fee"
               value={
@@ -961,23 +988,32 @@ function CreditCardPanel({
                   ? [
                       d.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : null,
                       d.freeNightPointsLimit ? `${d.freeNightPointsLimit.toLocaleString()} pts` : null,
-                      d.freeNightExpiresOn ? `expires ${d.freeNightExpiresOn}` : null,
+                      d.freeNightExpiresOn ? `expires ${d.freeNightExpiresOn}` : null,
                     ].filter(Boolean).join(" · ")
                   : "—"
               }
             />
-            {d?.benefitUsedOn ? (
-              <DetailRow label="Used / scheduled" value={d.benefitUsedOn} />
-            ) : null}
-            <DetailRow label="Closed" value={card.dateClosed ?? "—"} />
-            <DetailRow label="Payoff tracking" value={d?.isRevolvingDebt ? "Included in Debt/Loans" : "Off"} />
+            <DetailRow label="Used / scheduled" value={d?.benefitUsedOn ?? "—"} />
             <DetailRow
               label="Spending limit"
               value={d?.spendingLimitCents ? formatMoney(d.spendingLimitCents, currency) : "—"}
             />
-            {monthSpend !== 0 && !isArchived ? (
-              <DetailRow label={`${monthLabel} spent`} value={formatMoney(monthSpend, currency)} />
-            ) : null}
+            <DetailRow label="Closed" value={card.dateClosed ?? "—"} />
+            <DetailRow
+              label="Card URL"
+              value={
+                d?.cardUrl ? (
+                  <a
+                    href={d.cardUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block truncate text-brand hover:underline"
+                  >
+                    {(() => { try { return new URL(d.cardUrl).hostname; } catch { return d.cardUrl; } })()}
+                  </a>
+                ) : "—"
+              }
+            />
           </div>
 
           {d?.remarks ? (
@@ -1058,11 +1094,11 @@ function CreditCardPanel({
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <span className="min-w-[6.5rem] shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted">
+    <div className="overflow-hidden text-xs leading-relaxed text-foreground">
+      <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
         {label}
       </span>
-      <span className="min-w-0 text-sm text-foreground">{value}</span>
+      {value}
     </div>
   );
 }
@@ -1130,13 +1166,9 @@ function EditCreditCardForm({
           </label>
           <LabeledInput label="Rewards program" name="rewardsProgram" defaultValue={d?.rewardsProgram ?? ""} placeholder="Hilton, Hyatt, Chase UR…" />
           <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" defaultValue={d?.pointsValueMicros ? (d.pointsValueMicros / 1_000_000).toFixed(4) : ""} placeholder="0.0020" />
-          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-            <input type="checkbox" name="five24Countable" defaultChecked={d?.five24Countable ?? true} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-            Count toward Chase 5/24
-          </label>
+
           <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
           <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
-          <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
           <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
           <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
           <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
@@ -1144,12 +1176,12 @@ function EditCreditCardForm({
             <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
             Bonus earned
           </label>
-          <LabeledInput label="Free-night credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-          <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-          <LabeledInput label="Free night (pts limit)" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
+          <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
+          <LabeledInput label="Hotel Credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
+          <LabeledInput label="Hotel Credit/Anv Night Expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+          <LabeledInput label="Anv Free Night Pts per Night" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
           <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
           <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
-          <LabeledInput label="Fees paid this year" name="feesPaid" type="number" step="0.01" prefix="$" defaultValue={d?.feesPaidCents ? centsToDisplay(d.feesPaidCents) : ""} />
           <LabeledInput label="Card URL" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
           <label className="block">
             <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
@@ -1464,14 +1496,12 @@ function SummaryStat({
   hint?: string;
 }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-surface px-4 py-2.5 shadow-sm ring-1 ring-black/5 sm:block sm:text-center sm:py-3 dark:ring-white/10">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-      <div className="min-w-0 text-right sm:text-center">
-        <p className={`truncate text-base font-bold tabular-nums sm:mt-0.5 sm:text-lg ${tone}`}>
-          {formatMoney(value, currency)}
-        </p>
-        {hint ? <p className="text-[10px] text-muted">{hint}</p> : null}
-      </div>
+    <div className="flex min-w-0 flex-col items-center rounded-2xl bg-surface px-2 py-2.5 text-center shadow-sm ring-1 ring-black/5 sm:px-4 sm:py-3 dark:ring-white/10">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">{label}</p>
+      <p className={`mt-0.5 truncate text-xs font-bold tabular-nums sm:text-lg ${tone}`}>
+        {formatMoney(value, currency).replace(/\.00$/, "")}
+      </p>
+      {hint ? <p className="text-[10px] text-muted">{hint}</p> : null}
     </div>
   );
 }
@@ -1543,27 +1573,38 @@ function AccountSection({
   return (
     <section className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header */}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={() => {
-            if (open) setEditingId(null);
-            onToggle();
-          }}
-          className="flex min-w-0 items-center gap-2.5 text-left"
-          aria-expanded={open}
-        >
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-          <span className="truncate font-semibold leading-tight">{section.label}</span>
-          <svg
-            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            aria-hidden
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => {
+              if (open) setEditingId(null);
+              onToggle();
+            }}
+            className="flex min-w-0 items-center gap-2.5 text-left"
+            aria-expanded={open}
           >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
+            <span className="truncate font-semibold leading-tight">{section.label}</span>
+            <svg
+              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          {section.key === "loans" ? (
+            <Link
+              href="/snowball"
+              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
+              title="Go to Debt & Loans page"
+            >
+              Debt/Loan Page →
+            </Link>
+          ) : null}
+        </div>
         <span
           className={`text-right text-sm font-bold tabular-nums ${
             section.liability && total > 0 ? "text-negative" : ""
@@ -1580,21 +1621,30 @@ function AccountSection({
       {open ? (
         <div className="border-t border-line">
           {localAccounts.length > 0 || extraDebts.length > 0 ? (
-            <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
-              {headerBadge ? (
-                <span className="col-span-3 truncate text-[10px] font-medium uppercase tracking-wide text-muted">{headerBadge}</span>
-              ) : (
-                <>
-                  <span />
-                  <span />
-                  <span />
-                </>
-              )}
-              <span className="justify-self-stretch text-center">{monthAbbr(historyMonths[0])}</span>
-              <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[1])}</span>
-              <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[2])}</span>
-              <span className="hidden @[560px]:block" />
-            </div>
+            localAccounts.length === 0 && extraDebts.length > 0 ? (
+              <div className="grid grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                <span />
+                <span className="text-center">{monthAbbr(historyMonths[0])}</span>
+                <span className="text-center">{monthAbbr(historyMonths[1])}</span>
+                <span className="text-center">{monthAbbr(historyMonths[2])}</span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                {headerBadge ? (
+                  <span className="col-span-3 truncate text-[10px] font-medium uppercase tracking-wide text-muted">{headerBadge}</span>
+                ) : (
+                  <>
+                    <span />
+                    <span />
+                    <span />
+                  </>
+                )}
+                <span className="justify-self-stretch text-center">{monthAbbr(historyMonths[0])}</span>
+                <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[1])}</span>
+                <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[2])}</span>
+                <span className="hidden @[560px]:block" />
+              </div>
+            )
           ) : null}
           {localAccounts.length === 0 && extraDebts.length === 0 ? (
             <p className="px-4 py-2.5 text-sm text-muted">No accounts yet — use Add account above.</p>
@@ -1620,22 +1670,30 @@ function AccountSection({
             </ul>
           )}
           {extraDebts.length > 0 ? (
-            <ul className="border-t-0">
+            <ul className="divide-y divide-line">
               {extraDebts.map((d) => (
                 <li
                   key={`debt:${d.subcategoryId}`}
-                  className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] items-center gap-1.5 border-0 px-4 py-1.5 @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem]"
+                  className="grid grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 px-4 py-1.5"
                 >
-                  <span />
-                  <span />
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
-                  <span className="flex w-full items-center justify-center gap-0 text-sm font-semibold tabular-nums text-negative">
-                    <span className="text-muted">{currencySymbol(currency)}</span>
-                    <span className="tabular-nums">{centsToDisplay(d.balanceCents)}</span>
+                  <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">{formatMoney(d.balanceCents, currency)}</span>
+                  <span className="flex w-full justify-end">
+                    {d.prevMonthCents != null ? (
+                      <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
+                        <span className="text-xs text-muted">{currencySymbol(currency)}</span>
+                        <span className="text-sm">{centsToDisplay(d.prevMonthCents)}</span>
+                      </span>
+                    ) : <span className="text-sm text-muted">—</span>}
                   </span>
-                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted @[560px]:flex">$—</span>
-                  <span className="hidden w-full items-center justify-center text-sm tabular-nums text-muted @[560px]:flex">$—</span>
-                  <span className="hidden @[560px]:block" />
+                  <span className="flex w-full justify-end">
+                    {d.prev2MonthCents != null ? (
+                      <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
+                        <span className="text-xs text-muted">{currencySymbol(currency)}</span>
+                        <span className="text-sm">{centsToDisplay(d.prev2MonthCents)}</span>
+                      </span>
+                    ) : <span className="text-sm text-muted">—</span>}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -1673,26 +1731,35 @@ function BudgetDebtsSection({
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center gap-2.5 text-left"
-          aria-expanded={open}
-        >
-          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />
-          <span className="truncate font-semibold">Debts</span>
-          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-            {debts.length}
-          </span>
-          <svg
-            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            aria-hidden
+        <div className="flex min-w-0 items-center gap-2.5">
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex min-w-0 items-center gap-2.5 text-left"
+            aria-expanded={open}
           >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
+            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />
+            <span className="truncate font-semibold">Debts</span>
+            <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+              {debts.length}
+            </span>
+            <svg
+              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          <Link
+            href="/snowball"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
+            title="Go to Debt & Loans page"
+          >
+            Manage →
+          </Link>
+        </div>
         <span className={`text-right text-sm font-bold tabular-nums ${total > 0 ? "text-negative" : ""}`}>
           {formatMoney(total, currency)}
         </span>
@@ -1714,19 +1781,20 @@ function BudgetDebtsSection({
                       {excluded ? " · not in net worth" : ""}
                     </p>
                   </div>
-                  <span className={`shrink-0 text-sm font-semibold tabular-nums ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>
-                    {formatMoney(d.balanceCents, currency)}
+                  <span className="inline-flex shrink-0 items-baseline gap-0 font-semibold tabular-nums">
+                    <span className="text-sm text-muted">{currencySymbol(currency)}</span>
+                    <span className={`text-[0.9375rem] ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>{centsToDisplay(d.balanceCents)}</span>
                   </span>
                 </li>
               );
             })}
           </ul>
           <p className="border-t border-line px-4 py-2 text-[11px] text-muted">
-            Managed in{" "}
-            <Link href="/budget" className="font-medium text-brand hover:text-brand-strong">
-              Budget → Debt
+            Edit balances on the{" "}
+            <Link href="/snowball" className="font-medium text-brand hover:text-brand-strong">
+              Debt &amp; Loans
             </Link>
-            . Edit balances there.
+            {" "}page.
           </p>
         </div>
       ) : null}
@@ -1771,7 +1839,7 @@ function AccountRow({
   return (
     <li
       data-drop-key={`account:${account.id}`}
-      className={`${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+      className={`group/row ${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
       <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
         <GripHandle onMouseDown={onDragStart} />
@@ -1781,7 +1849,7 @@ function AccountRow({
             onClick={onToggleBuckets}
             title={bucketsOpen ? "Hide buckets" : "Show buckets"}
             aria-expanded={bucketsOpen}
-            className="flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand"
+            className="self-stretch flex w-full items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand"
           >
             <svg
               width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1795,44 +1863,36 @@ function AccountRow({
         ) : (
           <span />
         )}
-        <button
-          type="button"
-          onClick={onToggleEdit}
-          className="group/name relative flex min-w-0 items-center gap-1.5 justify-self-start text-left"
+        <div
+          role={allowBuckets ? "button" : undefined}
+          onClick={allowBuckets ? onToggleBuckets : undefined}
+          className="flex min-w-0 w-full cursor-default items-center gap-1.5 text-left"
         >
-          <span
-            role="tooltip"
-            className="pointer-events-none absolute -top-6 left-0 z-10 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background opacity-0 transition-opacity duration-75 group-hover/name:opacity-100"
-          >
-            Click to edit
-          </span>
           <span className={`shrink-0 truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
           {account.holder ? (
-            <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+            <EditPill onClick={onToggleEdit} className="bg-brand-soft text-brand hover:ring-brand">
               {account.holder}
-            </span>
+            </EditPill>
           ) : null}
           {account.ownership === "joint" ? (
-            <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">Joint</span>
+            <EditPill onClick={onToggleEdit} className="bg-violet-500/10 text-violet-700 hover:ring-violet-500 dark:text-violet-300">
+              Joint
+            </EditPill>
           ) : null}
           {section.key === "banking" && account.bankGroup ? (
-            <span
-              title="Net Worth uses this account-level setting"
-              className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
-                account.bankGroup === "savings"
-                  ? "bg-positive/15 text-positive"
-                  : "bg-black/5 text-muted dark:bg-white/10"
-              }`}
+            <EditPill
+              onClick={onToggleEdit}
+              className={`uppercase ${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-black/5 text-muted hover:ring-muted dark:bg-white/10"}`}
             >
               {account.bankGroup === "savings" ? "Savings" : "Checking"}
-            </span>
+            </EditPill>
           ) : null}
           {account.subtype ? (
-            <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+            <EditPill onClick={onToggleEdit} className="bg-sky-500/10 text-sky-600 hover:ring-sky-500 dark:text-sky-400">
               {account.subtype}
-            </span>
+            </EditPill>
           ) : null}
           {bucketCount > 0 ? (
             <span className="shrink-0 text-[11px] text-muted">
@@ -1841,7 +1901,7 @@ function AccountRow({
           ) : null}
           {maskAccountNumber(account.accountNumber) ? <span className="shrink-0 text-[11px] text-muted">{maskAccountNumber(account.accountNumber)}</span> : null}
           {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
-        </button>
+        </div>
 
         {allowBuckets && bucketCount > 0 ? (
           <>
@@ -2082,7 +2142,7 @@ function BucketBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => updateBucketBalance(fd))}
-      className="justify-self-center inline-flex items-center gap-0"
+      className="justify-self-end inline-flex items-center gap-0"
     >
       <input type="hidden" name="id" value={id} />
       <span className="pointer-events-none text-sm text-muted">{currencySymbol(currency)}</span>
@@ -2130,7 +2190,7 @@ function HistoricBucketBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => setBucketSnapshot(fd))}
-      className="justify-self-center inline-flex items-center gap-0"
+      className="justify-self-end inline-flex items-center gap-0"
     >
       <input type="hidden" name="bucketId" value={bucketId} />
       <input type="hidden" name="month" value={month} />
@@ -2236,7 +2296,7 @@ function DerivedBalance({
     return (
       <div
         title="No snapshot for this month yet — edit a bucket below to fill it in"
-        className="justify-self-center inline-flex items-center gap-0 py-1"
+        className="justify-self-end inline-flex items-center gap-0 py-1"
       >
         <span className="text-sm">—</span>
       </div>
@@ -2245,7 +2305,7 @@ function DerivedBalance({
   return (
     <div
       title="Sum of this account's buckets — edit the buckets below to change it"
-      className="justify-self-center inline-flex items-center gap-0 py-1"
+      className="justify-self-end inline-flex items-center gap-0 py-1"
     >
       <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
       <span className={`text-[0.9375rem] tabular-nums ${negative ? "text-negative font-semibold" : ""}`}>
@@ -2279,7 +2339,7 @@ function HistoricBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => setAccountSnapshot(fd))}
-      className="justify-self-center inline-flex items-center gap-0"
+      className="justify-self-end inline-flex items-center gap-0"
     >
       <input type="hidden" name="accountId" value={accountId} />
       <input type="hidden" name="month" value={month} />
@@ -2330,7 +2390,7 @@ function BalanceInput({
   const initial = centsToDisplay(balanceCents);
 
   return (
-    <div className="flex w-full items-center justify-center">
+    <div className="flex w-full items-center justify-end">
       <form
         ref={formRef}
         action={(fd) => start(() => updateBalance(fd))}
@@ -2417,13 +2477,13 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             </label>
             <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
             <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" placeholder="0.0020" />
-            <LabeledInput label="Current points" name="currentPoints" type="text" placeholder="0" />
             <LabeledInput label="Bonus info" name="bonusInfo" placeholder="60,000 pts" />
             <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" placeholder="3000" />
             <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" />
-            <LabeledInput label="Free-night credit" name="freeNightCredit" type="number" step="0.01" prefix="$" />
-            <LabeledInput label="Free-night expires" name="freeNightExpires" type="date" />
-            <LabeledInput label="Free night (pts limit)" name="freeNightPointsLimit" type="number" step="1" />
+            <LabeledInput label="Current points" name="currentPoints" type="text" placeholder="0" />
+            <LabeledInput label="Hotel Credit" name="freeNightCredit" type="number" step="0.01" prefix="$" />
+            <LabeledInput label="Hotel Credit/Anv Night Expires" name="freeNightExpires" type="date" />
+            <LabeledInput label="Anv Free Night Pts per Night" name="freeNightPointsLimit" type="number" step="1" />
             <LabeledInput label="Benefits reset" name="benefitCadence" placeholder="Annual" />
             <div className="sm:col-span-2"><LabeledInput label="Remarks" name="remarks" /></div>
             <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 sm:col-span-2 dark:border-rose-900/50 dark:bg-rose-950/20">
@@ -2773,6 +2833,23 @@ function EditAccountForm({
 
 // Grab handle for drag-to-reorder — mirrors the Net Worth grid's handle so
 // both boards reorder the same way (Victor prefers grab-and-drag over arrows).
+function EditPill({ onClick, className, children }: { onClick: () => void; className: string; children: React.ReactNode }) {
+  return (
+    <span className="group/pill relative inline-flex">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        className={`shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold hover:ring-1 ${className}`}
+      >
+        {children}
+      </button>
+      <span className="pointer-events-none absolute -top-6 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background opacity-0 transition-opacity duration-75 group-hover/pill:opacity-100">
+        Click to edit
+      </span>
+    </span>
+  );
+}
+
 function GripHandle({ onMouseDown, size = "md" }: { onMouseDown: () => void; size?: "sm" | "md" }) {
   const px = size === "sm" ? 11 : 13;
   return (

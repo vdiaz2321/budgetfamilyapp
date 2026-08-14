@@ -757,7 +757,7 @@ function DebtForm({
   const scheduledCents = d.minCents + (isSnowballFocus ? snowballExtraCents : 0);
   return (
     <Section title="Debt details">
-      <form action={(fd) => start(() => upsertDebtAndPlan(fd))} className="space-y-2">
+      <form id={`plan-form-${row.subId}`} action={(fd) => start(() => upsertDebtAndPlan(fd))} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <label className="block">
@@ -827,38 +827,6 @@ function DebtForm({
             </span>
           </label>
         ) : null}
-        {bucketOptions.length > 0 ? (
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
-              Payment savings bucket (optional)
-            </span>
-            <select
-              key={d.linkedBucketId ?? "none"}
-              name="bucketId"
-              defaultValue={d.linkedBucketId ?? ""}
-              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">None — pay directly from a bank account</option>
-              {(() => {
-                const family = bucketOptions.filter((b) => !b.isKids);
-                const seen: string[] = [];
-                const byAcct = new Map<string, typeof bucketOptions>();
-                for (const b of family) {
-                  if (!byAcct.has(b.accountName)) { seen.push(b.accountName); byAcct.set(b.accountName, []); }
-                  byAcct.get(b.accountName)!.push(b);
-                }
-                return seen.map((acct) =>
-                  <optgroup key={acct} label={acct}>
-                    {byAcct.get(acct)!.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </optgroup>
-                );
-              })()}
-            </select>
-            <span className="mt-0.5 block text-[10px] text-muted">
-              Most debts should stay set to None. Choose a bucket only if you intentionally save debt-payment money inside that specific savings bucket; payments will debit it automatically.
-            </span>
-          </label>
-        ) : null}
         <label className="block">
           <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wide text-muted">
             Notes
@@ -872,7 +840,6 @@ function DebtForm({
             className="w-full resize-none rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
-        <SaveBtn pending={pending} full />
       </form>
     </Section>
   );

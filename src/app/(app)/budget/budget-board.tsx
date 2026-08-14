@@ -5,6 +5,7 @@ import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { copyPlansFromPreviousMonth, restorePlansSnapshot, setRollover, setRolloverOverride } from "./actions";
+import { advanceSubscriptionRenewal } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
@@ -101,7 +102,14 @@ export function BudgetBoard({
     sessionStorage.setItem("budget-rail-tab", railTab);
   }, [railTab]);
   const [selected, setSelected] = useState<{ subId: string; kind: CategoryKind } | null>(null);
-  const [txFilterKind, setTxFilterKind] = useState<CategoryKind | null>(null);
+  const [txFilterKinds, setTxFilterKinds] = useState<CategoryKind[]>([]);
+  const [txFilterSubs, setTxFilterSubs] = useState<{ id: string; label: string }[]>([]);
+  const toggleFilterKind = (kind: CategoryKind) => {
+    setTxFilterKinds((prev) => prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind]);
+  };
+  const toggleFilterSub = (id: string, label: string) => {
+    setTxFilterSubs((prev) => prev.some((s) => s.id === id) ? prev.filter((s) => s.id !== id) : [...prev, { id, label }]);
+  };
   // Each group's open/collapsed state, persisted per-session (survives
   // navigating away and back, resets on a fresh login) — same pattern as
   // Net Worth / Accounts. Groups default open.
@@ -339,7 +347,14 @@ export function BudgetBoard({
           expanded={heroExpanded}
           onToggle={toggleHero}
           dueThisWeek={dueThisWeek}
-          onPayDue={setDuePayment}
+          onPayDue={(item) => {
+            if (item.source === "subscription") {
+              const fd = new FormData();
+              fd.set("id", item.id);
+              void advanceSubscriptionRenewal(fd);
+            }
+            setDuePayment(item);
+          }}
         />
         </div>
 
@@ -448,7 +463,7 @@ export function BudgetBoard({
                 compact={true}
                 detailsExpanded={detailsExpanded}
                 onFilter={(kind) => {
-                  setTxFilterKind(kind);
+                  toggleFilterKind(kind);
                   setRailTab("transactions");
                 }}
               />
@@ -471,6 +486,13 @@ export function BudgetBoard({
                   onToggle={() => toggleGroup("subscriptions")}
                   monthPlannedCents={subscriptionMonthPlanned}
                   monthSpentCents={subscriptionMonthSpent}
+                  onOpenSpent={() => {
+                    const subId = subscriptions.find((s) => s.subcategoryId)?.subcategoryId;
+                    if (subId) {
+                      toggleFilterSub(subId, "Subscriptions");
+                      setRailTab("transactions");
+                    }
+                  }}
                 />
 
                 <IrregularBillsSummaryCard
@@ -480,6 +502,13 @@ export function BudgetBoard({
                   creditCards={creditCards}
                   open={openGroups["irregularBills"] ?? false}
                   onToggle={() => toggleGroup("irregularBills")}
+                  onOpenSpent={() => {
+                    const subId = irregularBills.find((b) => b.subcategoryId)?.subcategoryId;
+                    if (subId) {
+                      toggleFilterSub(subId, "Irregular Bills");
+                      setRailTab("transactions");
+                    }
+                  }}
                 />
               </>
             ) : null}
@@ -538,8 +567,11 @@ export function BudgetBoard({
                   bucketsByAccount={bucketsByAccount}
                   payeeOptions={payeeOptions}
                   payeeLineItems={payeeLineItems}
-                  filterKind={txFilterKind}
-                  onClearFilter={() => setTxFilterKind(null)}
+                  filterKinds={txFilterKinds}
+                  filterSubs={txFilterSubs}
+                  onRemoveKind={(k) => setTxFilterKinds((prev) => prev.filter((x) => x !== k))}
+                  onRemoveSub={(id) => setTxFilterSubs((prev) => prev.filter((s) => s.id !== id))}
+                  onClearFilter={() => { setTxFilterKinds([]); setTxFilterSubs([]); }}
                 />
               )}
             </>

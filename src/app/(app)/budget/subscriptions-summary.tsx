@@ -43,11 +43,13 @@ export function SubscriptionsSummaryCard({
   onToggle,
   monthPlannedCents,
   monthSpentCents,
+  onOpenSpent,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
+  onOpenSpent?: () => void;
   open: boolean;
   onToggle: () => void;
   monthPlannedCents: number;
@@ -87,13 +89,23 @@ export function SubscriptionsSummaryCard({
           <Chevron open={open} />
         </button>
 
-        <div className="flex items-center gap-4 text-xs tabular-nums">
-          <span className="text-muted">
-            Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span>
-          </span>
-          <span className="text-muted">
-            Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span>
-          </span>
+        <div className="flex items-center gap-2 text-xs tabular-nums">
+          {onOpenSpent ? (
+            <button
+              type="button"
+              onClick={onOpenSpent}
+              title="View subscription transactions this month"
+              className="flex cursor-pointer items-center gap-3 rounded px-2 py-0.5 text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
+            >
+              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
+              <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 px-2 py-0.5 text-muted">
+              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
+              <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setManaging(true)}
@@ -307,6 +319,7 @@ export function IrregularBillsSummaryCard({
   creditCards,
   open,
   onToggle,
+  onOpenSpent,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
@@ -314,6 +327,7 @@ export function IrregularBillsSummaryCard({
   creditCards?: CreditCardOption[];
   open: boolean;
   onToggle: () => void;
+  onOpenSpent?: () => void;
 }) {
   const [rows, setRows] = useState(irregularBills);
   const [, startReorder] = useTransition();
@@ -342,13 +356,23 @@ export function IrregularBillsSummaryCard({
           <Chevron open={open} />
         </button>
 
-        <div className="flex items-center gap-4 text-xs tabular-nums">
-          <span className="text-muted">
-            Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span>
-          </span>
-          <span className="text-muted">
-            Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span>
-          </span>
+        <div className="flex items-center gap-2 text-xs tabular-nums">
+          {onOpenSpent ? (
+            <button
+              type="button"
+              onClick={onOpenSpent}
+              title="View irregular bill transactions this month"
+              className="flex cursor-pointer items-center gap-3 rounded px-2 py-0.5 text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
+            >
+              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
+              <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 px-2 py-0.5 text-muted">
+              <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
+              <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -423,10 +447,17 @@ function RenewalBadge({
   label?: string;
   onClick?: () => void;
 }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date + "T00:00:00");
+  const days = Math.round((target.getTime() - today.getTime()) / 86400000);
+  const dueSoon = billingCycle === "monthly" || (days >= 0 && days <= 30);
   const className = `rounded-full px-2 py-0.5 text-xs font-medium ${
     billingCycle === "monthly"
       ? "bg-positive/10 text-positive dark:bg-positive/20"
-      : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+      : dueSoon
+        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+        : "bg-black/[0.04] text-muted dark:bg-white/[0.06]"
   }`;
   const displayLabel = label ?? new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return onClick ? (
