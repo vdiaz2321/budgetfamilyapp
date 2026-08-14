@@ -139,10 +139,13 @@ export function BudgetGroup({
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}
       {/* Mobile header — flex layout */}
-      <div className="flex items-center gap-2 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 sm:hidden">
+      <div
+        className="flex cursor-pointer items-center gap-2 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 sm:hidden"
+        onClick={onToggle}
+      >
         <button
           type="button"
-          onClick={onToggle}
+          onClick={(event) => { event.stopPropagation(); onToggle(); }}
           className="flex items-center gap-2.5 text-left"
           aria-expanded={open}
         >
@@ -171,9 +174,9 @@ export function BudgetGroup({
           </span>
           <button
             type="button"
-            onClick={() => { if (!open) onToggle(); setAdding(true); }}
+            onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
             aria-label="Add item"
-            className={`flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_ACCENT[group.kind]}`}
+            className={`flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_ACCENT[group.kind]}`}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
               <path d="M12 5v14M5 12h14" />
@@ -183,11 +186,14 @@ export function BudgetGroup({
       </div>
 
       {/* Desktop header — 12-col grid aligned with rows below */}
-      <div className="hidden grid-cols-12 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 sm:grid">
-        <div className="col-span-4 flex items-center gap-2.5">
+      <div
+        className="group/header hidden cursor-pointer grid-cols-12 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 sm:grid"
+        onClick={onToggle}
+      >
+        <div className="col-span-5 flex min-w-0 items-center gap-2.5">
           <button
             type="button"
-            onClick={onToggle}
+            onClick={(event) => { event.stopPropagation(); onToggle(); }}
             className="flex items-center gap-2.5 text-left"
             aria-expanded={open}
           >
@@ -206,45 +212,43 @@ export function BudgetGroup({
               <span className="sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
             </span>
           </button>
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
+            aria-label={`Add ${group.name} item`}
+            title={`Add ${group.name} item`}
+            className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_ACCENT[group.kind]}`}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
           {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
         </div>
         <button
           type="button"
-          onClick={() => onFilter?.(group.kind)}
+          onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
           title={`Show ${group.name} transactions`}
           disabled={!onFilter}
-          className="col-span-6 grid grid-cols-3 items-center gap-2 rounded-md px-2 py-0.5 text-[11px] tabular-nums text-muted enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+          className="col-span-7 grid grid-cols-3 items-start gap-2 rounded-md px-2 py-1 text-[11px] tabular-nums text-muted enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
         >
-          <span className="text-right">
-            <span className="hidden sm:inline">Plan: </span>
-            <span className="font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
+          <span className="min-w-0 text-right leading-tight">
+            <span className="block text-[10px] text-muted">Plan</span>
+            <span className="block font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
-          <span className="text-right">
-            <span className="hidden sm:inline">{headerActualLabel}: </span>
-            <span className={`font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+          <span className="min-w-0 text-right leading-tight">
+            <span className="block text-[10px] text-muted">{headerActualLabel}</span>
+            <span className={`block font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
           </span>
-          <span className="text-right">
-            <span className="hidden md:inline">Left: </span>
-            <span className={`font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+          <span className="min-w-0 text-right leading-tight">
+            <span className="block text-[10px] text-muted">Left</span>
+            <span className={`block font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
               {formatMoney(remainingTotal, currency)}
             </span>
           </span>
         </button>
-        <div className="col-span-2 flex items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => { if (!open) onToggle(); setAdding(true); }}
-            aria-label="Add item"
-            className={`flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[11px] font-semibold transition ${ADD_ACCENT[group.kind]}`}
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            <span>Add</span>
-          </button>
-        </div>
       </div>
 
       {open ? (
@@ -419,7 +423,7 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={(event) => { event.stopPropagation(); setOpen(true); }}
         aria-label={`Manage ${group.name}`}
         title={`Manage ${group.name}`}
         className="rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-muted hover:bg-surface/70 hover:text-foreground"

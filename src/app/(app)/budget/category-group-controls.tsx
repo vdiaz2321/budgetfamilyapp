@@ -18,7 +18,7 @@ export function AddCategoryGroupButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-1.5 py-1 text-[13px] font-semibold text-foreground transition hover:bg-foreground/8 dark:hover:bg-white/10 sm:px-2.5 sm:text-xs"
+        className="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-1.5 py-1 text-[13px] font-semibold text-foreground transition hover:bg-foreground/8 dark:hover:bg-white/10 sm:px-2.5 sm:text-xs"
       >
         <span aria-hidden>+</span>
         Cat Group

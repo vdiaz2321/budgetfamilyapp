@@ -567,6 +567,27 @@ function CreditCardSection({
   const { dragOverId: dragOverBank, startDrag: startBankDrag } = usePointerReorder("credit-bank", reorderBank);
   const isArchived = section.key === "credit_archived";
   const isMain = section.key === "credit";
+  const travelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel");
+  const hotelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel");
+  const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory);
+  const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
+  const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
+  const renderCards = (cards: AccountData[]) => (
+    <ul className="divide-y divide-line">
+      {cards.map((a) => (
+        <CreditCardPanel
+          key={a.id}
+          card={a}
+          currency={currency}
+          nonCardAccounts={nonCardAccounts}
+          allBuckets={allBuckets}
+          isArchived={isArchived}
+          onDragStart={() => startDrag(a.id)}
+          isDragOver={dragOverId === a.id}
+        />
+      ))}
+    </ul>
+  );
 
   // Fee summary considers ALL open cards (across every sub-section) so numbers
   // read the same on the main and closed-this-year sub-groups.
@@ -615,7 +636,7 @@ function CreditCardSection({
             <path d="M6 9l6 6 6-6" />
           </svg>
         </button>
-        {!open && totalOwed > 0 ? (
+        {totalOwed > 0 ? (
           <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
             {formatMoney(totalOwed, currency)} owed
           </span>
@@ -625,14 +646,6 @@ function CreditCardSection({
       {/* Summary strip — only on the main section, hidden when empty */}
       {open && isMain && (feesAll > 0 || totalOwed > 0 || rewardCards.length > 0 || allCreditCards.length > 0) ? (
         <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-4 py-2 text-xs text-muted">
-          {totalOwed !== 0 ? (
-            <span>
-              <span className="font-semibold">Owed:</span>{" "}
-              <span className={`font-semibold tabular-nums ${totalOwed > 0 ? "text-negative" : "text-positive"}`}>
-                {formatMoney(totalOwed, currency)}
-              </span>
-            </span>
-          ) : null}
           {isMain && rewardCards.length > 0 ? (
             <span>
               {totalPoints > 0 ? <><span className="font-semibold">Current Pts:</span> <span className="font-semibold text-foreground">{totalPoints.toLocaleString()}</span> · </> : null}
@@ -655,6 +668,43 @@ function CreditCardSection({
             <p className="px-4 py-2.5 text-sm text-muted">
               {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
             </p>
+          ) : isMain ? (
+            <div>
+              <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+                <section>
+                  <div className="flex items-center gap-2 bg-sky-500/10 px-4 py-2.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+                    <span className="text-sm font-semibold">Travel rewards</span>
+                    <span className="text-xs text-muted">{travelCards.length} card{travelCards.length !== 1 ? "s" : ""}</span>
+                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                      {formatMoney(travelOwed, currency)} owed
+                    </span>
+                  </div>
+                  {travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
+                </section>
+                <section>
+                  <div className="flex items-center gap-2 bg-violet-500/10 px-4 py-2.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-violet-500" />
+                    <span className="text-sm font-semibold">Hotel rewards</span>
+                    <span className="text-xs text-muted">{hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}</span>
+                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                      {formatMoney(hotelOwed, currency)} owed
+                    </span>
+                  </div>
+                  {hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-muted">No hotel cards yet.</p>}
+                </section>
+              </div>
+              {otherCards.length > 0 ? (
+                <section className="border-t border-line">
+                  <div className="flex items-center gap-2 bg-black/[0.04] px-4 py-2.5 dark:bg-white/[0.05]">
+                    <span className="h-2.5 w-2.5 rounded-full bg-muted" />
+                    <span className="text-sm font-semibold">Other cards</span>
+                    <span className="text-xs text-muted">Choose Travel or Hotel when editing a card to move it above.</span>
+                  </div>
+                  {renderCards(otherCards)}
+                </section>
+              ) : null}
+            </div>
           ) : (() => {
             const groups = localAccounts.reduce<{ bank: string; cards: AccountData[] }[]>((acc, a) => {
               const b = bankLabel(a);
@@ -799,12 +849,12 @@ function CreditCardPanel({
           if (!next) setEditing(false);
           return next;
         })}
-        className={`flex flex-1 items-center gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-4 py-2 text-left`}
+        className={`flex min-w-0 flex-1 items-center gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="shrink-0 truncate text-sm font-medium">{card.name}</span>
+            <span className="min-w-0 truncate text-sm font-medium">{card.name}</span>
             {card.holder ? (
               <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
                 {card.holder}
@@ -833,6 +883,16 @@ function CreditCardPanel({
           </span>
           {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn) ? (
             <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              {d?.benefitUsedOn ? (
+                <span className={`text-[11px] ${fnUsed && fnExpired ? "text-negative" : "text-positive"}`}>
+                  Used/Scheduled: {d.benefitUsedOn}
+                </span>
+              ) : null}
+              {d?.freeNightExpiresOn ? (
+                <span className={`text-[11px] ${fnExpiresColor}`}>
+                  Expires {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}
+                </span>
+              ) : null}
               {d?.freeNightCreditCents ? (
                 <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400">
                   Free night ${(d.freeNightCreditCents / 100).toFixed(0)}
@@ -843,20 +903,10 @@ function CreditCardPanel({
                   Free night {d.freeNightPointsLimit.toLocaleString()} pts
                 </span>
               ) : null}
-              {d?.freeNightExpiresOn ? (
-                <span className={`text-[11px] ${fnExpiresColor}`}>
-                  Expires {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}
-                </span>
-              ) : null}
-              {d?.benefitUsedOn ? (
-                <span className={`text-[11px] ${fnUsed && fnExpired ? "text-negative" : "text-positive"}`}>
-                  Used/Scheduled: {d.benefitUsedOn}
-                </span>
-              ) : null}
             </p>
           ) : null}
         </span>
-        <span className={`w-24 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
+        <span className={`w-20 shrink-0 text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
           {owed !== 0 ? formatMoney(owed, currency) : "—"}
         </span>
         <svg

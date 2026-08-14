@@ -87,7 +87,9 @@ export function BudgetBoard({
 }: Props) {
   const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
   const [rowFilter, setRowFilter] = useState<"all" | "overspent">("all");
-  const [rowDetail, setRowDetail] = useSessionCollapse("budget-row-detail", () => ({ expanded: false }));
+  // Progress bars start visible on a fresh login. The versioned key also
+  // upgrades any earlier saved "off" preference from the two-button control.
+  const [rowDetail, setRowDetail] = useSessionCollapse("budget-row-detail-v2", () => ({ expanded: true }));
   const detailsExpanded = rowDetail.expanded === true;
   useEffect(() => {
     const saved = sessionStorage.getItem("budget-rail-tab");
@@ -362,7 +364,7 @@ export function BudgetBoard({
               type="button"
               onClick={() => setRowFilter("all")}
               aria-pressed={rowFilter === "all"}
-              className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition ${rowFilter === "all" ? "bg-foreground/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-foreground/8 dark:hover:bg-white/10"}`}
+              className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${rowFilter === "all" ? "bg-foreground/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-foreground/8 dark:hover:bg-white/10"}`}
             >
               All
             </button>
@@ -393,7 +395,7 @@ export function BudgetBoard({
             <button
               type="button"
               onClick={() => setShowAddModal(true)}
-              className="hidden h-7 shrink-0 items-center rounded-lg bg-brand px-3 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:flex"
+              className="hidden shrink-0 cursor-pointer items-center rounded-full bg-brand px-3 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-brand-strong sm:flex sm:text-xs"
             >
               + Transaction
             </button>
@@ -404,39 +406,31 @@ export function BudgetBoard({
             <div className="hidden sm:block">
               <BulkAddSubcategories groups={groups} />
             </div>
-            {/* Progress toggle — pinned to far right on desktop */}
-            <div className="ml-auto hidden items-center rounded-lg bg-[#ebe8e1] p-0.5 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/10 sm:flex">
-              <button
-                type="button"
-                onClick={() => setRowDetail((current) => ({ ...current, expanded: false }))}
-                aria-label="Progress off"
-                aria-pressed={!detailsExpanded}
-                className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${!detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+            {/* One switch replaces the old separate on/off buttons. */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={detailsExpanded}
+              aria-label="Show progress bars"
+              title={detailsExpanded ? "Progress On" : "Progress Off"}
+              onClick={() => setRowDetail((current) => ({ ...current, expanded: current.expanded !== true }))}
+              className={`ml-auto hidden h-7 items-center rounded-full p-1 transition sm:flex ${
+                detailsExpanded
+                  ? "bg-brand-soft text-brand ring-1 ring-brand/20"
+                  : "bg-[#ebe8e1] text-muted ring-1 ring-black/10 hover:text-foreground dark:bg-white/10 dark:ring-white/10"
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`relative h-5 w-9 rounded-full transition ${detailsExpanded ? "bg-brand" : "bg-muted/50"}`}
               >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-                  <rect x="2" y="2" width="10" height="3" rx="1" />
-                  <rect x="2" y="6" width="10" height="3" rx="1" />
-                  <rect x="2" y="10" width="10" height="3" rx="1" />
-                </svg>
-                <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                  Progress off
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setRowDetail((current) => ({ ...current, expanded: true }))}
-                aria-label="Progress on"
-                aria-pressed={detailsExpanded}
-                className={`group relative flex h-7 w-7 items-center justify-center rounded-md transition ${detailsExpanded ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
-                  <path d="M2 3h10M2 7h10M2 11h10" />
-                </svg>
-                <span className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] font-bold text-surface opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                  Progress on
-                </span>
-              </button>
-            </div>
+                <span
+                    className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-[left,right] ${
+                    detailsExpanded ? "left-0.5" : "right-0.5"
+                  }`}
+                />
+              </span>
+            </button>
           </div>
 
           {/* Groups */}
