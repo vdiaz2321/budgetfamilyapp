@@ -699,6 +699,123 @@ export async function upsertCardDetails(formData: FormData) {
 }
 
 
+// Surgical single-field update for the inline-edit UI on Accounts → Credit Cards.
+// Never touches other columns, so an empty save can't wipe adjacent data (which
+// upsertCardDetails would, since that action rewrites the whole row).
+export async function updateCardField(input: {
+  accountId: string;
+  field: string;
+  value: string;
+}): Promise<{ error?: string; ok?: true }> {
+  const { supabase, householdId } = await requireHousehold();
+  const { accountId, field, value } = input;
+  if (!accountId || !field) return { error: "Missing field." };
+
+  const { data: cardAccount } = await supabase
+    .from("accounts")
+    .select("id, kind")
+    .eq("id", accountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!cardAccount || cardAccount.kind !== "credit_card") return { error: "Card not found." };
+
+  const raw = value.trim();
+  const asCentsOrNull = () => (raw ? displayToCents(raw) : null);
+  const asIntOrNull = () => {
+    if (!raw) return null;
+    const n = parseInt(raw.replace(/,/g, ""), 10);
+    return Number.isFinite(n) ? n : null;
+  };
+  const asDateOrNull = () => (/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null);
+  const asTextOrNull = () => raw || null;
+  const asBool = () => raw === "true" || raw === "on" || raw === "1";
+
+  // Fields that live on the accounts table.
+  const accountUpdates: Record<string, unknown> = {};
+  switch (field) {
+    case "name":
+      if (!raw) return { error: "Card name is required." };
+      accountUpdates.name = raw;
+      break;
+    case "holder":
+      accountUpdates.holder = asTextOrNull();
+      break;
+    case "institution":
+      accountUpdates.institution = asTextOrNull();
+      break;
+    case "dateOpened":
+      accountUpdates.date_opened = asDateOrNull();
+      break;
+    case "dateClosed":
+      accountUpdates.date_closed = asDateOrNull();
+      break;
+    case "annualFee":
+      accountUpdates.annual_fee_cents = asCentsOrNull();
+      break;
+    case "feeWaived":
+      accountUpdates.fee_waived = asBool();
+      break;
+  }
+  if (Object.keys(accountUpdates).length > 0) {
+    const { error } = await supabase
+      .from("accounts")
+      .update({ ...accountUpdates, updated_at: new Date().toISOString() })
+      .eq("id", accountId)
+      .eq("household_id", householdId);
+    if (error) return { error: "Couldn't save — " + error.message };
+    revalidate();
+    return { ok: true };
+  }
+
+  // Fields that live on the credit_card_details table.
+  const detailUpdates: Record<string, unknown> = {};
+  switch (field) {
+    case "bank":
+      detailUpdates.bank = asTextOrNull();
+      break;
+    case "authUser":
+      detailUpdates.auth_user = asTextOrNull();
+      break;
+    case "charging":
+      detailUpdates.charging = asTextOrNull();
+      break;
+    case "currentPoints":
+      detailUpdates.current_points = asIntOrNull() ?? 0;
+      break;
+    case "spendingLimit":
+      detailUpdates.spending_limit_cents = asCentsOrNull();
+      break;
+    case "cardUrl":
+      detailUpdates.card_url = asTextOrNull();
+      break;
+    case "rewardsCategory":
+      detailUpdates.rewards_category = ["travel", "hotel"].includes(raw) ? raw : null;
+      break;
+    case "remarks":
+      detailUpdates.remarks = asTextOrNull();
+      break;
+    default:
+      return { error: `Unknown field: ${field}` };
+  }
+
+  // Upsert requires household_id + account_id since the row may not exist yet.
+  const { error } = await supabase
+    .from("credit_card_details")
+    .upsert(
+      {
+        account_id: accountId,
+        household_id: householdId,
+        ...detailUpdates,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "account_id" },
+    );
+  if (error) return { error: "Couldn't save — " + error.message };
+  revalidate();
+  return { ok: true };
+}
+
+
 // Pay a credit card: one transaction row that debits the source bank AND
 // (via paid_to_account_id) reduces the card's auto-computed "owed" tally.
 // For revolving cards with a linked debt subcategory, also lowers that debt.

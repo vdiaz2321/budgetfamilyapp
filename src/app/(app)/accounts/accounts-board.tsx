@@ -19,6 +19,7 @@ import {
   updateBalance,
   updateBucket,
   updateBucketBalance,
+  updateCardField,
   upsertCardDetails,
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
@@ -511,7 +512,11 @@ function CreditCardSection({
   }, [accounts]);
   const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
   const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
+  const [showOnlyOwedCards, setShowOnlyOwedCards] = useState(false);
+  const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
   const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
+  const hasOwed = (a: AccountData) => (a.owedCents ?? 0) > 0;
+  const hasPts = (a: AccountData) => (a.cardDetails?.currentPoints ?? 0) > 0;
   const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
     const next = new Set(prev);
     if (next.has(bank)) next.delete(bank);
@@ -572,9 +577,12 @@ function CreditCardSection({
   const isArchived = section.key === "credit_archived";
   const isMain = section.key === "credit";
   const feeFilter = (a: AccountData) => !showOnlyFeeCards || hasActiveFee(a);
-  const travelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel" && feeFilter(a));
-  const hotelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel" && feeFilter(a));
-  const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && feeFilter(a));
+  const owedFilter = (a: AccountData) => !showOnlyOwedCards || hasOwed(a);
+  const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
+  const passesFilters = (a: AccountData) => feeFilter(a) && owedFilter(a) && ptsFilter(a);
+  const travelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel" && passesFilters(a));
+  const hotelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel" && passesFilters(a));
+  const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const renderCards = (cards: AccountData[]) => (
@@ -619,80 +627,115 @@ function CreditCardSection({
   const hotelRedeemable = redeemableForCategory("hotel");
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex items-center gap-2.5 text-left"
-          aria-expanded={open}
-        >
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-          <span className="font-semibold">{section.label}</span>
-          <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
-            {accounts.length} card{accounts.length !== 1 ? "s" : ""}
-          </span>
-          <svg
-            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            aria-hidden
+      {isMain ? (
+        <div className="px-4 py-4 sm:px-6 sm:py-5">
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex w-full items-start gap-4 text-left"
+            aria-expanded={open}
           >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-        {totalOwed > 0 ? (
-          <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
-            {formatMoney(totalOwed, currency)} owed
-          </span>
-        ) : null}
-      </div>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
+              </span>
+              <span className="mt-0.5 block text-xs text-muted sm:text-sm">
+                Family points optimizer, fee tracker &amp; certificate manager
+              </span>
+            </span>
+            <svg
+              width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              className={`mt-1.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
 
-      {/* Summary strip — only on the main section, hidden when empty */}
-      {open && isMain && (feesAll > 0 || totalOwed > 0 || rewardCards.length > 0 || allCreditCards.length > 0) ? (
-        <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs">
-          {isMain && rewardCards.length > 0 ? (
-            <>
+          {(totalPoints > 0 || travelRedeemable > 0 || hotelRedeemable > 0 || feesPaid > 0 || totalOwed > 0) ? (
+            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-6">
               {totalPoints > 0 ? (
-                <span className="inline-flex items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 dark:bg-white/[0.06]">
-                  <span className="font-semibold text-foreground">Current Pts:</span>
-                  <span className="font-semibold text-foreground tabular-nums">{totalPoints.toLocaleString()}</span>
-                </span>
+                <StatTile
+                  label="Current Pts"
+                  value={totalPoints.toLocaleString()}
+                  tone="emerald"
+                  onClick={() => setShowOnlyPtsCards((v) => !v)}
+                  active={showOnlyPtsCards}
+                  title={showOnlyPtsCards ? "Show all cards" : "Show only cards with current points"}
+                />
               ) : null}
               {travelRedeemable > 0 ? (
-                <span className="inline-flex items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 dark:bg-white/[0.06]">
-                  <span className="font-semibold text-foreground">Travel Redeemable:</span>
-                  <span className="font-semibold text-positive tabular-nums">{formatMoney(travelRedeemable, currency)}</span>
-                </span>
+                <StatTile label="Travel Redeemable" value={formatMoney(travelRedeemable, currency)} tone="sky" />
               ) : null}
               {hotelRedeemable > 0 ? (
-                <span className="inline-flex items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 dark:bg-white/[0.06]">
-                  <span className="font-semibold text-foreground">Hotel Redeemable:</span>
-                  <span className="font-semibold text-positive tabular-nums">{formatMoney(hotelRedeemable, currency)}</span>
-                </span>
+                <StatTile label="Hotel Redeemable" value={formatMoney(hotelRedeemable, currency)} tone="teal" />
               ) : null}
-            </>
-          ) : null}
-          {feesPaid > 0 ? (
-            <button
-              type="button"
-              onClick={() => setShowOnlyFeeCards((v) => !v)}
-              title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
-              className={`inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 ring-1 transition ${
-                showOnlyFeeCards
-                  ? "bg-amber-500/25 ring-amber-500"
-                  : "bg-amber-500/10 ring-amber-500/30 hover:bg-amber-500/20"
-              }`}
-            >
-              <span className="font-semibold text-foreground">Active Fees:</span>
-              <span className="font-semibold tabular-nums text-amber-700 dark:text-amber-400">{formatMoney(feesPaid, currency)}/yr</span>
-              {showOnlyFeeCards ? <span className="ml-0.5 font-semibold text-amber-700 dark:text-amber-400">×</span> : null}
-            </button>
+              {feesPaid > 0 ? (
+                <StatTile
+                  label="Active Fees"
+                  value={`${formatMoney(feesPaid, currency)}/yr`}
+                  tone="amber"
+                  onClick={() => setShowOnlyFeeCards((v) => !v)}
+                  active={showOnlyFeeCards}
+                  title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
+                />
+              ) : null}
+              {totalOwed > 0 ? (
+                <StatTile
+                  label="Total Owed"
+                  value={formatMoney(totalOwed, currency)}
+                  tone="rose"
+                  onClick={() => setShowOnlyOwedCards((v) => !v)}
+                  active={showOnlyOwedCards}
+                  title={showOnlyOwedCards ? "Show all cards" : "Show only cards with a balance owed"}
+                />
+              ) : null}
+              <div className="flex flex-col items-center justify-center rounded-lg bg-slate-500/10 px-3 py-2 text-center ring-1 ring-slate-500/30">
+                <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                  <span>Travel: <span className="tabular-nums">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span></span>
+                  <span className="text-slate-500/60">/</span>
+                  <span>Hotel: <span className="tabular-nums">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span></span>
+                </div>
+                <div className="mt-0.5 text-xs font-bold tabular-nums text-slate-700 dark:text-slate-300">
+                  Total Cards: {accounts.length}
+                </div>
+              </div>
+            </div>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+          <button
+            type="button"
+            onClick={onToggle}
+            className="flex items-center gap-2.5 text-left"
+            aria-expanded={open}
+          >
+            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
+            <span className="font-semibold">{section.label}</span>
+            <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+              {accounts.length} card{accounts.length !== 1 ? "s" : ""}
+            </span>
+            <svg
+              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          {totalOwed > 0 ? (
+            <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
+              {formatMoney(totalOwed, currency)} owed
+            </span>
+          ) : null}
+        </div>
+      )}
 
       {open ? (
-        <div className="border-t border-line">
+        <div className="border-t-2 border-foreground/25">
           {reorderError ? (
             <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
           ) : null}
@@ -704,22 +747,35 @@ function CreditCardSection({
             <div>
               <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
                 <section>
-                  <div className="flex items-center gap-2 bg-sky-500/10 px-4 py-2.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
-                    <span className="text-sm font-semibold">Travel rewards</span>
-                    <span className="text-xs text-muted">{travelCards.length} card{travelCards.length !== 1 ? "s" : ""}</span>
-                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums sm:text-sm ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-sky-500/[0.06] px-4 py-3 dark:bg-sky-500/10">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+                      </svg>
+                    </span>
+                    <span className="text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
+                    <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                      {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
+                    </span>
+                    <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
                   </div>
                   {travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
                 </section>
                 <section>
-                  <div className="flex items-center gap-2 bg-teal-500/10 px-4 py-2.5">
-                    <span className="h-2.5 w-2.5 rounded-full bg-teal-500" />
-                    <span className="text-sm font-semibold">Hotel rewards</span>
-                    <span className="text-xs text-muted">{hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}</span>
-                    <span className={`ml-auto whitespace-nowrap text-xs font-semibold tabular-nums sm:text-sm ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-teal-500/[0.06] px-4 py-3 dark:bg-teal-500/10">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M3 21V7l7-4v4h11v14" />
+                        <path d="M7 10h.01M11 10h.01M15 14h.01M11 14h.01M7 14h.01M15 18h.01M11 18h.01M7 18h.01" />
+                      </svg>
+                    </span>
+                    <span className="text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
+                    <span className="rounded-md bg-teal-500/15 px-2 py-0.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
+                      {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
+                    </span>
+                    <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
                   </div>
@@ -728,10 +784,18 @@ function CreditCardSection({
               </div>
               {otherCards.length > 0 ? (
                 <section className="border-t border-line">
-                  <div className="flex items-center gap-2 bg-black/[0.04] px-4 py-2.5 dark:bg-white/[0.05]">
-                    <span className="h-2.5 w-2.5 rounded-full bg-muted" />
-                    <span className="text-sm font-semibold">Other cards</span>
-                    <span className="text-xs text-muted">Choose Travel or Hotel when editing a card to move it above.</span>
+                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-400">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <rect x="2" y="5" width="20" height="14" rx="2" />
+                        <path d="M2 10h20" />
+                      </svg>
+                    </span>
+                    <span className="text-sm font-bold text-foreground sm:text-base">Other Cards</span>
+                    <span className="rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      {otherCards.length} card{otherCards.length !== 1 ? "s" : ""}
+                    </span>
+                    <span className="ml-auto text-xs text-muted">Choose Travel or Hotel when editing a card.</span>
                   </div>
                   {renderCards(otherCards)}
                 </section>
@@ -907,43 +971,71 @@ function CreditCardPanel({
                 Debt
               </span>
             ) : null}
+            {card.annualFeeCents && !card.feeWaived ? (
+              <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                ${Math.round(card.annualFeeCents / 100)}/yr
+              </span>
+            ) : null}
           </span>
-          {(d?.benefitUsedOn || d?.freeNightExpiresOn) ? (
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-              {d?.benefitUsedOn ? (
-                <span className={`text-[11px] ${fnUsed && fnExpired ? "text-negative" : "text-positive"}`}>
-                  Used/Scheduled: {d.benefitUsedOn}
+          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || (d && d.currentPoints > 0)) ? (
+            <p className="mt-1 flex flex-wrap items-center gap-1.5">
+              {d && d.currentPoints > 0 ? (
+                <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                  Current Pts: <span className="ml-1 tabular-nums">{d.currentPoints.toLocaleString()}</span>
                 </span>
               ) : null}
-              {d?.freeNightExpiresOn ? (
-                <span className={`text-[11px] ${fnExpiresColor}`}>
-                  Expires {d.freeNightExpiresOn}{fnExpired && !fnUsed ? " ⚠ expired" : fnSoon && !fnUsed ? ` (${fnDaysLeft}d left)` : ""}
+              {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
+                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-500/30 dark:text-indigo-300">
+                  <span className="tabular-nums">
+                    {d?.freeNightCreditCents
+                      ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
+                      : `${d.freeNightPointsLimit!.toLocaleString()} pts`}
+                  </span>
+                  <span>Night Credit</span>
                 </span>
               ) : null}
-            </p>
-          ) : null}
-          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || (card.annualFeeCents && !card.feeWaived)) ? (
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-foreground">
-              {d?.freeNightCreditCents
-                ? <span>Free night: ${(d.freeNightCreditCents / 100).toFixed(0)}</span>
-                : d?.freeNightPointsLimit
-                  ? <span>Free night: {d.freeNightPointsLimit.toLocaleString()} pts</span>
-                  : null}
-              {card.annualFeeCents && !card.feeWaived ? (
-                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">Fee: ${Math.round(card.annualFeeCents / 100)}/yr</span>
+              {(d?.freeNightExpiresOn || d?.benefitUsedOn) ? (
+                <span className="inline-flex flex-nowrap items-center gap-1.5">
+                  {d?.freeNightExpiresOn ? (
+                    <span
+                      className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${
+                        fnUsed && fnExpired
+                          ? "text-muted line-through"
+                          : (fnExpired || fnSoon) && !fnUsed
+                            ? "text-negative"
+                            : "text-muted"
+                      }`}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 7v5l3 2" />
+                      </svg>
+                      Expires {d.freeNightExpiresOn.replace(/-/g, "‑")}
+                    </span>
+                  ) : null}
+                  {d?.benefitUsedOn ? (
+                    <span
+                      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${
+                        d.benefitUsedOn < today
+                          ? "bg-rose-500/10 text-negative ring-rose-500/30"
+                          : "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300"
+                      }`}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <rect x="3" y="4" width="18" height="17" rx="2" />
+                        <path d="M16 2v4M8 2v4M3 10h18" />
+                        <path d="m9 15 2 2 4-4" />
+                      </svg>
+                      Scheduled: {d.benefitUsedOn.replace(/-/g, "‑")}
+                    </span>
+                  ) : null}
+                </span>
               ) : null}
             </p>
           ) : null}
         </span>
-        <span className="ml-2 flex shrink-0 flex-col items-end gap-0.5 py-0.5">
-          {d && d.currentPoints > 0 ? (
-            <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums leading-none text-emerald-600 dark:text-emerald-400">
-              {d.currentPoints.toLocaleString()} pts
-            </span>
-          ) : null}
-          <span className={`text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
-            {owed !== 0 ? formatMoney(owed, currency) : "—"}
-          </span>
+        <span className={`ml-2 shrink-0 whitespace-nowrap text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
+          {owed !== 0 ? formatMoney(owed, currency) : "—"}
         </span>
         <svg
           width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -960,59 +1052,111 @@ function CreditCardPanel({
         <div className="space-y-3 border-t border-line bg-background/40 px-4 py-3">
           {/* Two-column detail grid */}
           <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
-            <DetailRow label="Bank" value={bank} />
-            <DetailRow label="Charging" value={d?.charging ?? "—"} />
-            <DetailRow label="Current Pts" value={d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : "—"} />
-            <DetailRow label="Auth user" value={d?.authUser ?? "—"} />
-            <DetailRow
+            <InlineField
+              label="Bank"
+              accountId={card.id}
+              field="bank"
+              rawValue={d?.bank ?? card.institution ?? ""}
+              displayValue={bank}
+              placeholder="Chase / AMEX / Cap 1"
+            />
+            <InlineField
+              label="Charging"
+              accountId={card.id}
+              field="charging"
+              rawValue={d?.charging ?? ""}
+              displayValue={d?.charging ?? "—"}
+              placeholder="Netflix, Google Drive"
+            />
+            <InlineField
+              label="Current Pts"
+              accountId={card.id}
+              field="currentPoints"
+              type="integer"
+              rawValue={d?.currentPoints ? String(d.currentPoints) : ""}
+              displayValue={d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : "—"}
+              placeholder="0"
+            />
+            <InlineField
+              label="Auth user"
+              accountId={card.id}
+              field="authUser"
+              rawValue={d?.authUser ?? ""}
+              displayValue={d?.authUser ?? "—"}
+              placeholder="Vic / Johana"
+            />
+            <InlineSelect
               label="Rewards cat"
-              value={
+              accountId={card.id}
+              field="rewardsCategory"
+              rawValue={d?.rewardsCategory ?? ""}
+              displayValue={
                 d?.rewardsCategory
                   ? d.rewardsCategory.charAt(0).toUpperCase() + d.rewardsCategory.slice(1)
                   : "—"
               }
+              options={[
+                { value: "", label: "Not set" },
+                { value: "travel", label: "Travel" },
+                { value: "hotel", label: "Hotel" },
+              ]}
             />
-            <DetailRow
+            <InlineField
               label="Annual fee"
-              value={
+              accountId={card.id}
+              field="annualFee"
+              type="currency"
+              currency={currency}
+              rawValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""}
+              displayValue={
                 card.annualFeeCents
                   ? `${formatMoney(card.annualFeeCents, currency)}${card.feeWaived ? " (waived)" : ""}${d && d.feesPaidCents > 0 ? ` · ${formatMoney(d.feesPaidCents, currency)} paid` : ""}`
                   : "—"
               }
+              placeholder="0.00"
             />
-            <DetailRow label="Opened" value={card.dateOpened ?? "—"} />
-            <DetailRow
-              label="Free night"
-              value={
-                d?.freeNightCreditCents || d?.freeNightExpiresOn || d?.freeNightPointsLimit
-                  ? [
-                      d.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : null,
-                      d.freeNightPointsLimit ? `${d.freeNightPointsLimit.toLocaleString()} pts` : null,
-                      d.freeNightExpiresOn ? `expires ${d.freeNightExpiresOn}` : null,
-                    ].filter(Boolean).join(" · ")
-                  : "—"
-              }
+            <InlineField
+              label="Opened"
+              accountId={card.id}
+              field="dateOpened"
+              type="date"
+              rawValue={card.dateOpened ?? ""}
+              displayValue={card.dateOpened ?? "—"}
             />
-            <DetailRow label="Used / scheduled" value={d?.benefitUsedOn ?? "—"} />
-            <DetailRow
+            <InlineField
               label="Spending limit"
-              value={d?.spendingLimitCents ? formatMoney(d.spendingLimitCents, currency) : "—"}
+              accountId={card.id}
+              field="spendingLimit"
+              type="currency"
+              currency={currency}
+              rawValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""}
+              displayValue={d?.spendingLimitCents ? `${currencySymbol(currency)}${Math.round(d.spendingLimitCents / 100).toLocaleString()}` : "—"}
+              placeholder="0"
             />
-            <DetailRow label="Closed" value={card.dateClosed ?? "—"} />
-            <DetailRow
+            {card.dateClosed ? (
+              <InlineField
+                label="Closed"
+                accountId={card.id}
+                field="dateClosed"
+                type="date"
+                rawValue={card.dateClosed}
+                displayValue={card.dateClosed}
+              />
+            ) : null}
+            <InlineField
               label="Card URL"
-              value={
+              accountId={card.id}
+              field="cardUrl"
+              type="url"
+              rawValue={d?.cardUrl ?? ""}
+              displayValue={
                 d?.cardUrl ? (
-                  <a
-                    href={d.cardUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block truncate text-brand hover:underline"
-                  >
+                  <span className="block truncate text-brand">
                     {(() => { try { return new URL(d.cardUrl).hostname; } catch { return d.cardUrl; } })()}
-                  </a>
+                  </span>
                 ) : "—"
               }
+              placeholder="https://issuer.com/card"
             />
           </div>
 
@@ -1029,27 +1173,40 @@ function CreditCardPanel({
                 <button
                   type="button"
                   onClick={() => setEditing(true)}
-                  className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-black/[0.04] px-3 py-1.5 text-xs font-normal text-primary hover:bg-black/[0.08] dark:bg-white/5 dark:hover:bg-white/10"
                 >
-                  Edit details
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                  Edit
                 </button>
                 {!isArchived && !card.dateClosed ? (
                   <button
                     type="button"
                     onClick={() => setPaying(true)}
-                    className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-normal text-white hover:bg-brand-strong"
                   >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <rect x="2" y="6" width="20" height="12" rx="2" />
+                      <circle cx="12" cy="12" r="2.5" />
+                    </svg>
                     {owed > 0 ? "Pay Balance" : "Pay Card"}
                   </button>
                 ) : null}
                 {!isArchived && !card.dateClosed ? (
-                  <form action={(fd) => startClose(() => closeCard(fd))}>
+                  <form action={(fd) => startClose(() => closeCard(fd))} className="ml-auto">
                     <input type="hidden" name="id" value={card.id} />
                     <button
                       type="submit"
                       disabled={closePending}
-                      className="rounded-md px-3 py-1.5 text-xs font-medium text-negative hover:bg-negative/10 disabled:opacity-60"
+                      className="inline-flex items-center gap-1.5 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-normal text-negative hover:bg-negative/15 disabled:opacity-60"
                     >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                      </svg>
                       {closePending ? "Closing…" : "Close Card"}
                     </button>
                   </form>
@@ -1060,7 +1217,7 @@ function CreditCardPanel({
                     <button
                       type="submit"
                       disabled={reopenPending}
-                      className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/70 disabled:opacity-60"
+                      className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:brightness-95 dark:hover:brightness-110 disabled:opacity-60"
                     >
                       {reopenPending ? "Reopening…" : "Reopen"}
                     </button>
@@ -1072,6 +1229,7 @@ function CreditCardPanel({
 
           {editing ? (
             <EditCreditCardForm
+              key={JSON.stringify(card.cardDetails) + card.annualFeeCents + card.dateOpened + card.dateClosed + card.holder + card.name}
               card={card}
               onDone={() => setEditing(false)}
             />
@@ -1092,13 +1250,240 @@ function CreditCardPanel({
   );
 }
 
+type StatTone = "emerald" | "sky" | "teal" | "amber" | "rose" | "slate";
+const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; value: string; activeBg: string }> = {
+  slate: {
+    bg: "bg-slate-500/10",
+    ring: "ring-slate-500/30",
+    label: "text-slate-700 dark:text-slate-400",
+    value: "text-slate-700 dark:text-slate-300",
+    activeBg: "bg-slate-500/25",
+  },
+  emerald: {
+    bg: "bg-emerald-500/10",
+    ring: "ring-emerald-500/30",
+    label: "text-emerald-700 dark:text-emerald-400",
+    value: "text-emerald-700 dark:text-emerald-300",
+    activeBg: "bg-emerald-500/25",
+  },
+  sky: {
+    bg: "bg-sky-500/10",
+    ring: "ring-sky-500/30",
+    label: "text-sky-700 dark:text-sky-400",
+    value: "text-sky-700 dark:text-sky-300",
+    activeBg: "bg-sky-500/25",
+  },
+  teal: {
+    bg: "bg-teal-500/10",
+    ring: "ring-teal-500/30",
+    label: "text-teal-700 dark:text-teal-400",
+    value: "text-teal-700 dark:text-teal-300",
+    activeBg: "bg-teal-500/25",
+  },
+  amber: {
+    bg: "bg-amber-500/10",
+    ring: "ring-amber-500/30",
+    label: "text-amber-700 dark:text-amber-400",
+    value: "text-amber-700 dark:text-amber-300",
+    activeBg: "bg-amber-500/25",
+  },
+  rose: {
+    bg: "bg-rose-500/10",
+    ring: "ring-rose-500/30",
+    label: "text-rose-700 dark:text-rose-400",
+    value: "text-rose-700 dark:text-rose-300",
+    activeBg: "bg-rose-500/25",
+  },
+};
+
+function StatTile({
+  label,
+  value,
+  tone,
+  onClick,
+  active,
+  title,
+}: {
+  label: string;
+  value: string;
+  tone: StatTone;
+  onClick?: () => void;
+  active?: boolean;
+  title?: string;
+}) {
+  const t = STAT_TONES[tone];
+  const base = `rounded-lg px-3 py-2 text-center ring-1 ${active ? t.activeBg : t.bg} ${t.ring}`;
+  const inner = (
+    <>
+      <div className={`text-[10px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
+      <div className={`mt-0.5 text-base font-bold tabular-nums sm:text-lg ${t.value}`}>{value}</div>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} title={title} className={`${base} transition hover:brightness-105`}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={base}>{inner}</div>;
+}
+
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="overflow-hidden text-xs leading-relaxed text-foreground">
+    <div className="text-xs leading-relaxed text-foreground">
       <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
         {label}
       </span>
       {value}
+    </div>
+  );
+}
+
+// Click a value → becomes an input; Enter or blur saves; Esc cancels.
+// Type variants match the columns supported by the updateCardField action.
+type InlineFieldType = "text" | "integer" | "currency" | "date" | "url";
+function InlineField({
+  label,
+  accountId,
+  field,
+  rawValue,
+  displayValue,
+  type = "text",
+  placeholder,
+  currency,
+}: {
+  label: string;
+  accountId: string;
+  field: string;
+  rawValue: string;
+  displayValue: React.ReactNode;
+  type?: InlineFieldType;
+  placeholder?: string;
+  currency?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(rawValue);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  useEffect(() => {
+    // If the underlying data changes (e.g. from another edit), reset local state.
+    if (!editing) setValue(rawValue);
+  }, [rawValue, editing]);
+
+  const commit = () => {
+    if (value === rawValue) { setEditing(false); return; }
+    startTransition(async () => {
+      const result = await updateCardField({ accountId, field, value });
+      if (result.error) { setError(result.error); return; }
+      setError(null);
+      setEditing(false);
+    });
+  };
+
+  const inputType = type === "date" ? "date" : type === "url" ? "url" : type === "integer" || type === "currency" ? "text" : "text";
+
+  return (
+    <div className="group text-xs leading-relaxed text-foreground">
+      <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {label}
+      </span>
+      {editing ? (
+        <span className="inline-flex items-center gap-1">
+          {type === "currency" ? (
+            <span className="text-muted">{currencySymbol(currency ?? "USD")}</span>
+          ) : null}
+          <input
+            ref={inputRef}
+            type={inputType}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commit(); }
+              else if (e.key === "Escape") { e.preventDefault(); setValue(rawValue); setEditing(false); setError(null); }
+            }}
+            disabled={pending}
+            placeholder={placeholder}
+            className="w-24 rounded bg-background px-1.5 py-0.5 text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+          />
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="rounded px-1 py-0.5 text-left hover:bg-black/[0.04] dark:hover:bg-white/5"
+        >
+          {displayValue}
+        </button>
+      )}
+      {error ? <span className="ml-2 text-[10px] font-semibold text-negative">{error}</span> : null}
+    </div>
+  );
+}
+
+// Select variant for enum fields (e.g. rewards category).
+function InlineSelect({
+  label,
+  accountId,
+  field,
+  rawValue,
+  displayValue,
+  options,
+}: {
+  label: string;
+  accountId: string;
+  field: string;
+  rawValue: string;
+  displayValue: React.ReactNode;
+  options: { value: string; label: string }[];
+}) {
+  const [editing, setEditing] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const commit = (v: string) => {
+    if (v === rawValue) { setEditing(false); return; }
+    startTransition(async () => {
+      const result = await updateCardField({ accountId, field, value: v });
+      if (result.error) { setError(result.error); return; }
+      setError(null);
+      setEditing(false);
+    });
+  };
+  return (
+    <div className="text-xs leading-relaxed text-foreground">
+      <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {label}
+      </span>
+      {editing ? (
+        <select
+          autoFocus
+          defaultValue={rawValue}
+          onBlur={() => setEditing(false)}
+          onChange={(e) => commit(e.target.value)}
+          disabled={pending}
+          className="rounded bg-background px-1 py-0.5 text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="rounded px-1 py-0.5 text-left hover:bg-black/[0.04] dark:hover:bg-white/5"
+        >
+          {displayValue}
+        </button>
+      )}
+      {error ? <span className="ml-2 text-[10px] font-semibold text-negative">{error}</span> : null}
     </div>
   );
 }
@@ -1169,28 +1554,35 @@ function EditCreditCardForm({
 
           <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
           <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
+          <div className="rounded-lg border-2 border-amber-300/70 bg-amber-50/60 p-3 sm:col-span-2 dark:border-amber-800/50 dark:bg-amber-950/20">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+              Key fields · monitor &amp; update Points &amp; Dates
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
+              <LabeledInput label="Total Hotel Credits Anv" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
+              <LabeledInput label="Credit / Credits Expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+              <LabeledInput label="Up to Anv Pts / Free Night" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
+              <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
+              <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
+              <LabeledInput label="Card URL" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
+              <label className="block">
+                <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
+                <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="annual">Annual</option>
+                  <option value="anniversary">Card anniversary</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
           <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
           <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
           <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
             <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
             Bonus earned
-          </label>
-          <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
-          <LabeledInput label="Hotel Credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-          <LabeledInput label="Hotel Credit/Anv Night Expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-          <LabeledInput label="Anv Free Night Pts per Night" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
-          <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
-          <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
-          <LabeledInput label="Card URL" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
-            <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-              <option value="monthly">Monthly</option>
-              <option value="quarterly">Quarterly</option>
-              <option value="annual">Annual</option>
-              <option value="anniversary">Card anniversary</option>
-            </select>
           </label>
           <div className="sm:col-span-2">
             <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
@@ -1211,13 +1603,13 @@ function EditCreditCardForm({
                 </span>
               </span>
             </label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.55fr)_minmax(0,1.55fr)]">
               <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
               <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
               <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" defaultValue={d?.promoAprEndsOn ?? ""} />
               <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
-              <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
               <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
+              <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
             </div>
             <p className="text-[11px] text-muted">
               APR % should be <span className="font-semibold">0</span> during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.

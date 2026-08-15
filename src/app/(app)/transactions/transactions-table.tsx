@@ -627,7 +627,7 @@ function TxLine({
     <li
       onClick={selectMode ? onSelect : undefined}
       onDoubleClick={!selectMode && canEdit ? onEdit : undefined}
-      title={selectMode ? "Click to toggle selection" : canEdit ? "Double-click to edit" : "Card payment — delete and recreate it from the card"}
+      title={selectMode ? "Click to toggle selection" : !canEdit ? "Card payment — delete and recreate it from the card" : undefined}
       className={`group grid ${GRID} ${selectMode ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
         tx.cleared && !selected ? "opacity-60" : ""
       } ${selected ? "bg-brand-soft/40" : ""}`}
