@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { SubmitButton } from "./submit-button";
 
 export const metadata = {
   title: "Sign in · Capitall",
@@ -177,12 +178,10 @@ export default async function LoginPage({
               <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
             ) : null}
 
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
-            >
-              {isSignup ? "Create account" : "Sign in"}
-            </button>
+            <SubmitButton
+              label={isSignup ? "Create account" : "Sign in"}
+              pendingLabel={isSignup ? "Creating account…" : "Signing in…"}
+            />
 
             {!isSignup ? (
               <p className="text-right text-sm">

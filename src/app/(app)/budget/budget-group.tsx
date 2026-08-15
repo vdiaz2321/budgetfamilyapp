@@ -232,19 +232,19 @@ export function BudgetGroup({
           disabled={!onFilter}
           className="col-span-7 grid grid-cols-3 items-start gap-2 rounded-md px-2 py-1 text-[11px] tabular-nums text-muted enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
         >
-          <span className="min-w-0 text-right leading-tight">
-            <span className="block text-[10px] text-muted">Plan</span>
-            <span className="block font-bold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
+          <span className="min-w-0 text-center leading-tight">
+            <span className="block text-xs font-semibold text-muted">Plan</span>
+            <span className="block text-sm font-semibold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </span>
-          <span className="min-w-0 text-right leading-tight">
-            <span className="block text-[10px] text-muted">{headerActualLabel}</span>
-            <span className={`block font-bold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+          <span className="min-w-0 text-center leading-tight">
+            <span className="block text-xs font-semibold text-muted">{headerActualLabel}</span>
+            <span className={`block text-sm font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
           </span>
-          <span className="min-w-0 text-right leading-tight">
-            <span className="block text-[10px] text-muted">Left</span>
-            <span className={`block font-bold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+          <span className="min-w-0 text-center leading-tight">
+            <span className="block text-xs font-semibold text-muted">Left</span>
+            <span className={`block text-sm font-semibold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
               {formatMoney(remainingTotal, currency)}
             </span>
           </span>
