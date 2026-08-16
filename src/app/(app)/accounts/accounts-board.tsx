@@ -580,8 +580,24 @@ function CreditCardSection({
   const owedFilter = (a: AccountData) => !showOnlyOwedCards || hasOwed(a);
   const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
   const passesFilters = (a: AccountData) => feeFilter(a) && owedFilter(a) && ptsFilter(a);
-  const travelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel" && passesFilters(a));
-  const hotelCards = localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel" && passesFilters(a));
+  type SortKey = "default" | "expiring" | "owed" | "points";
+  const [travelSort, setTravelSort] = useState<SortKey>("default");
+  const [hotelSort, setHotelSort] = useState<SortKey>("default");
+  const applySort = (cards: AccountData[], key: SortKey): AccountData[] => {
+    if (key === "default") return cards;
+    const copy = [...cards];
+    const bigFuture = "9999-12-31";
+    if (key === "expiring") {
+      copy.sort((a, b) => (a.cardDetails?.freeNightExpiresOn ?? bigFuture).localeCompare(b.cardDetails?.freeNightExpiresOn ?? bigFuture));
+    } else if (key === "owed") {
+      copy.sort((a, b) => (b.owedCents ?? 0) - (a.owedCents ?? 0));
+    } else if (key === "points") {
+      copy.sort((a, b) => (b.cardDetails?.currentPoints ?? 0) - (a.cardDetails?.currentPoints ?? 0));
+    }
+    return copy;
+  };
+  const travelCards = applySort(localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel" && passesFilters(a)), travelSort);
+  const hotelCards = applySort(localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel" && passesFilters(a)), hotelSort);
   const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
@@ -757,6 +773,17 @@ function CreditCardSection({
                     <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-300">
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
+                    <select
+                      value={travelSort}
+                      onChange={(e) => setTravelSort(e.target.value as SortKey)}
+                      className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/30 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:bg-sky-950/50 dark:text-sky-300"
+                      aria-label="Sort travel cards"
+                    >
+                      <option value="default">Sort: Default</option>
+                      <option value="expiring">Expiring soonest</option>
+                      <option value="owed">Highest owed</option>
+                      <option value="points">Most points</option>
+                    </select>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
@@ -775,6 +802,17 @@ function CreditCardSection({
                     <span className="rounded-md bg-teal-500/15 px-2 py-0.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
+                    <select
+                      value={hotelSort}
+                      onChange={(e) => setHotelSort(e.target.value as SortKey)}
+                      className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-teal-500/30 focus:outline-none focus:ring-2 focus:ring-teal-500 dark:bg-teal-950/50 dark:text-teal-300"
+                      aria-label="Sort hotel cards"
+                    >
+                      <option value="default">Sort: Default</option>
+                      <option value="expiring">Expiring soonest</option>
+                      <option value="owed">Highest owed</option>
+                      <option value="points">Most points</option>
+                    </select>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
@@ -977,12 +1015,37 @@ function CreditCardPanel({
               </span>
             ) : null}
           </span>
-          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || (d && d.currentPoints > 0)) ? (
+          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || (d && d.currentPoints > 0) || d?.bonusInfo) ? (
             <p className="mt-1 flex flex-wrap items-center gap-1.5">
               {d && d.currentPoints > 0 ? (
                 <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
                   Current Pts: <span className="ml-1 tabular-nums">{d.currentPoints.toLocaleString()}</span>
+                  {d.pointsValueMicros ? (
+                    <span className="ml-1 font-normal text-emerald-800/80 dark:text-emerald-300/80">
+                      ≈ ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}
+                    </span>
+                  ) : null}
                 </span>
+              ) : null}
+              {d?.bonusInfo ? (
+                d.bonusEarned ? (
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 6 9 17l-5-5" /></svg>
+                    Bonus earned: {d.bonusInfo}
+                  </span>
+                ) : (
+                  <span
+                    className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${
+                      d.bonusSpendDeadline && d.bonusSpendDeadline < today
+                        ? "bg-rose-500/10 text-negative ring-rose-500/30"
+                        : "bg-amber-500/15 text-amber-700 ring-amber-500/30 dark:text-amber-300"
+                    }`}
+                  >
+                    🎯 <span>Bonus: {d.bonusInfo}</span>
+                    {d.bonusSpendCents ? <span className="tabular-nums">· ${Math.round(d.bonusSpendCents / 100).toLocaleString()}</span> : null}
+                    {d.bonusSpendDeadline ? <span className="tabular-nums">· by {d.bonusSpendDeadline.replace(/-/g, "‑")}</span> : null}
+                  </span>
+                )
               ) : null}
               {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
                 <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-500/30 dark:text-indigo-300">
@@ -1500,11 +1563,28 @@ function EditCreditCardForm({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [migrationWarning, setMigrationWarning] = useState(false);
+  const [activeTab, setActiveTab] = useState<"key" | "basics" | "debt">("key");
   const d = card.cardDetails;
+
+  const tabBtn = (id: "key" | "basics" | "debt", label: string) => (
+    <button
+      type="button"
+      onClick={() => setActiveTab(id)}
+      className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+        activeTab === id
+          ? "bg-brand text-white"
+          : "text-muted hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/5"
+      }`}
+      aria-pressed={activeTab === id}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div className="space-y-4 rounded-md border border-line bg-surface p-3">
-      {/* One form: saves both account-level basics AND rewards details together */}
+      {/* One form: saves both account-level basics AND rewards details together.
+          All tabs stay mounted (hidden via CSS) so a single Save submits every field. */}
       <form
         action={(fd) =>
           startSave(async () => {
@@ -1527,34 +1607,15 @@ function EditCreditCardForm({
         <input type="hidden" name="subtype" value={card.subtype ?? ""} />
         <input type="hidden" name="active" value={card.active ? "on" : ""} />
 
-        {/* Card basics */}
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
-          <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
-          <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
-          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-            <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-            Fee waived (e.g. military benefit)
-          </label>
-          <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
-          <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
+        <div className="flex items-center gap-1 border-b border-line pb-2">
+          {tabBtn("key", "Points & Dates")}
+          {tabBtn("basics", "Basics & Rewards")}
+          {tabBtn("debt", "Debt tracking")}
         </div>
 
-        {/* Rewards details */}
-        <div className="grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2">
-          <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.institution ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span>
-            <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-              <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
-            </select>
-          </label>
-          <LabeledInput label="Rewards program" name="rewardsProgram" defaultValue={d?.rewardsProgram ?? ""} placeholder="Hilton, Hyatt, Chase UR…" />
-          <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" defaultValue={d?.pointsValueMicros ? (d.pointsValueMicros / 1_000_000).toFixed(4) : ""} placeholder="0.0020" />
-
-          <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
-          <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
-          <div className="rounded-lg border-2 border-amber-300/70 bg-amber-50/60 p-3 sm:col-span-2 dark:border-amber-800/50 dark:bg-amber-950/20">
+        {/* Tab 1: Key fields (default) */}
+        <div className={activeTab === "key" ? "" : "hidden"}>
+          <div className="rounded-lg border-2 border-amber-300/70 bg-amber-50/60 p-3 dark:border-amber-800/50 dark:bg-amber-950/20">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
               Key fields · monitor &amp; update Points &amp; Dates
             </p>
@@ -1577,18 +1638,48 @@ function EditCreditCardForm({
               </label>
             </div>
           </div>
-          <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
-          <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
-          <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-            <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-            Bonus earned
-          </label>
-          <div className="sm:col-span-2">
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
-            <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
+        </div>
+
+        {/* Tab 2: Basics & Rewards */}
+        <div className={activeTab === "basics" ? "" : "hidden"}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
+            <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
+            <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
+            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+              <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
+              Fee waived (e.g. military benefit)
+            </label>
+            <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
+            <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
+            <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.institution ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span>
+              <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
+              </select>
+            </label>
+            <LabeledInput label="Rewards program" name="rewardsProgram" defaultValue={d?.rewardsProgram ?? ""} placeholder="Hilton, Hyatt, Chase UR…" />
+            <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" defaultValue={d?.pointsValueMicros ? (d.pointsValueMicros / 1_000_000).toFixed(4) : ""} placeholder="0.0020" />
+            <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
+            <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
+            <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
+            <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
+            <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
+            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
+              <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
+              Bonus earned
+            </label>
+            <div className="sm:col-span-2">
+              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
+              <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
+            </div>
           </div>
-          <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 sm:col-span-2 dark:border-rose-900/50 dark:bg-rose-950/20">
+        </div>
+
+        {/* Tab 3: Debt tracking */}
+        <div className={activeTab === "debt" ? "" : "hidden"}>
+          <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
             <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
               <input
                 type="checkbox"
@@ -1614,32 +1705,17 @@ function EditCreditCardForm({
             <p className="text-[11px] text-muted">
               APR % should be <span className="font-semibold">0</span> during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.
             </p>
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="submit"
-                disabled={savePending}
-                className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
-              >
-                {savePending ? "Saving…" : "Save all changes"}
-              </button>
-              <button
-                type="button"
-                onClick={onDone}
-                className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
-          {detailsError ? (
-            <p className="sm:col-span-2 text-sm font-medium text-negative">{detailsError}</p>
-          ) : null}
-          {migrationWarning ? (
-            <p className="sm:col-span-2 text-xs text-amber-600 dark:text-amber-400">
-              Saved (most fields). To also save Used/Scheduled and Free Night pts limit, run migration 0026 in Supabase SQL Editor.
-            </p>
-          ) : null}
         </div>
+
+        {detailsError ? (
+          <p className="text-sm font-medium text-negative">{detailsError}</p>
+        ) : null}
+        {migrationWarning ? (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Saved (most fields). To also save Used/Scheduled and Free Night pts limit, run migration 0026 in Supabase SQL Editor.
+          </p>
+        ) : null}
 
         <div className="order-first flex items-center justify-between gap-2 pt-1">
           <div className="flex items-center gap-2">
