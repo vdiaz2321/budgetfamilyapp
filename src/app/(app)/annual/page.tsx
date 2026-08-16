@@ -2,8 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
-import { formatMoney } from "@/lib/money";
-import { MonthsTable } from "./months-table";
+import { AnnualHero } from "./annual-hero";
 import { YearPicker } from "./year-picker";
 import {
   CategoryMonthsTable,
@@ -101,6 +100,7 @@ export default async function AnnualOverviewPage({
     { data: investmentContributionRows },
     { data: investmentAccounts },
     { data: investmentBuckets },
+    { data: payees },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -128,7 +128,7 @@ export default async function AnnualOverviewPage({
       .order("line_sort"),
     supabase
       .from("transactions")
-      .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal")
+      .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal, payee_id")
       .eq("household_id", household.id)
       .gte("occurred_on", liveRangeStart)
       .lte("occurred_on", liveRangeEnd)
@@ -146,6 +146,10 @@ export default async function AnnualOverviewPage({
     supabase
       .from("buckets")
       .select("id, account_id, name")
+      .eq("household_id", household.id),
+    supabase
+      .from("payees")
+      .select("id, name")
       .eq("household_id", household.id),
   ]);
 
@@ -226,7 +230,6 @@ export default async function AnnualOverviewPage({
   for (const r of rows) {
     for (const { kind } of COLUMNS) totals[kind] += r.values[kind];
   }
-  const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
   // Category by Months: preserve each Budget group while its accounting kind
   // continues to feed the five summary totals above.
   const subIdsByCategory = new Map<string, string[]>();
@@ -284,6 +287,35 @@ export default async function AnnualOverviewPage({
     byYear.set(y, (byYear.get(y) ?? 0) + t.amount_cents);
   }
 
+  // Per-payee detail for line items that roll up (Subscriptions, Irregular Bills):
+  // subcategory_id → payee_name → year → cents
+  const DETAIL_SUB_NAMES = new Set(["subscriptions", "irregular bills"]);
+  const detailPayeeBySub = new Map<string, Map<string, Map<number, number>>>();
+  const payeeName = new Map((payees ?? []).map((p) => [p.id, p.name]));
+  const detailSubIds = new Set(
+    (subs ?? [])
+      .filter((s) => DETAIL_SUB_NAMES.has(s.name.toLowerCase()))
+      .map((s) => s.id),
+  );
+  for (const t of liveTxRows ?? []) {
+    if (!t.subcategory_id || !detailSubIds.has(t.subcategory_id)) continue;
+    if (!t.payee_id) continue;
+    const name = payeeName.get(t.payee_id);
+    if (!name) continue;
+    const y = parseInt(t.occurred_on.slice(0, 4), 10);
+    let byPayee = detailPayeeBySub.get(t.subcategory_id);
+    if (!byPayee) {
+      byPayee = new Map();
+      detailPayeeBySub.set(t.subcategory_id, byPayee);
+    }
+    let byYear = byPayee.get(name);
+    if (!byYear) {
+      byYear = new Map();
+      byPayee.set(name, byYear);
+    }
+    byYear.set(y, (byYear.get(y) ?? 0) + t.amount_cents);
+  }
+
   const budgetSubsForLive: LiveBudgetSub[] = [];
   for (const s of subs ?? []) {
     const kind = kindBySub.get(s.id);
@@ -300,6 +332,7 @@ export default async function AnnualOverviewPage({
       groupLabel: category.name,
       groupSort: category.sort_order,
       customGroup: !category.is_system,
+      ...(detailPayeeBySub.has(s.id) ? { details: detailPayeeBySub.get(s.id) } : {}),
     });
   }
 
@@ -343,7 +376,7 @@ export default async function AnnualOverviewPage({
   const gridCols = "grid-cols-[6.5rem_repeat(6,minmax(5.5rem,1fr))]";
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] space-y-4">
+    <div className="mx-auto w-full space-y-4">
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Annual Overview</h1>
@@ -360,29 +393,13 @@ export default async function AnnualOverviewPage({
         </div>
       </div>
 
-      {/* Year summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label={`${year} Income`} value={totals.income} currency={currency} tone="text-positive" />
-        <Stat
-          label={`${year} Outflow`}
-          value={OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0)}
-          currency={currency}
-          tone="text-negative"
-        />
-        <Stat
-          label={`${year} Net`}
-          value={totalNet}
-          currency={currency}
-          tone={totalNet >= 0 ? "text-positive" : "text-negative"}
-        />
-      </div>
-
-      {/* Months table */}
-      <MonthsTable
+      {/* Year summary + Months table (client wrapper so Outflow can filter by clicking column totals) */}
+      <AnnualHero
+        year={year}
         columns={COLUMNS}
+        outflowKinds={OUTFLOW_KINDS}
         rows={rows}
         totals={totals}
-        totalNet={totalNet}
         currency={currency}
         gridCols={gridCols}
       />
@@ -420,7 +437,7 @@ type BreakdownRow = {
   line_sort: number;
 };
 
-const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "investment", "kidsFunding", "savings"];
+const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "investment", "savings", "kidsFunding"];
 const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
   income: "Income",
   bills: "Bills",
@@ -451,6 +468,8 @@ type LiveBudgetSub = {
   groupSort?: number;
   customGroup?: boolean;
   byYear: Map<number, number>;
+  // Per-item breakdown (payee-grouped) used by Subscriptions / Irregular Bills.
+  details?: Map<string, Map<number, number>>; // itemName → year → cents
 };
 
 function buildBreakdown(
@@ -516,6 +535,27 @@ function buildBreakdown(
     return "savings";
   };
 
+  // Per-line payee-item detail (from live 2026+ transactions) — keyed by
+  // "kind::lineLabelLower". Merged into detailsByParent during group build.
+  const liveDetailByLine = new Map<string, Map<string, Map<number, number>>>();
+  const mergeLiveDetails = (sheetKind: string, lineLabel: string, sub: LiveBudgetSub) => {
+    if (!sub.details) return;
+    const key = `${sheetKind}::${lineLabel.toLowerCase()}`;
+    let byName = liveDetailByLine.get(key);
+    if (!byName) {
+      byName = new Map();
+      liveDetailByLine.set(key, byName);
+    }
+    for (const [name, yr] of sub.details) {
+      let dst = byName.get(name);
+      if (!dst) {
+        dst = new Map();
+        byName.set(name, dst);
+      }
+      for (const [y, v] of yr) dst.set(y, (dst.get(y) ?? 0) + v);
+    }
+  };
+
   let unmatchedSort = 0;
   for (const sub of liveBudgetSubs) {
     const sheetKind = resolveSheetKind(sub);
@@ -526,6 +566,7 @@ function buildBreakdown(
         match.byYear[y] = (match.byYear[y] ?? 0) + v;
         match.total += v;
       }
+      mergeLiveDetails(sheetKind, sub.name, sub);
     } else {
       const useNamedBudgetGroup = !sub.isKids && !sub.isInvestment && Boolean(sub.groupLabel);
       const group = ensureBudgetGroup(
@@ -546,6 +587,7 @@ function buildBreakdown(
       // Also register in the index so a future duplicate sub with the same
       // lowercased name folds into the same "From Budget" row.
       lineIndex.get(sheetKind)?.set(sub.name.toLowerCase(), line);
+      mergeLiveDetails(sheetKind, sub.name, sub);
     }
   }
   // ----------------------------------------------------------------------
@@ -555,12 +597,61 @@ function buildBreakdown(
     const groups = kinds.get(kind);
     if (!groups) continue;
 
+    // Extract "<LineLabel> Detail" groups first — they are attached as .details
+    // on the matching parent line rather than shown as their own group.
+    const detailsByParent = new Map<string, { label: string; byYear: Record<number, number>; total: number }[]>();
+    const detailGroupKeys: string[] = [];
+    for (const [label, g] of groups) {
+      const m = label.match(/^(.+) Detail$/);
+      if (!m) continue;
+      const parent = m[1];
+      const lines = [...g.lines.entries()]
+        .sort((a, b) => a[1].lineSort - b[1].lineSort)
+        .map(([lineLabel, l]) => ({ label: lineLabel, byYear: l.byYear, total: l.total }));
+      const existing = detailsByParent.get(parent) ?? [];
+      // Merge duplicates by label (add byYear + total).
+      const byLabel = new Map(existing.map((d) => [d.label, d]));
+      for (const nl of lines) {
+        const cur = byLabel.get(nl.label);
+        if (cur) {
+          for (const [y, v] of Object.entries(nl.byYear)) cur.byYear[Number(y)] = (cur.byYear[Number(y)] ?? 0) + v;
+          cur.total += nl.total;
+        } else {
+          byLabel.set(nl.label, { label: nl.label, byYear: { ...nl.byYear }, total: nl.total });
+        }
+      }
+      detailsByParent.set(parent, [...byLabel.values()].sort((a, b) => b.total - a.total));
+      detailGroupKeys.push(label);
+    }
+    for (const key of detailGroupKeys) groups.delete(key);
+
     const groupList = [...groups.entries()]
       .sort((a, b) => a[1].groupSort - b[1].groupSort)
       .map(([label, g]) => {
         const lines = [...g.lines.entries()]
           .sort((a, b) => a[1].lineSort - b[1].lineSort)
-          .map(([lineLabel, l]) => ({ label: lineLabel, byYear: l.byYear, total: l.total }));
+          .map(([lineLabel, l]) => {
+            const historical = detailsByParent.get(lineLabel);
+            const live = liveDetailByLine.get(`${kind}::${lineLabel.toLowerCase()}`);
+            // Merge historical + live details by item name.
+            let merged: { label: string; byYear: Record<number, number>; total: number }[] | undefined;
+            if (historical || live) {
+              const map = new Map<string, { label: string; byYear: Record<number, number>; total: number }>();
+              for (const d of historical ?? []) map.set(d.label, { label: d.label, byYear: { ...d.byYear }, total: d.total });
+              if (live) {
+                for (const [name, yr] of live) {
+                  const cur = map.get(name) ?? { label: name, byYear: {}, total: 0 };
+                  for (const [y, v] of yr) {
+                    cur.byYear[y] = (cur.byYear[y] ?? 0) + v;
+                    cur.total += v;
+                  }
+                  map.set(name, cur);
+                }
+              }
+              merged = [...map.values()].sort((a, b) => b.total - a.total);
+            }
+            return { label: lineLabel, byYear: l.byYear, total: l.total, ...(merged ? { details: merged } : {}) };
+          });
 
         const subtotalByYear: Record<number, number> = {};
         let total = 0;
@@ -585,27 +676,6 @@ function buildBreakdown(
     result.push({ kind, label: KIND_LABEL[kind], groups: groupList, totalByYear, total });
   }
   return result;
-}
-
-function Stat({
-  label,
-  value,
-  currency,
-  tone,
-}: {
-  label: string;
-  value: number;
-  currency: string;
-  tone: string;
-}) {
-  return (
-    <div className="rounded-2xl bg-surface px-4 py-3 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>
-        {formatMoney(value, currency)}
-      </p>
-    </div>
-  );
 }
 
 function YearArrow({ year, dir }: { year: number; dir: "prev" | "next" }) {

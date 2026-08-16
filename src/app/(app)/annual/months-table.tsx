@@ -20,9 +20,22 @@ type Props = {
   totalNet: number;
   currency: string;
   gridCols: string;
+  outflowKinds?: CategoryKind[];
+  selectedOutflow?: Set<CategoryKind>;
+  onToggleOutflow?: (kind: CategoryKind) => void;
 };
 
-export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCols }: Props) {
+export function MonthsTable({
+  columns,
+  rows,
+  totals,
+  totalNet,
+  currency,
+  gridCols,
+  outflowKinds,
+  selectedOutflow,
+  onToggleOutflow,
+}: Props) {
   // Default expanded on fresh login; toggle state survives within-session nav.
   const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: true }));
   const open = collapse.open;
@@ -110,9 +123,14 @@ export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCol
                 </span>
                 {columns.map((c) => {
                   const percent = shareOfIncome(totals[c.kind]);
-                  return (
-                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
-                      <span className="text-sm font-bold">{formatMoney(totals[c.kind], currency)}</span>
+                  const isOutflow = outflowKinds?.includes(c.kind) ?? false;
+                  const isSelected = selectedOutflow?.has(c.kind) ?? false;
+                  const clickable = isOutflow && !!onToggleOutflow;
+                  const content = (
+                    <>
+                      <span className="text-sm font-bold">
+                        {formatMoney(totals[c.kind], currency)}
+                      </span>
                       {c.kind === "income" ? null : (
                         <span
                           className="mt-1 w-full border-t border-brand/30 pt-1 text-xs font-semibold text-brand"
@@ -129,6 +147,23 @@ export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCol
                           &nbsp;
                         </span>
                       ) : null}
+                    </>
+                  );
+                  return clickable ? (
+                    <button
+                      key={c.kind}
+                      type="button"
+                      onClick={() => onToggleOutflow!(c.kind)}
+                      aria-pressed={isSelected}
+                      className={`flex cursor-pointer flex-col items-center rounded-md px-1 py-0.5 text-center tabular-nums ring-1 transition hover:bg-brand-soft/50 ${
+                        isSelected ? "ring-2 ring-brand bg-brand-soft/70" : "ring-brand-soft"
+                      }`}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
+                      {content}
                     </span>
                   );
                 })}

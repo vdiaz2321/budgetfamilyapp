@@ -495,7 +495,7 @@ export function TransactionModal({
                 name="cleared"
                 value="on"
                 disabled={pending || splits.length === 0}
-                className="whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-bold text-foreground ring-1 ring-slate-200 transition hover:bg-positive/15 hover:text-positive disabled:opacity-60 dark:bg-slate-800/70 dark:text-slate-100 dark:ring-slate-700 dark:hover:bg-positive/20 dark:hover:text-positive"
+                className="whitespace-nowrap rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
               >
                 Clear
               </button>
@@ -1206,7 +1206,7 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex w-fit items-center gap-1 text-xs font-semibold text-brand hover:text-brand-strong hover:underline"
+        className="inline-flex w-fit items-center gap-1 rounded-md py-1.5 text-sm font-semibold text-brand hover:text-brand-strong hover:underline sm:text-xs sm:py-0"
       >
         ↗ Convert currency to USD
       </button>
@@ -1215,7 +1215,16 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
 
   return (
     <div className="rounded-xl bg-background p-3 ring-1 ring-line">
-      <p className="mb-2 text-xs font-semibold text-muted">Convert to USD</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-muted">Convert to USD</p>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative hover:bg-negative/15"
+        >
+          Close
+        </button>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
@@ -1236,24 +1245,15 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
         <span className="text-sm font-bold tabular-nums text-foreground">
           {loading ? "…" : usd != null ? `$${usd.toFixed(2)}` : "$0.00"}
         </span>
-        <div className="ml-auto flex items-center gap-4">
-          {usdCents != null && (
-            <button
-              type="button"
-              onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
-              className="rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong"
-            >
-              Use
-            </button>
-          )}
+        {usdCents != null && (
           <button
             type="button"
-            onClick={() => setOpen(false)}
-            className="text-xs font-medium text-muted hover:text-foreground"
+            onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
+            className="ml-auto rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong"
           >
-            Close
+            Use
           </button>
-        </div>
+        )}
       </div>
       {error ? (
         <p className="mt-2 text-xs text-negative">{error}</p>

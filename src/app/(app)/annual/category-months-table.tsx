@@ -27,8 +27,8 @@ type Props = {
   currency: string;
 };
 
-// subcategory label + 12 months + Total
-const GRID_COLS = "grid-cols-[10rem_repeat(13,minmax(5rem,1fr))]";
+// subcategory label + Total + 12 months
+const GRID_COLS = "grid-cols-[10rem_minmax(5rem,1fr)_repeat(12,minmax(5rem,1fr))]";
 
 export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
   const [collapse, setCollapse] = useSessionCollapse("annual-category-months", () => ({ open: false }));
@@ -42,7 +42,7 @@ export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
   }
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="overflow-clip rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <button
         type="button"
         onClick={() => setCollapse({ open: !open })}
@@ -95,19 +95,14 @@ function Group({
   const open = collapse.open;
   const headerRef = useRef<HTMLDivElement>(null);
 
-  function syncHeader() {
-    const body = [...(scrollersRef.current ?? [])].find(
-      (el) => el.closest(`[data-category-id="${group.categoryId}"]`) !== null,
-    );
-    if (headerRef.current && body) {
-      headerRef.current.scrollLeft = body.scrollLeft;
-    }
+  function syncHeader(scrollLeft: number) {
+    if (headerRef.current) headerRef.current.scrollLeft = scrollLeft;
   }
 
   return (
     <div
       data-category-id={group.categoryId}
-      className="overflow-hidden rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10"
+      className="overflow-clip rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10"
     >
       <button
         type="button"
@@ -126,13 +121,16 @@ function Group({
         <>
           <div
             ref={headerRef}
-            className="border-y border-line bg-surface"
+            className="sticky top-0 z-20 border-y border-line bg-surface"
             style={{ overflowX: "hidden" }}
           >
             <div className="min-w-[74rem]">
               <div className={`grid ${GRID_COLS} items-center gap-2 pr-4 py-2`}>
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted">
-                  Category
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[10px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
+                  Annual Cat by Mos
+                </span>
+                <span className="text-center text-[11px] font-bold uppercase tracking-wide text-foreground">
+                  Total
                 </span>
                 {monthLabels.map((m) => (
                   <span
@@ -142,9 +140,6 @@ function Group({
                     {m}
                   </span>
                 ))}
-                <span className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
-                  Total
-                </span>
               </div>
             </div>
           </div>
@@ -154,8 +149,9 @@ function Group({
               if (el) scrollersRef.current.add(el);
             }}
             onScroll={(e) => {
-              syncHeader();
-              syncScrollX(e.currentTarget.scrollLeft);
+              const x = e.currentTarget.scrollLeft;
+              syncHeader(x);
+              syncScrollX(x);
             }}
             className="overflow-x-auto"
           >
@@ -166,14 +162,14 @@ function Group({
                     <span className="sticky left-0 z-10 truncate bg-surface pl-4 text-sm font-medium" title={r.name}>
                       {r.name}
                     </span>
+                    <span className="text-center text-xs font-semibold tabular-nums">
+                      {formatMoney(r.total, currency)}
+                    </span>
                     {r.months.map((v, i) => (
                       <span key={i} className="text-center text-xs tabular-nums">
                         {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                       </span>
                     ))}
-                    <span className="text-center text-xs font-semibold tabular-nums">
-                      {formatMoney(r.total, currency)}
-                    </span>
                   </li>
                 ))}
               </ul>
@@ -181,14 +177,14 @@ function Group({
               {/* Subtotal */}
               <div className={`grid ${GRID_COLS} items-center gap-2 border-t border-line pr-4 py-2`}>
                 <span className="sticky left-0 z-10 bg-surface pl-4 text-sm font-bold">Total</span>
+                <span className="text-center text-xs font-bold tabular-nums">
+                  {formatMoney(group.total, currency)}
+                </span>
                 {group.monthTotals.map((v, i) => (
                   <span key={i} className="text-center text-xs font-bold tabular-nums">
                     {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                   </span>
                 ))}
-                <span className="text-center text-xs font-bold tabular-nums">
-                  {formatMoney(group.total, currency)}
-                </span>
               </div>
             </div>
           </div>

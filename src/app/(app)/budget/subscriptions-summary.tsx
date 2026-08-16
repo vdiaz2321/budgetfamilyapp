@@ -76,7 +76,7 @@ export function SubscriptionsSummaryCard({
   const cardMap = new Map((creditCards ?? []).map((c) => [c.id, c.name]));
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5">
         <button
           type="button"
@@ -343,7 +343,7 @@ export function IrregularBillsSummaryCard({
   const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0);
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5">
         <button
           type="button"
