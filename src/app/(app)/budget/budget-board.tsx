@@ -755,49 +755,57 @@ function SummaryHeroCard({
   if (!expanded) {
     return (
       <div className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={false}
-          className="flex w-full items-center gap-2 bg-brand-soft px-4 py-2.5 text-left transition hover:bg-brand/20"
-        >
-          <svg
-            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className="shrink-0 -rotate-90 text-brand"
-            aria-hidden
+        <div className="relative bg-brand-soft">
+          <div
+            onClick={onToggle}
+            className="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left transition hover:bg-brand/20"
           >
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-          <div className="min-w-0 flex-1">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 tabular-nums">
-              <span>
-                <span className="block text-[11px] font-semibold text-foreground">Planned Budget:</span>
-                <span className="block text-[15px] font-semibold text-foreground">{formatMoney(outflowPlanned, currency)}</span>
-              </span>
-              <span className="text-right">
-                <span className="block text-[11px] font-semibold text-foreground">Income Planned:</span>
-                <span className="block text-[15px] font-semibold text-positive">{formatMoney(incomePlanned, currency)}</span>
-              </span>
-              <span>
-                <span className="block text-[11px] font-semibold text-foreground">Actual Spent:</span>
-                <span className="block text-[15px] font-semibold text-negative">{formatMoney(actualSpent, currency)}</span>
-              </span>
-              <span className="text-right">
-                <span className="block text-[11px] font-semibold text-foreground">Left to Budget:</span>
-                <span className={`block text-[15px] font-semibold ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
-                  {formatMoney(displayLeft, currency)}
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle();
+              }}
+              aria-expanded={false}
+              aria-label="Expand summary"
+              className="shrink-0 cursor-pointer rounded-full p-1.5 text-brand transition hover:bg-brand/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            >
+              <svg
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                className="-rotate-90"
+                aria-hidden
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 tabular-nums">
+                <span>
+                  <span className="block text-[11px] font-semibold text-foreground">Planned Budget:</span>
+                  <span className="block text-[15px] font-semibold text-foreground">{formatMoney(outflowPlanned, currency)}</span>
                 </span>
-              </span>
+                <span className="text-right">
+                  <span className="block text-[11px] font-semibold text-foreground">Income Planned:</span>
+                  <span className="block text-[15px] font-semibold text-positive">{formatMoney(incomePlanned, currency)}</span>
+                </span>
+                <span>
+                  <span className="block text-[11px] font-semibold text-foreground">Actual Spent:</span>
+                  <span className="block text-[15px] font-semibold text-negative">{formatMoney(actualSpent, currency)}</span>
+                </span>
+                <span className="text-right">
+                  <span className="block text-[11px] font-semibold text-foreground">Left to Budget:</span>
+                  <span className={`block text-[15px] font-semibold ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
+                    {formatMoney(displayLeft, currency)}
+                  </span>
+                </span>
+              </div>
             </div>
-            {rolloverCents > 0 ? (
-              <p className="mt-1 text-[11px] text-muted">
-                incl.{" "}
-                <span className="font-semibold text-brand">{formatMoney(rolloverCents, currency)}</span> rolled in from prior month
-              </p>
-            ) : null}
           </div>
-        </button>
+          <div className="flex justify-center px-4 pb-2.5 sm:absolute sm:left-1/2 sm:top-1/2 sm:z-10 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:p-0">
+            <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} centered />
+          </div>
+        </div>
       </div>
     );
   }
@@ -894,6 +902,89 @@ function dueItemDateLabel(date: string) {
   return target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function RolloverControl({
+  rollover,
+  monthFirstOfMonth,
+  currency,
+  centered = false,
+}: {
+  rollover: Props["rollover"];
+  monthFirstOfMonth: string;
+  currency: string;
+  centered?: boolean;
+}) {
+  const [pending, start] = useTransition();
+  const [editing, setEditing] = useState(false);
+  const { availableCents, liveAvailableCents, enabled, prevMonthLabel } = rollover;
+  const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
+
+  if (!hasRollover) return null;
+
+  const amount = formatMoney(Math.max(0, availableCents), currency);
+  const prevMonthName = prevMonthLabel.replace(/\s+\d{4}$/, "");
+  const rolloverPillContent = (
+    <>
+      <span className="size-1.5 rounded-full bg-positive" aria-hidden />
+      <span className="text-[11px] font-semibold opacity-80">Rollover {prevMonthName}:</span>
+      <span className="text-[11px] font-bold tabular-nums">{amount}</span>
+    </>
+  );
+
+  return (
+    <div className="relative flex min-w-0 items-center gap-1.5 text-xs text-muted">
+      {enabled ? (
+        <>
+          {editing ? (
+            <OverrideInput
+              monthFirstOfMonth={monthFirstOfMonth}
+              currentCents={availableCents}
+              liveLabel={formatMoney(liveAvailableCents, currency)}
+              onDone={() => setEditing(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive"
+              aria-label={`${amount} rolled over from ${prevMonthName}`}
+            >
+              {rolloverPillContent}
+            </button>
+          )}
+          <form
+            action={(fd) => start(() => setRollover(fd))}
+            className={centered ? "absolute left-full ml-1.5" : undefined}
+          >
+            <input type="hidden" name="month" value={monthFirstOfMonth} />
+            <input type="hidden" name="enable" value="" />
+            <button
+              type="submit"
+              disabled={pending}
+              className="shrink-0 cursor-pointer whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-muted transition hover:border-brand/30 hover:text-brand disabled:cursor-wait disabled:opacity-60"
+            >
+              {pending ? "Saving…" : "Undo"}
+            </button>
+          </form>
+        </>
+      ) : (
+        <form action={(fd) => start(() => setRollover(fd))}>
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <input type="hidden" name="enable" value="on" />
+          <button
+            type="submit"
+            disabled={pending}
+            title={`Add ${prevMonthLabel}'s unspent income to this month`}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive disabled:cursor-wait disabled:opacity-60"
+            aria-label={`Rollover ${prevMonthName}: ${amount}`}
+          >
+            {pending ? "Rolling over…" : rolloverPillContent}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 // Footer row: [Due this week pill] ... [rollover amount] [Rollover/Remove btn]
 // Due pill expands an inline list above the row.
 function RolloverFooter({
@@ -909,24 +1000,19 @@ function RolloverFooter({
   dueItems?: DueItem[];
   onPayDue?: (item: DueItem) => void;
 }) {
-  const [pending, start] = useTransition();
   const [copyPending, startCopy] = useTransition();
   const [undoPending, startUndo] = useTransition();
-  const [editing, setEditing] = useState(false);
   const [showDue, setShowDue] = useState(false);
   const [snapshot, setSnapshot] = useState<
     Array<{ subcategory_id: string; planned_cents: number | null }> | null
   >(null);
-  const { availableCents, liveAvailableCents, enabled, prevMonthLabel } = rollover;
+  const { enabled, prevMonthLabel } = rollover;
 
   useEffect(() => {
     if (!snapshot) return;
     const t = window.setTimeout(() => setSnapshot(null), 30_000);
     return () => window.clearTimeout(t);
   }, [snapshot]);
-  const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
-  const amount = formatMoney(Math.max(0, availableCents), currency);
-
   return (
     <div className={`border-t ${enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"}`}>
       {/* Expandable due-this-week list */}
@@ -971,7 +1057,7 @@ function RolloverFooter({
         </ul>
       )}
 
-      {/* Footer: row 1 — Due pill + rollover amount + Rollover/Remove btn */}
+      {/* Footer: row 1 — Due pill + clickable rollover pill / undo action */}
       <div className="flex items-center gap-2 px-4 pt-2.5">
         {dueItems.length > 0 && (
           <button
@@ -986,59 +1072,9 @@ function RolloverFooter({
           </button>
         )}
 
-        <span className={`ml-auto flex min-w-0 items-center gap-1 text-xs ${enabled ? "text-brand" : "text-muted"}`}>
-          {hasRollover ? (
-            enabled ? (
-              <>
-                {editing ? (
-                  <OverrideInput
-                    monthFirstOfMonth={monthFirstOfMonth}
-                    currentCents={availableCents}
-                    liveLabel={formatMoney(liveAvailableCents, currency)}
-                    onDone={() => setEditing(false)}
-                  />
-                ) : (
-                  <>
-                    <span className="font-semibold tabular-nums">{amount}</span>
-                    <button
-                      type="button"
-                      onClick={() => setEditing(true)}
-                      title="Manually adjust the rollover amount"
-                      className="rounded p-0.5 opacity-40 hover:opacity-100 hover:text-foreground"
-                    >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
-                      </svg>
-                    </button>
-                  </>
-                )}
-                {" "}· {prevMonthLabel}
-              </>
-            ) : (
-              <><span className="font-semibold tabular-nums">{amount}</span> · {prevMonthLabel}</>
-            )
-          ) : null}
-        </span>
-
-        <form action={(fd) => start(() => setRollover(fd))}>
-          <input type="hidden" name="month" value={monthFirstOfMonth} />
-          <input type="hidden" name="enable" value={enabled ? "" : "on"} />
-          <button
-            type="submit"
-            disabled={pending}
-            title={enabled
-              ? `Stop including ${prevMonthLabel}'s unspent income`
-              : `Add ${prevMonthLabel}'s unspent income to this month`}
-            className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
-              enabled
-                ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-                : "bg-brand text-white hover:bg-brand-strong"
-            }`}
-          >
-            {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
-          </button>
-        </form>
+        <div className="ml-auto">
+          <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+        </div>
       </div>
 
       {/* Footer: row 2 — Roll-in / Undo, right-aligned pill */}
