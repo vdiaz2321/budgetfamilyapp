@@ -23,10 +23,12 @@ type Props = {
 };
 
 export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCols }: Props) {
-  // Default collapsed on fresh login; toggle state survives within-session nav.
-  const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: false }));
+  // Default expanded on fresh login; toggle state survives within-session nav.
+  const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: true }));
   const open = collapse.open;
   const setOpen = (v: boolean) => setCollapse({ open: v });
+  const shareOfIncome = (value: number) =>
+    totals.income === 0 ? null : (value / totals.income) * 100;
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -99,19 +101,51 @@ export function MonthsTable({ columns, rows, totals, totalNet, currency, gridCol
               </ul>
 
               {/* Totals */}
-              <div className={`grid ${gridCols} items-center gap-2 border-t border-line px-4 py-2.5`}>
-                <span className="text-sm font-bold">Total</span>
-                {columns.map((c) => (
-                  <span key={c.kind} className="text-center text-sm font-bold tabular-nums">
-                    {formatMoney(totals[c.kind], currency)}
+              <div className={`grid ${gridCols} items-center gap-2 border-t border-brand/20 bg-brand-soft/35 px-4 py-3`}>
+                <span className="flex flex-col items-center text-sm font-bold">
+                  <span className="self-start">Total</span>
+                  <span className="mt-1 w-full whitespace-nowrap border-t border-brand/30 pt-1 text-center text-[11px] font-bold tracking-tight text-brand">
+                    Total % from income
                   </span>
-                ))}
-                <span
-                  className={`text-center text-sm font-bold tabular-nums ${
-                    totalNet >= 0 ? "text-positive" : "text-negative"
-                  }`}
-                >
-                  {formatMoney(totalNet, currency)}
+                </span>
+                {columns.map((c) => {
+                  const percent = shareOfIncome(totals[c.kind]);
+                  return (
+                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
+                      <span className="text-sm font-bold">{formatMoney(totals[c.kind], currency)}</span>
+                      {c.kind === "income" ? null : (
+                        <span
+                          className="mt-1 w-full border-t border-brand/30 pt-1 text-xs font-semibold text-brand"
+                          title="Percent of total income"
+                        >
+                          {percent === null ? "—" : `${percent.toFixed(1)}%`}
+                        </span>
+                      )}
+                      {c.kind === "income" ? (
+                        <span
+                          aria-hidden
+                          className="mt-1 w-full border-t border-brand/30 pt-1 text-xs text-transparent"
+                        >
+                          &nbsp;
+                        </span>
+                      ) : null}
+                    </span>
+                  );
+                })}
+                <span className="flex flex-col items-center text-center tabular-nums">
+                  <span
+                    className={`text-sm font-bold ${
+                      totalNet >= 0 ? "text-positive" : "text-negative"
+                    }`}
+                  >
+                    {formatMoney(totalNet, currency)}
+                  </span>
+                  <span
+                    className="mt-1 w-full border-t border-brand/30 pt-1 text-xs font-semibold text-brand"
+                    title="Net as a percent of total income"
+                  >
+                    {shareOfIncome(totalNet) === null ? "—" : `${shareOfIncome(totalNet)!.toFixed(1)}%`}
+                  </span>
                 </span>
               </div>
             </div>

@@ -487,7 +487,7 @@ function PerformanceChart({
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [mode, setMode] = useState<ChartMode>("stacked");
-  const [chartCollapseState, setChartCollapseState] = useSessionCollapse("invest-chart-open", () => ({ open: false }));
+  const [chartCollapseState, setChartCollapseState] = useSessionCollapse("invest-chart-open", () => ({ open: true }));
   const chartOpen = chartCollapseState.open;
   const setChartOpen = (v: boolean) => setChartCollapseState((s) => ({ ...s, open: v }));
   const desc = useMemo(() => [...years].sort((a, b) => b - a), [years]);
@@ -833,9 +833,9 @@ function PerfTable({
   noCard?: boolean;
 }) {
   const key = `invest-table-${title.toLowerCase().replace(/\s+/g, "-")}`;
-  // Kids Funding starts open on login; everything else starts collapsed.
-  // Session storage remembers per-title toggles across pages.
-  const defaultCollapsed = !/kids/i.test(title);
+  // Investment tables start open on login. Session storage remembers each
+  // table's last state while the user navigates around the app.
+  const defaultCollapsed = false;
   const [collapseState, setCollapseState] = useSessionCollapse(key, () => ({ v: defaultCollapsed }));
   const collapsed = collapseState.v;
   const toggle = () => setCollapseState((s) => ({ ...s, v: !s.v }));
@@ -940,11 +940,11 @@ function PerfTable({
           <thead>
             <tr className="text-[11px] font-medium text-muted">
               <th className="px-4 py-2 text-left">Account</th>
-              {showStart ? <th className="px-3 py-2 text-center">Start</th> : null}
-              <th className="px-3 py-2 text-center">Contrib</th>
-              <th className="px-3 py-2 text-center">Gains</th>
-              <th className="px-3 py-2 text-center">Current</th>
-              <th className="px-4 py-2 text-center">Return</th>
+              {showStart ? <th className="px-3 py-2 text-left">Start</th> : null}
+              <th className="px-3 py-2 text-left">Contrib</th>
+              <th className="px-3 py-2 text-left">Gains</th>
+              <th className="px-3 py-2 text-left">Current</th>
+              <th className="px-4 py-2 text-left">Return</th>
             </tr>
           </thead>
           <tbody>
@@ -1015,7 +1015,7 @@ function PerfTable({
                     {showStart ? (
                       <td className="px-1 py-1">
                         {hasBuckets ? (
-                          <span className={`block text-center text-sm tabular-nums ${(eff.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
+                          <span className={`block text-left text-sm tabular-nums ${(eff.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
                             {eff.startBalanceCents == null ? "—" : formatMoney(eff.startBalanceCents, currency)}
                           </span>
                         ) : (
@@ -1025,7 +1025,7 @@ function PerfTable({
                     ) : null}
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-left text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
                           {formatMoney(eff.contributedCents, currency)}
                         </span>
                       ) : (
@@ -1034,7 +1034,7 @@ function PerfTable({
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        <span className={`block text-left text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
                         </span>
                       ) : (
@@ -1043,14 +1043,14 @@ function PerfTable({
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-left text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
                         </span>
                       ) : (
                         <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
                       )}
                     </td>
-                    <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
+                    <td className={`px-4 py-2 text-left tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
                       {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
                     </td>
                   </tr>
@@ -1076,7 +1076,7 @@ function PerfTable({
                           <td className="px-1 py-1">
                             <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
-                          <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
+                          <td className="px-4 py-1 text-left tabular-nums text-muted">—</td>
                         </tr>
                       ) : null}
                       {a.buckets.map((b) => {
@@ -1098,11 +1098,11 @@ function PerfTable({
                               <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
                             </td>
                             <td className="px-1 py-1">
-                              <span className={`block text-center text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                              <span className={`block text-left text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents == null ? "—" : formatMoney(bc.endBalanceCents, currency)}
                               </span>
                             </td>
-                            <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
+                            <td className="px-4 py-1 text-left tabular-nums text-muted">—</td>
                           </tr>
                         );
                       })}
@@ -1116,21 +1116,21 @@ function PerfTable({
             <tr className="border-t-2 border-line bg-background/40 font-semibold">
               <td className="px-4 py-2">Total</td>
               {showStart ? (
-                <td className={`px-3 py-2 text-center tabular-nums ${startAny ? "text-muted" : zeroCls}`}>
+                <td className={`px-3 py-2 text-left tabular-nums ${startAny ? "text-muted" : zeroCls}`}>
                   {startAny ? formatMoney(startSum, currency) : "—"}
                 </td>
               ) : null}
-              <td className={`px-3 py-2 text-center tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
+              <td className={`px-3 py-2 text-left tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
               <td
-                className={`px-3 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
+                className={`px-3 py-2 text-left tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
                 style={accruedSum > 0 ? { color: "var(--color-chart-5, #0891b2)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
               >
                 {formatMoney(accruedSum, currency)}
               </td>
-              <td className={`px-3 py-2 text-center tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
+              <td className={`px-3 py-2 text-left tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
                 {endAny ? formatMoney(endSum, currency) : "—"}
               </td>
-              <td className={`px-4 py-2 text-center tabular-nums ${totalReturn == null ? zeroCls : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : zeroCls}`}>
+              <td className={`px-4 py-2 text-left tabular-nums ${totalReturn == null ? zeroCls : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : zeroCls}`}>
                 {totalReturn == null ? "—" : `${totalReturn > 0 ? "+" : ""}${formatMoney(totalReturn, currency)}`}
               </td>
             </tr>
@@ -1171,7 +1171,7 @@ function EditCell({
     <form
       ref={formRef}
       action={(fd) => start(() => setInvestmentYear(fd))}
-      className="flex items-center justify-center"
+      className="flex items-center justify-start"
     >
       <span className="pointer-events-none select-none text-sm text-muted">{currencySymbol(currency)}</span>
       <input type="hidden" name="accountId" value={accountId} />
@@ -1209,7 +1209,7 @@ function YearByYear({
   years: number[];
   currency: string;
 }) {
-  const [collapseState, setCollapseState] = useSessionCollapse("invest-yby", () => ({ open: false, mine: true, kids: true }));
+  const [collapseState, setCollapseState] = useSessionCollapse("invest-yby", () => ({ open: true, mine: true, kids: true }));
   const [yByBucketsOpen, setYByBucketsOpen] = useSessionCollapse("invest-yby-buckets-open", () => ({}));
   const open = collapseState.open;
   const setOpen = (v: boolean | ((p: boolean) => boolean)) => setCollapseState((s) => ({ ...s, open: typeof v === "function" ? v(s.open) : v }));

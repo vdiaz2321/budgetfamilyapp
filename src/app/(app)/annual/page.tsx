@@ -343,7 +343,7 @@ export default async function AnnualOverviewPage({
   const gridCols = "grid-cols-[6.5rem_repeat(6,minmax(5.5rem,1fr))]";
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-4">
+    <div className="mx-auto w-full max-w-[1600px] space-y-4">
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Annual Overview</h1>
@@ -362,15 +362,15 @@ export default async function AnnualOverviewPage({
 
       {/* Year summary */}
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="Income" value={totals.income} currency={currency} tone="text-positive" />
+        <Stat label={`${year} Income`} value={totals.income} currency={currency} tone="text-positive" />
         <Stat
-          label="Outflow"
+          label={`${year} Outflow`}
           value={OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0)}
           currency={currency}
           tone="text-negative"
         />
         <Stat
-          label="Net"
+          label={`${year} Net`}
           value={totalNet}
           currency={currency}
           tone={totalNet >= 0 ? "text-positive" : "text-negative"}

@@ -52,9 +52,11 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
   // Dynamic column count (label + N years + Total) → inline style, since Tailwind's
   // JIT can't see a computed grid-cols-[…] arbitrary value.
   const gridStyle: CSSProperties = {
-    gridTemplateColumns: `12rem repeat(${years.length + 1}, minmax(7rem, 1fr))`,
+    // Let the line-item column use extra room on wider displays, while keeping
+    // enough width for long names on a laptop before horizontal scrolling begins.
+    gridTemplateColumns: `minmax(16rem, 1.5fr) repeat(${years.length + 1}, minmax(7rem, 1fr))`,
   };
-  const minW = `${13 + (years.length + 1) * 7.25}rem`;
+  const minW = `${17 + (years.length + 1) * 7.25}rem`;
 
   return (
     <section className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
@@ -275,7 +277,7 @@ function Group({
           Savings, Investment) whose name would just repeat the section. */}
       {!singleGroup ? (
         <div className="grid items-center gap-2 bg-brand-soft/15 pr-4 py-1.5" style={gridStyle}>
-          <span className="sticky left-0 z-10 truncate bg-surface pl-4 text-xs font-bold" title={group.label}>
+          <span className="sticky left-0 z-10 bg-surface pl-4 text-xs font-bold leading-tight whitespace-normal break-words" title={group.label}>
             {group.label}
           </span>
           {years.map((y) => {
@@ -296,7 +298,7 @@ function Group({
         {group.lines.map((l) => (
           <li key={l.label} className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
             <span
-              className={`sticky left-0 z-10 truncate bg-surface text-xs ${singleGroup ? "pl-4" : "pl-7"}`}
+              className={`sticky left-0 z-10 bg-surface text-xs leading-tight whitespace-normal break-words ${singleGroup ? "pl-4" : "pl-7"}`}
               title={l.label}
             >
               {l.label}
