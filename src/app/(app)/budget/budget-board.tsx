@@ -971,9 +971,8 @@ function RolloverFooter({
         </ul>
       )}
 
-      {/* Single combined footer row */}
-      <div className="flex items-center gap-2 px-4 py-2.5">
-        {/* Due this week pill */}
+      {/* Footer: row 1 — Due pill + rollover amount + Rollover/Remove btn */}
+      <div className="flex items-center gap-2 px-4 pt-2.5">
         {dueItems.length > 0 && (
           <button
             type="button"
@@ -983,13 +982,10 @@ function RolloverFooter({
             }`}
           >
             Due this week
-            <span className="text-[10px] font-bold text-foreground">
-              {dueItems.length}
-            </span>
+            <span className="text-[10px] font-bold text-foreground">{dueItems.length}</span>
           </button>
         )}
 
-        {/* Rollover amount — pushed to the right */}
         <span className={`ml-auto flex min-w-0 items-center gap-1 text-xs ${enabled ? "text-brand" : "text-muted"}`}>
           {hasRollover ? (
             enabled ? (
@@ -1025,63 +1021,63 @@ function RolloverFooter({
           ) : null}
         </span>
 
-        {/* Rollover / Remove button + Roll-in planned */}
-        <div className="flex shrink-0 items-center gap-0">
-          <form action={(fd) => start(() => setRollover(fd))}>
+        <form action={(fd) => start(() => setRollover(fd))}>
+          <input type="hidden" name="month" value={monthFirstOfMonth} />
+          <input type="hidden" name="enable" value={enabled ? "" : "on"} />
+          <button
+            type="submit"
+            disabled={pending}
+            title={enabled
+              ? `Stop including ${prevMonthLabel}'s unspent income`
+              : `Add ${prevMonthLabel}'s unspent income to this month`}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
+              enabled
+                ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
+                : "bg-brand text-white hover:bg-brand-strong"
+            }`}
+          >
+            {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
+          </button>
+        </form>
+      </div>
+
+      {/* Footer: row 2 — Roll-in / Undo, right-aligned pill */}
+      <div className="flex justify-end px-4 pb-2.5 pt-1.5">
+        {snapshot ? (
+          <button
+            type="button"
+            disabled={undoPending}
+            onClick={() => {
+              const snap = snapshot;
+              startUndo(async () => {
+                await restorePlansSnapshot(monthFirstOfMonth, snap);
+                setSnapshot(null);
+              });
+            }}
+            className="rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-[11px] font-bold text-brand transition hover:bg-brand/20 disabled:opacity-60"
+          >
+            {undoPending ? "Undoing…" : `↩ Undo roll-in from ${prevMonthLabel}`}
+          </button>
+        ) : (
+          <form
+            action={(fd) =>
+              startCopy(async () => {
+                const res = await copyPlansFromPreviousMonth(fd);
+                if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
+              })
+            }
+          >
             <input type="hidden" name="month" value={monthFirstOfMonth} />
-            <input type="hidden" name="enable" value={enabled ? "" : "on"} />
             <button
               type="submit"
-              disabled={pending}
-              title={enabled
-                ? `Stop including ${prevMonthLabel}'s unspent income`
-                : `Add ${prevMonthLabel}'s unspent income to this month`}
-              className={`shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition disabled:opacity-60 ${
-                enabled
-                  ? "text-brand hover:bg-white/40 dark:hover:bg-white/10"
-                  : "bg-brand text-white hover:bg-brand-strong"
-              }`}
+              disabled={copyPending}
+              title={`Copy every planned amount from ${prevMonthLabel} into this month`}
+              className="rounded-full border border-brand/30 bg-brand-soft/60 px-3 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand-soft disabled:opacity-60"
             >
-              {pending ? "Saving…" : enabled ? "Remove" : "Rollover"}
+              {copyPending ? "Copying…" : `↓ Roll in ${prevMonthLabel} planned`}
             </button>
           </form>
-          <span className="mx-1.5 text-[11px] text-muted">/</span>
-          {snapshot ? (
-            <button
-              type="button"
-              disabled={undoPending}
-              onClick={() => {
-                const snap = snapshot;
-                startUndo(async () => {
-                  await restorePlansSnapshot(monthFirstOfMonth, snap);
-                  setSnapshot(null);
-                });
-              }}
-              className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-brand transition hover:bg-white/40 disabled:opacity-60 dark:hover:bg-white/10"
-            >
-              {undoPending ? "Undoing…" : "Undo roll-in"}
-            </button>
-          ) : (
-            <form
-              action={(fd) =>
-                startCopy(async () => {
-                  const res = await copyPlansFromPreviousMonth(fd);
-                  if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
-                })
-              }
-            >
-              <input type="hidden" name="month" value={monthFirstOfMonth} />
-              <button
-                type="submit"
-                disabled={copyPending}
-                title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-                className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-muted transition hover:bg-white/40 hover:text-foreground disabled:opacity-60 dark:hover:bg-white/10"
-              >
-                {copyPending ? "Copying…" : `Roll in ${prevMonthLabel} planned`}
-              </button>
-            </form>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );

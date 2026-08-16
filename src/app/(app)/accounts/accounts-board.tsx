@@ -514,9 +514,19 @@ function CreditCardSection({
   const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
   const [showOnlyOwedCards, setShowOnlyOwedCards] = useState(false);
   const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
+  const [showOnlyTravelRedeem, setShowOnlyTravelRedeem] = useState(false);
+  const [showOnlyHotelRedeem, setShowOnlyHotelRedeem] = useState(false);
   const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
   const hasOwed = (a: AccountData) => (a.owedCents ?? 0) > 0;
   const hasPts = (a: AccountData) => (a.cardDetails?.currentPoints ?? 0) > 0;
+  // A card "contributes" to the Redeemable tile when it's in that rewards
+  // category and has redeemable value (points × micro-value + free-night credit).
+  const hasRedeemableIn = (a: AccountData, cat: "travel" | "hotel") => {
+    const d = a.cardDetails;
+    if (!d || d.rewardsCategory !== cat) return false;
+    const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
+    return pts + (d.freeNightCreditCents ?? 0) > 0;
+  };
   const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
     const next = new Set(prev);
     if (next.has(bank)) next.delete(bank);
@@ -580,24 +590,18 @@ function CreditCardSection({
   const owedFilter = (a: AccountData) => !showOnlyOwedCards || hasOwed(a);
   const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
   const passesFilters = (a: AccountData) => feeFilter(a) && owedFilter(a) && ptsFilter(a);
-  type SortKey = "default" | "expiring" | "owed" | "points";
-  const [travelSort, setTravelSort] = useState<SortKey>("default");
-  const [hotelSort, setHotelSort] = useState<SortKey>("default");
-  const applySort = (cards: AccountData[], key: SortKey): AccountData[] => {
-    if (key === "default") return cards;
-    const copy = [...cards];
-    const bigFuture = "9999-12-31";
-    if (key === "expiring") {
-      copy.sort((a, b) => (a.cardDetails?.freeNightExpiresOn ?? bigFuture).localeCompare(b.cardDetails?.freeNightExpiresOn ?? bigFuture));
-    } else if (key === "owed") {
-      copy.sort((a, b) => (b.owedCents ?? 0) - (a.owedCents ?? 0));
-    } else if (key === "points") {
-      copy.sort((a, b) => (b.cardDetails?.currentPoints ?? 0) - (a.cardDetails?.currentPoints ?? 0));
-    }
-    return copy;
-  };
-  const travelCards = applySort(localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "travel" && passesFilters(a)), travelSort);
-  const hotelCards = applySort(localAccounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel" && passesFilters(a)), hotelSort);
+  // Per-category "contributes to Redeemable" filters — scoped to their own
+  // section so clicking Travel Redeemable doesn't empty the Hotel list.
+  const travelCards = localAccounts.filter((a) =>
+    a.cardDetails?.rewardsCategory === "travel"
+    && passesFilters(a)
+    && (!showOnlyTravelRedeem || hasRedeemableIn(a, "travel")),
+  );
+  const hotelCards = localAccounts.filter((a) =>
+    a.cardDetails?.rewardsCategory === "hotel"
+    && passesFilters(a)
+    && (!showOnlyHotelRedeem || hasRedeemableIn(a, "hotel")),
+  );
   const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
@@ -670,7 +674,7 @@ function CreditCardSection({
           </button>
 
           {(totalPoints > 0 || travelRedeemable > 0 || hotelRedeemable > 0 || feesPaid > 0 || totalOwed > 0) ? (
-            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-6">
+            <div className="mt-4 grid grid-cols-2 items-stretch gap-1.5 sm:grid-cols-7">
               {totalPoints > 0 ? (
                 <StatTile
                   label="Current Pts"
@@ -682,10 +686,24 @@ function CreditCardSection({
                 />
               ) : null}
               {travelRedeemable > 0 ? (
-                <StatTile label="Travel Redeemable" value={formatMoney(travelRedeemable, currency)} tone="sky" />
+                <StatTile
+                  label="Travel Redeemable"
+                  value={formatMoney(travelRedeemable, currency)}
+                  tone="sky"
+                  onClick={() => setShowOnlyTravelRedeem((v) => !v)}
+                  active={showOnlyTravelRedeem}
+                  title={showOnlyTravelRedeem ? "Show all cards" : "Show only travel cards contributing to this total"}
+                />
               ) : null}
               {hotelRedeemable > 0 ? (
-                <StatTile label="Hotel Redeemable" value={formatMoney(hotelRedeemable, currency)} tone="teal" />
+                <StatTile
+                  label="Hotel Redeemable"
+                  value={formatMoney(hotelRedeemable, currency)}
+                  tone="teal"
+                  onClick={() => setShowOnlyHotelRedeem((v) => !v)}
+                  active={showOnlyHotelRedeem}
+                  title={showOnlyHotelRedeem ? "Show all cards" : "Show only hotel cards contributing to this total"}
+                />
               ) : null}
               {feesPaid > 0 ? (
                 <StatTile
@@ -695,6 +713,14 @@ function CreditCardSection({
                   onClick={() => setShowOnlyFeeCards((v) => !v)}
                   active={showOnlyFeeCards}
                   title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
+                />
+              ) : null}
+              {feesAll > 0 ? (
+                <StatTile
+                  label="Actual Fees"
+                  value={`${formatMoney(feesAll, currency)}/yr`}
+                  tone="orange"
+                  title={`Total annual fees across all cards including waived (${formatMoney(feesWaived, currency)}/yr waived)`}
                 />
               ) : null}
               {totalOwed > 0 ? (
@@ -707,14 +733,14 @@ function CreditCardSection({
                   title={showOnlyOwedCards ? "Show all cards" : "Show only cards with a balance owed"}
                 />
               ) : null}
-              <div className="flex flex-col items-center justify-center rounded-lg bg-slate-500/10 px-3 py-2 text-center ring-1 ring-slate-500/30">
-                <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+              <div className="flex flex-col items-center justify-center rounded-lg bg-slate-500/10 px-2 py-1.5 text-center ring-1 ring-slate-500/30">
+                <div className="flex items-center justify-center gap-1 text-[9px] font-semibold text-slate-700 dark:text-slate-300">
                   <span>Travel: <span className="tabular-nums">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span></span>
                   <span className="text-slate-500/60">/</span>
                   <span>Hotel: <span className="tabular-nums">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span></span>
                 </div>
-                <div className="mt-0.5 text-xs font-bold tabular-nums text-slate-700 dark:text-slate-300">
-                  Total Cards: {accounts.length}
+                <div className="mt-0.5 text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">
+                  Total: {accounts.length}
                 </div>
               </div>
             </div>
@@ -762,6 +788,7 @@ function CreditCardSection({
           ) : isMain ? (
             <div>
               <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+                {showOnlyHotelRedeem ? <section aria-hidden /> : (
                 <section>
                   <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-sky-500/[0.06] px-4 py-3 dark:bg-sky-500/10">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
@@ -773,23 +800,14 @@ function CreditCardSection({
                     <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-300">
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
-                    <select
-                      value={travelSort}
-                      onChange={(e) => setTravelSort(e.target.value as SortKey)}
-                      className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-sky-500/30 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:bg-sky-950/50 dark:text-sky-300"
-                      aria-label="Sort travel cards"
-                    >
-                      <option value="default">Sort: Default</option>
-                      <option value="expiring">Expiring soonest</option>
-                      <option value="owed">Highest owed</option>
-                      <option value="points">Most points</option>
-                    </select>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
                   </div>
                   {travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
                 </section>
+                )}
+                {showOnlyTravelRedeem ? <section aria-hidden /> : (
                 <section>
                   <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-teal-500/[0.06] px-4 py-3 dark:bg-teal-500/10">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
@@ -802,25 +820,15 @@ function CreditCardSection({
                     <span className="rounded-md bg-teal-500/15 px-2 py-0.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
-                    <select
-                      value={hotelSort}
-                      onChange={(e) => setHotelSort(e.target.value as SortKey)}
-                      className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold text-teal-700 ring-1 ring-teal-500/30 focus:outline-none focus:ring-2 focus:ring-teal-500 dark:bg-teal-950/50 dark:text-teal-300"
-                      aria-label="Sort hotel cards"
-                    >
-                      <option value="default">Sort: Default</option>
-                      <option value="expiring">Expiring soonest</option>
-                      <option value="owed">Highest owed</option>
-                      <option value="points">Most points</option>
-                    </select>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
                   </div>
                   {hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-muted">No hotel cards yet.</p>}
                 </section>
+                )}
               </div>
-              {otherCards.length > 0 ? (
+              {otherCards.length > 0 && !showOnlyTravelRedeem && !showOnlyHotelRedeem ? (
                 <section className="border-t border-line">
                   <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-400">
@@ -1018,21 +1026,35 @@ function CreditCardPanel({
           {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || (d && d.currentPoints > 0) || d?.bonusInfo) ? (
             <p className="mt-1 flex flex-wrap items-center gap-1.5">
               {d && d.currentPoints > 0 ? (
-                <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
-                  Current Pts: <span className="ml-1 tabular-nums">{d.currentPoints.toLocaleString()}</span>
+                <>
+                  <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                    Current Pts: <span className="ml-1 tabular-nums">{d.currentPoints.toLocaleString()}</span>
+                  </span>
                   {d.pointsValueMicros ? (
-                    <span className="ml-1 font-normal text-emerald-800/80 dark:text-emerald-300/80">
-                      ≈ ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}
+                    <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                      Total Value: <span className="ml-1 tabular-nums">${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}</span>
                     </span>
                   ) : null}
-                </span>
+                </>
               ) : null}
               {d?.bonusInfo ? (
                 d.bonusEarned ? (
-                  <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 6 9 17l-5-5" /></svg>
-                    Bonus earned: {d.bonusInfo}
-                  </span>
+                  // Only surface "Bonus earned" while the card is new — from
+                  // date opened through ~a few months after the bonus should
+                  // have been met. After 12 months it's stale info, so hide it.
+                  (() => {
+                    if (!card.dateOpened) return null;
+                    const opened = new Date(card.dateOpened);
+                    const cutoff = new Date();
+                    cutoff.setMonth(cutoff.getMonth() - 12);
+                    if (opened < cutoff) return null;
+                    return (
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 6 9 17l-5-5" /></svg>
+                        Bonus earned: {d.bonusInfo}
+                      </span>
+                    );
+                  })()
                 ) : (
                   <span
                     className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${
@@ -1064,9 +1086,7 @@ function CreditCardPanel({
                       className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${
                         fnUsed && fnExpired
                           ? "text-muted line-through"
-                          : (fnExpired || fnSoon) && !fnUsed
-                            ? "text-negative"
-                            : "text-muted"
+                          : "text-negative"
                       }`}
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -1132,37 +1152,12 @@ function CreditCardPanel({
               placeholder="Netflix, Google Drive"
             />
             <InlineField
-              label="Current Pts"
-              accountId={card.id}
-              field="currentPoints"
-              type="integer"
-              rawValue={d?.currentPoints ? String(d.currentPoints) : ""}
-              displayValue={d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : "—"}
-              placeholder="0"
-            />
-            <InlineField
               label="Auth user"
               accountId={card.id}
               field="authUser"
               rawValue={d?.authUser ?? ""}
               displayValue={d?.authUser ?? "—"}
               placeholder="Vic / Johana"
-            />
-            <InlineSelect
-              label="Rewards cat"
-              accountId={card.id}
-              field="rewardsCategory"
-              rawValue={d?.rewardsCategory ?? ""}
-              displayValue={
-                d?.rewardsCategory
-                  ? d.rewardsCategory.charAt(0).toUpperCase() + d.rewardsCategory.slice(1)
-                  : "—"
-              }
-              options={[
-                { value: "", label: "Not set" },
-                { value: "travel", label: "Travel" },
-                { value: "hotel", label: "Hotel" },
-              ]}
             />
             <InlineField
               label="Annual fee"
@@ -1313,7 +1308,7 @@ function CreditCardPanel({
   );
 }
 
-type StatTone = "emerald" | "sky" | "teal" | "amber" | "rose" | "slate";
+type StatTone = "emerald" | "sky" | "teal" | "amber" | "orange" | "rose" | "slate";
 const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; value: string; activeBg: string }> = {
   slate: {
     bg: "bg-slate-500/10",
@@ -1350,6 +1345,13 @@ const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; va
     value: "text-amber-700 dark:text-amber-300",
     activeBg: "bg-amber-500/25",
   },
+  orange: {
+    bg: "bg-orange-500/10",
+    ring: "ring-orange-500/30",
+    label: "text-orange-700 dark:text-orange-400",
+    value: "text-orange-700 dark:text-orange-300",
+    activeBg: "bg-orange-500/25",
+  },
   rose: {
     bg: "bg-rose-500/10",
     ring: "ring-rose-500/30",
@@ -1375,11 +1377,11 @@ function StatTile({
   title?: string;
 }) {
   const t = STAT_TONES[tone];
-  const base = `rounded-lg px-3 py-2 text-center ring-1 ${active ? t.activeBg : t.bg} ${t.ring}`;
+  const base = `rounded-lg px-2 py-1.5 sm:px-2 sm:py-1.5 text-center ring-1 ${active ? t.activeBg : t.bg} ${t.ring}`;
   const inner = (
     <>
-      <div className={`text-[10px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
-      <div className={`mt-0.5 text-base font-bold tabular-nums sm:text-lg ${t.value}`}>{value}</div>
+      <div className={`text-[9px] sm:text-[9px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
+      <div className={`mt-0.5 text-sm font-bold tabular-nums sm:text-sm ${t.value}`}>{value}</div>
     </>
   );
   if (onClick) {
@@ -1450,7 +1452,7 @@ function InlineField({
     });
   };
 
-  const inputType = type === "date" ? "date" : type === "url" ? "url" : type === "integer" || type === "currency" ? "text" : "text";
+  const inputType = type === "date" ? "date" : type === "url" ? "url" : "text";
 
   return (
     <div className="group text-xs leading-relaxed text-foreground">
@@ -1474,8 +1476,11 @@ function InlineField({
             }}
             disabled={pending}
             placeholder={placeholder}
-            className="w-24 rounded bg-background px-1.5 py-0.5 text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
+            className="w-28 rounded bg-background px-1.5 py-0.5 text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
           />
+          {type === "date" && value ? (
+            <button type="button" onMouseDown={(e) => { e.preventDefault(); setValue(""); }} className="text-muted hover:text-foreground" aria-label="Clear date">✕</button>
+          ) : null}
         </span>
       ) : (
         <button
@@ -1596,7 +1601,6 @@ function EditCreditCardForm({
             ]);
             if (detailsResult?.error) { setDetailsError(detailsResult.error); return; }
             if (detailsResult?.missingMigration) { setMigrationWarning(true); }
-            onDone();
           })
         }
         className="flex flex-col gap-3"
@@ -1622,7 +1626,7 @@ function EditCreditCardForm({
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
               <LabeledInput label="Total Hotel Credits Anv" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-              <LabeledInput label="Credit / Credits Expires" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+              <LabeledInput label="Free Night / Credits Exp" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
               <LabeledInput label="Up to Anv Pts / Free Night" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
               <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
@@ -1720,18 +1724,22 @@ function EditCreditCardForm({
         <div className="order-first flex items-center justify-between gap-2 pt-1">
           <div className="flex items-center gap-2">
             <button
-              type="submit"
-              disabled={savePending}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
-            >
-              {savePending ? "Saving…" : "Save all changes"}
-            </button>
-            <button
               type="button"
               onClick={onDone}
-              className="rounded-md px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground"
+              title="Close"
+              aria-label="Close"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-line hover:text-foreground"
             >
-              Cancel
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+            <button
+              type="submit"
+              disabled={savePending}
+              className="rounded-md border border-zinc-300 bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+            >
+              {savePending ? "Saving…" : "Save"}
             </button>
           </div>
           {confirmDelete ? (
@@ -1780,6 +1788,40 @@ function LabeledInput({
   hint,
   ...inputProps
 }: { label: string; prefix?: string; hint?: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
+  const isDate = inputProps.type === "date";
+  const [dateVal, setDateVal] = useState(isDate ? (inputProps.defaultValue as string ?? "") : "");
+  const dateRef = useRef<HTMLInputElement | null>(null);
+
+  if (isDate) {
+    return (
+      <label className="block" onClick={(e) => e.preventDefault()}>
+        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+          {label}
+        </span>
+        <div className="flex items-center gap-1">
+          <input
+            {...inputProps}
+            ref={dateRef}
+            value={dateVal}
+            onChange={(e) => setDateVal(e.target.value)}
+            className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          {dateVal ? (
+            <button
+              type="button"
+              onClick={() => { setDateVal(""); if (dateRef.current) { dateRef.current.value = ""; dateRef.current.dispatchEvent(new Event("change", { bubbles: true })); } }}
+              className="shrink-0 rounded p-1 text-muted hover:text-foreground"
+              aria-label="Clear date"
+            >
+              ✕
+            </button>
+          ) : null}
+        </div>
+        {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
+      </label>
+    );
+  }
+
   return (
     <label className="block">
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
