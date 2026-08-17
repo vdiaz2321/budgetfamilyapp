@@ -19,6 +19,20 @@ export type MonthPoint = {
   fromHistory: boolean; // section-level (pre per-account) vs derived
 };
 
+// Shared column widths so Monthly Net Worth (compact) and Year-by-Year line up
+// vertically — column boundaries and their dividers land at the same X positions.
+// Same 10-column shape: Date | (Value|Diff)×3 metrics | Debt | Actual | Diff.
+const NW_TABLE_COL_WIDTHS = [
+  "5.5rem",  // Date / Month
+  "6.5rem", "6rem", // NW w/out Invest & Savings: Value, Diff
+  "6.5rem", "6rem", // Stocks
+  "6.5rem", "6rem", // Total NW w/out Debt
+  "6rem",    // Debt Incurred
+  "7rem",    // Actual NW
+  "6rem",    // Debt Ratio / Y2Y Diff
+] as const;
+const NW_TABLE_MIN_WIDTH = "62rem";
+
 const MONTHS_SHORT = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -31,7 +45,7 @@ function monthLabel(month: string): string {
 
 function pctLabel(p: number | null): string {
   if (p == null) return "—";
-  return `${p >= 0 ? "+" : ""}${(p * 100).toFixed(2)}%`;
+  return `${(Math.abs(p) * 100).toFixed(2)}%`;
 }
 
 // Compact tick label: $12.5K / $1.2M (cents in, display out).
@@ -132,7 +146,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
   const [year, setYear] = useState<string>(years[0] ?? "");
 
   // Chart open state lifted here so selecting an account can auto-open it.
-  const [chartState, setChartState] = useSessionCollapse("networth-chart-open", () => ({ open: false }));
+  const [chartState, setChartState] = useSessionCollapse("networth-chart-open", () => ({ open: true }));
   const chartOpen = !!chartState.open;
   const setChartOpen = (v: boolean) => setChartState((s) => ({ ...s, open: v }));
 
@@ -851,7 +865,7 @@ function BalanceGrid({
     let sum = 0;
     let any = false;
     for (const r of g.rows) {
-      if (r.indent || r.excluded) continue;
+      if (r.indent) continue;
       const v = r.balances[i];
       if (v == null) continue;
       any = true;
@@ -885,7 +899,6 @@ function BalanceGrid({
   const zebraBg = (r: GridRow) => (r.indent ? "bg-background/30" : "");
 
   const stickyCls = "sticky left-0 z-10 min-w-[14rem] pr-3";
-  const hasUnallocated = localRows.some((r) => r.muted);
 
   // A handful of months fills the card width evenly (Account column gets the
   // rest); once there are more than that, fixed compact columns + horizontal
@@ -894,7 +907,7 @@ function BalanceGrid({
   const acctPct = wideLayout ? Math.max(35, 70 - months.length * 8) : null;
   const monthPct = wideLayout && acctPct != null ? (100 - acctPct) / months.length : null;
 
-  const [gridOpenState, setGridOpenState] = useSessionCollapse("networth-monthly-balances-open", () => ({ open: false }));
+  const [gridOpenState, setGridOpenState] = useSessionCollapse("networth-monthly-balances-open", () => ({ open: true }));
   const gridOpen = gridOpenState.open;
   const toggleGrid = () => setGridOpenState((s) => ({ ...s, open: !s.open }));
 
@@ -945,25 +958,66 @@ function BalanceGrid({
             </tr>
           </thead>
           <tbody>
-            {sections.map((g, gi) => {
-              const isOpen = !collapsed[g.section];
-              const accountCount = g.rows.filter((r) => !r.indent).length;
-              // Kids Funding is the kids' money, excluded from every total —
-              // a divider row (matching the Accounts page) makes that visually
-              // clear instead of it just blending into the sections above it.
-              const prevSection = sections[gi - 1]?.section;
-              const showKidsDivider = g.section === "Kids Funding" && prevSection !== "Kids Funding";
-              return (
-                <Fragment key={g.section}>
-                  {showKidsDivider ? (
-                    <tr>
-                      <td colSpan={months.length + 1} className="bg-background px-4 py-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                          Not counted in net worth
-                        </span>
+            {(() => {
+              // Total Net Worth per month = sum of every section EXCEPT Kids Funding,
+              // with liability sections subtracted. Rendered once, right before the
+              // "Not counted" divider (or at the end if there's no Kids Funding).
+              const netTotals = months.map((_, i) => {
+                let sum = 0;
+                let any = false;
+                for (const g of sections) {
+                  if (g.section === "Kids Funding") continue;
+                  const t = sectionTotal(g, i);
+                  if (t == null) continue;
+                  const isLiab = g.rows[0]?.liability ?? false;
+                  sum += isLiab ? -t : t;
+                  any = true;
+                }
+                return any ? sum : null;
+              });
+              const totalRow = (
+                <tr className="border-y-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
+                  <td className="sticky left-0 z-10 min-w-[14rem] bg-surface pr-3 px-4 py-2">
+                    <span className="whitespace-nowrap text-sm font-bold uppercase tracking-wider text-foreground">
+                      Total Net Worth
+                    </span>
+                  </td>
+                  {months.map((m, i) => {
+                    const v = netTotals[i];
+                    return (
+                      <td key={m} className="whitespace-nowrap px-3 py-2 text-center text-sm font-bold tabular-nums">
+                        {v == null ? (
+                          <span className="text-muted">—</span>
+                        ) : (
+                          <span className={v < 0 ? "text-negative" : ""}>{formatMoney(v, currency)}</span>
+                        )}
                       </td>
-                    </tr>
-                  ) : null}
+                    );
+                  })}
+                </tr>
+              );
+              const hasKids = sections.some((g) => g.section === "Kids Funding");
+              return (
+                <>
+                  {sections.map((g, gi) => {
+                    const isOpen = !collapsed[g.section];
+                    const accountCount = g.rows.filter((r) => !r.indent).length;
+                    const prevSection = sections[gi - 1]?.section;
+                    const showKidsDivider = g.section === "Kids Funding" && prevSection !== "Kids Funding";
+                    return (
+                      <Fragment key={g.section}>
+                        {showKidsDivider ? (
+                          <>
+                            {totalRow}
+                            <tr>
+                              <td colSpan={months.length + 1} className="bg-background px-4 py-2">
+                                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                                  Not counted in net worth
+                                </span>
+                              </td>
+                            </tr>
+                          </>
+                        ) : null}
                   <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
                     <td className="sticky left-0 z-10 min-w-[14rem] bg-surface pr-3 p-0">
                       <button
@@ -1019,7 +1073,7 @@ function BalanceGrid({
                               key={`${g.section}-${ri}-${r.name}`}
                               data-drop-key={dropKey}
                               className={`border-b border-line ${zebraBg(r)} ${
-                                r.linked || r.excluded ? "opacity-50" : ""
+                                r.linked ? "opacity-50" : ""
                               } ${
                                 dropKey && dragOverKey === dropKey ? "outline outline-2 -outline-offset-2 outline-brand" : ""
                               }`}
@@ -1127,30 +1181,14 @@ function BalanceGrid({
                     : null}
                 </Fragment>
               );
-            })}
+                  })}
+                  {!hasKids ? totalRow : null}
+                </>
+              );
+            })()}
           </tbody>
         </table>
       </div>
-      {hasUnallocated || rows.some((r) => r.linked || r.excluded) ? (
-        <div className="space-y-1 border-t border-line px-4 py-2 text-xs text-muted">
-          {hasUnallocated ? (
-            <p>
-              <span className="italic">Unallocated</span> = the account&apos;s balance minus
-              its buckets&apos; balances — whatever isn&apos;t parked in one of the named
-              buckets below it. It should read $0.00 once every dollar has a bucket.
-            </p>
-          ) : null}
-          {rows.some((r) => r.linked) ? (
-            <p>&ldquo;Linked&rdquo; accounts are counted through their Budget debt row, not twice.</p>
-          ) : null}
-          {rows.some((r) => r.excluded) ? (
-            <p>
-              Kids Funding accounts are tracked here but excluded from every total —
-              it&apos;s the kids&apos; money, not the household&apos;s.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
       </> : null}
     </section>
   );
@@ -1439,6 +1477,8 @@ function MonthlyAnalytics({
   const [year, setYear] = useState<string>(availableYears[0] ?? "all");
   void sharedYear;
 
+  // Whole-dollar formatting (no cents) so this table matches Year by Year.
+  const fmt0 = (cents: number) => formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "");
   const byMonth = new Map(points.map((p) => [p.month, p]));
   const val = (p: MonthPoint | undefined, k: Metric["key"]) => (p ? p[k] : null);
 
@@ -1470,8 +1510,8 @@ function MonthlyAnalytics({
     .filter((r) => year === "all" || r.month.slice(0, 4) === year)
     .reverse();
 
-  // Columns per metric: 1 when compact, 4 (Current / M2M Diff / Monthly Diff / YTD) when expanded.
-  const span = showChanges ? 4 : 1;
+  // Columns per metric: 2 (Current / M2M Diff) when compact, 4 (+ Monthly Diff / YTD) when expanded.
+  const span = showChanges ? 4 : 2;
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -1511,78 +1551,80 @@ function MonthlyAnalytics({
         )}
       </div>
       {!collapsed && <div className="border-t border-line max-h-[520px] overflow-auto">
-        <table className="w-full border-collapse whitespace-nowrap text-xs">
+        <table
+          className={`border-collapse whitespace-nowrap text-xs ${!showChanges ? "w-full table-fixed" : ""}`}
+          style={!showChanges ? { minWidth: NW_TABLE_MIN_WIDTH } : undefined}
+        >
+          {!showChanges ? (
+            <colgroup>
+              {NW_TABLE_COL_WIDTHS.map((w, i) => (
+                <col key={i} style={{ width: w }} />
+              ))}
+            </colgroup>
+          ) : null}
           <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
             {/* Grouped metric names, centered over their columns */}
             <tr className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-              <th className="sticky left-0 z-30 bg-surface px-3 pt-2 text-left" rowSpan={showChanges ? 2 : 1}>
+              <th className="sticky left-0 z-30 bg-brand-soft/40 px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
                 Month
               </th>
               {METRICS.map((m) => (
-                <th key={m.key} colSpan={span} className="border-l border-line px-3 pt-2 pb-1 text-center">
+                <th key={m.key} colSpan={span} className="border-l border-line px-1.5 pt-1.5 pb-1 text-center">
                   {m.label}
                 </th>
               ))}
-              <th className="border-l border-line px-3 pt-2 text-center" rowSpan={showChanges ? 2 : 1}>Debt Incurred</th>
-              <th className="px-3 pt-2 text-center" rowSpan={showChanges ? 2 : 1}>Actual NW</th>
-              <th className="px-2 pt-2 text-center" rowSpan={showChanges ? 2 : 1}>Debt Ratio</th>
+              <th className="border-l border-line px-1.5 pt-1.5 text-center" rowSpan={2}>Debt Incurred</th>
+              <th className="px-1.5 pt-1.5 text-center" rowSpan={2}>Actual NW</th>
+              <th className="px-1.5 pt-1.5 text-center" rowSpan={2}>Debt Ratio</th>
             </tr>
-            {showChanges ? (
-              <tr className="border-b border-line text-[9px] font-medium uppercase tracking-wide text-muted">
-                {METRICS.map((m) => (
-                  <Fragment key={m.key}>
-                    <th className="border-l border-line px-3 pb-2 text-center">Current</th>
-                    <th className="px-2 pb-2 text-center">M2M Diff</th>
-                    <th className="px-2 pb-2 text-center">Monthly Diff</th>
-                    <th className="px-2 pb-2 text-center">YTD</th>
-                  </Fragment>
-                ))}
-              </tr>
-            ) : (
-              <tr className="border-b border-line">
-                <th className="sticky left-0 z-10 bg-surface" />
-                {METRICS.map((m) => (
-                  <th key={m.key} className="border-l border-line" />
-                ))}
-                <th className="border-l border-line" />
-                <th />
-                <th />
-              </tr>
-            )}
+            <tr className="border-b border-line text-[9px] font-medium uppercase tracking-wide text-muted">
+              {METRICS.map((m) => (
+                <Fragment key={m.key}>
+                  <th className="border-l border-line px-1.5 pb-1.5 text-center">Current</th>
+                  <th className="px-1.5 pb-1.5 text-center">M2M Diff</th>
+                  {showChanges ? (
+                    <>
+                      <th className="px-1.5 pb-1.5 text-center">Monthly Diff</th>
+                      <th className="px-1.5 pb-1.5 text-center">YTD</th>
+                    </>
+                  ) : null}
+                </Fragment>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {shown.map((r) => (
               <tr key={r.month} className="border-b border-line last:border-0">
-                <td className="sticky left-0 z-10 bg-surface px-3 py-1.5 text-left font-medium">
+                <td className="sticky left-0 z-10 border-b border-line bg-brand-soft/40 px-2 py-1 text-center font-medium">
                   {monthLabel(r.month)}
                 </td>
                 {r.cells.map((c, ci) => (
                   <Fragment key={ci}>
-                    <td className="border-l border-line px-3 py-1.5 text-center tabular-nums">
-                      {formatMoney(c.value, currency)}
+                    <td className="border-l border-line px-1.5 py-1 text-center tabular-nums">
+                      {fmt0(c.value)}
+                    </td>
+                    <td className={`px-1.5 py-1 text-center tabular-nums ${negCls(c.delta)}`}>
+                      {c.delta == null ? "—" : fmt0(Math.abs(c.delta))}
                     </td>
                     {showChanges ? (
                       <>
-                        <td className={`px-2 py-1.5 text-center tabular-nums ${negCls(c.delta)}`}>
-                          {c.delta == null ? "—" : `${c.delta >= 0 ? "+" : ""}${formatMoney(c.delta, currency)}`}
-                        </td>
-                        <td className={`px-2 py-1.5 text-center tabular-nums ${negCls(c.monthlyPct)}`}>
+                        <td className={`px-1.5 py-1 text-center tabular-nums ${negCls(c.monthlyPct)}`}>
                           {pctLabel(c.monthlyPct)}
                         </td>
-                        <td className={`px-2 py-1.5 text-center tabular-nums ${negCls(c.ytd)}`}>
+                        <td className={`px-1.5 py-1 text-center tabular-nums ${negCls(c.ytd)}`}>
                           {pctLabel(c.ytd)}
                         </td>
                       </>
                     ) : null}
                   </Fragment>
                 ))}
-                <td className={`border-l border-line px-3 py-1.5 text-center tabular-nums ${r.debt > 0 ? "text-negative" : ""}`}>
-                  {formatMoney(r.debt, currency)}
+                <td className={`border-l border-line px-1.5 py-1 text-center tabular-nums ${r.debt > 0 ? "text-negative" : ""}`}>
+                  {fmt0(r.debt)}
                 </td>
-                <td className={`px-3 py-1.5 text-center font-semibold tabular-nums ${negCls(r.actualNet)}`}>
-                  {formatMoney(r.actualNet, currency)}
+                <td className={`px-1.5 py-1 text-center font-semibold tabular-nums ${negCls(r.actualNet)}`}>
+                  {fmt0(r.actualNet)}
                 </td>
-                <td className="px-2 py-1.5 text-center tabular-nums text-muted">
+                <td className="px-1.5 py-1 text-center tabular-nums text-muted">
                   {r.debtRatio == null ? "—" : `${(r.debtRatio * 100).toFixed(2)}%`}
                 </td>
               </tr>
@@ -1704,11 +1746,48 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
   const [yearState, setYearState] = useSessionCollapse("networth-year-table", () => ({ v: true }));
   const collapsed = !!yearState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setYearState((s) => ({ v: fn(!!s.v) }));
-  // Last snapshot of each year = that year's closing position.
-  const byYear = new Map<string, MonthPoint>();
-  for (const p of points) byYear.set(p.month.slice(0, 4), p);
-  const years = [...byYear.entries()].sort(([a], [b]) => b.localeCompare(a));
 
+  // Anchor each year to its December snapshot; fall back to the following
+  // January (Jan Y+1 reflects the Y year-end position). Current year uses
+  // the latest available month and is labeled "Current".
+  const pointByMonth = new Map(points.map((p) => [p.month, p]));
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const yearsAsc = [...new Set(points.map((p) => parseInt(p.month.slice(0, 4), 10)))].sort((a, b) => a - b);
+
+  type Row = { label: string; year: number; p: MonthPoint };
+  const rows: Row[] = [];
+  for (const y of yearsAsc) {
+    if (y === currentYear) {
+      const latest = points.filter((p) => p.month.startsWith(String(y))).at(-1);
+      if (latest) rows.push({ label: "Current", year: y, p: latest });
+      continue;
+    }
+    const dec = pointByMonth.get(`${y}-12-01`);
+    const janNext = pointByMonth.get(`${y + 1}-01-01`);
+    const p = dec ?? janNext;
+    if (p) rows.push({ label: `Dec ${String(y).slice(2)}`, year: y, p });
+  }
+  // Sort newest first for display; keep asc for prev-year lookup via map.
+  const rowByYear = new Map(rows.map((r) => [r.year, r]));
+  const rowsDesc = [...rows].reverse();
+
+  // Whole-dollar formatting (no cents) for this table only.
+  const fmt = (cents: number) => {
+    const raw = formatMoney(Math.round(cents / 100) * 100, currency);
+    return raw.replace(/\.00$/, "");
+  };
+  const diff = (v: number | null) => {
+    if (v == null) return <span className="text-muted">—</span>;
+    const cls = v >= 0 ? "text-positive" : "text-negative";
+    return <span className={cls}>{fmt(Math.abs(v))}</span>;
+  };
+  const y2y = (r: Row, get: (p: MonthPoint) => number) => {
+    const prev = rowByYear.get(r.year - 1);
+    return prev ? get(r.p) - get(prev.p) : null;
+  };
+
+  // Column groups: label | value | y2y  (Actual NW group has an extra Debt column)
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center gap-2 px-4 py-2.5">
@@ -1725,39 +1804,75 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
           </svg>
           <h2 className="font-semibold">Year by year</h2>
         </button>
-        {!collapsed && (
-          <>
-            <span className="ml-auto w-32 text-center text-[11px] font-medium uppercase tracking-wide text-muted">Net worth</span>
-            <span className="w-32 text-center text-[11px] font-medium uppercase tracking-wide text-muted">Change</span>
-          </>
-        )}
       </div>
-      {!collapsed && <ul className="divide-y divide-line border-t border-line">
-        {years.map(([year, p], i) => {
-          const prev = i < years.length - 1 ? years[i + 1][1] : null;
-          const delta = prev ? p.net - prev.net : null;
-          return (
-            <li key={year} className="grid grid-cols-[4rem_1fr_8rem_8rem] items-center gap-2 px-4 py-2">
-              <span className="text-sm font-semibold">{year}</span>
-              <span className="text-xs text-muted">as of {monthLabel(p.month)}</span>
-              <span className="text-center text-sm font-bold tabular-nums">
-                {formatMoney(p.net, currency)}
-              </span>
-              <span
-                title={delta == null ? "No prior year to compare against yet" : undefined}
-                className={`text-center text-sm tabular-nums ${
-                  delta == null ? "text-muted" : delta >= 0 ? "text-positive" : "text-negative"
-                }`}
-              >
-                {delta == null ? "—" : `${delta >= 0 ? "+" : ""}${formatMoney(delta, currency)}`}
-              </span>
-            </li>
-          );
-        })}
-        <li className="border-t border-line px-4 py-2">
-          <AddPastYear currency={currency} />
-        </li>
-      </ul>}
+      {!collapsed && (
+        <div className="border-t border-line overflow-x-auto">
+          <table
+            className="w-full border-collapse whitespace-nowrap text-xs table-fixed"
+            style={{ minWidth: NW_TABLE_MIN_WIDTH }}
+          >
+            <colgroup>
+              {NW_TABLE_COL_WIDTHS.map((w, i) => (
+                <col key={i} style={{ width: w }} />
+              ))}
+            </colgroup>
+            <thead>
+              <tr className="border-b border-line bg-brand-soft/25 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                <th rowSpan={2} className="sticky left-0 z-10 border-r border-line bg-brand-soft/40 px-2 py-1 text-center align-middle">
+                  Date
+                </th>
+                <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">
+                  NW w/out Invest &amp; Savings
+                </th>
+                <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">Stocks</th>
+                <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">Total NW w/out Debt</th>
+                <th colSpan={3} className="px-1.5 py-1 text-center">Actual NW</th>
+              </tr>
+              <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
+                <th className="px-1.5 py-1 text-center">Value</th>
+                <th className="border-r border-line px-1.5 py-1 text-center">Y2Y Diff</th>
+                <th className="px-1.5 py-1 text-center">Value</th>
+                <th className="border-r border-line px-1.5 py-1 text-center">Y2Y Diff</th>
+                <th className="px-1.5 py-1 text-center">Value</th>
+                <th className="border-r border-line px-1.5 py-1 text-center">Y2Y Diff</th>
+                <th className="px-1.5 py-1 text-center">Debt Incurred</th>
+                <th className="px-1.5 py-1 text-center">Actual NW</th>
+                <th className="px-1.5 py-1 text-center">Y2Y Diff</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rowsDesc.map((r) => {
+                const nwOut = r.p.nwWithoutInvest;
+                const stocks = r.p.stocks;
+                const gross = r.p.assets;
+                const debt = r.p.liabilities;
+                const actual = r.p.net;
+                return (
+                  <tr key={r.year} className="border-b border-line last:border-0">
+                    <td className="sticky left-0 z-10 border-b border-r border-line bg-brand-soft/40 px-2 py-1 text-center text-xs font-semibold">
+                      {r.label}
+                    </td>
+                    <td className="px-1.5 py-1 text-center tabular-nums">{fmt(nwOut)}</td>
+                    <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.nwWithoutInvest))}</td>
+                    <td className="px-1.5 py-1 text-center tabular-nums">{fmt(stocks)}</td>
+                    <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.stocks))}</td>
+                    <td className="px-1.5 py-1 text-center tabular-nums">{fmt(gross)}</td>
+                    <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.assets))}</td>
+                    <td className="px-1.5 py-1 text-center tabular-nums text-negative">{debt === 0 ? <span className="text-muted">—</span> : fmt(debt)}</td>
+                    <td className="px-1.5 py-1 text-center text-xs font-bold tabular-nums">{fmt(actual)}</td>
+                    <td className="px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.net))}</td>
+                  </tr>
+                );
+              })}
+              <tr className="border-t border-line">
+                <td colSpan={10} className="px-4 py-2">
+                  <AddPastYear currency={currency} />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }
