@@ -20,6 +20,12 @@ const KIND_LABEL: Record<CategoryKind, string> = {
 };
 
 const GRID = "grid-cols-[5rem_2rem_6rem_5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_6rem_2rem]";
+const CalendarIcon = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M16 3v4M8 3v4M3 10h18" />
+  </svg>
+);
 
 type Props = {
   month: { key: string; label: string; firstOfMonth: string };
@@ -51,24 +57,12 @@ export function TransactionsTable({
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const searchToolbarRef = useRef<HTMLDivElement>(null);
-  const fromDateInputRef = useRef<HTMLInputElement>(null);
-  const toDateInputRef = useRef<HTMLInputElement>(null);
   const [fromDate, setFromDate] = useState(dateRange.from ?? "");
   const [toDate, setToDate] = useState(dateRange.to ?? "");
   // Date sort — defaults to descending (newest first). Click header to flip.
   const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
   const hasRange = Boolean(dateRange.from || dateRange.to);
-
-  const openDatePicker = (input: HTMLInputElement | null) => {
-    if (!input) return;
-    try {
-      input.showPicker?.();
-    } catch {
-      // Some mobile browsers only open their native calendar after focus.
-      input.focus({ preventScroll: true });
-    }
-  };
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -265,14 +259,28 @@ export function TransactionsTable({
         </button>
       {searchOpen ? (
         <div className="absolute left-0 top-11 z-30 w-full rounded-xl bg-surface p-2 shadow-lg ring-1 ring-black/10 dark:ring-white/10 sm:max-w-md">
-          <input
-            autoFocus
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search categories, payees, accounts, or amounts"
-            className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
+          <div className="relative">
+            <input
+              autoFocus
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search categories, payees, accounts, or amounts"
+              className="w-full rounded-lg bg-background py-2 pl-3 pr-10 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            {query ? (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="absolute inset-y-0 right-1 flex w-8 cursor-pointer items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" aria-hidden>
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
         </div>
           ) : null}
         </div>
@@ -280,36 +288,46 @@ export function TransactionsTable({
       {/* Date range — searches across months instead of just the one selected above */}
         <div className="order-3 grid w-full grid-cols-[1fr_1fr_auto] items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:flex sm:w-auto sm:gap-1.5">
         <div className="relative min-w-0 sm:w-40 sm:flex-none">
-          <button type="button" onClick={() => openDatePicker(fromDateInputRef.current)} className="absolute inset-0 z-10 rounded-lg" aria-label="Choose from date" />
-          {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-20 flex items-center text-xs font-semibold text-muted">From</span> : null}
+          {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-muted">From</span> : null}
           <input
-            ref={fromDateInputRef}
             type="date"
             aria-label="From date"
             value={fromDate}
-            onKeyDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              try {
+                event.currentTarget.showPicker?.();
+              } catch {
+                // Some browsers only expose their native picker through focus.
+              }
+            }}
             onChange={(e) => {
               setFromDate(e.target.value);
               applyRange(e.target.value, toDate);
             }}
-            className={`pointer-events-none w-full rounded-lg bg-background py-1.5 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`w-full cursor-pointer appearance-none rounded-lg bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
+          <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
         </div>
         <div className="relative min-w-0 sm:w-40 sm:flex-none">
-          <button type="button" onClick={() => openDatePicker(toDateInputRef.current)} className="absolute inset-0 z-10 rounded-lg" aria-label="Choose to date" />
-          {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-20 flex items-center text-xs font-semibold text-muted">To</span> : null}
+          {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-muted">To</span> : null}
           <input
-            ref={toDateInputRef}
             type="date"
             aria-label="To date"
             value={toDate}
-            onKeyDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              try {
+                event.currentTarget.showPicker?.();
+              } catch {
+                // Some browsers only expose their native picker through focus.
+              }
+            }}
             onChange={(e) => {
               setToDate(e.target.value);
               applyRange(fromDate, e.target.value);
             }}
-            className={`pointer-events-none w-full rounded-lg bg-background py-1.5 pr-2 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand dark:ring-white/15 sm:pr-3 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`w-full cursor-pointer appearance-none rounded-lg bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
+          <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
         </div>
         <button
           type="button"
@@ -348,7 +366,7 @@ export function TransactionsTable({
           <button
             type="button"
             onClick={() => setQuery("")}
-            className="rounded-xl px-2 py-1.5 font-medium text-muted hover:bg-brand-soft hover:text-foreground sm:px-3"
+            className="rounded-xl px-2 py-1.5 font-medium text-muted transition hover:bg-brand-soft hover:text-foreground sm:px-3"
           >
             Clear search
           </button>

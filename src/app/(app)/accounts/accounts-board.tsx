@@ -306,7 +306,7 @@ export function AccountsBoard({
     ...(visibleBudgetDebts.length > 0 ? ["budget_debts"] : []),
   ];
   const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
-    Object.fromEntries(SECTIONS.map((s) => [s.key, true])),
+    Object.fromEntries(SECTIONS.map((s) => [s.key, s.key !== "credit"])),
   );
   const allOpen = sectionKeys.every((k) => !collapsed[k]);
   const toggleSection = (key: string) =>
@@ -658,9 +658,6 @@ function CreditCardSection({
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2">
                 <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
-              </span>
-              <span className="mt-0.5 block text-xs text-muted sm:text-sm">
-                Family points optimizer, fee tracker &amp; certificate manager
               </span>
             </span>
             <svg

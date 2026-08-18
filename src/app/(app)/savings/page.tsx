@@ -38,6 +38,7 @@ export default async function SavingsPage() {
 
   const categories = await ensureCategories(supabase, household.id);
   const savingsCategoryIds = categories.filter((c) => c.kind === "savings").map((c) => c.id);
+  const incomeCategoryIds = categories.filter((c) => c.kind === "income").map((c) => c.id);
 
   const { data: subs } = await supabase
     .from("subcategories")
@@ -47,11 +48,20 @@ export default async function SavingsPage() {
 
   const savingsSubs = (subs ?? []).filter((s) => savingsCategoryIds.includes(s.category_id));
   const savingsSubIds = savingsSubs.map((s) => s.id);
+  const incomeSubIds = (subs ?? []).filter((s) => incomeCategoryIds.includes(s.category_id)).map((s) => s.id);
 
   const now = new Date();
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [{ data: savingsGoals }, { data: savingsTx }, { data: plans }, { data: buckets }, { data: accounts }] = await Promise.all([
+  const [
+    { data: savingsGoals },
+    { data: savingsTx },
+    { data: plans },
+    { data: buckets },
+    { data: accounts },
+    { data: payees },
+    { data: incomeActuals },
+  ] = await Promise.all([
     savingsSubIds.length
       ? supabase
           .from("savings_goals")
@@ -61,7 +71,7 @@ export default async function SavingsPage() {
     savingsSubIds.length
       ? supabase
           .from("transactions")
-          .select("id, subcategory_id, amount_cents, is_withdrawal, payee, occurred_on, account_id")
+          .select("id, subcategory_id, amount_cents, is_withdrawal, payee_id, occurred_on, account_id")
           .eq("household_id", household.id)
           .in("subcategory_id", savingsSubIds)
       : Promise.resolve({ data: [] }),
@@ -74,30 +84,50 @@ export default async function SavingsPage() {
           .in("subcategory_id", savingsSubIds)
       : Promise.resolve({ data: [] }),
     supabase.from("buckets").select("id, account_id").eq("household_id", household.id),
-    supabase.from("accounts").select("id, is_kids_account").eq("household_id", household.id),
+    supabase.from("accounts").select("id, name, is_kids_account").eq("household_id", household.id),
+    supabase.from("payees").select("id, name").eq("household_id", household.id),
+    incomeSubIds.length
+      ? supabase
+          .from("v_monthly_actuals")
+          .select("subcategory_id, actual_cents")
+          .eq("household_id", household.id)
+          .eq("month", monthKey)
+          .in("subcategory_id", incomeSubIds)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const isKidsAccountById = new Map((accounts ?? []).map((a) => [a.id, a.is_kids_account ?? false]));
+  const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  const payeeNameById = new Map((payees ?? []).map((payee) => [payee.id, payee.name]));
   const accountIdByBucket = new Map((buckets ?? []).map((b) => [b.id, b.account_id]));
+  const incomeReceivedCents = (incomeActuals ?? []).reduce(
+    (sum, row) => sum + Math.max(0, row.actual_cents ?? 0),
+    0,
+  );
+  const currentMonthKey = monthKey.slice(0, 7);
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents as number]));
-  const contribBySub = new Map<string, number>();
+  const monthDepositsBySub = new Map<string, number>();
+  const monthWithdrawalsBySub = new Map<string, number>();
   for (const t of savingsTx ?? []) {
-    const delta = t.is_withdrawal ? -t.amount_cents : t.amount_cents;
-    contribBySub.set(t.subcategory_id, (contribBySub.get(t.subcategory_id) ?? 0) + delta);
+    if (t.occurred_on.startsWith(currentMonthKey)) {
+      const target = t.is_withdrawal ? monthWithdrawalsBySub : monthDepositsBySub;
+      target.set(t.subcategory_id, (target.get(t.subcategory_id) ?? 0) + t.amount_cents);
+    }
   }
 
-  // Build per-subcategory transaction lists for the card dropdown (most recent first, cap at 10)
+  // Build per-subcategory transaction lists for the expanded goal details (most recent first, cap at 10).
   const txsBySub = new Map<string, SavingsCardData["transactions"]>();
   for (const t of savingsTx ?? []) {
     if (!txsBySub.has(t.subcategory_id)) txsBySub.set(t.subcategory_id, []);
     txsBySub.get(t.subcategory_id)!.push({
       id: t.id,
       date: t.occurred_on,
-      payee: t.payee,
+      payee: t.payee_id ? payeeNameById.get(t.payee_id) ?? null : null,
       amountCents: t.amount_cents,
       isWithdrawal: t.is_withdrawal,
+      accountName: t.account_id ? accountNameById.get(t.account_id) ?? null : null,
     });
   }
   for (const [k, arr] of txsBySub) {
@@ -116,14 +146,16 @@ export default async function SavingsPage() {
     const startCents = g?.start_cents ?? 0;
     const monthlyCents = g?.monthly_contribution_cents ?? 0;
     const targetDate = (g?.target_date as string | null) ?? null;
-    // Saved tracks progress toward the Goal, so it's Start + everything
-    // logged under this item — not the linked bucket's account balance,
-    // which can include market movement or funds beyond this goal.
-    const savedCents = startCents + (contribBySub.get(s.id) ?? 0);
+    const plannedCents = plannedBySub.get(s.id) ?? 0;
+    const monthDepositsCents = monthDepositsBySub.get(s.id) ?? 0;
+    const monthWithdrawalsCents = monthWithdrawalsBySub.get(s.id) ?? 0;
+    const monthNetCents = monthDepositsCents - monthWithdrawalsCents;
+    // Match Budget's savings progress: the configured opening balance plus
+    // this month's net contributions. Historical transactions may predate the
+    // opening balance and must not be counted a second time.
+    const savedCents = startCents + monthNetCents;
     const leftToSaveCents = goalCents - savedCents;
     const reached = goalCents > 0 && leftToSaveCents <= 0;
-
-    const plannedCents = plannedBySub.get(s.id) ?? 0;
 
     let pace: SavingsCardData["pace"] = "none";
     let requiredMonthlyCents: number | null = null;
@@ -157,10 +189,21 @@ export default async function SavingsPage() {
       targetDate,
       pace,
       requiredMonthlyCents,
+      monthDepositsCents,
+      monthWithdrawalsCents,
+      monthNetCents,
       transactions: txsBySub.get(s.id) ?? [],
       isKids,
     };
   });
 
-  return <SavingsBoard cards={cards} currency={household.currency} />;
+  return (
+    <SavingsBoard
+      cards={cards}
+      currency={household.currency}
+      incomeReceivedCents={incomeReceivedCents}
+      currentMonthKey={currentMonthKey}
+      currentMonthLabel={now.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+    />
+  );
 }

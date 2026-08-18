@@ -8,6 +8,18 @@ import { TransactionsTable } from "./transactions-table";
 export const metadata = { title: "Transactions · Capitall" };
 
 type SearchParams = Promise<{ month?: string; from?: string; to?: string }>;
+type TransactionQueryRow = {
+  id: string;
+  occurred_on: string;
+  amount_cents: number;
+  memo: string | null;
+  subcategory_id: string | null;
+  payee_id: string | null;
+  account_id: string | null;
+  paid_to_account_id: string | null;
+  cleared: boolean | null;
+  is_withdrawal: boolean | null;
+};
 
 export default async function TransactionsPage({
   searchParams,
@@ -45,28 +57,44 @@ export default async function TransactionsPage({
   const categories = await ensureCategories(supabase, household.id);
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
 
-  let txQuery = supabase
-    .from("transactions")
-    .select(
-      "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, paid_to_account_id, cleared, is_withdrawal",
-    )
-    .eq("household_id", household.id);
-  if (hasRange) {
-    if (from) txQuery = txQuery.gte("occurred_on", from);
-    if (to) txQuery = txQuery.lte("occurred_on", to);
-  } else {
-    txQuery = txQuery.gte("occurred_on", month.firstOfMonth).lt("occurred_on", nextFirst);
-  }
-  txQuery = txQuery.order("occurred_on", { ascending: true }).order("created_at", { ascending: true });
+  const buildTransactionsQuery = () => {
+    let query = supabase
+      .from("transactions")
+      .select(
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, paid_to_account_id, cleared, is_withdrawal",
+      )
+      .eq("household_id", household.id);
+    if (hasRange) {
+      if (from) query = query.gte("occurred_on", from);
+      if (to) query = query.lte("occurred_on", to);
+    } else {
+      query = query.gte("occurred_on", month.firstOfMonth).lt("occurred_on", nextFirst);
+    }
+    return query.order("occurred_on", { ascending: true }).order("created_at", { ascending: true });
+  };
 
-  const [{ data: subs }, { data: txRows }, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }, { data: planRows }, { data: actualRows }] =
+  // PostgREST responses are capped at 1,000 rows by default. Load each page
+  // so an all-time range includes recent transactions beyond that first page.
+  const loadTransactions = async () => {
+    const pageSize = 1_000;
+    const rows: TransactionQueryRow[] = [];
+    for (let start = 0; ; start += pageSize) {
+      const { data, error } = await buildTransactionsQuery().range(start, start + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data ?? []));
+      if (!data || data.length < pageSize) return rows;
+    }
+  };
+  const transactionRowsPromise = loadTransactions();
+
+  const [{ data: subs }, txRows, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }, { data: planRows }, { data: actualRows }] =
     await Promise.all([
       supabase
         .from("subcategories")
         .select("id, category_id, name, linked_bucket_id")
         .eq("household_id", household.id)
         .order("sort_order"),
-      txQuery,
+      transactionRowsPromise,
       supabase
         .from("payees")
         .select("id, name")
@@ -157,7 +185,7 @@ export default async function TransactionsPage({
     (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.name });
   }
 
-  const transactions: TxData[] = (txRows ?? []).map((t) => ({
+  const transactions: TxData[] = txRows.map((t) => ({
     id: t.id,
     date: t.occurred_on,
     amountCents: t.amount_cents,

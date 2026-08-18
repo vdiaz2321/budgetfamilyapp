@@ -95,13 +95,13 @@ export function SubscriptionsSummaryCard({
               type="button"
               onClick={onOpenSpent}
               title="View subscription transactions this month"
-              className="flex cursor-pointer items-center gap-3 rounded px-2 py-0.5 text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
+              className="grid cursor-pointer grid-cols-[7rem_7rem] items-center gap-3 rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
             >
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
             </button>
           ) : (
-            <div className="flex items-center gap-3 px-2 py-0.5 text-muted">
+            <div className="grid grid-cols-[7rem_7rem] items-center gap-3 px-2 py-0.5 text-right text-muted">
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
             </div>
@@ -110,7 +110,7 @@ export function SubscriptionsSummaryCard({
             type="button"
             onClick={() => setManaging(true)}
             aria-label="Manage subscriptions"
-            className="rounded-lg p-1.5 text-muted transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
           >
             {GearIcon}
           </button>
@@ -362,17 +362,18 @@ export function IrregularBillsSummaryCard({
               type="button"
               onClick={onOpenSpent}
               title="View irregular bill transactions this month"
-              className="flex cursor-pointer items-center gap-3 rounded px-2 py-0.5 text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
+              className="grid cursor-pointer grid-cols-[7rem_7rem] items-center gap-3 rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
             >
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
             </button>
           ) : (
-            <div className="flex items-center gap-3 px-2 py-0.5 text-muted">
+            <div className="grid grid-cols-[7rem_7rem] items-center gap-3 px-2 py-0.5 text-right text-muted">
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
             </div>
           )}
+          <span className="size-8 shrink-0" aria-hidden />
         </div>
       </div>
 

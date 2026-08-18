@@ -1206,7 +1206,7 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex w-fit items-center gap-1 rounded-md py-1.5 text-sm font-semibold text-brand hover:text-brand-strong hover:underline sm:text-xs sm:py-0"
+        className="inline-flex w-fit items-center gap-1 rounded-md py-1.5 text-sm font-semibold text-brand hover:text-brand-strong hover:underline sm:py-0"
       >
         ↗ Convert currency to USD
       </button>
