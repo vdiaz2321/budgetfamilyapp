@@ -1217,13 +1217,24 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
     <div className="rounded-xl bg-background p-3 ring-1 ring-line">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-muted">Convert to USD</p>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative hover:bg-negative/15"
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative hover:bg-negative/15"
+          >
+            Close
+          </button>
+          {usdCents != null && (
+            <button
+              type="button"
+              onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
+              className="rounded-md bg-positive/15 px-3.5 py-2 text-sm font-bold text-positive transition hover:bg-positive/25"
+            >
+              Use
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -1245,15 +1256,6 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
         <span className="text-sm font-bold tabular-nums text-foreground">
           {loading ? "…" : usd != null ? `$${usd.toFixed(2)}` : "$0.00"}
         </span>
-        {usdCents != null && (
-          <button
-            type="button"
-            onClick={() => { onUse(usdCents); setOpen(false); setAmount(""); }}
-            className="ml-auto rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white transition hover:bg-brand-strong"
-          >
-            Use
-          </button>
-        )}
       </div>
       {error ? (
         <p className="mt-2 text-xs text-negative">{error}</p>

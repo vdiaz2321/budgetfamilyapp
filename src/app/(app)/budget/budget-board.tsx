@@ -377,14 +377,6 @@ export function BudgetBoard({
           <div className="flex flex-nowrap items-center gap-1.5 rounded-xl px-0.5 py-1 sm:flex-wrap sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
             <button
               type="button"
-              onClick={() => setRowFilter("all")}
-              aria-pressed={rowFilter === "all"}
-              className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${rowFilter === "all" ? "bg-foreground/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-foreground/8 dark:hover:bg-white/10"}`}
-            >
-              All
-            </button>
-            <button
-              type="button"
               onClick={() => rowFilter === "overspent" ? setRowFilter("all") : showOverspent()}
               aria-pressed={rowFilter === "overspent"}
               disabled={overspentCount === 0}
@@ -802,7 +794,7 @@ function SummaryHeroCard({
               </div>
             </div>
           </div>
-          <div className="flex justify-center px-4 pb-2.5 sm:absolute sm:left-1/2 sm:top-1/2 sm:z-10 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:p-0">
+          <div className="flex justify-end px-4 pb-2.5 sm:absolute sm:left-1/2 sm:top-1/2 sm:z-10 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:justify-center sm:p-0">
             <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} centered />
           </div>
         </div>
