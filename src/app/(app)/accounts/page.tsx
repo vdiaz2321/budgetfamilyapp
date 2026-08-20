@@ -51,6 +51,7 @@ export default async function AccountsPage() {
     { data: debtRows },
     { data: subRows },
     { data: cardDetailRowsInitial, error: cardDetailsError },
+    { data: rewardActivityRowsInitial, error: rewardActivitiesError },
     { data: acctSnapshotRows },
     { data: bktSnapshotRows },
     { data: debtSnapshotRows },
@@ -80,6 +81,12 @@ export default async function AccountsPage() {
       .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence")
       .eq("household_id", household.id),
     supabase
+      .from("credit_card_reward_activities")
+      .select("id, account_id, activity_type, occurred_on, points_delta, hotel_credit_delta_cents, booked_on, note, archived_at")
+      .eq("household_id", household.id)
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
       .from("account_snapshots")
       .select("account_id, month, balance_cents")
       .eq("household_id", household.id)
@@ -106,6 +113,9 @@ export default async function AccountsPage() {
       .eq("household_id", household.id);
     cardDetailRows = legacy.data as typeof cardDetailRowsInitial;
   }
+  // Migration 0037 adds the rewards ledger. Keep the rest of Accounts usable
+  // until it has been applied in Supabase.
+  const rewardActivityRows = rewardActivitiesError ? [] : rewardActivityRowsInitial ?? [];
   // (accountId, month) -> cents; buckets keyed by (bucketId, month) -> cents.
   const acctHistory = new Map<string, number>();
   for (const s of acctSnapshotRows ?? []) {
@@ -132,6 +142,21 @@ export default async function AccountsPage() {
   }));
 
   const cardDetailsByAccount = new Map<string, CardDetails>();
+  const rewardActivitiesByAccount = new Map<string, AccountData["rewardActivities"]>();
+  for (const activity of rewardActivityRows) {
+    const items = rewardActivitiesByAccount.get(activity.account_id) ?? [];
+    items.push({
+      id: activity.id,
+      type: activity.activity_type as "points_redemption" | "hotel_credit_redemption" | "free_night_booking",
+      occurredOn: activity.occurred_on,
+      pointsDelta: activity.points_delta ?? 0,
+      hotelCreditDeltaCents: activity.hotel_credit_delta_cents ?? 0,
+      bookedOn: activity.booked_on ?? null,
+      note: activity.note ?? null,
+      archivedAt: activity.archived_at ?? null,
+    });
+    rewardActivitiesByAccount.set(activity.account_id, items);
+  }
   const debtByAccount = new Map((debtRows ?? []).filter((debt) => debt.account_id).map((debt) => [debt.account_id as string, debt]));
   for (const d of cardDetailRows ?? []) {
     const payoff = debtByAccount.get(d.account_id);
@@ -238,6 +263,7 @@ export default async function AccountsPage() {
     dateOpened: a.date_opened ?? null,
     dateClosed: a.date_closed ?? null,
     cardDetails: cardDetailsByAccount.get(a.id) ?? null,
+    rewardActivities: rewardActivitiesByAccount.get(a.id) ?? [],
     owedCents: cardOwed.get(a.id) ?? 0,
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
     prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,

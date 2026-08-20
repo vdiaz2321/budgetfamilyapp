@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ensureCategories } from "@/lib/categories";
 import { SavingsBoard, type SavingsCardData } from "./savings-board";
+import type { AccountOption, SubOption } from "../budget/types";
 
 export const metadata = { title: "Savings · Capitall" };
 
@@ -84,7 +85,7 @@ export default async function SavingsPage() {
           .in("subcategory_id", savingsSubIds)
       : Promise.resolve({ data: [] }),
     supabase.from("buckets").select("id, account_id").eq("household_id", household.id),
-    supabase.from("accounts").select("id, name, is_kids_account").eq("household_id", household.id),
+    supabase.from("accounts").select("id, name, holder, kind, is_kids_account").eq("household_id", household.id),
     supabase.from("payees").select("id, name").eq("household_id", household.id),
     incomeSubIds.length
       ? supabase
@@ -105,6 +106,19 @@ export default async function SavingsPage() {
     0,
   );
   const currentMonthKey = monthKey.slice(0, 7);
+  const withdrawalSubOptions: SubOption[] = savingsSubs.map((sub) => ({
+    id: sub.id,
+    name: sub.name,
+    kind: "savings",
+    linkedBucketId: sub.linked_bucket_id ?? null,
+  }));
+  const withdrawalAccountOptions: AccountOption[] = (accounts ?? [])
+    .filter((account) => account.kind === "checking" || account.kind === "savings_bucket" || account.kind === "cash" || account.kind === "credit_card")
+    .map((account) => ({
+      id: account.id,
+      name: account.name,
+      group: account.kind === "credit_card" ? "Credit Cards" : "Banking",
+    }));
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents as number]));
@@ -117,7 +131,7 @@ export default async function SavingsPage() {
     }
   }
 
-  // Build per-subcategory transaction lists for the expanded goal details (most recent first, cap at 10).
+  // Build per-subcategory transaction lists for the expanded goal details (most recent first, cap at 12).
   const txsBySub = new Map<string, SavingsCardData["transactions"]>();
   for (const t of savingsTx ?? []) {
     if (!txsBySub.has(t.subcategory_id)) txsBySub.set(t.subcategory_id, []);
@@ -132,7 +146,7 @@ export default async function SavingsPage() {
   }
   for (const [k, arr] of txsBySub) {
     arr.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-    txsBySub.set(k, arr.slice(0, 10));
+    txsBySub.set(k, arr.slice(0, 12));
   }
 
   const cards: SavingsCardData[] = savingsSubs.map((s) => {
@@ -204,6 +218,10 @@ export default async function SavingsPage() {
       incomeReceivedCents={incomeReceivedCents}
       currentMonthKey={currentMonthKey}
       currentMonthLabel={now.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+      withdrawalSubOptions={withdrawalSubOptions}
+      withdrawalAccountOptions={withdrawalAccountOptions}
+      withdrawalPayeeOptions={(payees ?? []).map((payee) => ({ id: payee.id, name: payee.name }))}
+      firstOfMonth={monthKey}
     />
   );
 }

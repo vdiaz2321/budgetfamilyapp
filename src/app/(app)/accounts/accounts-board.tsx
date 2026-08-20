@@ -11,6 +11,8 @@ import {
   closeCard,
   deleteAccount,
   deleteBucket,
+  logCreditCardRewardActivity,
+  setCreditCardRewardActivityArchived,
   payCard,
   reorderAccounts,
   reorderBuckets,
@@ -19,7 +21,6 @@ import {
   updateBalance,
   updateBucket,
   updateBucketBalance,
-  updateCardField,
   upsertCardDetails,
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
@@ -35,6 +36,10 @@ function monthAbbr(firstOfMonth: string): string {
 function maskAccountNumber(accountNumber: string | null): string | null {
   const lastFour = accountNumber?.replace(/\s/g, "").slice(-4);
   return lastFour ? `•••• ${lastFour}` : null;
+}
+
+function externalCardUrl(value: string): string {
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
 }
 
 export type BucketData = {
@@ -83,6 +88,17 @@ export type CardDetails = {
   promoAprEndsOn: string | null;
 };
 
+export type RewardActivity = {
+  id: string;
+  type: "points_redemption" | "hotel_credit_redemption" | "free_night_booking";
+  occurredOn: string;
+  pointsDelta: number;
+  hotelCreditDeltaCents: number;
+  bookedOn: string | null;
+  note: string | null;
+  archivedAt: string | null;
+};
+
 export type AccountData = {
   id: string;
   name: string;
@@ -103,6 +119,7 @@ export type AccountData = {
   dateClosed: string | null;
   // Credit-card only. Auto-computed on the server for CCs.
   cardDetails?: CardDetails | null;
+  rewardActivities: RewardActivity[];
   owedCents?: number;
   monthSpendCents?: number;
   // Prior-month account_snapshots (null = never recorded yet for that month).
@@ -183,7 +200,7 @@ const SECTIONS: Section[] = [
   },
   {
     key: "credit_closed",
-    label: "Credit Cards",
+    label: `Closed cards · ${new Date().getFullYear()}`,
     dot: "bg-negative",
     liability: false,
     match: (a) => {
@@ -197,7 +214,7 @@ const SECTIONS: Section[] = [
   },
   {
     key: "credit_archived",
-    label: "Archived Cards",
+    label: "Closed cards archive",
     dot: "bg-muted",
     liability: false,
     match: (a) => {
@@ -645,33 +662,53 @@ function CreditCardSection({
       }, 0);
   const travelRedeemable = redeemableForCategory("travel");
   const hotelRedeemable = redeemableForCategory("hotel");
+  const rewardActivityEntries = allCreditCards
+    .flatMap((card) => card.rewardActivities.map((activity) => ({ ...activity, cardName: card.name })))
+    .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
         <div className="px-4 py-4 sm:px-6 sm:py-5">
-          <button
-            type="button"
-            onClick={onToggle}
-            className="flex w-full items-start gap-4 text-left"
-            aria-expanded={open}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-2">
-                <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
-              </span>
-            </span>
-            <svg
-              width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className={`mt-1.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-              aria-hidden
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggle}
+              className="min-w-0 flex-1 text-left"
+              aria-expanded={open}
             >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
+              <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
+            </button>
+            <a
+              href="https://www.dailydrop.com/calculator"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/30 bg-white px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
+              title="Open the Daily Drop cents-per-point calculator"
+            >
+              <span className="sm:hidden">Calculator</span>
+              <span className="hidden sm:inline">Points value calculator</span>
+              <span aria-hidden>↗</span>
+            </a>
+            <button
+              type="button"
+              onClick={onToggle}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800"
+              aria-label={open ? "Collapse credit card rewards" : "Expand credit card rewards"}
+            >
+              <svg
+                width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                className={`transition-transform ${open ? "" : "-rotate-90"}`}
+                aria-hidden
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          </div>
 
           {(totalPoints > 0 || travelRedeemable > 0 || hotelRedeemable > 0 || feesPaid > 0 || totalOwed > 0) ? (
-            <div className="mt-4 grid grid-cols-2 items-stretch gap-1.5 sm:grid-cols-7">
+            <>
+            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-4">
               {totalPoints > 0 ? (
                 <StatTile
                   label="Current Pts"
@@ -702,24 +739,6 @@ function CreditCardSection({
                   title={showOnlyHotelRedeem ? "Show all cards" : "Show only hotel cards contributing to this total"}
                 />
               ) : null}
-              {feesPaid > 0 ? (
-                <StatTile
-                  label="Active Fees"
-                  value={`${formatMoney(feesPaid, currency)}/yr`}
-                  tone="amber"
-                  onClick={() => setShowOnlyFeeCards((v) => !v)}
-                  active={showOnlyFeeCards}
-                  title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
-                />
-              ) : null}
-              {feesAll > 0 ? (
-                <StatTile
-                  label="Actual Fees"
-                  value={`${formatMoney(feesAll, currency)}/yr`}
-                  tone="orange"
-                  title={`Total annual fees across all cards including waived (${formatMoney(feesWaived, currency)}/yr waived)`}
-                />
-              ) : null}
               {totalOwed > 0 ? (
                 <StatTile
                   label="Total Owed"
@@ -730,17 +749,32 @@ function CreditCardSection({
                   title={showOnlyOwedCards ? "Show all cards" : "Show only cards with a balance owed"}
                 />
               ) : null}
-              <div className="flex flex-col items-center justify-center rounded-lg bg-slate-500/10 px-2 py-1.5 text-center ring-1 ring-slate-500/30">
-                <div className="flex items-center justify-center gap-1 text-[9px] font-semibold text-slate-700 dark:text-slate-300">
-                  <span>Travel: <span className="tabular-nums">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span></span>
-                  <span className="text-slate-500/60">/</span>
-                  <span>Hotel: <span className="tabular-nums">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span></span>
-                </div>
-                <div className="mt-0.5 text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">
-                  Total: {accounts.length}
-                </div>
-              </div>
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 pt-3 text-xs text-muted dark:border-slate-800">
+              {feesPaid > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowOnlyFeeCards((v) => !v)}
+                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+                  title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
+                >
+                  Active fees <span className="tabular-nums text-amber-700 dark:text-amber-300">{formatMoney(feesPaid, currency)}/yr</span>
+                </button>
+              ) : null}
+              {feesAll > 0 ? (
+                <span title={`${formatMoney(feesWaived, currency)}/yr waived`}>
+                  Fees before waivers <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
+                </span>
+              ) : null}
+              <span className="sm:ml-auto">
+                <span className="font-semibold tabular-nums text-foreground">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span> travel
+                <span className="mx-1.5 text-slate-400">·</span>
+                <span className="font-semibold tabular-nums text-foreground">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span> hotel
+                <span className="mx-1.5 text-slate-400">·</span>
+                <span className="font-semibold tabular-nums text-foreground">{accounts.length}</span> total
+              </span>
+            </div>
+            </>
           ) : null}
         </div>
       ) : (
@@ -787,14 +821,14 @@ function CreditCardSection({
               <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
                 {showOnlyHotelRedeem ? <section aria-hidden /> : (
                 <section>
-                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-sky-500/[0.06] px-4 py-3 dark:bg-sky-500/10">
+                  <div className="flex items-center gap-2.5 border-b border-line bg-slate-50/70 px-4 py-3 dark:bg-slate-900/40">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
                       </svg>
                     </span>
                     <span className="text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
-                    <span className="rounded-md bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                    <span className="rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
@@ -806,7 +840,7 @@ function CreditCardSection({
                 )}
                 {showOnlyTravelRedeem ? <section aria-hidden /> : (
                 <section>
-                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-teal-500/[0.06] px-4 py-3 dark:bg-teal-500/10">
+                  <div className="flex items-center gap-2.5 border-b border-line bg-slate-50/70 px-4 py-3 dark:bg-slate-900/40">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 21V7l7-4v4h11v14" />
@@ -814,7 +848,7 @@ function CreditCardSection({
                       </svg>
                     </span>
                     <span className="text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
-                    <span className="rounded-md bg-teal-500/15 px-2 py-0.5 text-xs font-semibold text-teal-700 dark:text-teal-300">
+                    <span className="rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
@@ -843,6 +877,7 @@ function CreditCardSection({
                   {renderCards(otherCards)}
                 </section>
               ) : null}
+              <RewardsActivityLedger entries={rewardActivityEntries} currency={currency} />
             </div>
           ) : (() => {
             const groups = localAccounts.reduce<{ bank: string; cards: AccountData[] }[]>((acc, a) => {
@@ -917,8 +952,85 @@ function CreditCardSection({
   );
 }
 
-// One card panel — collapsed row of glance-info, expanded 2-column grid for the
-// full rewards details plus [Edit] [Pay Card] [Close] action bar.
+function RewardsActivityLedger({
+  entries,
+  currency,
+}: {
+  entries: Array<RewardActivity & { cardName: string }>;
+  currency: string;
+}) {
+  const [showArchived, setShowArchived] = useState(false);
+  const labels: Record<RewardActivity["type"], string> = {
+    points_redemption: "Points used",
+    hotel_credit_redemption: "Hotel credit used",
+    free_night_booking: "Free night booked",
+  };
+  const activeEntries = entries.filter((entry) => !entry.archivedAt);
+  const archivedEntries = entries.filter((entry) => entry.archivedAt);
+  const visibleEntries = showArchived ? archivedEntries : activeEntries;
+
+  return (
+    <section className="border-t-2 border-foreground/25 bg-brand-soft/[0.06]">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div>
+          <h3 className="text-sm font-bold">Rewards activity</h3>
+          <p className="text-xs text-muted">Every points redemption, hotel-credit use, and booked free night.</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {archivedEntries.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowArchived((value) => !value)}
+              className={`rounded-md border px-2 py-1 text-xs font-semibold transition ${showArchived ? "border-brand/40 bg-brand-soft text-brand" : "border-line bg-white text-muted hover:text-foreground dark:bg-slate-950"}`}
+            >
+              {showArchived ? "Back to activity" : `Archived ${archivedEntries.length}`}
+            </button>
+          ) : null}
+          <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">{activeEntries.length} active</span>
+        </div>
+      </div>
+      {visibleEntries.length === 0 ? (
+        <p className="px-4 py-4 text-sm text-muted">{showArchived ? "No archived rewards activity." : "No rewards activity yet. Open a card and choose “Log rewards activity” to create the first entry."}</p>
+      ) : (
+        <ul className="divide-y divide-line bg-background/70">
+          {visibleEntries.map((entry) => (
+            <li key={entry.id} className={`grid grid-cols-[4.75rem_minmax(0,1fr)_auto_auto] items-center gap-2 px-4 py-2.5 text-xs sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] ${entry.archivedAt ? "opacity-65" : ""}`}>
+              <span className="text-muted tabular-nums">{entry.occurredOn}</span>
+              <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
+              <span className="min-w-0 text-muted">{labels[entry.type]}{entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}{entry.note ? ` · ${entry.note}` : ""}</span>
+              <span className="whitespace-nowrap font-semibold text-negative tabular-nums">
+                {entry.pointsDelta ? `${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
+              </span>
+              <RewardActivityArchiveButton entry={entry} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RewardActivityArchiveButton({ entry }: { entry: RewardActivity }) {
+  const [pending, startTransition] = useTransition();
+  const archive = !entry.archivedAt;
+  return (
+    <form action={(formData) => startTransition(async () => { await setCreditCardRewardActivityArchived(formData); })}>
+      <input type="hidden" name="activityId" value={entry.id} />
+      <input type="hidden" name="archived" value={String(archive)} />
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md border border-line bg-white px-2 py-1 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:text-foreground disabled:opacity-50 dark:bg-slate-950"
+        title={archive ? "Archive this activity" : "Restore this activity"}
+      >
+        {pending ? "…" : archive ? "Archive" : "Restore"}
+      </button>
+    </form>
+  );
+}
+
+// The card row opens a compact action tray first. Editing is an explicit choice,
+// which keeps routine browsing from unexpectedly dropping a long form into view.
 function CreditCardPanel({
   card,
   currency,
@@ -939,6 +1051,7 @@ function CreditCardPanel({
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [loggingRewards, setLoggingRewards] = useState(false);
   const [closePending, startClose] = useTransition();
   const [reopenPending, startReopen] = useTransition();
 
@@ -948,29 +1061,14 @@ function CreditCardPanel({
   // Free-night expiry state for highlighting
   const today = new Date().toISOString().slice(0, 10);
   const fnExpires = d?.freeNightExpiresOn ?? null;
-  const fnUsed = d?.benefitUsedOn ?? null;
   const fnExpired = fnExpires ? fnExpires < today : false;
-  const fnDaysLeft = fnExpires && !fnExpired
-    ? Math.round((new Date(fnExpires).getTime() - new Date(today).getTime()) / 86_400_000)
-    : null;
-  const fnSoon = fnDaysLeft !== null && fnDaysLeft <= 60;
-  const fnExpiresColor = fnUsed && fnExpired
-    ? "text-muted line-through"
-    : fnExpired
-      ? "text-negative font-semibold"
-      : fnSoon
-        ? "text-negative font-semibold"
-        : "text-negative";
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const monthLabel = monthNames[new Date().getMonth()];
-  const monthSpend = card.monthSpendCents ?? 0;
-
+  const fnExpiresColor = fnExpired ? "text-negative font-semibold" : "text-foreground font-semibold";
   const bank = d?.bank ?? card.institution ?? card.subtype ?? null;
 
   return (
     <li
       data-drop-key={`credit-card:${card.id}`}
-      className={`${expanded ? "bg-brand-soft/15" : "hover:bg-brand-soft/25"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+      className={`${expanded ? "bg-slate-50/70 dark:bg-slate-900/35" : "hover:bg-slate-50 dark:hover:bg-slate-900/30"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
       {/* Collapsed row */}
       <div className="flex items-center">
@@ -983,24 +1081,26 @@ function CreditCardPanel({
         type="button"
         onClick={() => setExpanded((v) => {
           const next = !v;
-          // Collapsing must also clear the "editing" flag so a stale, unchanged
-          // Save/Cancel/Delete bar doesn't hang out below when the panel reopens.
-          if (!next) setEditing(false);
+          if (!next) {
+            setEditing(false);
+            setPaying(false);
+            setLoggingRewards(false);
+          }
           return next;
         })}
         className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="min-w-0 truncate text-sm font-medium">{card.name}</span>
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="w-full min-w-0 whitespace-normal break-words text-sm font-semibold leading-tight sm:w-auto sm:truncate">{card.name}</span>
             {card.holder ? (
-              <span className="shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                 {card.holder}
               </span>
             ) : null}
             {bank ? (
-              <span className="shrink-0 rounded bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400">
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
                 {bank}
               </span>
             ) : null}
@@ -1020,8 +1120,9 @@ function CreditCardPanel({
               </span>
             ) : null}
           </span>
-          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || (d && d.currentPoints > 0) || d?.bonusInfo) ? (
-            <p className="mt-1 flex flex-wrap items-center gap-1.5">
+          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || d?.charging || (d && d.currentPoints > 0)) ? (
+            <span className="mt-1 block space-y-1">
+            <span className="flex flex-wrap items-center gap-1.5 sm:flex-nowrap">
               {d && d.currentPoints > 0 ? (
                 <>
                   <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
@@ -1034,38 +1135,6 @@ function CreditCardPanel({
                   ) : null}
                 </>
               ) : null}
-              {d?.bonusInfo ? (
-                d.bonusEarned ? (
-                  // Only surface "Bonus earned" while the card is new — from
-                  // date opened through ~a few months after the bonus should
-                  // have been met. After 12 months it's stale info, so hide it.
-                  (() => {
-                    if (!card.dateOpened) return null;
-                    const opened = new Date(card.dateOpened);
-                    const cutoff = new Date();
-                    cutoff.setMonth(cutoff.getMonth() - 12);
-                    if (opened < cutoff) return null;
-                    return (
-                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M20 6 9 17l-5-5" /></svg>
-                        Bonus earned: {d.bonusInfo}
-                      </span>
-                    );
-                  })()
-                ) : (
-                  <span
-                    className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${
-                      d.bonusSpendDeadline && d.bonusSpendDeadline < today
-                        ? "bg-rose-500/10 text-negative ring-rose-500/30"
-                        : "bg-amber-500/15 text-amber-700 ring-amber-500/30 dark:text-amber-300"
-                    }`}
-                  >
-                    🎯 <span>Bonus: {d.bonusInfo}</span>
-                    {d.bonusSpendCents ? <span className="tabular-nums">· ${Math.round(d.bonusSpendCents / 100).toLocaleString()}</span> : null}
-                    {d.bonusSpendDeadline ? <span className="tabular-nums">· by {d.bonusSpendDeadline.replace(/-/g, "‑")}</span> : null}
-                  </span>
-                )
-              ) : null}
               {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
                 <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-500/30 dark:text-indigo-300">
                   <span className="tabular-nums">
@@ -1076,21 +1145,23 @@ function CreditCardPanel({
                   <span>Night Credit</span>
                 </span>
               ) : null}
-              {(d?.freeNightExpiresOn || d?.benefitUsedOn) ? (
-                <span className="inline-flex flex-nowrap items-center gap-1.5">
+            </span>
+              {(d?.freeNightExpiresOn || d?.benefitUsedOn || d?.charging) ? (
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   {d?.freeNightExpiresOn ? (
                     <span
-                      className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold ${
-                        fnUsed && fnExpired
-                          ? "text-muted line-through"
-                          : "text-negative"
-                      }`}
+                      className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] ${fnExpiresColor}`}
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <circle cx="12" cy="12" r="9" />
                         <path d="M12 7v5l3 2" />
                       </svg>
-                      Expires {d.freeNightExpiresOn.replace(/-/g, "‑")}
+                      {fnExpired ? "Expired" : "Expires"} {d.freeNightExpiresOn.replace(/-/g, "‑")}
+                    </span>
+                  ) : null}
+                  {d?.charging ? (
+                    <span className="whitespace-nowrap text-[11px] text-muted">
+                      <span className="font-semibold text-foreground">Charging:</span> {d.charging}
                     </span>
                   ) : null}
                   {d?.benefitUsedOn ? (
@@ -1106,12 +1177,12 @@ function CreditCardPanel({
                         <path d="M16 2v4M8 2v4M3 10h18" />
                         <path d="m9 15 2 2 4-4" />
                       </svg>
-                      Scheduled: {d.benefitUsedOn.replace(/-/g, "‑")}
+                      Booked: {d.benefitUsedOn.replace(/-/g, "‑")}
                     </span>
                   ) : null}
                 </span>
               ) : null}
-            </p>
+            </span>
           ) : null}
         </span>
         <span className={`ml-2 shrink-0 whitespace-nowrap text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
@@ -1129,106 +1200,21 @@ function CreditCardPanel({
       </div>
 
       {expanded ? (
-        <div className="space-y-3 border-t border-line bg-background/40 px-4 py-3">
-          {/* Two-column detail grid */}
-          <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
-            <InlineField
-              label="Bank"
-              accountId={card.id}
-              field="bank"
-              rawValue={d?.bank ?? card.institution ?? ""}
-              displayValue={bank}
-              placeholder="Chase / AMEX / Cap 1"
+        <div className="border-t border-line bg-white dark:bg-slate-950">
+          {editing ? (
+            <EditCreditCardForm
+              key={JSON.stringify(card.cardDetails) + card.annualFeeCents + card.dateOpened + card.dateClosed + card.holder + card.name}
+              card={card}
+              onDone={() => setEditing(false)}
             />
-            <InlineField
-              label="Charging"
-              accountId={card.id}
-              field="charging"
-              rawValue={d?.charging ?? ""}
-              displayValue={d?.charging ?? "—"}
-              placeholder="Netflix, Google Drive"
-            />
-            <InlineField
-              label="Auth user"
-              accountId={card.id}
-              field="authUser"
-              rawValue={d?.authUser ?? ""}
-              displayValue={d?.authUser ?? "—"}
-              placeholder="Vic / Johana"
-            />
-            <InlineField
-              label="Annual fee"
-              accountId={card.id}
-              field="annualFee"
-              type="currency"
-              currency={currency}
-              rawValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""}
-              displayValue={
-                card.annualFeeCents
-                  ? `${formatMoney(card.annualFeeCents, currency)}${card.feeWaived ? " (waived)" : ""}${d && d.feesPaidCents > 0 ? ` · ${formatMoney(d.feesPaidCents, currency)} paid` : ""}`
-                  : "—"
-              }
-              placeholder="0.00"
-            />
-            <InlineField
-              label="Opened"
-              accountId={card.id}
-              field="dateOpened"
-              type="date"
-              rawValue={card.dateOpened ?? ""}
-              displayValue={card.dateOpened ?? "—"}
-            />
-            <InlineField
-              label="Spending limit"
-              accountId={card.id}
-              field="spendingLimit"
-              type="currency"
-              currency={currency}
-              rawValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""}
-              displayValue={d?.spendingLimitCents ? `${currencySymbol(currency)}${Math.round(d.spendingLimitCents / 100).toLocaleString()}` : "—"}
-              placeholder="0"
-            />
-            {card.dateClosed ? (
-              <InlineField
-                label="Closed"
-                accountId={card.id}
-                field="dateClosed"
-                type="date"
-                rawValue={card.dateClosed}
-                displayValue={card.dateClosed}
-              />
-            ) : null}
-            <InlineField
-              label="Card URL"
-              accountId={card.id}
-              field="cardUrl"
-              type="url"
-              rawValue={d?.cardUrl ?? ""}
-              displayValue={
-                d?.cardUrl ? (
-                  <span className="block truncate text-brand">
-                    {(() => { try { return new URL(d.cardUrl).hostname; } catch { return d.cardUrl; } })()}
-                  </span>
-                ) : "—"
-              }
-              placeholder="https://issuer.com/card"
-            />
-          </div>
-
-          {d?.remarks ? (
-            <p className="text-xs text-muted">
-              <span className="font-semibold">Remarks:</span> {d.remarks}
-            </p>
-          ) : null}
-
-          {/* Action bar */}
-          <div className="flex flex-wrap items-center gap-2">
-            {!editing && !paying ? (
+          ) : (
+          <div className="grid grid-cols-3 items-center gap-1.5 px-3 py-2.5 min-[380px]:grid-cols-5 sm:flex sm:flex-nowrap">
+            {!editing && !paying && !loggingRewards ? (
               <>
                 <button
                   type="button"
                   onClick={() => setEditing(true)}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-black/[0.04] px-3 py-1.5 text-xs font-normal text-primary hover:bg-black/[0.08] dark:bg-white/5 dark:hover:bg-white/10"
+                  className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-black/[0.04] px-1.5 py-1.5 text-[11px] font-medium text-primary hover:bg-black/[0.08] sm:w-auto sm:shrink-0 sm:px-2 dark:bg-white/5 dark:hover:bg-white/10"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M12 20h9" />
@@ -1236,33 +1222,53 @@ function CreditCardPanel({
                   </svg>
                   Edit
                 </button>
+                {d?.cardUrl ? (
+                  <a
+                    href={externalCardUrl(d.cardUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={`Open ${d.cardUrl}`}
+                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-line bg-white px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:border-brand/40 hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                  >
+                    <span className="sm:hidden">Site</span><span className="hidden sm:inline">Visit site</span> <span aria-hidden>↗</span>
+                  </a>
+                ) : null}
+                {!isArchived && !card.dateClosed ? (
+                  <button
+                    type="button"
+                    onClick={() => setLoggingRewards(true)}
+                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-brand/35 bg-white px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                  >
+                    <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards log</span>
+                  </button>
+                ) : null}
                 {!isArchived && !card.dateClosed ? (
                   <button
                     type="button"
                     onClick={() => setPaying(true)}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-normal text-white hover:bg-brand-strong"
+                    className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-brand px-1.5 py-1.5 text-[11px] font-medium text-white hover:bg-brand-strong sm:w-auto sm:shrink-0 sm:px-2"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <rect x="2" y="6" width="20" height="12" rx="2" />
                       <circle cx="12" cy="12" r="2.5" />
                     </svg>
-                    {owed > 0 ? "Pay Balance" : "Pay Card"}
+                    <span className="sm:hidden">Pay</span><span className="hidden sm:inline">{owed > 0 ? "Pay balance" : "Pay card"}</span>
                   </button>
                 ) : null}
                 {!isArchived && !card.dateClosed ? (
-                  <form action={(fd) => startClose(() => closeCard(fd))} className="ml-auto">
+                  <form action={(fd) => startClose(() => closeCard(fd))} className="col-span-2 min-[380px]:col-span-1 sm:ml-auto sm:shrink-0">
                     <input type="hidden" name="id" value={card.id} />
                     <button
                       type="submit"
                       disabled={closePending}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-normal text-negative hover:bg-negative/15 disabled:opacity-60"
+                      className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-negative/10 px-1.5 py-1.5 text-[11px] font-medium text-negative hover:bg-negative/15 disabled:opacity-60 sm:w-auto sm:px-2"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 6h18" />
                         <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                         <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
                       </svg>
-                      {closePending ? "Closing…" : "Close Card"}
+                      {closePending ? "Closing…" : <><span className="sm:hidden">Close</span><span className="hidden sm:inline">Close card</span></>}
                     </button>
                   </form>
                 ) : null}
@@ -1281,14 +1287,7 @@ function CreditCardPanel({
               </>
             ) : null}
           </div>
-
-          {editing ? (
-            <EditCreditCardForm
-              key={JSON.stringify(card.cardDetails) + card.annualFeeCents + card.dateOpened + card.dateClosed + card.holder + card.name}
-              card={card}
-              onDone={() => setEditing(false)}
-            />
-          ) : null}
+          )}
 
           {paying ? (
             <PayCardModal
@@ -1299,9 +1298,98 @@ function CreditCardPanel({
               onClose={() => setPaying(false)}
             />
           ) : null}
+          {loggingRewards ? (
+            <RewardActivityForm
+              card={card}
+              currency={currency}
+              onDone={() => setLoggingRewards(false)}
+            />
+          ) : null}
         </div>
       ) : null}
     </li>
+  );
+}
+
+function RewardActivityForm({
+  card,
+  currency,
+  onDone,
+}: {
+  card: AccountData;
+  currency: string;
+  onDone: () => void;
+}) {
+  const [activityType, setActivityType] = useState<RewardActivity["type"]>("points_redemption");
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const d = card.cardDetails;
+  const today = new Date().toISOString().slice(0, 10);
+  const labels: Record<RewardActivity["type"], string> = {
+    points_redemption: "Points used",
+    hotel_credit_redemption: "Hotel credit used",
+    free_night_booking: "Free night booked",
+  };
+
+  return (
+    <section className="rounded-lg border-2 border-brand/25 bg-brand-soft/10 p-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold">Log rewards activity</h4>
+          <p className="text-xs text-muted">The ledger keeps this card&apos;s balances and Booked date up to date automatically.</p>
+        </div>
+        <button type="button" onClick={onDone} className="text-xs font-medium text-muted hover:text-foreground">Cancel</button>
+      </div>
+      <form
+        action={(formData) => start(async () => {
+          setError(null);
+          const result = await logCreditCardRewardActivity(formData);
+          if (result?.error) setError(result.error);
+          else onDone();
+        })}
+        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      >
+        <input type="hidden" name="accountId" value={card.id} />
+        <label className="block">
+          <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Activity</span>
+          <select name="activityType" value={activityType} onChange={(e) => setActivityType(e.target.value as RewardActivity["type"])} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+            <option value="points_redemption">Points redemption</option>
+            <option value="hotel_credit_redemption">Hotel credit used</option>
+            <option value="free_night_booking">Free night booked</option>
+          </select>
+        </label>
+        <LabeledInput label="Activity date" name="occurredOn" type="date" defaultValue={today} />
+        {activityType === "points_redemption" ? (
+          <LabeledInput label={`Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`} name="pointsUsed" type="number" min="1" step="1" placeholder="0" />
+        ) : null}
+        {activityType === "hotel_credit_redemption" ? (
+          <LabeledInput label={`Hotel credit used · ${d?.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : formatMoney(0, currency)} available`} name="hotelCreditUsed" type="number" min="0.01" step="0.01" prefix={currencySymbol(currency)} placeholder="0" />
+        ) : null}
+        <LabeledInput label={activityType === "free_night_booking" ? "Booked / check-in date" : "Booked / check-in date (optional)"} name="bookedOn" type="date" defaultValue={activityType === "free_night_booking" ? today : ""} />
+        <div className="sm:col-span-2">
+          <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Note (optional)</label>
+          <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
+        </div>
+        <div className="sm:col-span-2 flex items-center justify-between gap-3 pt-1">
+          <p className="text-xs text-muted">{labels[activityType]} will be added to this card&apos;s activity log.</p>
+          <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
+        </div>
+        {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
+      </form>
+      {card.rewardActivities.length > 0 ? (
+        <div className="mt-3 border-t border-line pt-2">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Recent rewards activity</p>
+          <ul className="space-y-1 text-xs">
+            {card.rewardActivities.slice(0, 5).map((activity) => (
+              <li key={activity.id} className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate">{labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
+                <span className="shrink-0 font-semibold text-negative">{activity.pointsDelta ? `${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoney(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1374,7 +1462,7 @@ function StatTile({
   title?: string;
 }) {
   const t = STAT_TONES[tone];
-  const base = `rounded-lg px-2 py-1.5 sm:px-2 sm:py-1.5 text-center ring-1 ${active ? t.activeBg : t.bg} ${t.ring}`;
+  const base = `rounded-lg px-2 py-2 text-center ring-1 ${active ? `${t.activeBg} ${t.ring}` : "bg-white ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"}`;
   const inner = (
     <>
       <div className={`text-[9px] sm:text-[9px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
@@ -1389,168 +1477,6 @@ function StatTile({
     );
   }
   return <div className={base}>{inner}</div>;
-}
-
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="text-xs leading-relaxed text-foreground">
-      <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
-        {label}
-      </span>
-      {value}
-    </div>
-  );
-}
-
-// Click a value → becomes an input; Enter or blur saves; Esc cancels.
-// Type variants match the columns supported by the updateCardField action.
-type InlineFieldType = "text" | "integer" | "currency" | "date" | "url";
-function InlineField({
-  label,
-  accountId,
-  field,
-  rawValue,
-  displayValue,
-  type = "text",
-  placeholder,
-  currency,
-}: {
-  label: string;
-  accountId: string;
-  field: string;
-  rawValue: string;
-  displayValue: React.ReactNode;
-  type?: InlineFieldType;
-  placeholder?: string;
-  currency?: string;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(rawValue);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.focus();
-  }, [editing]);
-
-  useEffect(() => {
-    // If the underlying data changes (e.g. from another edit), reset local state.
-    if (!editing) setValue(rawValue);
-  }, [rawValue, editing]);
-
-  const commit = () => {
-    if (value === rawValue) { setEditing(false); return; }
-    startTransition(async () => {
-      const result = await updateCardField({ accountId, field, value });
-      if (result.error) { setError(result.error); return; }
-      setError(null);
-      setEditing(false);
-    });
-  };
-
-  const inputType = type === "date" ? "date" : type === "url" ? "url" : "text";
-
-  return (
-    <div className="group text-xs leading-relaxed text-foreground">
-      <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
-        {label}
-      </span>
-      {editing ? (
-        <span className="inline-flex items-center gap-1">
-          {type === "currency" ? (
-            <span className="text-muted">{currencySymbol(currency ?? "USD")}</span>
-          ) : null}
-          <input
-            ref={inputRef}
-            type={inputType}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); commit(); }
-              else if (e.key === "Escape") { e.preventDefault(); setValue(rawValue); setEditing(false); setError(null); }
-            }}
-            disabled={pending}
-            placeholder={placeholder}
-            className="w-28 rounded bg-background px-1.5 py-0.5 text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
-          />
-          {type === "date" && value ? (
-            <button type="button" onMouseDown={(e) => { e.preventDefault(); setValue(""); }} className="text-muted hover:text-foreground" aria-label="Clear date">✕</button>
-          ) : null}
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="rounded px-1 py-0.5 text-left hover:bg-black/[0.04] dark:hover:bg-white/5"
-        >
-          {displayValue}
-        </button>
-      )}
-      {error ? <span className="ml-2 text-[10px] font-semibold text-negative">{error}</span> : null}
-    </div>
-  );
-}
-
-// Select variant for enum fields (e.g. rewards category).
-function InlineSelect({
-  label,
-  accountId,
-  field,
-  rawValue,
-  displayValue,
-  options,
-}: {
-  label: string;
-  accountId: string;
-  field: string;
-  rawValue: string;
-  displayValue: React.ReactNode;
-  options: { value: string; label: string }[];
-}) {
-  const [editing, setEditing] = useState(false);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const commit = (v: string) => {
-    if (v === rawValue) { setEditing(false); return; }
-    startTransition(async () => {
-      const result = await updateCardField({ accountId, field, value: v });
-      if (result.error) { setError(result.error); return; }
-      setError(null);
-      setEditing(false);
-    });
-  };
-  return (
-    <div className="text-xs leading-relaxed text-foreground">
-      <span className="mr-2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
-        {label}
-      </span>
-      {editing ? (
-        <select
-          autoFocus
-          defaultValue={rawValue}
-          onBlur={() => setEditing(false)}
-          onChange={(e) => commit(e.target.value)}
-          disabled={pending}
-          className="rounded bg-background px-1 py-0.5 text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-60"
-        >
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="rounded px-1 py-0.5 text-left hover:bg-black/[0.04] dark:hover:bg-white/5"
-        >
-          {displayValue}
-        </button>
-      )}
-      {error ? <span className="ml-2 text-[10px] font-semibold text-negative">{error}</span> : null}
-    </div>
-  );
 }
 
 function EditCreditCardForm({
@@ -1568,23 +1494,24 @@ function EditCreditCardForm({
   const [activeTab, setActiveTab] = useState<"key" | "basics" | "debt">("key");
   const d = card.cardDetails;
 
-  const tabBtn = (id: "key" | "basics" | "debt", label: string) => (
+  const tabBtn = (id: "key" | "basics" | "debt", label: string, mobileLabel: string) => (
     <button
       type="button"
       onClick={() => setActiveTab(id)}
-      className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+      className={`h-8 min-w-0 whitespace-nowrap px-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-sm ${
         activeTab === id
-          ? "bg-brand text-white"
-          : "text-muted hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/5"
+          ? "text-brand shadow-[inset_0_-2px_0_var(--brand)]"
+          : "text-muted hover:bg-slate-50 hover:text-foreground dark:hover:bg-slate-900"
       }`}
       aria-pressed={activeTab === id}
     >
-      {label}
+      <span className="sm:hidden">{mobileLabel}</span>
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 
   return (
-    <div className="space-y-4 rounded-md border border-line bg-surface p-3">
+    <div className="bg-white p-3 dark:bg-slate-950">
       {/* One form: saves both account-level basics AND rewards details together.
           All tabs stay mounted (hidden via CSS) so a single Save submits every field. */}
       <form
@@ -1598,9 +1525,10 @@ function EditCreditCardForm({
             ]);
             if (detailsResult?.error) { setDetailsError(detailsResult.error); return; }
             if (detailsResult?.missingMigration) { setMigrationWarning(true); }
+            onDone();
           })
         }
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-3 [&_input]:!bg-white [&_select]:!bg-white dark:[&_input]:!bg-slate-950 dark:[&_select]:!bg-slate-950"
       >
         <input type="hidden" name="id" value={card.id} />
         <input type="hidden" name="accountId" value={card.id} />
@@ -1608,29 +1536,37 @@ function EditCreditCardForm({
         <input type="hidden" name="subtype" value={card.subtype ?? ""} />
         <input type="hidden" name="active" value={card.active ? "on" : ""} />
 
-        <div className="flex items-center gap-1 border-b border-line pb-2">
-          {tabBtn("key", "Points & Dates")}
-          {tabBtn("basics", "Basics & Rewards")}
-          {tabBtn("debt", "Debt tracking")}
+        <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_2rem] items-center border-b border-slate-200 dark:border-slate-800">
+          {tabBtn("key", "Points & Dates", "Points")}
+          {tabBtn("basics", "Basics & Rewards", "Basics")}
+          {tabBtn("debt", "Debt tracking", "Debt")}
+          <button
+            type="button"
+            onClick={onDone}
+            title="Close editor"
+            aria-label="Close editor"
+            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-slate-100 hover:text-foreground dark:hover:bg-slate-800"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         {/* Tab 1: Key fields (default) */}
         <div className={activeTab === "key" ? "" : "hidden"}>
-          <div className="rounded-lg border-2 border-amber-300/70 bg-amber-50/60 p-3 dark:border-amber-800/50 dark:bg-amber-950/20">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-              Key fields · monitor &amp; update Points &amp; Dates
-            </p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/35">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-slate-300 [&_select]:bg-white [&_select]:ring-slate-300 dark:[&_input]:bg-slate-950 dark:[&_input]:ring-slate-700 dark:[&_select]:bg-slate-950 dark:[&_select]:ring-slate-700">
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
-              <LabeledInput label="Total Hotel Credits Anv" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-              <LabeledInput label="Free Night / Credits Exp" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-              <LabeledInput label="Up to Anv Pts / Free Night" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
-              <LabeledInput label="Used / scheduled" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
+              <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
+              <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+              <LabeledInput label="Free-night point value" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
+              <LabeledInput label="Booked / check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
-              <LabeledInput label="Card URL" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
+              <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
               <label className="block">
-                <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
-                <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
+                <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md px-2 py-1.5 text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-brand">
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="annual">Annual</option>
@@ -1714,27 +1650,16 @@ function EditCreditCardForm({
         ) : null}
         {migrationWarning ? (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            Saved (most fields). To also save Used/Scheduled and Free Night pts limit, run migration 0026 in Supabase SQL Editor.
+            Saved (most fields). To also save Booked dates and free-night point values, run migration 0026 in Supabase SQL Editor.
           </p>
         ) : null}
 
-        <div className="order-first flex items-center justify-between gap-2 pt-1">
+        <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onDone}
-              title="Close"
-              aria-label="Close"
-              className="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-line hover:text-foreground"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
             <button
               type="submit"
               disabled={savePending}
-              className="rounded-md border border-zinc-300 bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 disabled:opacity-60 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+              className="h-8 rounded-md bg-brand px-3 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
             >
               {savePending ? "Saving…" : "Save"}
             </button>
@@ -1768,7 +1693,7 @@ function EditCreditCardForm({
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="text-xs font-medium text-negative hover:underline"
+              className="h-8 rounded-md px-2.5 text-xs font-medium text-negative hover:bg-negative/10"
             >
               Delete card
             </button>
@@ -1786,7 +1711,8 @@ function LabeledInput({
   ...inputProps
 }: { label: string; prefix?: string; hint?: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
   const isDate = inputProps.type === "date";
-  const [dateVal, setDateVal] = useState(isDate ? (inputProps.defaultValue as string ?? "") : "");
+  const { defaultValue: initialDefaultValue, ...dateInputProps } = inputProps;
+  const [dateVal, setDateVal] = useState(isDate ? (typeof initialDefaultValue === "string" ? initialDefaultValue : "") : "");
   const dateRef = useRef<HTMLInputElement | null>(null);
 
   if (isDate) {
@@ -1797,7 +1723,7 @@ function LabeledInput({
         </span>
         <div className="flex items-center gap-1">
           <input
-            {...inputProps}
+            {...dateInputProps}
             ref={dateRef}
             value={dateVal}
             onChange={(e) => setDateVal(e.target.value)}
@@ -2937,6 +2863,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [debtSubtype, setDebtSubtype] = useState("");
+  const [cardTab, setCardTab] = useState<"key" | "basics" | "debt">("key");
   const kindKeys = Object.keys(section.kindLabels);
   const multiKind = kindKeys.length > 1;
 
@@ -2953,66 +2880,89 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
               else onDone(result?.id ?? null);
             })
           }
-          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+          className="flex flex-col gap-3"
         >
           <input type="hidden" name="kind" value={section.fixedKind ?? kindKeys[0]} />
-          <LabeledInput label="Card name" name="name" placeholder="e.g. 1175 Sapphire V" required autoFocus onChange={() => setError(null)} />
-          <LabeledInput label="Institution" name="institution" placeholder="e.g. Chase" />
-          <LabeledInput label="Account holder(s)" name="holder" />
-          <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
-          <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
-            Ownership
-            <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-              <option value="sole">Sole</option>
-              <option value="joint">Joint</option>
-            </select>
-          </label>
-          <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" />
-          <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-            <input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-            Fee waived (e.g. military benefit)
-          </label>
-          <LabeledInput label="Date opened" name="dateOpened" type="date" />
-          <LabeledInput label="Date closed" name="dateClosed" type="date" />
-          <div className="col-span-full grid grid-cols-1 gap-2 border-t border-line pt-3 sm:grid-cols-2">
-            <LabeledInput label="Bank" name="bank" placeholder="AMEX / Chase / Cap 1" />
-            <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Rewards category
-              <select name="rewardsCategory" defaultValue="" className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-                <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
-              </select>
-            </label>
-            <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
-            <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" placeholder="0.0020" />
-            <LabeledInput label="Bonus info" name="bonusInfo" placeholder="60,000 pts" />
-            <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" placeholder="3000" />
-            <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" />
-            <LabeledInput label="Current points" name="currentPoints" type="text" placeholder="0" />
-            <LabeledInput label="Hotel Credit" name="freeNightCredit" type="number" step="0.01" prefix="$" />
-            <LabeledInput label="Hotel Credit/Anv Night Expires" name="freeNightExpires" type="date" />
-            <LabeledInput label="Anv Free Night Pts per Night" name="freeNightPointsLimit" type="number" step="1" />
-            <LabeledInput label="Benefits reset" name="benefitCadence" placeholder="Annual" />
-            <div className="sm:col-span-2"><LabeledInput label="Remarks" name="remarks" /></div>
-            <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 sm:col-span-2 dark:border-rose-900/50 dark:bg-rose-950/20">
-              <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
-                <input type="checkbox" name="trackAsPayoffDebt" className="mt-0.5 h-4 w-4 rounded accent-[var(--brand)]" />
-                <span>
-                  Track this card as payoff debt
-                  <span className="mt-0.5 block text-xs font-normal text-muted">Off by default. Syncs balance, rate, and payment plan with Budget → Debt/Loans.</span>
-                </span>
+          <div className="flex items-center gap-1 border-b border-line pb-2">
+            {([
+              ["key", "Points & Dates"],
+              ["basics", "Basics & Rewards"],
+              ["debt", "Debt tracking"],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setCardTab(id)}
+                aria-pressed={cardTab === id}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${cardTab === id ? "bg-brand text-white" : "text-muted hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/5"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className={cardTab === "key" ? "" : "hidden"}>
+            <div className="rounded-lg border-2 border-amber-300/70 bg-amber-50/60 p-3 dark:border-amber-800/50 dark:bg-amber-950/20">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Key fields · monitor &amp; update points &amp; dates</p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <LabeledInput label="Current points" name="currentPoints" type="text" placeholder="0" />
+                <LabeledInput label="Total Hotel Credits Anv" name="freeNightCredit" type="number" step="0.01" prefix="$" />
+                <LabeledInput label="Free Night / Credits Exp" name="freeNightExpires" type="date" />
+                <LabeledInput label="Up to Anv Pts / Free Night" name="freeNightPointsLimit" type="number" step="1" />
+                <LabeledInput label="Booked" name="benefitUsedOn" type="date" />
+                <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" />
+                <LabeledInput label="Card URL" name="cardUrl" type="url" placeholder="https://issuer.com/card" />
+                <label className="block">
+                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
+                  <select name="benefitCadence" defaultValue="annual" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                    <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option><option value="anniversary">Card anniversary</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className={cardTab === "basics" ? "" : "hidden"}>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <LabeledInput label="Card name" name="name" placeholder="e.g. 1175 Sapphire V" autoComplete="off" required={cardTab === "basics"} autoFocus onChange={() => setError(null)} />
+              <LabeledInput label="Card issuer (bank)" name="institution" placeholder="e.g. Chase" autoComplete="off" />
+              <LabeledInput label="Account holder(s)" name="holder" />
+              <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
+              <label className="block">
+                <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Ownership</span>
+                <select name="ownership" defaultValue="sole" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="sole">Sole</option><option value="joint">Joint</option></select>
               </label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="space-y-2"><LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" /><label className="flex items-center gap-1.5 px-0.5 text-xs text-muted"><input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Fee waived (e.g. military benefit)</label></div>
+              <LabeledInput label="Date opened" name="dateOpened" type="date" />
+              <LabeledInput label="Date closed" name="dateClosed" type="date" />
+              <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
+              <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
+              <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" placeholder="0.0020" />
+              <LabeledInput label="Auth user" name="authUser" />
+              <LabeledInput label="Charging" name="charging" placeholder="Netflix, Google Drive" />
+              <LabeledInput label="Bonus info" name="bonusInfo" placeholder="60,000 pts" />
+              <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" placeholder="3000" />
+              <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" />
+              <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted"><input type="checkbox" name="bonusEarned" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Bonus earned</label>
+              <div className="sm:col-span-2"><label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label><input name="remarks" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></div>
+            </div>
+          </div>
+
+          <div className={cardTab === "debt" ? "" : "hidden"}>
+            <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
+              <label className="flex items-start gap-2 text-sm font-semibold text-foreground"><input type="checkbox" name="trackAsPayoffDebt" className="mt-0.5 h-4 w-4 rounded accent-[var(--brand)]" /><span>Track this card as payoff debt<span className="mt-0.5 block text-xs font-normal text-muted">Off by default. Syncs balance, rate, and payment plan with Budget → Debt/Loans.</span></span></label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.55fr)_minmax(0,1.55fr)]">
                 <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" />
                 <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" />
                 <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" />
                 <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" />
-                <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" />
                 <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" />
+                <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" />
               </div>
-              <p className="text-[11px] text-muted">Set APR to 0 during a 0% promo period; add the regular rate when the promo ends.</p>
+              <p className="text-[11px] text-muted">APR % should be 0 during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:col-span-2">
+          <div className="flex items-center gap-2">
             <button
               type="submit"
               disabled={pending}
@@ -3029,7 +2979,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             </button>
           </div>
           {error ? (
-            <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p>
+            <p className="text-sm font-medium text-negative">{error}</p>
           ) : null}
         </form>
       </div>

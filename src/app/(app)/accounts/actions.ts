@@ -309,6 +309,9 @@ export async function addCreditCardWithDetails(formData: FormData) {
   const result = await addAccount(formData);
   if (result?.error || !result?.id) return result;
 
+  // The add form asks for the card issuer once. Keep the detail record's
+  // grouping field in sync without showing a second, duplicate Bank field.
+  formData.set("bank", String(formData.get("institution") ?? "").trim());
   formData.set("accountId", result.id);
   formData.set("id", result.id);
   formData.set("isCreditCard", "on");
@@ -606,6 +609,8 @@ export async function upsertCardDetails(formData: FormData) {
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? Math.round(n * 1_000_000) : null;
   };
+  const rawCardUrl = optText("cardUrl");
+  const cardUrl = rawCardUrl && !/^https?:\/\//i.test(rawCardUrl) ? `https://${rawCardUrl}` : rawCardUrl;
 
   const trackAsPayoffDebt = formData.get("trackAsPayoffDebt") === "on";
   let debtSubcategoryId = (existingDetails?.debt_subcategory_id as string | null) ?? null;
@@ -662,7 +667,7 @@ export async function upsertCardDetails(formData: FormData) {
     benefit_used_on: optDate("benefitUsedOn"),
     spending_limit_cents: optCents("spendingLimit"),
     remarks: optText("remarks"),
-    card_url: optText("cardUrl"),
+    card_url: cardUrl,
     benefit_cadence: optText("benefitCadence"),
     is_revolving_debt: trackAsPayoffDebt,
     debt_subcategory_id: debtSubcategoryId,
@@ -693,6 +698,79 @@ export async function upsertCardDetails(formData: FormData) {
       return { error: null, missingMigration: true };
     }
     return { error: "Couldn't save — " + error.message };
+  }
+  revalidate();
+  return { error: null };
+}
+
+// Reward activity is a ledger entry, not an editable balance. The database
+// trigger created in migration 0037 applies the matching deduction and, for a
+// free-night booking, updates the card's Booked date in the same transaction.
+export async function logCreditCardRewardActivity(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const accountId = String(formData.get("accountId") ?? "");
+  const activityType = String(formData.get("activityType") ?? "");
+  const occurredOn = String(formData.get("occurredOn") ?? "").trim();
+  const bookedOn = String(formData.get("bookedOn") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+  if (!accountId || !["points_redemption", "hotel_credit_redemption", "free_night_booking"].includes(activityType)) {
+    return { error: "Choose a valid reward activity." };
+  }
+  if (!isDate(occurredOn) || (bookedOn && !isDate(bookedOn))) {
+    return { error: "Enter a valid activity date." };
+  }
+
+  const { data: details } = await supabase
+    .from("credit_card_details")
+    .select("current_points, free_night_credit_cents")
+    .eq("account_id", accountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (!details) return { error: "Card details were not found." };
+
+  const pointsUsed = Math.max(0, Math.trunc(Number(String(formData.get("pointsUsed") ?? "0").replace(/,/g, "")) || 0));
+  const hotelCreditUsedCents = Math.max(0, displayToCents(String(formData.get("hotelCreditUsed") ?? "0")));
+  if (activityType === "points_redemption" && pointsUsed <= 0) return { error: "Enter the points you used." };
+  if (activityType === "hotel_credit_redemption" && hotelCreditUsedCents <= 0) return { error: "Enter the hotel credit you used." };
+  if (activityType === "points_redemption" && pointsUsed > (details.current_points ?? 0)) return { error: "That is more points than this card currently has." };
+  if (activityType === "hotel_credit_redemption" && hotelCreditUsedCents > (details.free_night_credit_cents ?? 0)) return { error: "That is more hotel credit than this card currently has." };
+
+  const { error } = await supabase.from("credit_card_reward_activities").insert({
+    household_id: householdId,
+    account_id: accountId,
+    activity_type: activityType,
+    occurred_on: occurredOn,
+    points_delta: activityType === "points_redemption" ? -pointsUsed : 0,
+    hotel_credit_delta_cents: activityType === "hotel_credit_redemption" ? -hotelCreditUsedCents : 0,
+    booked_on: bookedOn || (activityType === "free_night_booking" ? occurredOn : null),
+    note,
+  });
+  if (error) {
+    console.error("[logCreditCardRewardActivity]", error);
+    return { error: "Couldn't log that reward activity — " + error.message };
+  }
+  revalidate();
+  return { error: null };
+}
+
+// Archiving only changes ledger visibility. It never reverses a redemption or
+// alters the card's points/credit balance; restoring brings the entry back.
+export async function setCreditCardRewardActivityArchived(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const activityId = String(formData.get("activityId") ?? "");
+  const archived = String(formData.get("archived") ?? "") === "true";
+  if (!activityId) return { error: "Reward activity was not found." };
+
+  const { error } = await supabase
+    .from("credit_card_reward_activities")
+    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .eq("id", activityId)
+    .eq("household_id", householdId);
+  if (error) {
+    console.error("[setCreditCardRewardActivityArchived]", error);
+    return { error: `Couldn't ${archived ? "archive" : "restore"} that activity — ${error.message}` };
   }
   revalidate();
   return { error: null };

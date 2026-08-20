@@ -83,6 +83,8 @@ export function TransactionModal({
   initialAmountCents,
   initialPayee,
   initialDate,
+  initialIsWithdrawal = false,
+  restrictToInitialKind = false,
   onClose,
 }: {
   editTx: TxData | null;
@@ -99,6 +101,8 @@ export function TransactionModal({
   initialAmountCents?: number;
   initialPayee?: string;
   initialDate?: string;
+  initialIsWithdrawal?: boolean;
+  restrictToInitialKind?: boolean;
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
@@ -179,6 +183,8 @@ export function TransactionModal({
   const SPEND_KINDS = new Set<CategoryKind>(["savings", "bills", "expenses", "debt"]);
   const options = isEdit
     ? subOptions.filter((s) => s.kind === txType)
+    : restrictToInitialKind && initialKind
+      ? subOptions.filter((s) => s.kind === initialKind)
     : subOptions.filter((s) => txType === "income" ? s.kind === "income" : SPEND_KINDS.has(s.kind));
 
   const allowedGroups = txType === "income" ? new Set(["Banking"]) : new Set(["Banking", "Credit Cards"]);
@@ -267,15 +273,15 @@ export function TransactionModal({
                 </button>
               ))}
             </div>
-          ) : initialKind === "debt" ? (
+          ) : initialKind === "debt" || initialKind === "savings" ? (
             <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
               <div
                 className={
                   "flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-semibold shadow-sm ring-1 ring-line " +
-                  TAB_ACTIVE_TEXT.debt
+                  TAB_ACTIVE_TEXT[initialKind]
                 }
               >
-                {KIND_TAB.debt}
+                {KIND_TAB[initialKind]}
               </div>
             </div>
           ) : (
@@ -300,6 +306,7 @@ export function TransactionModal({
 
           <form id="tx-form" ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
+            {!isEdit && initialIsWithdrawal ? <input type="hidden" name="isWithdrawal" value="on" /> : null}
 
             <CurrencyConverter
               onUse={(usdCents) => {
@@ -506,7 +513,7 @@ export function TransactionModal({
               disabled={pending || (!isEdit && splits.length === 0)}
               className={"rounded-xl px-3.5 py-1.5 text-sm font-bold transition-colors disabled:opacity-60 " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
-              {pending ? "Saving..." : isEdit ? "Save" : "Add " + KIND_SHORT[txType]}
+              {pending ? "Saving..." : isEdit ? "Save" : initialIsWithdrawal ? "Withdraw" : "Add " + KIND_SHORT[txType]}
             </button>
             {isEdit ? (
               <button

@@ -789,6 +789,7 @@ export async function addTransaction(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
+  revalidatePath("/savings");
 }
 
 export async function updateTransaction(formData: FormData) {
@@ -956,6 +957,7 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
+  revalidatePath("/savings");
 }
 
 // Lightweight inline edit used by the transaction register. It changes only
@@ -1018,6 +1020,7 @@ export async function updateTransactionAmount(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
+  revalidatePath("/savings");
 }
 
 export async function deleteTransaction(formData: FormData) {
@@ -1081,6 +1084,7 @@ export async function deleteTransaction(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
+  revalidatePath("/savings");
 }
 
 export async function deleteTransactions(ids: string[]) {
