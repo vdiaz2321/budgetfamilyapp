@@ -1,8 +1,7 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
 import { syncAllBucketedAccounts } from "./actions";
+import { getSessionContext } from "@/lib/auth-context";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
 function monthsBefore(firstOfMonth: string, n: number): string {
@@ -14,26 +13,7 @@ function monthsBefore(firstOfMonth: string, n: number): string {
 export const metadata = { title: "Accounts · Capitall" };
 
 export default async function AccountsPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, currency")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
+  const { supabase, household } = await getSessionContext();
 
   // Self-heal any account whose top-level balance drifted from its buckets'
   // sum before this sync existed (e.g. a manually-entered total that never

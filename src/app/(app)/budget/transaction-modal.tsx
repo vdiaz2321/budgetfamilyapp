@@ -108,6 +108,18 @@ export function TransactionModal({
   const [pending, start] = useTransition();
   const isEdit = editTx != null;
   const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
+  // A refund is stored as a NEGATIVE amount on the same subcategory/account —
+  // the actuals view (`sum(amount_cents)`) and ledger delta naturally undo it
+  // from spending and return the money to the account. Seed from the sign of
+  // the existing tx so the toggle reflects reality on edit.
+  const [isRefund, setIsRefund] = useState<boolean>(
+    editTx != null && editTx.amountCents < 0,
+  );
+  // Splits-on-edit: when enabled, the modal switches to the same multi-item
+  // flow used when adding a new transaction. Saving with 2+ items replaces
+  // the original tx with N new ones (delete + insert × N) that all share the
+  // same date / account / payee / memo.
+  const [splittingMode, setSplittingMode] = useState<boolean>(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? initialAccountId ?? "");
   const availableBuckets = bucketsByAccount[selectedAccountId] ?? [];
   const [selectedBucketId, setSelectedBucketId] = useState<string>("");
@@ -130,13 +142,16 @@ export function TransactionModal({
   // When exactly one item is selected, auto-fill it with the full total so the
   // user doesn't have to re-enter it after changing the amount or removing splits.
   useEffect(() => {
-    if (isEdit) return;
+    // On edit, we still let the single-item sync happen when the user is
+    // building up a split (splittingMode true) so the initial entry mirrors
+    // the entered total.
+    if (isEdit && !splittingMode) return;
     if (splits.length !== 1) return;
     if (splits[0].amountCents === totalCents) return;
     // Keep the single selected item synchronized with the entered total.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSplits([{ subId: splits[0].subId, amountCents: totalCents }]);
-  }, [isEdit, splits, totalCents]);
+  }, [isEdit, splittingMode, splits, totalCents]);
 
   function handlePayeeMatch(item: PayeeLineItem) {
     if (item.subcategoryId) {
@@ -162,30 +177,30 @@ export function TransactionModal({
 
   function handlePickerConfirm(selectedIds: string[]) {
     setPickerOpen(false);
-    if (!isEdit) {
-      setSplits((prev) => {
-        const kept = prev.filter((sp) => selectedIds.includes(sp.subId));
-        const keptIds = new Set(kept.map((sp) => sp.subId));
-        const newIds = selectedIds.filter((id) => !keptIds.has(id));
-        // Multiple splits: new items start at 0 so the user enters each amount
-        // explicitly. Single item is filled by the effect below.
-        const added = newIds.map((id) => ({ subId: id, amountCents: 0 }));
-        return [...kept, ...added];
-      });
-    }
+    setSplits((prev) => {
+      const kept = prev.filter((sp) => selectedIds.includes(sp.subId));
+      const keptIds = new Set(kept.map((sp) => sp.subId));
+      const newIds = selectedIds.filter((id) => !keptIds.has(id));
+      // Multiple splits: new items start at 0 so the user enters each amount
+      // explicitly. Single item is filled by the effect below.
+      const added = newIds.map((id) => ({ subId: id, amountCents: 0 }));
+      return [...kept, ...added];
+    });
   }
 
   const today = new Date().toISOString().slice(0, 10);
   const defaultDate = editTx?.date ?? initialDate ?? (today.startsWith(monthKey) ? today : firstOfMonth);
-  // When editing (single-select) keep options scoped to the current tab.
-  // When adding (multi-select picker), income stays income-only, but spend
-  // kinds share the picker so one receipt can split across e.g. Bills + Expenses.
+  // Both add and edit share the two-tab UI now, so "Income" narrows to income
+  // subs and "Expense" opens to any spend kind (savings/bills/expenses/debt).
+  // A locked initial kind (Budget's Debt/Savings row context) still filters
+  // to exactly that kind so a payment posted from a debt row can't drift.
   const SPEND_KINDS = new Set<CategoryKind>(["savings", "bills", "expenses", "debt"]);
-  const options = isEdit
-    ? subOptions.filter((s) => s.kind === txType)
-    : restrictToInitialKind && initialKind
+  const options =
+    restrictToInitialKind && initialKind
       ? subOptions.filter((s) => s.kind === initialKind)
-    : subOptions.filter((s) => txType === "income" ? s.kind === "income" : SPEND_KINDS.has(s.kind));
+      : subOptions.filter((s) =>
+          txType === "income" ? s.kind === "income" : SPEND_KINDS.has(s.kind),
+        );
 
   const allowedGroups = txType === "income" ? new Set(["Banking"]) : new Set(["Banking", "Credit Cards"]);
   const filteredAccounts = accountOptions.filter((a) => allowedGroups.has(a.group ?? "Other"));
@@ -205,7 +220,33 @@ export function TransactionModal({
   function handleFormAction(fd: FormData) {
     start(async () => {
       if (isEdit) {
-        await updateTransaction(fd);
+        // Splits-on-edit: replace the original transaction with N new ones
+        // that all share the same date/account/payee/memo but each get their
+        // own subcategory + amount. Only kicks in when the user opted into
+        // splittingMode AND picked 2+ items. One-item saves stay as a plain
+        // update so ids and audit trails don't churn.
+        if (splittingMode && splits.length > 1 && editTx) {
+          const deleteFd = new FormData();
+          deleteFd.set("id", editTx.id);
+          await deleteTransaction(deleteFd);
+          for (const sp of splits) {
+            const sfd = new FormData();
+            fd.forEach((v, k) => {
+              if (k !== "id" && k !== "subcategoryId" && k !== "amount") sfd.append(k, v);
+            });
+            sfd.set("subcategoryId", sp.subId);
+            sfd.set("amount", (sp.amountCents / 100).toFixed(2));
+            await addTransaction(sfd);
+          }
+        } else if (splittingMode && splits.length === 1) {
+          // Split flow settled back to a single item — update the existing
+          // row to that sub + amount instead of doing a delete+insert.
+          fd.set("subcategoryId", splits[0].subId);
+          fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
+          await updateTransaction(fd);
+        } else {
+          await updateTransaction(fd);
+        }
         onClose();
       } else {
         if (splits.length === 0) return;
@@ -254,26 +295,13 @@ export function TransactionModal({
 
       <div className="flex max-h-[92dvh] min-h-0 w-full flex-1 flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl dark:ring-white/10">
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-          {/* Tabs: two-way (Income / Expense) when adding new; five-way when editing */}
-          {isEdit ? (
-            <div className="flex flex-wrap gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
-              {CATEGORY_KINDS.map(({ kind }) => (
-                <button
-                  key={kind}
-                  type="button"
-                  onClick={() => handleTypeChange(kind)}
-                  className={
-                    "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition " +
-                    (txType === kind
-                      ? "shadow-sm ring-1 ring-line " + TAB_ACTIVE_TEXT[kind]
-                      : "text-muted hover:bg-foreground/8 hover:text-foreground")
-                  }
-                >
-                  {KIND_TAB[kind]}
-                </button>
-              ))}
-            </div>
-          ) : initialKind === "debt" || initialKind === "savings" ? (
+          {/* Tabs: same simple two-way (Income / Expense) in both add and edit.
+              Picking a subcategory in the dropdown below is what pins the true
+              kind (savings / bills / expenses / debt) — the tabs only filter
+              the picker into inflow vs outflow, so an edit reads as clean as
+              an add. Only exception: a locked initial kind (debt/savings from
+              the Budget row context) still shows its own tab. */}
+          {initialKind === "debt" || initialKind === "savings" ? (
             <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
               <div
                 className={
@@ -307,6 +335,10 @@ export function TransactionModal({
           <form id="tx-form" ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
             {!isEdit && initialIsWithdrawal ? <input type="hidden" name="isWithdrawal" value="on" /> : null}
+            {/* Signals to the server action to negate the amount (refund) and
+                skip bucket/debt side effects. The input's own value stays a
+                positive amount either way — server does the sign flip. */}
+            <input type="hidden" name="isRefund" value={isRefund ? "on" : ""} />
 
             <CurrencyConverter
               onUse={(usdCents) => {
@@ -319,24 +351,55 @@ export function TransactionModal({
             <div className="grid grid-cols-2 items-start gap-2">
               <AmountInput
                 inputRef={amountRef}
-                defaultValue={editTx ? centsToDisplay(editTx.amountCents) : initialAmountCents != null ? centsToDisplay(initialAmountCents) : ""}
+                defaultValue={
+                  editTx
+                    // Refunds are stored negative in the DB but always typed as
+                    // positive dollars — flip the sign for display so the input
+                    // reads $50 instead of −$50 while the Refund pill is on.
+                    ? centsToDisplay(Math.abs(editTx.amountCents))
+                    : initialAmountCents != null
+                    ? centsToDisplay(initialAmountCents)
+                    : ""
+                }
                 onChangeCents={setTotalCents}
                 forcedCents={convertedCents}
               />
 
-              {/* Budget item: single select for edit, multi-select for new */}
-              {isEdit ? (
-                <BudgetItemField
-                  key={txType + "-" + (autoFillSubId ?? "")}
-                  kindLabel={KIND_TAB[txType]}
-                  options={options}
-                  showLabel={false}
-                  defaultValue={
-                    autoFillSubId ??
-                    (editTx && editTx.kind === txType ? editTx.subId ?? "" : "")
-                  }
-                  defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
-                />
+              {/* Budget item: single select for edit (unless the user opts
+                  into splittingMode via "+ Add split"), multi-select for new. */}
+              {isEdit && !splittingMode ? (
+                <div className="flex flex-col gap-1">
+                  <BudgetItemField
+                    key={txType + "-" + (autoFillSubId ?? "")}
+                    kindLabel={KIND_TAB[txType]}
+                    options={options}
+                    showLabel={false}
+                    defaultValue={
+                      autoFillSubId ??
+                      (editTx && editTx.kind === txType ? editTx.subId ?? "" : "")
+                    }
+                    defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Seed the split list with the existing single-item so the
+                      // picker opens showing what's already there, then let the
+                      // user add more. Save will replace this tx with N new ones.
+                      const currentSubId = editTx && editTx.kind === txType ? editTx.subId ?? "" : "";
+                      setSplits(
+                        currentSubId
+                          ? [{ subId: currentSubId, amountCents: totalCents }]
+                          : [],
+                      );
+                      setSplittingMode(true);
+                      setPickerOpen(true);
+                    }}
+                    className="text-left text-xs font-semibold text-foreground/70 hover:text-foreground px-1"
+                  >
+                    + Add split
+                  </button>
+                </div>
               ) : (
                 <div className="flex flex-col gap-1">
                   <button
@@ -426,7 +489,7 @@ export function TransactionModal({
             </div>
 
             {/* Split rows — only shown when 2+ splits exist */}
-            {!isEdit && splits.length > 1 && (
+            {(!isEdit || splittingMode) && splits.length > 1 && (
               <SplitRows
                 splits={splits}
                 options={options}
@@ -462,39 +525,64 @@ export function TransactionModal({
               defaultValue={editTx?.memo ?? ""}
               className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
-            {/* Edit-mode only: Delete lives here at the bottom of the form */}
-            {isEdit ? (
-              <div className="flex justify-start border-t border-line pt-3">
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() =>
-                    start(async () => {
-                      const fd = new FormData();
-                      fd.set("id", editTx.id);
-                      await deleteTransaction(fd);
-                      onClose();
-                    })
-                  }
-                  className="rounded-lg px-3 py-2 text-sm font-bold text-negative transition hover:bg-negative/10 disabled:opacity-60"
-                >
-                  Delete transaction
-                </button>
-              </div>
-            ) : null}
+            {/* Delete moved into the footer next to Refund so all row-level
+                controls sit on one line — see the bottom action bar below. */}
           </form>
         </div>
 
-        {/* Bottom action bar */}
-        <div className={"flex items-center justify-between gap-2 border-t border-line px-3 py-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))]  " + HEADER_TINT[txType]}>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-2 py-1.5 text-sm font-bold text-muted transition hover:text-foreground"
-          >
-            Cancel
-          </button>
-          <div className="flex items-center gap-2">
+        {/* Bottom action bar — flex-wrap so the right-side controls fall
+            under the left group on narrow (mobile) widths instead of running
+            off the edge, and everything shrinks a step tighter on mobile. */}
+        <div className={"flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 border-t border-line px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]  " + HEADER_TINT[txType]}>
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-1.5 py-1 text-xs font-bold text-muted transition hover:text-foreground sm:px-2 sm:py-1.5 sm:text-sm"
+            >
+              Cancel
+            </button>
+            {/* Refund toggle — only meaningful for spend kinds. Off: normal
+                spend; On: server stores amount as negative so it credits the
+                account and reduces the sub's actual spend. Hidden on income
+                (a refund of income doesn't exist) and on the locked
+                debt/savings context (those flows have their own semantics). */}
+            {txType !== "income" && !initialIsWithdrawal && !(restrictToInitialKind && (initialKind === "debt" || initialKind === "savings")) ? (
+              <button
+                type="button"
+                onClick={() => setIsRefund((v) => !v)}
+                aria-pressed={isRefund}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
+                  isRefund
+                    ? "bg-positive/20 text-positive ring-positive/40 hover:bg-positive/30"
+                    : "bg-transparent text-muted ring-line hover:text-foreground"
+                }`}
+              >
+                {isRefund ? "✓ Refund" : "Refund"}
+              </button>
+            ) : null}
+            {/* Delete lives here so the footer holds every row-level control
+                (Cancel · Refund · Delete) in one line. Same 11px tuning so it
+                fits on the same row as the primary save on the right. */}
+            {isEdit ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    const fd = new FormData();
+                    fd.set("id", editTx.id);
+                    await deleteTransaction(fd);
+                    onClose();
+                  })
+                }
+                className="rounded-full px-2.5 py-1 text-[11px] font-bold text-negative ring-1 ring-negative/30 transition hover:bg-negative/10 disabled:opacity-60"
+              >
+                Delete
+              </button>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2">
             {!isEdit ? (
               <button
                 type="submit"
@@ -502,7 +590,7 @@ export function TransactionModal({
                 name="cleared"
                 value="on"
                 disabled={pending || splits.length === 0}
-                className="whitespace-nowrap rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
+                className="whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 sm:px-3 sm:py-1.5 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
               >
                 Clear
               </button>
@@ -510,10 +598,20 @@ export function TransactionModal({
             <button
               type="submit"
               form="tx-form"
-              disabled={pending || (!isEdit && splits.length === 0)}
-              className={"rounded-xl px-3.5 py-1.5 text-sm font-bold transition-colors disabled:opacity-60 " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
+              disabled={pending || ((!isEdit || splittingMode) && splits.length === 0)}
+              className={"rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
-              {pending ? "Saving..." : isEdit ? "Save" : initialIsWithdrawal ? "Withdraw" : "Add " + KIND_SHORT[txType]}
+              {pending
+                ? "Saving..."
+                : isRefund
+                ? isEdit
+                  ? "Save Refund"
+                  : "Add Refund"
+                : isEdit
+                ? "Save"
+                : initialIsWithdrawal
+                ? "Withdraw"
+                : "Add " + KIND_SHORT[txType]}
             </button>
             {isEdit ? (
               <button
@@ -528,13 +626,13 @@ export function TransactionModal({
                     onClose();
                   })
                 }
-                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-bold text-foreground ring-1 transition disabled:opacity-60 ${
+                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold text-foreground ring-1 transition disabled:opacity-60 sm:px-3 sm:py-1.5 sm:text-sm ${
                   editTx.cleared
                     ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
                     : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
                 }`}
               >
-                {editTx.cleared ? "Uncleared" : "Clear"}
+                {editTx.cleared ? "Unclear" : "Clear"}
               </button>
             ) : null}
           </div>
@@ -633,19 +731,6 @@ function AmountInput({
     if (inputRef.current) inputRef.current.value = display;
   };
 
-  const insert = (ch: string) => {
-    const input = inputRef.current;
-    if (!input) return;
-    const start = input.selectionStart ?? raw.length;
-    const end = input.selectionEnd ?? raw.length;
-    const next = raw.slice(0, start) + ch + raw.slice(end);
-    setRaw(next);
-    requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(start + ch.length, start + ch.length);
-    });
-  };
-
   return (
     <div className="flex flex-col gap-1">
       <div className="relative">
@@ -663,6 +748,9 @@ function AmountInput({
           onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
           onBlur={() => { setTimeout(() => setFocused(false), 150); commit(raw); }}
           onKeyDown={(e) => {
+            // Enter evaluates a typed expression like "45 + 12.50 - 3" (parser
+            // in moneyExpressionToCents). No calculator chips needed — the
+            // input accepts +, -, *, / directly on any keyboard.
             if (e.key === "Enter") { e.preventDefault(); commit(raw); e.currentTarget.blur(); }
           }}
           onChange={(e) => {
@@ -673,34 +761,14 @@ function AmountInput({
           className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
         />
       </div>
-      {focused && (
-        <div className="flex items-center gap-1">
-          {["+", "−", "×", "÷"].map((label) => {
-            const ch = label === "−" ? "-" : label === "×" ? "*" : label === "÷" ? "/" : "+";
-            return (
-              <button
-                key={label}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); insert(` ${ch} `); }}
-                className="flex h-8 flex-1 items-center justify-center rounded-lg bg-background text-sm font-bold ring-1 ring-line hover:bg-brand-soft hover:text-brand"
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
 
 // Uncontrolled-style amount input: keeps raw string while typing, formats on blur.
-// Accepts arithmetic expressions (e.g. "45 + 12.50 - 3") — mobile keypads don't
-// expose operator keys, so operator chips appear beside the input on focus.
+// Accepts arithmetic expressions (e.g. "45 + 12.50 - 3") — Enter evaluates.
 function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onChange: (cents: number) => void }) {
   const [raw, setRaw] = useState(amountCents === 0 ? "" : (amountCents / 100).toFixed(2));
-  const [focused, setFocused] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const commit = (value: string) => {
     const cents = moneyExpressionToCents(value);
@@ -708,76 +776,29 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
     setRaw(cents === 0 ? "" : (cents / 100).toFixed(2));
   };
 
-  const insert = (ch: string) => {
-    const input = inputRef.current;
-    if (!input) return;
-    const start = input.selectionStart ?? raw.length;
-    const end = input.selectionEnd ?? raw.length;
-    const next = raw.slice(0, start) + ch + raw.slice(end);
-    setRaw(next);
-    // Re-focus and place caret after the inserted char.
-    requestAnimationFrame(() => {
-      input.focus();
-      input.setSelectionRange(start + ch.length, start + ch.length);
-    });
-  };
-
   return (
-    <div className="flex flex-col items-end gap-1">
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode="decimal"
-        value={raw}
-        placeholder="0.00"
-        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
-        onChange={(e) => {
-          setRaw(e.target.value);
-          const v = parseFloat(e.target.value);
-          onChange(isNaN(v) ? 0 : Math.round(v * 100));
-        }}
-        onKeyDown={(e) => {
-          // Enter evaluates the expression instead of submitting the form.
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit(raw);
-          }
-        }}
-        onBlur={() => {
-          // Delay so tapping an operator chip doesn't close the toolbar first.
-          setTimeout(() => setFocused(false), 150);
+    <input
+      type="text"
+      inputMode="decimal"
+      value={raw}
+      placeholder="0.00"
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => {
+        setRaw(e.target.value);
+        const v = parseFloat(e.target.value);
+        onChange(isNaN(v) ? 0 : Math.round(v * 100));
+      }}
+      onKeyDown={(e) => {
+        // Enter evaluates the expression instead of submitting the form.
+        if (e.key === "Enter") {
+          e.preventDefault();
           commit(raw);
-        }}
-        title="Type a value or expression, e.g. 45 + 12.50"
-        className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-      />
-      {focused && (
-        <div className="flex items-center gap-0.5">
-          {["+", "−", "×", "÷"].map((label) => {
-            const ch = label === "−" ? "-" : label === "×" ? "*" : label === "÷" ? "/" : "+";
-            return (
-              <button
-                key={label}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => insert(ch)}
-                className="h-5 w-5 rounded bg-brand-soft text-[11px] font-bold text-brand ring-1 ring-brand/20 active:bg-brand/20"
-              >
-                {label}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => commit(raw)}
-            className="ml-0.5 h-5 rounded bg-brand px-1.5 text-[10px] font-bold text-white active:bg-brand-strong"
-          >
-            =
-          </button>
-        </div>
-      )}
-    </div>
+        }
+      }}
+      onBlur={() => commit(raw)}
+      title="Type a value or expression, e.g. 45 + 12.50"
+      className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    />
   );
 }
 

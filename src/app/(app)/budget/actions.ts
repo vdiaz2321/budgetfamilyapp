@@ -638,22 +638,37 @@ export async function addTransaction(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const subcategoryId = String(formData.get("subcategoryId") ?? "");
   const occurredOn = String(formData.get("date") ?? "");
-  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  const enteredCents = displayToCents(String(formData.get("amount") ?? "0"));
   const payeeName = String(formData.get("payee") ?? "").trim();
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
+  const isRefund = formData.get("isRefund") === "on";
   const cleared = formData.get("cleared") === "on";
-  if (!subcategoryId || !occurredOn || amountCents <= 0) return;
+  if (!subcategoryId || !occurredOn || enteredCents <= 0) return;
+  // Refund posts as a negative amount on the same subcategory + account.
+  // Everything downstream — v_monthly_actuals (sums), account ledger
+  // (via ledgerDelta which multiplies by ±1 per kind), Annual Overview,
+  // Insights — handles the sign naturally, so no other code has to know.
+  const amountCents = isRefund ? -enteredCents : enteredCents;
 
-  // Keep category_id consistent with the chosen subcategory.
+  // Pull every subcategory field the rest of this action needs in ONE query
+  // — the linked bucket/account ids and the category's kind (via FK join),
+  // so the follow-up helpers below can read them from memory instead of
+  // firing three more sequential lookups (each ~150ms from Frankfurt/EU).
   const { data: sub } = await supabase
     .from("subcategories")
-    .select("category_id, name")
+    .select("category_id, name, linked_bucket_id, linked_account_id, categories(kind)")
     .eq("id", subcategoryId)
     .eq("household_id", householdId)
-    .maybeSingle();
+    .maybeSingle<{
+      category_id: string;
+      name: string;
+      linked_bucket_id: string | null;
+      linked_account_id: string | null;
+      categories: { kind: string } | null;
+    }>();
   if (!sub) return;
 
   let payeeId: string | null = null;
@@ -744,32 +759,35 @@ export async function addTransaction(formData: FormData) {
   });
 
   // A contribution adds to the linked bucket; a withdrawal (e.g. using the
-  // Real Estate bucket for a down payment) subtracts from it instead.
-  const bucketId = await getLinkedBucketId(supabase, householdId, subcategoryId);
-  if (bucketId) {
+  // Real Estate bucket for a down payment) subtracts from it instead. All
+  // of these ids come from the enriched sub select above — no extra queries.
+  // Refunds are skipped: they only affect the source account + monthly
+  // spend actuals; touching a savings bucket or a debt principal on a refund
+  // would double-count.
+  const bucketId = sub.linked_bucket_id;
+  if (!isRefund && bucketId) {
     await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
     await captureSnapshots(supabase, householdId);
   }
 
   // Direct-bucket attribution (investment sub-account). adjustBucketBalance
   // also rolls the parent account total via syncAccountFromBuckets.
-  if (directBucketId && directBucketId !== bucketId) {
+  if (!isRefund && directBucketId && directBucketId !== bucketId) {
     await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
     await captureSnapshots(supabase, householdId);
   }
 
   // Bare investment account link (TSP, M1, …) — contribution posts straight
   // to the account balance. Only fires when there's no linked bucket.
-  if (!bucketId) {
-    const linkedAccountId = await getLinkedAccountId(supabase, householdId, subcategoryId);
-    if (linkedAccountId) {
-      await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, isWithdrawal ? -amountCents : amountCents);
-      await captureSnapshots(supabase, householdId);
-    }
+  if (!isRefund && !bucketId && sub.linked_account_id) {
+    await adjustLinkedAccountBalance(supabase, householdId, sub.linked_account_id, isWithdrawal ? -amountCents : amountCents);
+    await captureSnapshots(supabase, householdId);
   }
 
   // A payment logged against a debt lowers its outstanding balance.
-  const touchedDebt = await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents);
+  const touchedDebt = !isRefund
+    ? await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)
+    : false;
   if (touchedDebt) {
     await captureSnapshots(supabase, householdId);
     revalidatePath("/snowball");
@@ -777,10 +795,9 @@ export async function addTransaction(formData: FormData) {
 
   // Post to the chosen account's running ledger (income adds, everything
   // else spends out) — skipped for investment/bucketed accounts, which stay
-  // manual.
+  // manual. Kind comes from the sub's joined category, no extra query.
   if (accountId) {
-    const kind = await categoryKindOf(supabase, sub.category_id);
-    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(kind, amountCents))) {
+    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(sub.categories?.kind ?? null, amountCents))) {
       await captureSnapshots(supabase, householdId);
     }
   }
@@ -797,30 +814,65 @@ export async function updateTransaction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const subcategoryId = String(formData.get("subcategoryId") ?? "");
   const occurredOn = String(formData.get("date") ?? "");
-  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  const enteredCents = displayToCents(String(formData.get("amount") ?? "0"));
   const payeeName = String(formData.get("payee") ?? "").trim();
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
-  if (!id || !subcategoryId || !occurredOn || amountCents <= 0) return;
+  const isRefund = formData.get("isRefund") === "on";
+  if (!id || !subcategoryId || !occurredOn || enteredCents <= 0) return;
+  // Refund posts as negative on the same sub/account; toggling the pill
+  // off restores a positive spend. Bucket/debt side-effects are skipped in
+  // both directions so we never double-count.
+  const amountCents = isRefund ? -enteredCents : enteredCents;
 
   // Snapshot the pre-edit values so we can undo their bucket effect below —
-  // the old subcategory/amount/direction may differ from the new ones.
+  // the old subcategory/amount/direction may differ from the new ones. Pull
+  // the linked bucket/account ids for the OLD subcategory in the same round
+  // trip via FK join, so the undo path doesn't need extra lookups.
   const { data: prevTx } = await supabase
     .from("transactions")
-    .select("subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal")
+    .select(
+      "subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal, subcategories(linked_bucket_id, linked_account_id), categories(kind)",
+    )
     .eq("id", id)
     .eq("household_id", householdId)
-    .maybeSingle();
+    .maybeSingle<{
+      subcategory_id: string;
+      category_id: string;
+      account_id: string | null;
+      bucket_id: string | null;
+      amount_cents: number;
+      is_withdrawal: boolean;
+      subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
+      categories: { kind: string } | null;
+    }>();
 
+  // New subcategory's category + link ids + kind, all in one query. The rest
+  // of this action reads these fields from memory instead of firing three
+  // more sequential lookups (getLinkedBucketId, getLinkedAccountId,
+  // categoryKindOf) as it used to — the biggest source of save latency.
   const { data: sub } = await supabase
     .from("subcategories")
-    .select("category_id")
+    .select("category_id, linked_bucket_id, linked_account_id, categories(kind)")
     .eq("id", subcategoryId)
     .eq("household_id", householdId)
-    .maybeSingle();
+    .maybeSingle<{
+      category_id: string;
+      linked_bucket_id: string | null;
+      linked_account_id: string | null;
+      categories: { kind: string } | null;
+    }>();
   if (!sub) return;
+  const prevLinkedBucketId = prevTx?.subcategories?.linked_bucket_id ?? null;
+  const prevLinkedAccountId = prevTx?.subcategories?.linked_account_id ?? null;
+  const prevKind = prevTx?.categories?.kind ?? null;
+  // A previous refund was stored as a negative amount, and we deliberately
+  // never wrote to its bucket or debt at add time (see addTransaction). Skip
+  // the undo of those side effects here so we don't credit balances that
+  // were never debited.
+  const wasRefund = (prevTx?.amount_cents ?? 0) < 0;
 
   let payeeId: string | null = null;
   if (payeeName) {
@@ -875,79 +927,74 @@ export async function updateTransaction(formData: FormData) {
     .eq("household_id", householdId);
 
   // Undo the old transaction's bucket effect (it may have hit a different
-  // bucket, or none at all), then apply the new one's.
+  // bucket, or none at all), then apply the new one's. All linked-id lookups
+  // come from the enriched selects above — no extra round trips. Refunds
+  // (both the previous and new sides) skip bucket/debt writes entirely.
   let touchedBucket = false;
-  if (prevTx) {
-    const prevBucketId = await getLinkedBucketId(supabase, householdId, prevTx.subcategory_id);
-    if (prevBucketId) {
+  if (prevTx && !wasRefund) {
+    if (prevLinkedBucketId) {
       const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
-      await adjustBucketBalance(supabase, householdId, prevBucketId, undoDelta);
+      await adjustBucketBalance(supabase, householdId, prevLinkedBucketId, undoDelta);
       touchedBucket = true;
     }
     // Undo previous direct-bucket attribution (investment sub-account).
-    if (prevTx.bucket_id && prevTx.bucket_id !== (prevBucketId ?? null)) {
+    if (prevTx.bucket_id && prevTx.bucket_id !== prevLinkedBucketId) {
       const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
       await adjustBucketBalance(supabase, householdId, prevTx.bucket_id, undoDelta);
       touchedBucket = true;
     }
   }
-  const bucketId = await getLinkedBucketId(supabase, householdId, subcategoryId);
-  if (bucketId) {
+  const bucketId = sub.linked_bucket_id;
+  if (!isRefund && bucketId) {
     await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
     touchedBucket = true;
   }
   // Apply new direct-bucket attribution.
-  if (directBucketId && directBucketId !== bucketId) {
+  if (!isRefund && directBucketId && directBucketId !== bucketId) {
     await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
     touchedBucket = true;
   }
 
   // Bare-account link (TSP/M1/…) — same undo-then-reapply pattern. Only
   // fires on the leg where there's no linked bucket for that sub.
-  if (prevTx) {
-    const prevBucketId = await getLinkedBucketId(supabase, householdId, prevTx.subcategory_id);
-    if (!prevBucketId) {
-      const prevAccountLink = await getLinkedAccountId(supabase, householdId, prevTx.subcategory_id);
-      if (prevAccountLink) {
-        const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
-        await adjustLinkedAccountBalance(supabase, householdId, prevAccountLink, undoDelta);
-        touchedBucket = true;
-      }
-    }
+  if (prevTx && !wasRefund && !prevLinkedBucketId && prevLinkedAccountId) {
+    const undoDelta = prevTx.is_withdrawal ? prevTx.amount_cents : -prevTx.amount_cents;
+    await adjustLinkedAccountBalance(supabase, householdId, prevLinkedAccountId, undoDelta);
+    touchedBucket = true;
   }
-  if (!bucketId) {
-    const linkedAccountId = await getLinkedAccountId(supabase, householdId, subcategoryId);
-    if (linkedAccountId) {
-      await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, isWithdrawal ? -amountCents : amountCents);
-      touchedBucket = true;
-    }
+  if (!isRefund && !bucketId && sub.linked_account_id) {
+    await adjustLinkedAccountBalance(supabase, householdId, sub.linked_account_id, isWithdrawal ? -amountCents : amountCents);
+    touchedBucket = true;
   }
   if (touchedBucket) await captureSnapshots(supabase, householdId);
 
   // Undo the old payment's effect on its debt balance, then apply the new one's
   // — the edit may have changed the amount or moved it off/onto a debt entirely.
+  // Skip both sides when refund is involved: refunds never wrote to a debt
+  // principal, and reversing that non-write would credit the debt in error.
   let touchedDebt = false;
-  if (prevTx) {
+  if (prevTx && !wasRefund) {
     touchedDebt = await adjustDebtBalance(supabase, householdId, prevTx.subcategory_id, prevTx.amount_cents);
   }
-  if (await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)) touchedDebt = true;
+  if (!isRefund) {
+    if (await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)) touchedDebt = true;
+  }
   if (touchedDebt) {
     await captureSnapshots(supabase, householdId);
     revalidatePath("/snowball");
   }
 
   // Undo the old posting to its account (may be a different account than the
-  // new one, or none), then post the new one.
+  // new one, or none), then post the new one. Both category kinds come from
+  // the enriched selects above — no per-post categoryKindOf query.
   let touchedAccount = false;
   if (prevTx?.account_id) {
-    const prevKind = prevTx.category_id ? await categoryKindOf(supabase, prevTx.category_id) : null;
     if (await adjustAccountLedger(supabase, householdId, prevTx.account_id, -ledgerDelta(prevKind, prevTx.amount_cents))) {
       touchedAccount = true;
     }
   }
   if (accountId) {
-    const kind = await categoryKindOf(supabase, sub.category_id);
-    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(kind, amountCents))) {
+    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(sub.categories?.kind ?? null, amountCents))) {
       touchedAccount = true;
     }
   }

@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
+import { getSessionContext } from "@/lib/auth-context";
 import { AnnualHero } from "./annual-hero";
 import { YearPicker } from "./year-picker";
 import {
@@ -56,26 +55,7 @@ export default async function AnnualOverviewPage({
   const parsed = yearParam ? parseInt(yearParam, 10) : currentYear;
   const year = Number.isNaN(parsed) ? currentYear : Math.min(2100, Math.max(2000, parsed));
 
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, currency")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
+  const { supabase, household } = await getSessionContext();
 
   const categories = await ensureCategories(supabase, household.id);
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));

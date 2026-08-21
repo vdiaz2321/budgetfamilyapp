@@ -1,8 +1,7 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { captureSnapshots } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
+import { getSessionContext } from "@/lib/auth-context";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
@@ -12,26 +11,7 @@ export const metadata = { title: "Net Worth · Capitall" };
 const LIABILITY_KINDS = ["credit_card", "debt_loan"];
 
 export default async function NetworthPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, currency")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
+  const { supabase, household } = await getSessionContext();
 
   // Refresh this month's snapshot on every visit — this is what freezes prior
   // months into history even if no balance was edited after a month rollover.

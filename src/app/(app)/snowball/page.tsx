@@ -1,35 +1,15 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { projectSnowball } from "@/lib/snowball";
 import { TransactionsPanel } from "../budget/transactions-panel";
 import type { AccountOption, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
 import { SnowballSettings } from "./snowball-settings";
+import { getSessionContext } from "@/lib/auth-context";
 
 export const metadata = { title: "Debt/Loan Snowball · Capitall" };
 
 export default async function SnowballPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, currency, snowball_start_date, snowball_monthly_extra_cents")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
+  const { supabase, household } = await getSessionContext();
 
   const currency = household.currency;
   // Manual top-up used ONLY by the classic textbook Snowball (below) — pure

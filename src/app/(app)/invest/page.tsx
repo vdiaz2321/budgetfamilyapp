@@ -1,7 +1,6 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { captureSnapshots } from "@/lib/snapshots";
 import { InvestBoard, type InvestAccount, type BucketRow, type InvestmentImportView, type YearCell } from "./invest-board";
+import { getSessionContext } from "@/lib/auth-context";
 
 export const metadata = { title: "Investments · Capitall" };
 
@@ -9,26 +8,7 @@ export const metadata = { title: "Investments · Capitall" };
 const FLOOR_YEAR = 2023;
 
 export default async function InvestPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, currency")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
+  const { supabase, household } = await getSessionContext();
 
   // Freeze this month's balances into snapshots, same as Net Worth — that's the
   // series the year-end balances are read from.

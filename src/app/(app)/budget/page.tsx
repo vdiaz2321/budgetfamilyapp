@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
+import { getSessionContext } from "@/lib/auth-context";
 import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
 import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
@@ -19,27 +18,7 @@ export default async function BudgetPage({
   const month = resolveMonth(monthParam);
   const nextFirst = `${month.nextKey}-01`;
 
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, name, currency, snowball_monthly_extra_cents")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
-
+  const { supabase, household } = await getSessionContext();
   const snowballExtraCents = household.snowball_monthly_extra_cents ?? 0;
 
   const categories = await ensureCategories(supabase, household.id);

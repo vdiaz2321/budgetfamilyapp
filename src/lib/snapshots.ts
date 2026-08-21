@@ -19,9 +19,32 @@ export function currentMonthFirst(): string {
 export async function captureSnapshots(
   supabase: SupabaseClient,
   householdId: string,
+  options: { force?: boolean } = {},
 ): Promise<void> {
   const month = currentMonthFirst();
   const now = new Date().toISOString();
+
+  // Fast path: skip the seven queries + three upserts if a fresh snapshot for
+  // this month already exists. Mutations (transactions, account edits) all
+  // trigger their own snapshot writes, so a recent updated_at means live
+  // balances are already reflected. Page visits after that just re-render
+  // whatever's in the snapshot rows — no need to rewrite them on every load.
+  // A 5-minute window is long enough to collapse rapid navigation and short
+  // enough that month-rollover always captures on the first visit.
+  if (!options.force) {
+    const { data: fresh } = await supabase
+      .from("account_snapshots")
+      .select("updated_at")
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fresh?.updated_at) {
+      const ageMs = Date.now() - new Date(fresh.updated_at).getTime();
+      if (ageMs < 5 * 60 * 1000) return;
+    }
+  }
 
   const [{ data: accounts }, { data: debts }, { data: buckets }] = await Promise.all([
     supabase

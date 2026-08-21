@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // The Start tab has exactly these five columns, in this order.
@@ -25,10 +26,13 @@ export type CategoryRow = {
 };
 
 // Ensure the five canonical categories exist for a household. Idempotent.
-export async function ensureCategories(
+// Wrapped in React.cache so a single request can call it from multiple places
+// (page + helper) without re-running the read/insert pair — the getSessionContext
+// helper hands the same supabase client to every caller, so cache keys match.
+export const ensureCategories = cache(async (
   supabase: SupabaseClient,
   householdId: string,
-): Promise<CategoryRow[]> {
+): Promise<CategoryRow[]> => {
   const { data: existing } = await supabase
     .from("categories")
     .select("id, name, kind, sort_order, is_system")
@@ -36,6 +40,14 @@ export async function ensureCategories(
 
   const byKind = new Map((existing ?? []).filter((c) => c.is_system).map((c) => [c.kind, c]));
   const missing = CATEGORY_KINDS.filter((c) => !byKind.has(c.kind));
+
+  // Common path: all five system categories already exist. Skip the second
+  // ordered read and just sort what we already have — one query instead of two.
+  if (!missing.length && existing?.length) {
+    return [...existing].sort(
+      (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+    ) as CategoryRow[];
+  }
 
   if (missing.length) {
     await supabase.from("categories").insert(
@@ -56,4 +68,4 @@ export async function ensureCategories(
     .order("sort_order");
 
   return (fresh ?? []) as CategoryRow[];
-}
+});

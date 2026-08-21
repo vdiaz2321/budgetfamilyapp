@@ -1,31 +1,17 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "./sidebar";
 import { SessionInit } from "./session-init";
 import { MobileTabBar } from "./mobile-tab-bar";
 import { MobileHeaderMenu } from "./mobile-header-menu";
 import type { SidebarGroup } from "./sidebar-accounts";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
+import { getSessionContext } from "@/lib/auth-context";
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id, display_name, avatar_url")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (!profile) redirect("/onboarding");
+  const { supabase, user, profile } = await getSessionContext();
 
   // Sidebar account list (YNAB-style): cash + investment accounts from
   // Accounts, debts from Budget (single source of truth), split like YNAB's

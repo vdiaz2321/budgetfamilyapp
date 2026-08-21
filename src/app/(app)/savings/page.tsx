@@ -1,8 +1,7 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { ensureCategories } from "@/lib/categories";
 import { SavingsBoard, type SavingsCardData } from "./savings-board";
 import type { AccountOption, SubOption } from "../budget/types";
+import { getSessionContext } from "@/lib/auth-context";
 
 export const metadata = { title: "Savings · Capitall" };
 
@@ -16,26 +15,7 @@ function monthsUntil(target: string): number {
 }
 
 export default async function SavingsPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-
-  const { data: household } = await supabase
-    .from("households")
-    .select("id, currency")
-    .eq("id", profile.household_id)
-    .single();
-  if (!household) redirect("/onboarding");
+  const { supabase, household } = await getSessionContext();
 
   const categories = await ensureCategories(supabase, household.id);
   const savingsCategoryIds = categories.filter((c) => c.kind === "savings").map((c) => c.id);

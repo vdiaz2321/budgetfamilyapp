@@ -36,6 +36,20 @@
   --cat-orange: #f97316;
   --cat-lime: #84cc16;
 
+  /* Insights charts. A deliberately cool, low-drama palette: a navy→light-blue
+     pair for the income/spending bars, and four flow colors separated by BOTH
+     hue and lightness so they stay tellable apart (each also carries a text
+     label, so color is never the only cue). Intentionally avoids indigo and
+     the amber/orange pair used elsewhere — those read as noisy at chart scale. */
+  --viz-income: #1e3a8a;   /* blue-900 — deep navy */
+  --viz-spending: #93c5fd; /* blue-300 — light blue */
+  --viz-savings: #1d4ed8;  /* blue-700 (dark) */
+  --viz-bills: #0d9488;    /* teal-600 */
+  --viz-expenses: #38bdf8; /* sky-400 (light) */
+  --viz-debt: #e11d48;     /* rose-600 */
+  --viz-grid: #e5e7eb;     /* gridlines */
+  --viz-sel: #eff6ff;      /* selected-period wash (blue-50) */
+
   /* Near-black navy sidebar; white text lives on it in both themes. */
   --sidebar: #0B0E1B;
 }
@@ -72,6 +86,17 @@
   --cat-teal: #6dbabf;
   --cat-orange: #d69368;
   --cat-lime: #a8c078;
+
+  /* Chart palette, dark: same hues pulled toward the dim canvas. The bar pair
+     inverts its lightness order so both stay visible on a dark surface. */
+  --viz-income: #a8c4ff;
+  --viz-spending: #4f6ec4;
+  --viz-savings: #6d8fe0;
+  --viz-bills: #4fb8ab;
+  --viz-expenses: #8ed3f5;
+  --viz-debt: #d76b83;
+  --viz-grid: #373d59;
+  --viz-sel: #2b3153;
 
   --sidebar: #1a1d36;
 }

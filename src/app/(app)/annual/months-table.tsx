@@ -4,6 +4,17 @@ import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 
+// Color per category kind — matches the hero cards' value color so a reader
+// can scan a column and its total tint reads as one thing. Uses the --viz-*
+// tokens (never --brand, which is purple) per the app-wide chart color rule.
+const KIND_COLOR: Record<CategoryKind, string> = {
+  income: "var(--positive)",
+  savings: "var(--viz-savings)",
+  bills: "var(--negative)",
+  expenses: "var(--negative)",
+  debt: "var(--negative)",
+};
+
 type MonthRow = {
   idx: number;
   name: string;
@@ -49,7 +60,7 @@ export function MonthsTable({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10"
       >
         <svg
           width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -82,13 +93,13 @@ export function MonthsTable({
                   <li
                     key={r.idx}
                     className={`grid ${gridCols} items-center gap-2 px-4 py-2 ${
-                      r.status === "current" ? "bg-brand-soft/40" : ""
+                      r.status === "current" ? "bg-black/[0.04] dark:bg-white/[0.06]" : ""
                     } ${r.status === "future" ? "text-muted" : ""}`}
                   >
                     <span className="flex items-center gap-1.5 text-sm font-medium">
                       {r.name.slice(0, 3)}
                       {r.status === "current" ? (
-                        <span className="rounded bg-brand px-1 py-0.5 text-[9px] font-bold uppercase text-white">
+                        <span className="rounded bg-foreground px-1 py-0.5 text-[9px] font-bold uppercase text-background">
                           Now
                         </span>
                       ) : null}
@@ -114,10 +125,10 @@ export function MonthsTable({
               </ul>
 
               {/* Totals */}
-              <div className={`grid ${gridCols} items-center gap-2 border-t border-brand/20 bg-brand-soft/35 px-4 py-3`}>
+              <div className={`grid ${gridCols} items-center gap-2 border-t border-line bg-black/[0.03] px-4 py-3 dark:bg-white/[0.05]`}>
                 <span className="flex flex-col items-center text-sm font-bold">
                   <span className="self-start">Total</span>
-                  <span className="mt-1 w-full whitespace-nowrap border-t border-brand/30 pt-1 text-center text-[11px] font-bold tracking-tight text-brand">
+                  <span className="mt-1 w-full whitespace-nowrap border-t border-line pt-1 text-center text-[11px] font-medium uppercase tracking-wide text-muted">
                     Total % from income
                   </span>
                 </span>
@@ -133,7 +144,8 @@ export function MonthsTable({
                       </span>
                       {c.kind === "income" ? null : (
                         <span
-                          className="mt-1 w-full border-t border-brand/30 pt-1 text-xs font-semibold text-brand"
+                          className="mt-1 w-full border-t border-line pt-1 text-xs font-semibold"
+                          style={{ color: KIND_COLOR[c.kind] }}
                           title="Percent of total income"
                         >
                           {percent === null ? "—" : `${percent.toFixed(1)}%`}
@@ -142,7 +154,7 @@ export function MonthsTable({
                       {c.kind === "income" ? (
                         <span
                           aria-hidden
-                          className="mt-1 w-full border-t border-brand/30 pt-1 text-xs text-transparent"
+                          className="mt-1 w-full border-t border-line pt-1 text-xs text-transparent"
                         >
                           &nbsp;
                         </span>
@@ -155,8 +167,10 @@ export function MonthsTable({
                       type="button"
                       onClick={() => onToggleOutflow!(c.kind)}
                       aria-pressed={isSelected}
-                      className={`flex cursor-pointer flex-col items-center rounded-md px-1 py-0.5 text-center tabular-nums ring-1 transition hover:bg-brand-soft/50 ${
-                        isSelected ? "ring-2 ring-brand bg-brand-soft/70" : "ring-brand-soft"
+                      className={`flex cursor-pointer flex-col items-center rounded-md px-1 py-0.5 text-center tabular-nums ring-1 transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                        isSelected
+                          ? "bg-black/[0.06] ring-2 ring-foreground/70 dark:bg-white/10"
+                          : "ring-line"
                       }`}
                     >
                       {content}
@@ -176,7 +190,9 @@ export function MonthsTable({
                     {formatMoney(totalNet, currency)}
                   </span>
                   <span
-                    className="mt-1 w-full border-t border-brand/30 pt-1 text-xs font-semibold text-brand"
+                    className={`mt-1 w-full border-t border-line pt-1 text-xs font-semibold ${
+                      totalNet >= 0 ? "text-positive" : "text-negative"
+                    }`}
                     title="Net as a percent of total income"
                   >
                     {shareOfIncome(totalNet) === null ? "—" : `${shareOfIncome(totalNet)!.toFixed(1)}%`}

@@ -62,6 +62,11 @@ export function TransactionsTable({
   // Date sort — defaults to descending (newest first). Click header to flip.
   const [dateSort, setDateSort] = useState<"asc" | "desc">("desc");
   const cycleDateSort = () => setDateSort((s) => (s === "asc" ? "desc" : "asc"));
+  // Toggles the table to show only rows the user hasn't yet reconciled
+  // against their bank/card app — the exact set they need to hunt through
+  // on any given day. Kept in local state (not URL) so a filter clicks off
+  // easily and doesn't linger across sessions.
+  const [uncleredOnly, setUnclearedOnly] = useState(false);
   const hasRange = Boolean(dateRange.from || dateRange.to);
 
   useEffect(() => {
@@ -199,6 +204,7 @@ export function TransactionsTable({
       return searchableText.includes(term) || amountText.includes(amountQuery.replace(/^-/, "")) || `-${amountText}`.includes(amountQuery);
     });
     if (!matchesSearch) return false;
+    if (uncleredOnly && t.cleared) return false;
     return true;
   });
   {
@@ -215,8 +221,8 @@ export function TransactionsTable({
   const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-4">
-      <div className="sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 py-3 backdrop-blur-sm md:mx-0 md:px-0">
+    <div className="mx-auto w-full max-w-7xl space-y-2">
+      <div className="sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm md:mx-0 md:px-0">
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">
@@ -361,6 +367,34 @@ export function TransactionsTable({
             <path d="M12 5v14M5 12h14" />
           </svg>
           Transaction
+        </button>
+        {/* Filter chip: show only rows still un-reconciled (cleared=false).
+            Uses viz-savings blue when active so it never reads as
+            purple/brand. Sits right after +Transaction so on mobile it
+            wraps onto the same first row; on desktop it moves to the
+            right of the date pill (order-4). */}
+        <button
+          type="button"
+          aria-pressed={uncleredOnly}
+          onClick={() => setUnclearedOnly((v) => !v)}
+          className={`order-2 flex shrink-0 items-center gap-1 rounded-xl px-2 py-1 text-[11px] font-semibold transition sm:order-4 sm:px-3 sm:py-1.5 sm:text-sm ${
+            uncleredOnly
+              ? "text-white shadow-sm ring-1"
+              : "bg-surface text-foreground ring-1 ring-line hover:bg-black/5 dark:hover:bg-white/10"
+          }`}
+          style={
+            uncleredOnly
+              ? { backgroundColor: "var(--viz-savings)", boxShadow: "inset 0 0 0 1px var(--viz-savings)" }
+              : undefined
+          }
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="4" y="4" width="16" height="16" rx="2.5" />
+          </svg>
+          {/* Shorter label on mobile so the whole toolbar stays on one row
+              next to +Transaction; full "Uncleared" text on sm+. */}
+          <span className="sm:hidden">Unclear</span>
+          <span className="hidden sm:inline">Uncleared</span>
         </button>
         {query ? (
           <button
@@ -685,6 +719,10 @@ function TxLine({
           onFocus={(e) => e.currentTarget.select()}
           onChange={(e) => setAmountValue(e.target.value)}
           onBlur={saveAmount}
+          // In selectMode the row's onClick toggles selection; a click INSIDE
+          // this edit input would otherwise bubble up and uncheck the row
+          // Victor was in the middle of adjusting. Stop it at the input.
+          onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (e.key === "Enter") e.currentTarget.blur();
@@ -707,14 +745,25 @@ function TxLine({
           onDoubleClick={(e) => e.stopPropagation()}
           title={canEdit ? "Click to edit amount" : "Card payment — edit it from the card account"}
           className={`rounded-md px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums transition hover:bg-brand-soft hover:text-brand-strong focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit ${
-          isIncome ? "text-positive" : "text-foreground"
+          isIncome || tx.amountCents < 0 ? "text-positive" : "text-foreground"
         }`}
       >
-        {isIncome ? "+" : "−"}
-        {formatMoney(tx.amountCents, currency)}
+        {/* Refunds are stored as negative amounts. They still read as an
+            inflow, so we show them as +$X (positive-colored) with a small
+            "Refund" chip next to the value in the type column below. */}
+        {isIncome || tx.amountCents < 0 ? "+" : "−"}
+        {formatMoney(Math.abs(tx.amountCents), currency)}
         </button>
       )}
-      <span className="truncate text-sm text-muted">{tx.kind ? KIND_LABEL[tx.kind] : "—"}</span>
+      <span className="truncate text-sm text-muted">
+        {tx.amountCents < 0 ? (
+          <span className="rounded bg-positive/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-positive">
+            Refund
+          </span>
+        ) : (
+          tx.kind ? KIND_LABEL[tx.kind] : "—"
+        )}
+      </span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
         <span className="truncate text-sm">{tx.subName}</span>
