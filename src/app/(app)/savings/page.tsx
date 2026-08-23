@@ -205,11 +205,23 @@ export default async function SavingsPage() {
   // per person across every IRA that person holds, so each goal is shown on
   // its own line rather than merged: if a second IRA exists that isn't tracked
   // here, a merged total would quietly understate usage.
-  // Caps come from lib/contribution-limits.ts keyed by the current tax year,
-  // so January doesn't silently start measuring against last year's figures.
-  // A year with no published entry yields null and the card says so.
+  // Caps are keyed by the current tax year, so January doesn't silently start
+  // measuring against last year's figures. Anything entered from this page
+  // (contribution_caps) wins over the built-in table; a year in neither yields
+  // null and the card says so rather than showing a stale cap.
   const capYear = now.getFullYear();
-  const caps = capsForYear(capYear);
+  const { data: storedCapRows } = await supabase
+    .from("contribution_caps")
+    .select("tax_year, elective_deferral_cents, ira_cents")
+    .eq("household_id", household.id);
+  const storedCaps: Record<number, { electiveDeferralCents: number; iraCents: number }> =
+    Object.fromEntries(
+      (storedCapRows ?? []).map((r) => [
+        r.tax_year,
+        { electiveDeferralCents: r.elective_deferral_cents, iraCents: r.ira_cents },
+      ]),
+    );
+  const caps = capsForYear(capYear, storedCaps);
   const subtypeById = new Map((accounts ?? []).map((a) => [a.id, (a as { subtype?: string | null }).subtype ?? null]));
   const bucketNameById = new Map(
     (buckets ?? []).map((b) => [b.id, (b as { name?: string }).name ?? ""]),
@@ -330,8 +342,9 @@ export default async function SavingsPage() {
       contributionLimits={contributionLimits}
       capYear={capYear}
       capsPublished={caps != null}
-      latestCapYear={latestCapYear()}
-      pendingCapYear={pendingCapYear(now)}
+      latestCapYear={latestCapYear(storedCaps)}
+      pendingCapYear={pendingCapYear(now, storedCaps)}
+      seedCaps={caps}
       incomeReceivedCents={incomeReceivedCents}
       currentMonthKey={currentMonthKey}
       currentMonthLabel={now.toLocaleDateString("en-US", { month: "long", year: "numeric" })}

@@ -56,3 +56,53 @@ export async function updateSavingsGoalFields(formData: FormData) {
   revalidatePath("/budget");
   return { error: null };
 }
+
+/**
+ * Record the IRS contribution caps for a tax year, from the Savings page.
+ *
+ * These are federal figures published each autumn. Storing them here means a
+ * new tax year no longer needs a code change — the card would otherwise go
+ * blank on 1 January of any year not compiled into
+ * lib/contribution-limits.ts.
+ *
+ * Validated rather than trusted: a mistyped cap silently rewrites every pace
+ * figure on the card, so the amounts have to be positive and inside a range
+ * that a real IRS limit could plausibly occupy. The year is bounded too — a
+ * typo like 20267 would file the caps under a year nothing ever reads.
+ */
+export async function saveContributionCaps(formData: FormData) {
+  const { supabase, household } = await getSessionContext();
+
+  const taxYear = Number(formData.get("taxYear"));
+  const currentYear = new Date().getFullYear();
+  if (!Number.isInteger(taxYear) || taxYear < currentYear - 1 || taxYear > currentYear + 2) {
+    return { error: "That tax year looks wrong." };
+  }
+
+  const electiveDeferralCents = displayToCents(String(formData.get("electiveDeferral") ?? "0"));
+  const iraCents = displayToCents(String(formData.get("ira") ?? "0"));
+
+  // Wide enough to never argue with a real figure, tight enough to catch a
+  // decimal-point slip (750 or 75000 instead of 7500).
+  if (electiveDeferralCents < 1000000 || electiveDeferralCents > 10000000) {
+    return { error: "The elective deferral cap looks wrong — check the IRS page." };
+  }
+  if (iraCents < 300000 || iraCents > 5000000) {
+    return { error: "The IRA cap looks wrong — check the IRS page." };
+  }
+
+  const { error } = await supabase.from("contribution_caps").upsert(
+    {
+      household_id: household.id,
+      tax_year: taxYear,
+      elective_deferral_cents: electiveDeferralCents,
+      ira_cents: iraCents,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "household_id,tax_year" },
+  );
+  if (error) return { error: "Couldn't save the caps." };
+
+  revalidatePath("/savings");
+  return { error: null };
+}

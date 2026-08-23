@@ -8,8 +8,11 @@
 // entry returns null, and the UI says so and links out rather than falling back
 // to the most recent figures it happens to have.
 //
-// TO UPDATE: add the new year below when the IRS publishes (usually late
-// October/November for the following year). Sources:
+// TO UPDATE: normally you don't touch this file. From November the Savings
+// page shows a "<year> caps due" prompt and takes the two figures directly
+// into the `contribution_caps` table, which wins over the entries below. The
+// table here is the fallback/seed for years already known at build time.
+// Sources:
 //   IRS — https://www.irs.gov/retirement-plans/cola-increases-for-dollar-limitations-on-benefits-and-contributions
 //   TSP — https://www.tsp.gov/making-contributions/contribution-limits/
 //
@@ -33,9 +36,20 @@ const CAPS_BY_YEAR: Record<number, ContributionCaps> = {
 export const IRS_LIMITS_URL =
   "https://www.irs.gov/retirement-plans/cola-increases-for-dollar-limitations-on-benefits-and-contributions";
 
-/** Caps for a tax year, or null when that year hasn't been added yet. */
-export function capsForYear(year: number): ContributionCaps | null {
-  return CAPS_BY_YEAR[year] ?? null;
+/**
+ * Caps for a tax year, or null when that year isn't known yet.
+ *
+ * `stored` holds anything entered from the Savings page (the
+ * `contribution_caps` table), keyed by tax year. It wins over the built-in
+ * table so a new year can be added without a code change; absent years fall
+ * through to the figures above, and a year in neither returns null so the
+ * card can say "not published yet" instead of measuring against a stale cap.
+ */
+export function capsForYear(
+  year: number,
+  stored?: Record<number, ContributionCaps>,
+): ContributionCaps | null {
+  return stored?.[year] ?? CAPS_BY_YEAR[year] ?? null;
 }
 
 export type CapKind = "electiveDeferral" | "ira";
@@ -69,9 +83,13 @@ export function monthsUntilDeadline(kind: CapKind, taxYear: number, from = new D
   return Math.max(0, months + (due.getDate() >= from.getDate() ? 1 : 0));
 }
 
-/** The most recent year with published caps — used to explain what's missing. */
-export function latestCapYear(): number {
-  return Math.max(...Object.keys(CAPS_BY_YEAR).map(Number));
+/** The most recent year with caps on file — used to explain what's missing. */
+export function latestCapYear(stored?: Record<number, ContributionCaps>): number {
+  const years = [
+    ...Object.keys(CAPS_BY_YEAR).map(Number),
+    ...Object.keys(stored ?? {}).map(Number),
+  ];
+  return Math.max(...years);
 }
 
 /**
@@ -89,8 +107,11 @@ const CAPS_ANNOUNCED_MONTH = 10; // November (months are 0-indexed)
  * on New Year's Day. Asking in November leaves two months to act, and the
  * prompt disappears on its own once the year is added.
  */
-export function pendingCapYear(from = new Date()): number | null {
+export function pendingCapYear(
+  from = new Date(),
+  stored?: Record<number, ContributionCaps>,
+): number | null {
   if (from.getMonth() < CAPS_ANNOUNCED_MONTH) return null;
   const next = from.getFullYear() + 1;
-  return capsForYear(next) ? null : next;
+  return capsForYear(next, stored) ? null : next;
 }

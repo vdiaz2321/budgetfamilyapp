@@ -4,7 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import { TransactionModal } from "../budget/transaction-modal";
 import type { AccountOption, SubOption } from "../budget/types";
 import { centsToDisplay } from "@/lib/money";
-import { updateSavingsGoalFields } from "./actions";
+import { updateSavingsGoalFields, saveContributionCaps } from "./actions";
+import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { IRS_LIMITS_URL, contributionDeadline, monthsUntilDeadline } from "@/lib/contribution-limits";
 
@@ -45,6 +46,7 @@ type Props = {
   capsPublished?: boolean;
   latestCapYear?: number;
   pendingCapYear?: number | null;
+  seedCaps?: { electiveDeferralCents: number; iraCents: number } | null;
   incomeReceivedCents: number;
   currentMonthKey: string;
   currentMonthLabel: string;
@@ -241,11 +243,117 @@ export type ContributionLimitRow = {
   contributedCents: number;
 };
 
+/**
+ * Enter the IRS caps for a tax year without a code change.
+ *
+ * The figures are federal and published each autumn; before this existed a new
+ * year meant editing lib/contribution-limits.ts, so the card would go blank on
+ * 1 January of any year nobody had compiled in. Prefilled with the current
+ * year's caps because the change is usually a few hundred dollars — adjusting
+ * a number beats typing one from scratch, and it makes a wrong entry obvious.
+ */
+function CapsEditor({
+  taxYear,
+  seed,
+  currency,
+  onClose,
+}: {
+  taxYear: number;
+  seed: { electiveDeferralCents: number; iraCents: number } | null;
+  currency: string;
+  onClose: () => void;
+}) {
+  const [electiveDeferral, setElectiveDeferral] = useState(
+    seed ? centsToDisplay(seed.electiveDeferralCents) : "",
+  );
+  const [ira, setIra] = useState(seed ? centsToDisplay(seed.iraCents) : "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  const submit = () => {
+    setError(null);
+    const fd = new FormData();
+    fd.set("taxYear", String(taxYear));
+    fd.set("electiveDeferral", electiveDeferral);
+    fd.set("ira", ira);
+    start(async () => {
+      const res = await saveContributionCaps(fd);
+      if (res?.error) setError(res.error);
+      else onClose();
+    });
+  };
+
+  return (
+    <ModalShell title={`${taxYear} contribution caps`} onClose={onClose} mobileAlign="top">
+      <div className="space-y-3 px-5 py-4">
+        <p className="text-xs leading-relaxed text-muted">
+          Copy the two figures from the IRS page for tax year {taxYear}. They take effect
+          immediately and carry over on 1 January.{" "}
+          <a
+            href={IRS_LIMITS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="font-semibold underline underline-offset-2"
+            style={{ color: "var(--viz-savings)" }}
+          >
+            Open the IRS limits ↗
+          </a>
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold text-muted">
+            Elective deferral — TSP / 401(k) ({currency})
+          </span>
+          <input
+            value={electiveDeferral}
+            onChange={(e) => setElectiveDeferral(e.target.value)}
+            inputMode="decimal"
+            placeholder="24,500"
+            className="w-full rounded-lg bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold text-muted">
+            IRA, per person ({currency})
+          </span>
+          <input
+            value={ira}
+            onChange={(e) => setIra(e.target.value)}
+            inputMode="decimal"
+            placeholder="7,500"
+            className="w-full rounded-lg bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+        {error ? <p className="text-xs font-semibold text-negative">{error}</p> : null}
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-muted transition hover:bg-black/5 dark:hover:bg-white/10"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending}
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+            style={{ backgroundColor: "var(--viz-savings)" }}
+          >
+            {pending ? "Saving…" : `Save ${taxYear} caps`}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
 // Annual caps on tax-advantaged accounts. Unused room doesn't roll over, so
 // the useful framing is what's left and how long is left to use it.
-function ContributionLimits({ rows, currency, year, published, latestYear, pendingYear }: { rows: ContributionLimitRow[]; currency: string; year: number; published: boolean; latestYear: number; pendingYear: number | null }) {
+function ContributionLimits({ rows, currency, year, published, latestYear, pendingYear, seedCaps }: { rows: ContributionLimitRow[]; currency: string; year: number; published: boolean; latestYear: number; pendingYear: number | null; seedCaps: { electiveDeferralCents: number; iraCents: number } | null }) {
   const [state, setState] = useSessionCollapse("savings-contribution-limits", () => ({ open: false }));
   const open = state.open === true;
+  // Which tax year the caps editor is open for, or null when it's closed.
+  const [editingYear, setEditingYear] = useState<number | null>(null);
   const anyMaxed = rows.some((r) => r.contributedCents >= r.limitCents);
   // The rows are paced to 31 December. An IRA's real cutoff runs months past
   // that, which matters only if the year goes badly — so it's said once, here,
@@ -318,6 +426,14 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                   Check the current IRS limits ↗
                 </a>
               </p>
+              <button
+                type="button"
+                onClick={() => setEditingYear(year)}
+                className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+                style={{ backgroundColor: "var(--viz-savings)" }}
+              >
+                Enter {year} caps
+              </button>
             </div>
           ) : null}
           {/* From November, next year's figures are published but not yet on
@@ -339,6 +455,14 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                   Check the {pendingYear} IRS limits ↗
                 </a>
               </p>
+              <button
+                type="button"
+                onClick={() => setEditingYear(pendingYear)}
+                className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+                style={{ backgroundColor: "var(--viz-savings)" }}
+              >
+                Enter {pendingYear} caps
+              </button>
             </div>
           ) : null}
           {rows.map((r) => {
@@ -428,6 +552,14 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
           ) : null}
         </div>
       ) : null}
+      {editingYear !== null ? (
+        <CapsEditor
+          taxYear={editingYear}
+          seed={seedCaps}
+          currency={currency}
+          onClose={() => setEditingYear(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -440,6 +572,7 @@ export function SavingsBoard({
   capsPublished = true,
   latestCapYear: latestCapYearProp = capYear,
   pendingCapYear = null,
+  seedCaps = null,
   emergencyFund,
   incomeReceivedCents,
   currentMonthKey,
@@ -497,6 +630,7 @@ export function SavingsBoard({
                   published={capsPublished}
                   latestYear={latestCapYearProp}
                   pendingYear={pendingCapYear}
+                  seedCaps={seedCaps}
                 />
               ) : null}
             </div>
