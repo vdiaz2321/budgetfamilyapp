@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
+  coverOverspend,
   deleteSubcategory,
   deleteTransaction,
   moveSubcategoryToGroup,
@@ -49,6 +50,119 @@ type Props = {
   onAddTransaction: () => void;
   onEditTransaction: (tx: TxData) => void;
 };
+
+// Move planned dollars from a category that has room into this overspent one.
+// Only categories with something left to give are offered, with the amount
+// pre-filled to exactly cover the shortfall — the common case is one tap.
+function CoverOverspend({
+  row,
+  monthKey,
+  currency,
+  shortfallCents,
+  subOptions,
+}: {
+  row: RowData;
+  monthKey: string;
+  currency: string;
+  shortfallCents: number;
+  subOptions: SubOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [fromId, setFromId] = useState("");
+  const [amount, setAmount] = useState(centsToDisplay(shortfallCents));
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  // Outflow categories only. "Remaining" on an income item means income still
+  // expected to arrive, not planned money sitting unspent — offering those as
+  // donors would let you fund a shortfall out of a paycheque you haven't
+  // received, which is exactly the mistake envelope budgeting exists to stop.
+  const donors = subOptions
+    .filter((s) => s.id !== row.subId && s.kind !== "income" && (s.remainingCents ?? 0) > 0)
+    .sort((a, b) => (b.remainingCents ?? 0) - (a.remainingCents ?? 0));
+
+  if (!open) {
+    return (
+      <div className="border-b border-line bg-negative/5 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-xs font-semibold text-negative underline-offset-2 hover:underline"
+        >
+          Cover the {formatMoney(shortfallCents, currency)} from another category
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-b border-line bg-negative/5 px-4 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+        Move money into {row.name}
+      </p>
+      {donors.length === 0 ? (
+        <p className="mt-1.5 text-xs text-muted">
+          No category has planned money left this month to move.
+        </p>
+      ) : (
+        <>
+          <div className="mt-1.5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_auto]">
+            <select
+              value={fromId}
+              onChange={(e) => setFromId(e.target.value)}
+              aria-label="Move from"
+              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              <option value="">Take from…</option>
+              {donors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} · {formatMoney(d.remainingCents ?? 0, currency)} left
+                </option>
+              ))}
+            </select>
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              inputMode="decimal"
+              aria-label="Amount to move"
+              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={pending || !fromId}
+                onClick={() => {
+                  setError(null);
+                  const fd = new FormData();
+                  fd.set("fromSubcategoryId", fromId);
+                  fd.set("toSubcategoryId", row.subId);
+                  fd.set("month", monthKey);
+                  fd.set("amount", amount);
+                  start(async () => {
+                    const res = await coverOverspend(fd);
+                    if (res?.error) setError(res.error);
+                    else setOpen(false);
+                  });
+                }}
+                className="rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {pending ? "Moving…" : "Move"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setOpen(false); setError(null); }}
+                className="rounded-lg px-2 py-1.5 text-xs font-semibold text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+          {error ? <p className="mt-1.5 text-xs text-negative">{error}</p> : null}
+        </>
+      )}
+    </div>
+  );
+}
 
 export function ItemPanel({
   row,
@@ -135,6 +249,16 @@ export function ItemPanel({
           </div>
         </div>
       </div>
+
+      {over && !overIsGood ? (
+        <CoverOverspend
+          row={row}
+          monthKey={monthKey}
+          currency={currency}
+          shortfallCents={-remaining}
+          subOptions={subOptions}
+        />
+      ) : null}
 
       <DeleteFooter
         subId={row.subId}
@@ -290,6 +414,46 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
   );
 }
 
+// Save button that lives OUTSIDE its target form (targets via form="…"), so
+// we can't easily hook into the form's own useTransition. Instead we track a
+// short local "saving" flash on click and auto-clear after ~1.4s — long
+// enough to cover a normal save round-trip from Frankfurt, short enough that
+// a fast save doesn't leave the label stale.
+function SaveButton({ saveFormId }: { saveFormId: string }) {
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!saving) return;
+    const t = window.setTimeout(() => setSaving(false), 1400);
+    return () => window.clearTimeout(t);
+  }, [saving]);
+  return (
+    <button
+      type="submit"
+      form={saveFormId}
+      onClick={() => setSaving(true)}
+      disabled={saving}
+      className="flex shrink-0 items-center gap-1.5 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:cursor-wait disabled:opacity-70"
+    >
+      {saving ? (
+        <>
+          <svg
+            className="h-3.5 w-3.5 animate-spin"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          Saving…
+        </>
+      ) : (
+        "Save"
+      )}
+    </button>
+  );
+}
+
 function DeleteFooter({
   subId,
   onDeleted,
@@ -322,15 +486,7 @@ function DeleteFooter({
       >
         +Transaction
       </button>
-      {saveFormId ? (
-        <button
-          type="submit"
-          form={saveFormId}
-          className="shrink-0 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
-        >
-          Save
-        </button>
-      ) : null}
+      {saveFormId ? <SaveButton saveFormId={saveFormId} /> : null}
       <form
         action={(fd) => start(() => deleteSubcategory(fd).then(onDeleted))}
         className="shrink-0"

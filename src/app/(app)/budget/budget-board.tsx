@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { formatMoney } from "@/lib/money";
+import { centsToDisplay, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { copyPlansFromPreviousMonth, restorePlansSnapshot, setRollover, setRolloverOverride } from "./actions";
+import { addToPlan, copyPlansFromPreviousMonth, restorePlansSnapshot, setRollover, setRolloverOverride } from "./actions";
 import { advanceSubscriptionRenewal } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
@@ -12,6 +12,7 @@ import { ItemPanel } from "./item-panel";
 import { TransactionsPanel } from "./transactions-panel";
 import { TransactionModal } from "./transaction-modal";
 import { SummaryPanel } from "./summary-panel";
+import { ModalShell } from "@/components/modal-shell";
 import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
 import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import { AddCategoryGroupButton } from "./category-group-controls";
@@ -331,6 +332,7 @@ export function BudgetBoard({
         {/* Left-to-budget hero card */}
         <div ref={heroRef}>
         <SummaryHeroCard
+          heroSubOptions={subOptions}
           actualLeft={actualLeft}
           displayLeft={displayLeft}
           incomePlanned={incomePlanned}
@@ -632,6 +634,159 @@ const TONE_CLASSES: Record<BudgetTone, { text: string; badge: string; icon: stri
   },
 };
 
+// Give unassigned income a job. Adds to an item's Planned rather than moving
+// between two, since the money is coming from income that isn't allocated yet.
+//
+// A modal rather than inline controls: the hero card is a dense grid of
+// figures, and dropping a select + input + two buttons into it pushed the
+// numbers around. The trigger stays a quiet text link; the form gets room.
+function AssignLeftover({
+  leftoverCents,
+  monthKey,
+  currency,
+  options,
+}: {
+  leftoverCents: number;
+  monthKey: string;
+  currency: string;
+  options: SubOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [toId, setToId] = useState("");
+  const [amount, setAmount] = useState(centsToDisplay(leftoverCents));
+  const [filter, setFilter] = useState("");
+  const [pending, start] = useTransition();
+
+  // Outflow items only — assigning income to an income line is meaningless.
+  const targets = options.filter((o) => o.kind !== "income");
+  const KIND_LABEL: Partial<Record<CategoryKind, string>> = {
+    savings: "Investments & Savings",
+    bills: "Bills",
+    expenses: "Expenses",
+    debt: "Debt",
+  };
+  const q = filter.trim().toLowerCase();
+  const shown = q ? targets.filter((o) => o.name.toLowerCase().includes(q)) : targets;
+  const grouped = (["bills", "expenses", "savings", "debt"] as CategoryKind[])
+    .map((k) => ({ kind: k, items: shown.filter((o) => o.kind === k) }))
+    .filter((g) => g.items.length > 0);
+
+  const submit = () => {
+    const fd = new FormData();
+    fd.set("subcategoryId", toId);
+    fd.set("month", monthKey);
+    fd.set("addAmount", amount);
+    start(async () => {
+      await addToPlan(fd);
+      setOpen(false);
+      setToId("");
+      setFilter("");
+    });
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => { setAmount(centsToDisplay(leftoverCents)); setOpen(true); }}
+        className="mt-1 text-[11px] font-semibold text-brand underline-offset-2 hover:underline"
+      >
+        Give it a job
+      </button>
+
+      {open ? (
+        <ModalShell title="Assign to a budget item" onClose={() => setOpen(false)} className="sm:max-w-md" mobileAlign="top">
+          <div className="space-y-4 px-5 py-4">
+            <p className="text-sm text-muted">
+              <span className="font-semibold text-foreground tabular-nums">
+                {formatMoney(leftoverCents, currency)}
+              </span>{" "}
+              of planned income has no job yet.
+            </p>
+
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                Amount
+              </span>
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                inputMode="decimal"
+                autoFocus
+                className="w-full rounded-xl bg-background px-3 py-2.5 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            </label>
+
+            <div>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                Assign to
+              </span>
+              {/* 70+ items is too many to scan, so the list filters as you type. */}
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Search items…"
+                aria-label="Filter budget items"
+                className="mb-2 w-full rounded-xl bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+              <div className="max-h-56 overflow-y-auto rounded-xl ring-1 ring-line">
+                {grouped.length === 0 ? (
+                  <p className="px-3 py-4 text-center text-xs text-muted">No items match.</p>
+                ) : (
+                  grouped.map((g) => (
+                    <div key={g.kind}>
+                      <p className="sticky top-0 bg-background px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                        {KIND_LABEL[g.kind]}
+                      </p>
+                      {g.items.map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => setToId(o.id)}
+                          className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition ${
+                            toId === o.id
+                              ? "bg-brand-soft font-semibold"
+                              : "hover:bg-black/5 dark:hover:bg-white/10"
+                          }`}
+                        >
+                          <span className="min-w-0 truncate">{o.name}</span>
+                          {o.remainingCents != null ? (
+                            <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                              {formatMoney(o.remainingCents, currency)} left
+                            </span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending || !toId}
+                onClick={submit}
+                className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {pending ? "Assigning…" : "Assign"}
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+    </>
+  );
+}
+
 function getBudgetStatus(
   actualLeft: number,
 ): { tone: BudgetTone; badgeText: string } {
@@ -648,6 +803,7 @@ function CategoryProgressCard({
   dotClass,
   fillClass,
   currency,
+  shareOfIncome,
 }: {
   label: string;
   actualLabel: string;
@@ -657,6 +813,10 @@ function CategoryProgressCard({
   dotClass: string;
   fillClass: string;
   currency: string;
+  // Planned amount as a share of planned income. Set on the Savings card so
+  // the savings rate — the headline number in any personal-finance review —
+  // is visible without leaving Budget.
+  shareOfIncome?: number | null;
 }) {
   const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
   return (
@@ -664,6 +824,14 @@ function CategoryProgressCard({
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
         <span className="truncate text-xs text-muted">{label}</span>
+        {shareOfIncome != null ? (
+          <span
+            className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
+            style={{ backgroundColor: "var(--viz-sel)", color: "var(--viz-savings)" }}
+          >
+            {shareOfIncome.toFixed(0)}% of income
+          </span>
+        ) : null}
         <span className="ml-auto whitespace-nowrap text-xs tabular-nums">
           <span className="font-semibold text-foreground">{formatMoney(planned, currency)}</span>
           <span className="text-muted"> / {actualLabel} </span>
@@ -704,6 +872,26 @@ function RailActions({
   );
 }
 
+// Small submit-only Undo button used inline next to the "+$X rollover" line
+// in the hero card. Same server action as the pill's Undo in RolloverFooter —
+// posts a blank `enable` value to toggle rollover off for this month.
+function UndoRolloverButton({ monthFirstOfMonth }: { monthFirstOfMonth: string }) {
+  const [pending, start] = useTransition();
+  return (
+    <form action={(fd) => start(() => setRollover(fd))}>
+      <input type="hidden" name="month" value={monthFirstOfMonth} />
+      <input type="hidden" name="enable" value="" />
+      <button
+        type="submit"
+        disabled={pending}
+        className="cursor-pointer rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-semibold text-muted transition hover:border-negative/40 hover:text-negative disabled:cursor-wait disabled:opacity-60"
+      >
+        {pending ? "…" : "Undo"}
+      </button>
+    </form>
+  );
+}
+
 function SummaryHeroCard({
   actualLeft,
   displayLeft,
@@ -717,6 +905,7 @@ function SummaryHeroCard({
   rolloverCents,
   rollover,
   monthFirstOfMonth,
+  heroSubOptions,
   currency,
   expanded,
   onToggle,
@@ -735,6 +924,7 @@ function SummaryHeroCard({
   rolloverCents: number;
   rollover: Props["rollover"];
   monthFirstOfMonth: string;
+  heroSubOptions: SubOption[];
   currency: string;
   expanded: boolean;
   onToggle: () => void;
@@ -794,8 +984,27 @@ function SummaryHeroCard({
               </div>
             </div>
           </div>
-          <div className="flex justify-end px-4 pb-2.5 sm:absolute sm:left-1/2 sm:top-1/2 sm:z-10 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:justify-center sm:p-0">
-            <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} centered />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="flex justify-end px-4 pb-2.5 sm:absolute sm:left-1/2 sm:top-1/2 sm:z-10 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:justify-center sm:p-0"
+          >
+            {rolloverCents > 0 ? (
+              // Active state: sits in the SAME centered pill slot as the
+              // "Rollover July: $1,974.86" opt-in pill, just with the added
+              // amount + inline Undo so the user sees at a glance that it's
+              // already in for this month. No plus sign; "Added" instead of
+              // "rollover" per Victor's copy.
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive">
+                <span className="size-1.5 rounded-full bg-positive" aria-hidden />
+                <span className="text-[11px] font-bold tabular-nums">
+                  {formatMoney(rolloverCents, currency)}
+                </span>
+                <span className="text-[11px] font-semibold opacity-80">Added</span>
+                <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
+              </span>
+            ) : (
+              <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} centered />
+            )}
           </div>
         </div>
       </div>
@@ -843,12 +1052,32 @@ function SummaryHeroCard({
             <p className={`mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
+            {/* Zero-based budgeting says every dollar gets a job. This figure
+                used to sit here as a read-only fact; now it's the entry point
+                for giving the money one. */}
+            {displayLeft > 0 ? (
+              <AssignLeftover
+                leftoverCents={displayLeft}
+                monthKey={monthFirstOfMonth}
+                currency={currency}
+                options={heroSubOptions}
+              />
+            ) : null}
             {rolloverCents > 0 && (
-              <p className="mt-0.5 text-xs text-muted">
-                incl.{" "}
-                <span className="font-medium text-brand">{formatMoney(rolloverCents, currency)}</span>{" "}
-                rolled in
-              </p>
+              // <div> (not <p>) because UndoRolloverButton renders a <form>,
+              // and forms inside paragraphs are invalid HTML.
+              <div className="mt-0.5 flex items-baseline gap-1.5 text-xs text-muted">
+                <span className="whitespace-nowrap">
+                  <span className="font-semibold text-positive">
+                    {formatMoney(rolloverCents, currency)}
+                  </span>{" "}
+                  Added
+                </span>
+                {/* Inline Undo — same submit RolloverFooter used to render.
+                    Keeping it here lets the footer drop the redundant
+                    pill+Undo when a rollover is already in. */}
+                <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
+              </div>
             )}
           </div>
           <div className="min-w-0 text-right">
@@ -874,7 +1103,7 @@ function SummaryHeroCard({
         <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--cat-income)]" fillClass="bg-[color:var(--cat-income)]" currency={currency} />
           <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--cat-bills)]" fillClass="bg-[color:var(--cat-bills)]" currency={currency} />
-          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--cat-savings)]" fillClass="bg-[color:var(--cat-savings)]" currency={currency} />
+          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--cat-savings)]" fillClass="bg-[color:var(--cat-savings)]" currency={currency} shareOfIncome={incomePlanned > 0 ? (savings.planned / incomePlanned) * 100 : null} />
           <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--cat-debt)]" fillClass="bg-[color:var(--cat-debt)]" currency={currency} />
         </div>
       </div>
@@ -911,6 +1140,11 @@ function RolloverControl({
   const hasRollover = availableCents > 0 || enabled || liveAvailableCents > 0;
 
   if (!hasRollover) return null;
+  // Once the rollover has been rolled in, the hero card already displays
+  // "+$X rollover · Undo" under Income Left — rendering the pill here too
+  // would double it up in the footer. Keep this control only when the user
+  // still has to opt in (enabled=false).
+  if (enabled) return null;
 
   const amount = formatMoney(Math.max(0, availableCents), currency);
   const prevMonthName = prevMonthLabel.replace(/\s+\d{4}$/, "");
@@ -1006,7 +1240,10 @@ function RolloverFooter({
     return () => window.clearTimeout(t);
   }, [snapshot]);
   return (
-    <div className={`border-t ${enabled ? "border-brand/20 bg-brand-soft/40" : "border-line bg-background/40"}`}>
+    // Neutral tint on both enabled/disabled states — the hero card already
+    // signals when a rollover is active via the "+$X rollover" line, so the
+    // extra brand-soft wash here was noise on top of it.
+    <div className={`border-t border-line ${enabled ? "bg-black/[0.03] dark:bg-white/[0.05]" : "bg-background/40"}`}>
       {/* Expandable due-this-week list */}
       {showDue && dueItems.length > 0 && (
         <ul className="divide-y divide-line border-b border-line">
@@ -1049,8 +1286,11 @@ function RolloverFooter({
         </ul>
       )}
 
-      {/* Footer: row 1 — Due pill + clickable rollover pill / undo action */}
-      <div className="flex items-center gap-2 px-4 pt-2.5">
+      {/* Single row: Due-this-week pill on the left, rollover pill (only
+          when the user hasn't opted in yet) and Roll-in / Undo action on
+          the right. Merged from two rows so there's no dead space when
+          rollover is already in (hero card carries that state). */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
         {dueItems.length > 0 && (
           <button
             type="button"
@@ -1064,48 +1304,43 @@ function RolloverFooter({
           </button>
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
-        </div>
-      </div>
-
-      {/* Footer: row 2 — Roll-in / Undo, right-aligned pill */}
-      <div className="flex justify-end px-4 pb-2.5 pt-1.5">
-        {snapshot ? (
-          <button
-            type="button"
-            disabled={undoPending}
-            onClick={() => {
-              const snap = snapshot;
-              startUndo(async () => {
-                await restorePlansSnapshot(monthFirstOfMonth, snap);
-                setSnapshot(null);
-              });
-            }}
-            className="rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-[11px] font-bold text-brand transition hover:bg-brand/20 disabled:opacity-60"
-          >
-            {undoPending ? "Undoing…" : `↩ Undo roll-in from ${prevMonthLabel}`}
-          </button>
-        ) : (
-          <form
-            action={(fd) =>
-              startCopy(async () => {
-                const res = await copyPlansFromPreviousMonth(fd);
-                if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
-              })
-            }
-          >
-            <input type="hidden" name="month" value={monthFirstOfMonth} />
+          {snapshot ? (
             <button
-              type="submit"
-              disabled={copyPending}
-              title={`Copy every planned amount from ${prevMonthLabel} into this month`}
-              className="rounded-full border border-brand/30 bg-brand-soft/60 px-3 py-1 text-[11px] font-semibold text-brand transition hover:bg-brand-soft disabled:opacity-60"
+              type="button"
+              disabled={undoPending}
+              onClick={() => {
+                const snap = snapshot;
+                startUndo(async () => {
+                  await restorePlansSnapshot(monthFirstOfMonth, snap);
+                  setSnapshot(null);
+                });
+              }}
+              className="rounded-full border border-line bg-surface px-3 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
             >
-              {copyPending ? "Copying…" : `↓ Roll in ${prevMonthLabel} planned`}
+              {undoPending ? "Undoing…" : `↩ Undo roll-in from ${prevMonthLabel}`}
             </button>
-          </form>
-        )}
+          ) : (
+            <form
+              action={(fd) =>
+                startCopy(async () => {
+                  const res = await copyPlansFromPreviousMonth(fd);
+                  if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
+                })
+              }
+            >
+              <input type="hidden" name="month" value={monthFirstOfMonth} />
+              <button
+                type="submit"
+                disabled={copyPending}
+                className="rounded-full border border-line bg-surface px-3 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
+              >
+                {copyPending ? "Copying…" : `↓ Roll in ${prevMonthLabel} planned`}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1136,7 +1371,14 @@ function OverrideInput({
   };
 
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex items-center gap-1.5">
+      {/* Editing label — swaps in for the "Rollover July:" pill copy so it's
+          obvious what the input is editing (the rolled-over amount, not
+          the month's spending or income). Sits before the input, muted so
+          the input itself stays the focal point. */}
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+        Amount rollover
+      </span>
       <input
         type="text"
         inputMode="decimal"
@@ -1154,10 +1396,9 @@ function OverrideInput({
       <button
         type="button"
         onClick={() => save("")}
-        title={`Reset to live calc (${liveLabel})`}
         className="text-[10px] text-muted underline hover:text-foreground"
       >
-        reset
+        reset to {liveLabel}
       </button>
     </span>
   );

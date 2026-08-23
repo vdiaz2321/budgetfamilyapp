@@ -366,6 +366,44 @@ export default async function BudgetPage({
     return `${names[parseInt(m, 10) - 1]} ${y}`;
   };
 
+  // ---- Trailing 3-month average per budget item.
+  //
+  // `allActuals` above is already fetched for the rollover walk — it holds
+  // per-subcategory actuals for every month since the anchor, and was
+  // previously collapsed straight into one leftover figure per month and
+  // discarded. Keeping the subcategory dimension costs nothing extra and gives
+  // every row the history needed to judge whether its plan is realistic.
+  //
+  // Only complete months count (the current month is partial and would drag
+  // the average down), and only months at or after the item's first recorded
+  // activity, so a category started in June isn't averaged against three
+  // months of zeros.
+  const avg3BySub = new Map<string, number>();
+  {
+    const prevMonths: string[] = [];
+    for (let i = 1; i <= 3; i++) {
+      const [y, m] = month.firstOfMonth.split("-").map(Number);
+      const d = new Date(y, m - 1 - i, 1);
+      prevMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+    }
+    const window = new Set(prevMonths);
+    const sums = new Map<string, number>();
+    const counts = new Map<string, number>();
+    for (const row of allActuals ?? []) {
+      if (!window.has(row.month)) continue;
+      sums.set(row.subcategory_id, (sums.get(row.subcategory_id) ?? 0) + Math.abs(row.actual_cents ?? 0));
+      counts.set(row.subcategory_id, (counts.get(row.subcategory_id) ?? 0) + 1);
+    }
+    for (const [subId, total] of sums) {
+      const n = counts.get(subId) ?? 0;
+      if (n > 0) avg3BySub.set(subId, Math.round(total / n));
+    }
+  }
+  const groupsWithHistory: GroupData[] = groups.map((g) => ({
+    ...g,
+    rows: g.rows.map((r) => ({ ...r, avg3Cents: avg3BySub.get(r.subId) ?? null })),
+  }));
+
   const remainingBySub = new Map<string, number>();
   for (const group of groups) {
     for (const row of group.rows) {
@@ -539,7 +577,7 @@ export default async function BudgetPage({
         firstOfMonth: month.firstOfMonth,
       }}
       currency={household.currency}
-      groups={groups}
+      groups={groupsWithHistory}
       incomePlanned={incomePlanned}
       outflowPlanned={outflowPlanned}
       leftToBudget={incomePlanned - outflowPlanned}

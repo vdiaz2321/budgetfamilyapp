@@ -33,6 +33,33 @@ export function actualColorClass(kind: CategoryKind, spentCents: number): string
   return "text-negative"; // bills / expenses
 }
 
+// How far through the month we are, as a percentage — the reference point a
+// spending bar needs to mean anything. 74% spent on the 22nd of a 31-day month
+// is on pace; the same 74% on the 5th is not.
+//
+// Null for any month that isn't the current one: a finished month has no
+// "pace" left to judge, and a future month hasn't started.
+export function monthElapsedPct(monthKey: string): number | null {
+  const [y, m] = monthKey.split("-").map(Number);
+  const now = new Date();
+  if (y !== now.getFullYear() || m !== now.getMonth() + 1) return null;
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return Math.min(100, (now.getDate() / daysInMonth) * 100);
+}
+
+// A thin marker showing today's position along a spending bar. Purely visual —
+// no extra row, no extra text.
+function PaceMarker({ pct }: { pct: number | null }) {
+  if (pct == null || pct <= 0 || pct >= 100) return null;
+  return (
+    <span
+      className="absolute inset-y-0 z-10 w-px bg-foreground/45"
+      style={{ left: `${pct}%` }}
+      aria-hidden
+    />
+  );
+}
+
 export const ACTUAL_LABEL: Record<CategoryKind, string> = {
   income: "Received",
   savings: "Invested",
@@ -68,8 +95,11 @@ function DeleteButton({ subId }: { subId: string }) {
         fd.set("id", subId);
         start(() => deleteSubcategory(fd));
       }}
-      title="Delete item"
-      className="absolute right-1 top-2 rounded p-0.5 text-muted/50 transition-all hover:bg-negative/10 hover:text-negative disabled:pointer-events-none sm:top-1/2 sm:-translate-y-1/2 sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:text-muted/50"
+      aria-label={`Delete item`}
+      // Hidden on mobile: an irreversible action sitting permanently under the
+      // scrolling thumb is too easy to hit by accident. On phones the item
+      // panel (tap the row) carries the delete instead.
+      className="absolute right-1 top-2 hidden rounded p-0.5 text-muted/50 transition-all hover:bg-negative/10 hover:text-negative disabled:pointer-events-none sm:top-1/2 sm:block sm:-translate-y-1/2 sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:text-muted/50"
     >
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
         <path d="M18 6 6 18M6 6l12 12" />
@@ -80,6 +110,7 @@ function DeleteButton({ subId }: { subId: string }) {
 
 export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, detailsExpanded, onSelect, onDragStart, autoPlanned }: Props) {
   const remaining = row.plannedCents - row.spentCents;
+  const elapsedPct = monthElapsedPct(monthKey);
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
   const plannedInputRef = useRef<HTMLInputElement>(null);
@@ -124,7 +155,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
 
       {/* Mobile row: the progress stripe spans Category + Planned only, so it
           stops before the Spent value instead of stretching across the row. */}
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-1.5 pr-6 sm:hidden">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-1.5 sm:hidden">
         <button
           type="button"
           onClick={onSelect}
@@ -133,7 +164,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           {row.name}
         </button>
 
-        <div className="text-xs tabular-nums text-muted">
+        <div className="text-[11px] tabular-nums text-muted">
           {autoPlanned ?? row.autoPlanned ? (
             <span>{formatMoney(row.plannedCents, currency)}</span>
           ) : (
@@ -144,15 +175,34 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         <button
           type="button"
           onClick={onSelect}
-          className={`text-xs font-semibold tabular-nums ${
+          className={`text-[11px] font-semibold tabular-nums ${
             remaining < 0 ? "text-negative" : actualColorClass(kind, row.spentCents)
           }`}
         >
           / {formatMoney(row.spentCents, currency)}
         </button>
 
+        {/* Remaining — the number the row is actually consulted for. Desktop
+            has always had its own column; mobile used to force mental
+            arithmetic from Planned and Spent. */}
+        <button
+          type="button"
+          onClick={onSelect}
+          className="text-xs font-bold tabular-nums"
+        >
+          {overBudget ? (
+            <span className="inline-flex rounded-full bg-negative/15 px-1.5 py-0.5 text-foreground ring-1 ring-negative/15">
+              {formatMoney(remaining, currency)}
+            </span>
+          ) : (
+            <span className={remainingColorClass(kind, remaining, row.plannedCents)}>
+              {formatMoney(remaining, currency)}
+            </span>
+          )}
+        </button>
+
         <div
-          className="relative -ml-3 -mr-9 col-span-full mt-1.5 h-1.5 overflow-hidden rounded-none bg-[#eee9df] dark:bg-white/10"
+          className="relative -ml-3 -mr-3 col-span-full mt-1.5 h-1.5 overflow-hidden rounded-none bg-[#eee9df] dark:bg-white/10"
           aria-label={`Current month progress: ${displayPct}%`}
         >
           {greenBarPct > 0 ? (
@@ -176,6 +226,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
               aria-hidden
             />
           ) : null}
+          <PaceMarker pct={elapsedPct} />
         </div>
       </div>
 
@@ -252,13 +303,19 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         )}
       </button>
 
-      {/* Desktop: % */}
+      {/* Desktop: % — with the 3-month average underneath when we have the
+          history, so the plan can be judged against what actually happens. */}
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden sm:col-span-2 sm:block sm:text-center sm:text-xs sm:font-semibold sm:tabular-nums ${pctClass}`}
+        className="hidden sm:col-span-2 sm:block sm:text-center sm:tabular-nums"
       >
-        {displayPct}%
+        <span className={`block text-xs font-semibold ${pctClass}`}>{displayPct}%</span>
+        {row.avg3Cents != null && row.avg3Cents > 0 && !paidOff ? (
+          <span className="block text-[10px] leading-tight text-muted">
+            avg {formatMoney(row.avg3Cents, currency)}
+          </span>
+        ) : null}
       </button>
 
       {detailsExpanded ? (
@@ -288,6 +345,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
                 aria-hidden
               />
             ) : null}
+          <PaceMarker pct={elapsedPct} />
           </div>
         </div>
       ) : null}

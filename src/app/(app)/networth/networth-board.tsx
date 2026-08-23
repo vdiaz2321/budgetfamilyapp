@@ -874,6 +874,29 @@ function BalanceGrid({
     return any ? sum : null;
   };
 
+  // Same, but skipping rows individually marked as not counting toward Net
+  // Worth — a mortgage, say, which is tracked for payoff but excluded because
+  // the app doesn't hold the home's value to offset it.
+  //
+  // The section total above deliberately keeps them: a section's own row should
+  // report everything it contains. Only the Net Worth line drops them. Before
+  // this split, whole sections were skipped by name (Kids Funding) but an
+  // excluded row inside a counted section was still subtracted, so a mortgage
+  // reduced the grid's Net Worth while the headline figure above it — which
+  // does honour the exclusion — disagreed by the entire loan balance.
+  const sectionTotalCounted = (g: (typeof sections)[number], i: number) => {
+    let sum = 0;
+    let any = false;
+    for (const r of g.rows) {
+      if (r.indent || r.excluded) continue;
+      const v = r.balances[i];
+      if (v == null) continue;
+      any = true;
+      sum += v;
+    }
+    return any ? sum : null;
+  };
+
   const readCell = (r: GridRow, i: number) => {
     const v = r.balances[i];
     if (v == null) return <span className="text-muted">—</span>;
@@ -967,7 +990,7 @@ function BalanceGrid({
                 let any = false;
                 for (const g of sections) {
                   if (g.section === "Kids Funding") continue;
-                  const t = sectionTotal(g, i);
+                  const t = sectionTotalCounted(g, i);
                   if (t == null) continue;
                   const isLiab = g.rows[0]?.liability ?? false;
                   sum += isLiab ? -t : t;

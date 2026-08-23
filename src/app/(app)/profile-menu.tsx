@@ -104,13 +104,14 @@ export function ProfileMenu({ userEmail, displayName, avatarUrl, compact = false
         <div
           role="menu"
           className={`absolute z-50 w-60 overflow-hidden rounded-xl border border-line bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 ${
-            compact ? "bottom-full left-0 mb-2" : "bottom-full left-0 mb-2 w-full min-w-[15rem]"
+            compact ? "top-full left-0 mt-2" : "top-full left-0 mt-2 w-full min-w-[15rem]"
           }`}
         >
           <div className="border-b border-line px-3 py-2.5">
             <p className="truncate text-sm font-semibold text-foreground">{shownName}</p>
             <p className="truncate text-xs text-muted">{userEmail}</p>
           </div>
+          <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Account</p>
           <MenuLink href="/account" onClick={() => setOpen(false)} icon="user">
             Account settings
           </MenuLink>

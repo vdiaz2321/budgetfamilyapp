@@ -95,13 +95,13 @@ export function SubscriptionsSummaryCard({
               type="button"
               onClick={onOpenSpent}
               title="View subscription transactions this month"
-              className="grid cursor-pointer grid-cols-[7rem_7rem] items-center gap-3 rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
+              className="cursor-pointer grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
             >
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
             </button>
           ) : (
-            <div className="grid grid-cols-[7rem_7rem] items-center gap-3 px-2 py-0.5 text-right text-muted">
+            <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center px-2 py-0.5 text-right text-muted">
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(monthSpentCents, currency)}</span></span>
             </div>
@@ -161,7 +161,15 @@ export function SubscriptionsSummaryCard({
                     >
                       {DragHandle}
                     </span>
-                    <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`min-w-0 truncate ${s.isActive ? "" : "text-muted line-through"}`}>{s.name}</span>
+                      {/* Due badge sits inline right of the name on mobile —
+                          no extra row. On sm+ this hides and the dedicated
+                          Due column to the right takes over. */}
+                      <span className="shrink-0 sm:hidden">
+                        <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
+                      </span>
+                    </div>
                     <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
                     <span className="hidden sm:flex sm:items-center sm:justify-center">
                       <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
@@ -362,13 +370,13 @@ export function IrregularBillsSummaryCard({
               type="button"
               onClick={onOpenSpent}
               title="View irregular bill transactions this month"
-              className="grid cursor-pointer grid-cols-[7rem_7rem] items-center gap-3 rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
+              className="cursor-pointer grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
             >
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
             </button>
           ) : (
-            <div className="grid grid-cols-[7rem_7rem] items-center gap-3 px-2 py-0.5 text-right text-muted">
+            <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center px-2 py-0.5 text-right text-muted">
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
             </div>

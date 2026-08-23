@@ -427,64 +427,64 @@ export function TransactionModal({
               )}
             </div>
 
-            {/* Merchant */}
-            <PayeeField
-              placeholder={PAYEE_PLACEHOLDER[txType]}
-              defaultValue={editTx?.payee ?? initialPayee ?? ""}
-              payeeOptions={payeeOptions}
-              payeeLineItems={payeeLineItems}
-              onMatch={handlePayeeMatch}
-            />
+            {/* Account — full width, sits above Merchant/Date so the name has
+                the whole row and isn't cut off on mobile. */}
+            <div>
+              <input type="hidden" name="accountId" value={selectedAccountId} className="sm:hidden" />
+              <button
+                type="button"
+                onClick={() => setAccountPickerOpen(true)}
+                className="flex w-full items-center justify-between gap-2 rounded-xl bg-background px-3 py-2.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
+              >
+                <span className={`min-w-0 flex-1 truncate ${selectedAccountId ? "text-foreground" : "text-muted"}`}>
+                  {selectedAccountId
+                    ? filteredAccounts.find((account) => account.id === selectedAccountId)?.name ?? "Accounts"
+                    : "Accounts"}
+                </span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </button>
+              <select
+                name="accountId"
+                value={selectedAccountId}
+                onChange={(e) => {
+                  setSelectedAccountId(e.target.value);
+                  setSelectedBucketId("");
+                }}
+                className="hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3"
+              >
+                <option value="">Accounts</option>
+                {accountGroups.map((g) => (
+                  <optgroup key={g} label={g}>
+                    {accountByGroup.get(g)!.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {txType === "debt" ? (
+                <p className="mt-1 px-1 text-[11px] text-muted">
+                  Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page.
+                </p>
+              ) : null}
+            </div>
 
-            {/* Account | Date */}
-            <div className="grid grid-cols-2 items-start gap-2">
-              <div>
-                <input type="hidden" name="accountId" value={selectedAccountId} className="sm:hidden" />
-                <button
-                  type="button"
-                  onClick={() => setAccountPickerOpen(true)}
-                  className="flex w-full items-center justify-between gap-2 rounded-xl bg-background px-2 py-2.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
-                >
-                  <span className={`min-w-0 flex-1 truncate ${selectedAccountId ? "text-foreground" : "text-muted"}`}>
-                    {selectedAccountId
-                      ? filteredAccounts.find((account) => account.id === selectedAccountId)?.name ?? "Accounts"
-                      : "Accounts"}
-                  </span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
-                    <path d="m9 18 6-6-6-6" />
-                  </svg>
-                </button>
-                <select
-                  name="accountId"
-                  value={selectedAccountId}
-                  onChange={(e) => {
-                    setSelectedAccountId(e.target.value);
-                    setSelectedBucketId("");
-                  }}
-                  className="hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3"
-                >
-                  <option value="">Accounts</option>
-                  {accountGroups.map((g) => (
-                    <optgroup key={g} label={g}>
-                      {accountByGroup.get(g)!.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                {txType === "debt" ? (
-                  <p className="mt-1 px-1 text-[11px] text-muted">
-                    Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page.
-                  </p>
-                ) : null}
-              </div>
-
+            {/* Merchant | Date */}
+            <div className="grid grid-cols-[1fr_auto] items-start gap-2">
+              <PayeeField
+                placeholder={PAYEE_PLACEHOLDER[txType]}
+                defaultValue={editTx?.payee ?? initialPayee ?? ""}
+                payeeOptions={payeeOptions}
+                payeeLineItems={payeeLineItems}
+                onMatch={handlePayeeMatch}
+              />
               <input
                 name="date"
                 type="date"
                 required
                 defaultValue={defaultDate}
-                className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                className="w-[9.5rem] rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm"
               />
             </div>
 
@@ -561,28 +561,10 @@ export function TransactionModal({
                 {isRefund ? "✓ Refund" : "Refund"}
               </button>
             ) : null}
-            {/* Delete lives here so the footer holds every row-level control
-                (Cancel · Refund · Delete) in one line. Same 11px tuning so it
-                fits on the same row as the primary save on the right. */}
-            {isEdit ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  start(async () => {
-                    const fd = new FormData();
-                    fd.set("id", editTx.id);
-                    await deleteTransaction(fd);
-                    onClose();
-                  })
-                }
-                className="rounded-full px-2.5 py-1 text-[11px] font-bold text-negative ring-1 ring-negative/30 transition hover:bg-negative/10 disabled:opacity-60"
-              >
-                Delete
-              </button>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Row-level controls all sit on the left next to Cancel so the
+                right side stays a single primary action. Add mode: Clear
+                (submit with cleared=on). Edit mode: Delete + Clear/Unclear
+                toggle. Same 11px sizing on mobile as Refund. */}
             {!isEdit ? (
               <button
                 type="submit"
@@ -590,11 +572,51 @@ export function TransactionModal({
                 name="cleared"
                 value="on"
                 disabled={pending || splits.length === 0}
-                className="whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 sm:px-3 sm:py-1.5 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
+                className="whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
               >
                 Clear
               </button>
-            ) : null}
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    start(async () => {
+                      const fd = new FormData();
+                      fd.set("id", editTx.id);
+                      await deleteTransaction(fd);
+                      onClose();
+                    })
+                  }
+                  className="rounded-full px-2.5 py-1 text-[11px] font-bold text-negative ring-1 ring-negative/30 transition hover:bg-negative/10 disabled:opacity-60"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    start(async () => {
+                      const fd = new FormData();
+                      fd.set("id", editTx.id);
+                      fd.set("cleared", editTx.cleared ? "false" : "true");
+                      await toggleCleared(fd);
+                      onClose();
+                    })
+                  }
+                  className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold text-foreground ring-1 transition disabled:opacity-60 ${
+                    editTx.cleared
+                      ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
+                      : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
+                  }`}
+                >
+                  {editTx.cleared ? "Unclear" : "Clear"}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               type="submit"
               form="tx-form"
@@ -613,28 +635,6 @@ export function TransactionModal({
                 ? "Withdraw"
                 : "Add " + KIND_SHORT[txType]}
             </button>
-            {isEdit ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  start(async () => {
-                    const fd = new FormData();
-                    fd.set("id", editTx.id);
-                    fd.set("cleared", editTx.cleared ? "false" : "true");
-                    await toggleCleared(fd);
-                    onClose();
-                  })
-                }
-                className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold text-foreground ring-1 transition disabled:opacity-60 sm:px-3 sm:py-1.5 sm:text-sm ${
-                  editTx.cleared
-                    ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
-                    : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
-                }`}
-              >
-                {editTx.cleared ? "Unclear" : "Clear"}
-              </button>
-            ) : null}
           </div>
         </div>
       </div>
@@ -700,8 +700,12 @@ function SplitRows({
   );
 }
 
-// The main "$ amount" field. Supports arithmetic expressions (e.g. "26.10 + 8.19")
-// — operator chips appear on focus so mobile keypads can insert them.
+// The main "$ amount" field. Supports arithmetic expressions (e.g. "26.10 + 8.19"
+// via moneyExpressionToCents). On mobile the iOS numeric/decimal keypad omits
+// operator keys entirely, so a compact "+ − × ÷" chip strip appears while the
+// field is focused; each chip inserts its symbol into the input and keeps focus
+// so the keypad stays up. On desktop the operators can be typed directly, so
+// the strip is hidden (sm:hidden).
 function AmountInput({
   inputRef,
   defaultValue,
@@ -731,6 +735,23 @@ function AmountInput({
     if (inputRef.current) inputRef.current.value = display;
   };
 
+  // Insert a character at the caret without losing focus. Used by the mobile
+  // operator chips. Falls back to appending if the caret can't be read.
+  const insertAtCaret = (ch: string) => {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const next = el.value.slice(0, start) + ch + el.value.slice(end);
+    setRaw(next);
+    el.value = next;
+    const caret = start + ch.length;
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
   return (
     <div className="flex flex-col gap-1">
       <div className="relative">
@@ -748,9 +769,6 @@ function AmountInput({
           onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
           onBlur={() => { setTimeout(() => setFocused(false), 150); commit(raw); }}
           onKeyDown={(e) => {
-            // Enter evaluates a typed expression like "45 + 12.50 - 3" (parser
-            // in moneyExpressionToCents). No calculator chips needed — the
-            // input accepts +, -, *, / directly on any keyboard.
             if (e.key === "Enter") { e.preventDefault(); commit(raw); e.currentTarget.blur(); }
           }}
           onChange={(e) => {
@@ -761,6 +779,34 @@ function AmountInput({
           className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
         />
       </div>
+      {focused ? (
+        <div className="flex gap-1 sm:hidden">
+          {[
+            { label: "+", ch: "+" },
+            { label: "−", ch: "-" },
+            { label: "=", ch: "=" },
+          ].map((k) => (
+            <button
+              key={k.label}
+              type="button"
+              // Prevent the input from losing focus (which would close the
+              // iOS keypad and dismiss these chips before the tap registers).
+              onMouseDown={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onClick={() => {
+                if (k.ch === "=") {
+                  commit(raw);
+                  return;
+                }
+                insertAtCaret(k.ch);
+              }}
+              className="flex-1 rounded-lg bg-black/[0.06] px-2 py-2 text-base font-semibold tabular-nums text-foreground active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

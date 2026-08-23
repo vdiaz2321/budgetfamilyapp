@@ -19,7 +19,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[5rem_2rem_6rem_5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_6rem_2rem]";
+const GRID = "grid-cols-[5rem_2rem_6rem_5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
 const CalendarIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -511,7 +511,6 @@ export function TransactionsTable({
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
               <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Remarks</span>
               <span />
             </div>
 
@@ -772,7 +771,6 @@ function TxLine({
         {tx.payee ?? "—"}
       </button>
       <span title={accountName} className="truncate text-xs text-muted">{accountName}</span>
-      <span className="truncate text-sm text-muted">{tx.memo ?? ""}</span>
       <form
         action={(fd) => startDel(() => deleteTransaction(fd))}
         onDoubleClick={(e) => e.stopPropagation()}

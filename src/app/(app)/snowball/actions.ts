@@ -1,21 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { displayToCents } from "@/lib/money";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionContext } from "@/lib/auth-context";
 
+// Uses the shared, request-cached session context rather than re-running the
+// getUser → profile → household chain by hand (see AGENTS.md). The chain was
+// duplicated here, costing extra auth round-trips on every debt action.
 async function requireHousehold() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!profile) redirect("/onboarding");
-  return { supabase, householdId: profile.household_id as string };
+  const { supabase, household } = await getSessionContext();
+  return { supabase, householdId: household.id };
 }
 
 // Manual statement interest is authoritative for revolving cards and is also
@@ -65,3 +59,63 @@ export async function recordDebtInterest(formData: FormData) {
   return { error: null };
 }
 
+
+/**
+ * Commit a simulated payment to the plan.
+ *
+ * The Payoff Simulator could show that paying $X clears a debt N months
+ * sooner, but nothing carried that answer anywhere — the figure had to be
+ * remembered and re-typed into the Budget page by hand, which is where most of
+ * its value leaked away.
+ *
+ * Writes both places the payment is read from:
+ *   - `budget_plans` for the given month, which is what Budget displays and
+ *     what Snowball's "My Plan" mode projects from;
+ *   - `debts.target_payment_cents`, the standing amount used as a fallback for
+ *     months that haven't been planned yet.
+ */
+export async function applyPayoffPlan(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  const month = String(formData.get("month") ?? "");
+  const paymentCents = displayToCents(String(formData.get("payment") ?? "0"));
+
+  if (!subcategoryId || !month) return { error: "Missing details." };
+  if (paymentCents <= 0) return { error: "Enter a payment above zero." };
+
+  // A payment below the minimum isn't a plan the lender will accept, and
+  // silently storing one would make every downstream projection optimistic.
+  const { data: debt } = await supabase
+    .from("debts")
+    .select("min_payment_cents")
+    .eq("household_id", householdId)
+    .eq("subcategory_id", subcategoryId)
+    .maybeSingle();
+  const minCents = debt?.min_payment_cents ?? 0;
+  if (paymentCents < minCents) {
+    return { error: "That's below this debt's minimum payment." };
+  }
+
+  const now = new Date().toISOString();
+  const { error: planError } = await supabase.from("budget_plans").upsert(
+    {
+      household_id: householdId,
+      month,
+      subcategory_id: subcategoryId,
+      planned_cents: paymentCents,
+      updated_at: now,
+    },
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+  if (planError) return { error: "Couldn't update the budget plan." };
+
+  await supabase
+    .from("debts")
+    .update({ target_payment_cents: paymentCents, updated_at: now })
+    .eq("household_id", householdId)
+    .eq("subcategory_id", subcategoryId);
+
+  revalidatePath("/snowball");
+  revalidatePath("/budget");
+  return { error: null };
+}

@@ -7,6 +7,7 @@ import { displayToCents, moneyExpressionToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
 import { adjustBucketBalance } from "@/lib/buckets";
 import { adjustDebtBalance } from "@/lib/debts";
+import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 
 // The bucket a Savings subcategory contributes to, if any linked — null when
@@ -213,6 +214,95 @@ export async function deleteCategoryGroup(formData: FormData): Promise<{ error?:
 }
 
 // ---------- Planned amounts (per subcategory per month) ----------
+
+/**
+ * Move planned dollars from one budget item to another within a month.
+ *
+ * Covering an overspent category by taking the money from somewhere that has
+ * room is the single most-used action in an envelope budget, and there was no
+ * way to do it here — the only route was editing two Planned fields by hand and
+ * remembering what the numbers had been.
+ *
+ * The two writes aren't wrapped in a transaction: PostgREST has no cross-call
+ * transaction, and the failure mode is benign (the source keeps its money and
+ * nothing is created from nothing). Guarding the source amount matters more,
+ * and that is enforced below.
+ */
+export async function coverOverspend(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const fromSubId = String(formData.get("fromSubcategoryId") ?? "");
+  const toSubId = String(formData.get("toSubcategoryId") ?? "");
+  const month = String(formData.get("month") ?? "");
+  const amountCents = moneyExpressionToCents(String(formData.get("amount") ?? "0"));
+
+  if (!fromSubId || !toSubId || !month) return { error: "Missing details." };
+  if (fromSubId === toSubId) return { error: "Pick a different category to move from." };
+  if (amountCents <= 0) return { error: "Enter an amount above zero." };
+
+  const { data: plans } = await supabase
+    .from("budget_plans")
+    .select("subcategory_id, planned_cents")
+    .eq("household_id", householdId)
+    .eq("month", month)
+    .in("subcategory_id", [fromSubId, toSubId]);
+
+  const plannedOf = (id: string) =>
+    (plans ?? []).find((p) => p.subcategory_id === id)?.planned_cents ?? 0;
+  const fromPlanned = plannedOf(fromSubId);
+  if (fromPlanned < amountCents) {
+    return { error: "That category doesn't have enough planned to move." };
+  }
+
+  const now = new Date().toISOString();
+  await supabase.from("budget_plans").upsert(
+    { household_id: householdId, month, subcategory_id: fromSubId, planned_cents: fromPlanned - amountCents, updated_at: now },
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+  await supabase.from("budget_plans").upsert(
+    { household_id: householdId, month, subcategory_id: toSubId, planned_cents: plannedOf(toSubId) + amountCents, updated_at: now },
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+
+  revalidatePath("/budget");
+  return {};
+}
+
+/**
+ * Add to an item's planned amount, rather than replacing it.
+ *
+ * Used when assigning unallocated income from the hero card — the money has no
+ * source category to come out of, so this is a one-sided increase rather than
+ * the two-sided move that `coverOverspend` performs.
+ */
+export async function addToPlan(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  const month = String(formData.get("month") ?? "");
+  const addCents = moneyExpressionToCents(String(formData.get("addAmount") ?? "0"));
+  if (!subcategoryId || !month || addCents <= 0) return { error: "Missing details." };
+
+  const { data: existing } = await supabase
+    .from("budget_plans")
+    .select("planned_cents")
+    .eq("household_id", householdId)
+    .eq("month", month)
+    .eq("subcategory_id", subcategoryId)
+    .maybeSingle();
+
+  await supabase.from("budget_plans").upsert(
+    {
+      household_id: householdId,
+      month,
+      subcategory_id: subcategoryId,
+      planned_cents: (existing?.planned_cents ?? 0) + addCents,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+
+  revalidatePath("/budget");
+  return {};
+}
 
 export async function upsertPlan(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
@@ -580,33 +670,42 @@ export async function upsertDebt(formData: FormData) {
     accountId = account?.id ?? null;
   }
 
-  // Manual balance edits stamp/clear paid_off_at the same way a payment does,
-  // so a debt zeroed out here still drops off the Snowball page next year.
+  // `paid_off_at` is stamped/cleared inside saveDebt, so a debt zeroed out here
+  // still drops off the Snowball page next year without this action repeating
+  // the rule.
   const { data: existing } = await supabase
     .from("debts")
-    .select("paid_off_at")
+    .select("original_balance_cents")
     .eq("subcategory_id", subcategoryId)
     .eq("household_id", householdId)
     .maybeSingle();
-  const paidOffAt =
-    balanceCents <= 0 ? existing?.paid_off_at ?? new Date().toISOString().slice(0, 10) : null;
+  // Seed the opening balance when the debt is first created here. Debts made
+  // from Budget used to leave `original_balance_cents` at 0 forever — only the
+  // Accounts editor set it — so Snowball's "principal paid" percentage was
+  // measured against a zero baseline and reported progress that never happened.
+  // An existing value is preserved: it's the historical opening balance and a
+  // later balance edit must not overwrite it.
+  const originalBalanceCents =
+    existing?.original_balance_cents && existing.original_balance_cents > 0
+      ? existing.original_balance_cents
+      : balanceCents;
 
-  await supabase.from("debts").upsert(
-    {
-      household_id: householdId,
-      subcategory_id: subcategoryId,
-      current_balance_cents: balanceCents,
-      paid_off_at: paidOffAt,
-      min_payment_cents: minPaymentCents,
-      apr: Number.isNaN(apr) ? 0 : apr,
-      due_day: dueDay,
-      debt_kind: debtKind,
-      notes,
-      promo_apr_ends_on: promoAprEndsOn,
-      account_id: accountId,
-    },
-    { onConflict: "household_id,subcategory_id" },
-  );
+  // Single shared write path (lib/save-debt.ts). Fields this editor doesn't
+  // manage — escrow, term, loan start, interest method, target payment — are
+  // omitted and therefore preserved, instead of being blanked by a partial
+  // upsert as they were before.
+  await saveDebt(supabase, householdId, {
+    subcategoryId,
+    balanceCents,
+    minPaymentCents,
+    apr: Number.isNaN(apr) ? 0 : apr,
+    originalBalanceCents,
+    accountId,
+    dueDay,
+    debtKind,
+    notes,
+    promoAprEndsOn,
+  });
 
   // Keep subcategories.due_day in sync — the budget row list badge and the
   // Rename form read from there, not from debts.due_day. Without this, the

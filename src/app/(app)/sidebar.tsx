@@ -39,19 +39,17 @@ export function Sidebar({ groups, userEmail, displayName, avatarUrl, badges }: P
         collapsed ? "w-[4.5rem] px-3" : "w-[16.25rem] px-0"
       }`}
     >
-      <div className={`mb-5 flex items-center gap-2 ${collapsed ? "justify-center px-1" : "px-5"}`}>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-lg font-extrabold text-white shadow-[0_0_20px_rgba(139,92,246,0.45)]">
-          C
-        </span>
-        {collapsed ? null : (
-          <span className="text-xl font-bold tracking-tight text-white">Capitall</span>
-        )}
+      {/* Profile sits at the top where the Capitall logo used to be. The
+          collapse toggle shares the row so it stays reachable. */}
+      <div className={`mb-4 flex items-center gap-1 ${collapsed ? "flex-col justify-center px-1" : "px-3"}`}>
+        <div className="min-w-0 flex-1">
+          <ProfileMenu userEmail={userEmail} displayName={displayName} avatarUrl={avatarUrl} compact={collapsed} />
+        </div>
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className={`${collapsed ? "h-7 w-6" : "ml-auto h-7 w-8"} flex shrink-0 cursor-pointer items-center justify-center rounded-md border border-white/70 bg-white/5 text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80`}
+          className={`${collapsed ? "h-7 w-6" : "h-7 w-8"} flex shrink-0 cursor-pointer items-center justify-center rounded-md border border-white/70 bg-white/5 text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80`}
         >
           <svg
             width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -71,10 +69,6 @@ export function Sidebar({ groups, userEmail, displayName, avatarUrl, badges }: P
       ) : (
         <SidebarAccounts groups={groups} />
       )}
-
-      <div className="mx-4 mt-3 border-t border-white/[0.06] pt-3">
-        <ProfileMenu userEmail={userEmail} displayName={displayName} avatarUrl={avatarUrl} compact={collapsed} />
-      </div>
     </aside>
   );
 }

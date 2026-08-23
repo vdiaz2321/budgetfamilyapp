@@ -26,6 +26,31 @@ import {
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
+import { PeriodPicker } from "../insights/insights-period-picker";
+import { currentPeriodKey, periodLabel, priorKey, type Granularity } from "../insights/period";
+
+// Resolve a period key to the "YYYY-MM-01" account_snapshots.month whose
+// balance represents that period's end. Returns null when the period IS
+// the current month/quarter/year — we prefer the live current balance in
+// that case since a snapshot may lag intra-period activity.
+function periodSnapshotMonthFor(
+  granularity: Granularity,
+  periodKey: string,
+): string | null {
+  const now = new Date();
+  const cur = currentPeriodKey(granularity, now);
+  if (periodKey === cur) return null;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  if (granularity === "monthly") return `${periodKey}-01`;
+  if (granularity === "quarterly") {
+    const y = Number(periodKey.slice(0, 4));
+    const q = Number(periodKey.slice(6));
+    const endMonth = q * 3; // 3, 6, 9, 12
+    return `${y}-${pad2(endMonth)}-01`;
+  }
+  if (granularity === "yearly") return `${periodKey}-12-01`;
+  return null; // weekly (not offered on Accounts) or unknown
+}
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // "2026-07-01" -> "Jul"
@@ -126,6 +151,10 @@ export type AccountData = {
   // For bucketed accounts these are derived server-side from bucket_snapshots.
   prevMonthCents: number | null;
   prev2MonthCents: number | null;
+  // Every snapshot the server has for this account, keyed by "YYYY-MM-01".
+  // Lets the header's period picker resolve the section total to a chosen
+  // historical month/quarter/year without another round trip.
+  balancesByMonth?: Record<string, number>;
   buckets: BucketData[];
 };
 
@@ -146,6 +175,9 @@ export type BudgetDebt = {
   balanceCents: number;
   prevMonthCents: number | null;
   prev2MonthCents: number | null;
+  // Every snapshot recorded for this debt subcategory, keyed by "YYYY-MM-01".
+  // Powers the header period picker's Debts / Net Worth totals + deltas.
+  balancesByMonth?: Record<string, number>;
   debtKind: string | null;
   accountId: string | null;
 };
@@ -266,33 +298,107 @@ export function AccountsBoard({
   historyMonths,
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
+  // Period picker on the Accounts header — same control as Insights. Local
+  // state (no URL sync) since the state is UI-only here. The picker's
+  // filtering DOES NOT extend to the Credit Card Rewards section below —
+  // rewards points and travel benefits are cumulative/lifetime data that
+  // doesn't slice cleanly by period. It's read purely for header/summary
+  // context that a future revision can wire into historical balances.
+  const [periodGranularity, setPeriodGranularity] = useState<Granularity>("monthly");
+  const [periodKey, setPeriodKey] = useState<string>(() => currentPeriodKey("monthly"));
+  // The month whose snapshot represents the selected period's end. Used to
+  // resolve section totals + hero stats (Assets / Debts / Net Worth) back
+  // to a historical balance. Current month → null so we keep showing the
+  // live current balance instead of a snapshot that may be stale.
+  const periodSnapshotMonth = periodSnapshotMonthFor(periodGranularity, periodKey);
+  // Prior period's snapshot month, for the "% vs last period" deltas on the
+  // Assets / Debts / Net Worth cards. Even for the default "This month" we
+  // want a comparison, so use the previous month's snapshot as the baseline.
+  const priorPeriodKey = priorKey(periodGranularity, periodKey);
+  const priorSnapshotMonth = periodSnapshotMonthFor(periodGranularity, priorPeriodKey)
+    // priorKey for a monthly picker at This-month returns Last-month, but
+    // periodSnapshotMonthFor returns null when the resolved key equals
+    // "current" — which it won't here, so this is defensive only.
+    ?? `${priorPeriodKey}-01`;
+  const priorPeriodLabel = periodLabel(periodGranularity, priorPeriodKey);
+  // The three month columns shown when a section is expanded. These used to be
+  // fixed to [this month, last, the one before] from the server, so selecting
+  // "Last month" moved the section totals but left the columns still headed
+  // AUG — the totals and the rows underneath them disagreed.
+  //
+  // Anchored on the selected period's end month instead, so picking July shows
+  // JUL / JUN / MAY.
+  const shiftMonth = (monthKey: string, back: number): string => {
+    const [y, m] = monthKey.split("-").map(Number);
+    const d = new Date(y, m - 1 - back, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  };
+  const anchorMonth = periodSnapshotMonth ?? historyMonths[0];
+  const displayMonths: [string, string, string] = [
+    anchorMonth,
+    shiftMonth(anchorMonth, 1),
+    shiftMonth(anchorMonth, 2),
+  ];
+  // Resolve an account's balance for the currently-selected period: the
+  // historical snapshot if one exists for that month, otherwise the live
+  // current balance so pre-history months don't blank the total.
+  const balanceOf = (a: AccountData): number => {
+    if (!periodSnapshotMonth) return a.balanceCents;
+    return a.balancesByMonth?.[periodSnapshotMonth] ?? a.balanceCents;
+  };
+  const priorBalanceOf = (a: AccountData): number | null => {
+    return a.balancesByMonth?.[priorSnapshotMonth] ?? null;
+  };
   const active = accounts.filter((a) => a.active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
 
   const assets = active
     .filter((a) => !isLiability(a.kind) && !a.isKidsAccount)
-    .reduce((sum, a) => sum + a.balanceCents, 0);
+    .reduce((sum, a) => sum + balanceOf(a), 0);
+  // Prior assets for the % change subtitle. Only counts accounts that HAVE
+  // a prior snapshot so a newly-opened account doesn't dilute the comparison.
+  const assetAccounts = active.filter((a) => !isLiability(a.kind) && !a.isKidsAccount);
+  const priorAssets = (() => {
+    let sum = 0;
+    let covered = 0;
+    for (const a of assetAccounts) {
+      const p = priorBalanceOf(a);
+      if (p == null) continue;
+      sum += p;
+      covered += 1;
+    }
+    return covered === 0 ? null : sum;
+  })();
   // Build a map so we can tell which debts are already shown as debt_loan account rows.
   const accountKindById = new Map(active.map((a) => [a.id, a.kind]));
   const isDebtLoanLinked = (d: BudgetDebt) =>
     !!d.accountId && accountKindById.get(d.accountId) === "debt_loan";
 
+  // Debt totals resolve to the selected period's snapshot when we have one,
+  // falling back to the live current balance otherwise (same rule as assets).
+  const debtBalanceOf = (d: BudgetDebt): number => {
+    if (!periodSnapshotMonth) return d.balanceCents;
+    return d.balancesByMonth?.[periodSnapshotMonth] ?? d.balanceCents;
+  };
+  const priorDebtBalanceOf = (d: BudgetDebt): number | null =>
+    d.balancesByMonth?.[priorSnapshotMonth] ?? null;
+
   // debt_loan accounts are counted directly from the accounts array.
   const directDebtTotal = active
     .filter((a) => a.kind === "debt_loan")
-    .reduce((sum, a) => sum + Math.abs(a.balanceCents), 0);
+    .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
   const countedDirectDebtTotal = active
     .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype))
-    .reduce((sum, a) => sum + Math.abs(a.balanceCents), 0);
+    .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
 
   // Budget debts only count rows NOT already represented as a debt_loan account
   // (e.g. credit cards flagged as revolving/payoff debt).
   const budgetDebtTotal = budgetDebts.reduce(
-    (sum, d) => (isDebtLoanLinked(d) ? sum : sum + d.balanceCents),
+    (sum, d) => (isDebtLoanLinked(d) ? sum : sum + debtBalanceOf(d)),
     0,
   );
   const countedBudgetDebtTotal = budgetDebts.reduce(
-    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind) ? sum : sum + d.balanceCents),
+    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind) ? sum : sum + debtBalanceOf(d)),
     0,
   );
   // Rewards cards are tracked separately from the Debt section. Their
@@ -300,6 +406,83 @@ export function AccountsBoard({
   const debtsTotal = budgetDebtTotal + directDebtTotal;
   const mortgageExcluded = countedBudgetDebtTotal !== budgetDebtTotal || countedDirectDebtTotal !== directDebtTotal;
   const net = assets - countedBudgetDebtTotal - countedDirectDebtTotal;
+
+  // Prior debt totals for the "% vs last period" subtitle. Both direct (debt_loan
+  // accounts) and budget-debt subcategories have their own snapshot tables now,
+  // so both contribute to the prior baseline when snapshots exist. Anything
+  // without a prior snapshot falls back to its current balance so
+  // newly-tracked debts don't fabricate a swing.
+  const debtLoanAccounts = active.filter((a) => a.kind === "debt_loan");
+  const priorDirectDebt = (() => {
+    let sum = 0;
+    let covered = 0;
+    for (const a of debtLoanAccounts) {
+      const p = priorBalanceOf(a);
+      if (p == null) {
+        sum += Math.abs(balanceOf(a));
+        continue;
+      }
+      sum += Math.abs(p);
+      covered += 1;
+    }
+    return { sum, covered };
+  })();
+  const priorCountedDirectDebt = (() => {
+    let sum = 0;
+    let covered = 0;
+    for (const a of debtLoanAccounts) {
+      if (isDebtExcludedFromNetWorth(a.subtype)) continue;
+      const p = priorBalanceOf(a);
+      if (p == null) {
+        sum += Math.abs(balanceOf(a));
+        continue;
+      }
+      sum += Math.abs(p);
+      covered += 1;
+    }
+    return { sum, covered };
+  })();
+  const priorBudgetDebt = (() => {
+    let sum = 0;
+    let covered = 0;
+    for (const d of budgetDebts) {
+      if (isDebtLoanLinked(d)) continue;
+      const p = priorDebtBalanceOf(d);
+      if (p == null) {
+        sum += debtBalanceOf(d);
+        continue;
+      }
+      sum += p;
+      covered += 1;
+    }
+    return { sum, covered };
+  })();
+  const priorCountedBudgetDebt = (() => {
+    let sum = 0;
+    let covered = 0;
+    for (const d of budgetDebts) {
+      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
+      const p = priorDebtBalanceOf(d);
+      if (p == null) {
+        sum += debtBalanceOf(d);
+        continue;
+      }
+      sum += p;
+      covered += 1;
+    }
+    return { sum, covered };
+  })();
+  // Show a delta if EITHER source (accounts or budget debts) has real prior
+  // coverage — otherwise it's flat by construction and misleading.
+  const priorDebts = priorDirectDebt.covered + priorBudgetDebt.covered === 0
+    ? null
+    : priorDirectDebt.sum + priorBudgetDebt.sum;
+  const priorCountedDebt = priorCountedDirectDebt.covered + priorCountedBudgetDebt.covered === 0
+    ? null
+    : priorCountedDirectDebt.sum + priorCountedBudgetDebt.sum;
+  const priorNet = priorAssets == null || priorCountedDebt == null
+    ? null
+    : priorAssets - priorCountedDebt;
 
   const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
   const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
@@ -399,23 +582,56 @@ export function AccountsBoard({
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
-      <div>
+      {/* Title + period picker in one row, right-aligned like Insights.
+          Subtitle removed at Victor's request. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold">Accounts</h1>
-        <p className="text-sm text-muted">
-          Track banking, investments, cards, debts, and Kids Funding in one place.
-        </p>
+        <PeriodPicker
+          granularity={periodGranularity}
+          periodKey={periodKey}
+          label={periodLabel(periodGranularity, periodKey)}
+          minYear={new Date().getFullYear() - 5}
+          // Weekly account balances don't exist as snapshots — drop it.
+          granularities={["monthly", "quarterly", "yearly"]}
+          onSelect={(g, k) => {
+            setPeriodGranularity(g);
+            setPeriodKey(k);
+          }}
+        />
       </div>
 
       {/* Net worth summary */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        <SummaryStat label="Assets" value={assets} currency={currency} tone="text-positive" />
-        <SummaryStat label="Debts" value={debtsTotal} currency={currency} tone="text-negative" />
+        <SummaryStat
+          label="Assets"
+          value={assets}
+          currency={currency}
+          tone="text-positive"
+          delta={deltaPct(assets, priorAssets)}
+          deltaAmount={priorAssets == null ? null : assets - priorAssets}
+          deltaGoodWhen="up"
+          priorLabel={priorPeriodLabel}
+        />
+        <SummaryStat
+          label="Debts"
+          value={debtsTotal}
+          currency={currency}
+          tone="text-negative"
+          delta={deltaPct(debtsTotal, priorDebts)}
+          deltaAmount={priorDebts == null ? null : debtsTotal - priorDebts}
+          deltaGoodWhen="down"
+          priorLabel={priorPeriodLabel}
+        />
         <SummaryStat
           label="Net worth"
           value={net}
           currency={currency}
           tone={net >= 0 ? "text-foreground" : "text-negative"}
           hint={mortgageExcluded ? "Mortgage excluded" : undefined}
+          delta={deltaPct(net, priorNet)}
+          deltaAmount={priorNet == null ? null : net - priorNet}
+          deltaGoodWhen="up"
+          priorLabel={priorPeriodLabel}
         />
       </div>
 
@@ -459,7 +675,8 @@ export function AccountsBoard({
             accounts={accounts.filter((a) => section.match(a))}
             extraDebts={extras}
             currency={currency}
-            historyMonths={historyMonths}
+            historyMonths={displayMonths}
+            periodSnapshotMonth={periodSnapshotMonth}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
             isBucketsOpen={isBucketsOpen}
@@ -533,6 +750,9 @@ function CreditCardSection({
   const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
   const [showOnlyTravelRedeem, setShowOnlyTravelRedeem] = useState(false);
   const [showOnlyHotelRedeem, setShowOnlyHotelRedeem] = useState(false);
+  // Holder filter — clicking a name (Vic / Johana / …) limits the visible
+  // cards to that holder. Null = all holders.
+  const [holderFilter, setHolderFilter] = useState<string | null>(null);
   const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
   const hasOwed = (a: AccountData) => (a.owedCents ?? 0) > 0;
   const hasPts = (a: AccountData) => (a.cardDetails?.currentPoints ?? 0) > 0;
@@ -606,7 +826,9 @@ function CreditCardSection({
   const feeFilter = (a: AccountData) => !showOnlyFeeCards || hasActiveFee(a);
   const owedFilter = (a: AccountData) => !showOnlyOwedCards || hasOwed(a);
   const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
-  const passesFilters = (a: AccountData) => feeFilter(a) && owedFilter(a) && ptsFilter(a);
+  const holderFilterFn = (a: AccountData) => !holderFilter || (a.holder ?? "") === holderFilter;
+  const passesFilters = (a: AccountData) =>
+    feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a);
   // Per-category "contributes to Redeemable" filters — scoped to their own
   // section so clicking Travel Redeemable doesn't empty the Hotel list.
   const travelCards = localAccounts.filter((a) =>
@@ -639,9 +861,11 @@ function CreditCardSection({
     </ul>
   );
 
-  // Fee summary considers ALL open cards (across every sub-section) so numbers
-  // read the same on the main and closed-this-year sub-groups.
-  const openCards = allCreditCards.filter((a) => !a.dateClosed);
+  // Every headline stat honors the active holder filter so the numbers and
+  // the visible card lists always agree. When no holder is picked this reduces
+  // back to the full-household totals.
+  const holderScoped = <T extends AccountData>(list: T[]) => list.filter(holderFilterFn);
+  const openCards = holderScoped(allCreditCards.filter((a) => !a.dateClosed));
   const feesPaid = openCards
     .filter((a) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0)
     .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
@@ -649,9 +873,41 @@ function CreditCardSection({
     .filter((a) => a.feeWaived && (a.annualFeeCents ?? 0) > 0)
     .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
   const feesAll = feesPaid + feesWaived;
-  const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
-  const rewardCards = allCreditCards.filter((a) => a.cardDetails);
+  const totalOwed = holderScoped(accounts).reduce((s, a) => s + (a.owedCents ?? 0), 0);
+  const rewardCards = holderScoped(allCreditCards.filter((a) => a.cardDetails));
   const totalPoints = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
+  const pointsForCategory = (cat: "travel" | "hotel") =>
+    rewardCards
+      .filter((a) => a.cardDetails?.rewardsCategory === cat)
+      .reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
+  const travelPoints = pointsForCategory("travel");
+  const hotelPoints = pointsForCategory("hotel");
+  // ---- Credit utilisation: balances owed as a share of total credit limit.
+  // The single biggest lever on a credit score, and computable from limits
+  // already stored per card. Only cards with a recorded limit are counted, so
+  // the figure isn't skewed by cards whose limit hasn't been entered — the
+  // covered-card count is shown alongside so the basis is clear.
+  const cardsWithLimit = holderScoped(openCards).filter(
+    (a) => (a.cardDetails?.spendingLimitCents ?? 0) > 0,
+  );
+  const totalLimitCents = cardsWithLimit.reduce(
+    (s, a) => s + (a.cardDetails?.spendingLimitCents ?? 0),
+    0,
+  );
+  const owedOnLimitedCards = cardsWithLimit.reduce((s, a) => s + Math.max(0, a.owedCents ?? 0), 0);
+  const utilisationPct = totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null;
+  // Compact number formatter tuned so the sub-line's pieces still visibly add
+  // up to the headline value. E.g. 1,025,563 → "1.03M" (not "1.0M"), so
+  // Travel 395k + Hotel 1.03M reads consistent with total 1,420,563.
+  const compactNum = (n: number) => {
+    if (n >= 100_000_000) return `${(n / 1_000_000).toFixed(0)}M`;
+    if (n >= 10_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 100_000) return `${(n / 1_000).toFixed(0)}k`;
+    if (n >= 10_000) return `${(n / 1_000).toFixed(1)}k`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return n.toLocaleString();
+  };
   const redeemableForCategory = (cat: "travel" | "hotel") =>
     rewardCards
       .filter((a) => a.cardDetails?.rewardsCategory === cat)
@@ -682,7 +938,7 @@ function CreditCardSection({
               href="https://www.dailydrop.com/calculator"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/30 bg-white px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
               title="Open the Daily Drop cents-per-point calculator"
             >
               <span className="sm:hidden">Calculator</span>
@@ -713,44 +969,61 @@ function CreditCardSection({
                 <StatTile
                   label="Current Pts"
                   value={totalPoints.toLocaleString()}
+                  sub={(() => {
+                    const other = Math.max(0, totalPoints - travelPoints - hotelPoints);
+                    const parts: string[] = [];
+                    if (travelPoints > 0) parts.push(`Travel ${compactNum(travelPoints)}`);
+                    if (hotelPoints > 0) parts.push(`Hotel ${compactNum(hotelPoints)}`);
+                    if (other > 0) parts.push(`Other ${compactNum(other)}`);
+                    return parts.length ? parts.join(" · ") : undefined;
+                  })()}
                   tone="emerald"
                   onClick={() => setShowOnlyPtsCards((v) => !v)}
                   active={showOnlyPtsCards}
-                  title={showOnlyPtsCards ? "Show all cards" : "Show only cards with current points"}
                 />
               ) : null}
               {travelRedeemable > 0 ? (
                 <StatTile
-                  label="Travel Redeemable"
+                  label="Travel Value Redeemable"
                   value={formatMoney(travelRedeemable, currency)}
                   tone="sky"
                   onClick={() => setShowOnlyTravelRedeem((v) => !v)}
                   active={showOnlyTravelRedeem}
-                  title={showOnlyTravelRedeem ? "Show all cards" : "Show only travel cards contributing to this total"}
                 />
               ) : null}
               {hotelRedeemable > 0 ? (
                 <StatTile
-                  label="Hotel Redeemable"
+                  label="Hotel Value Redeemable"
                   value={formatMoney(hotelRedeemable, currency)}
                   tone="teal"
                   onClick={() => setShowOnlyHotelRedeem((v) => !v)}
                   active={showOnlyHotelRedeem}
-                  title={showOnlyHotelRedeem ? "Show all cards" : "Show only hotel cards contributing to this total"}
                 />
               ) : null}
               {totalOwed > 0 ? (
                 <StatTile
-                  label="Total Owed"
+                  label="Total CC Owed"
                   value={formatMoney(totalOwed, currency)}
+                  sub={
+                    utilisationPct != null
+                      ? `${utilisationPct.toFixed(0)}% of ${formatMoney(totalLimitCents, currency).replace(/\.00$/, "")} limit`
+                      : undefined
+                  }
+                  // Under 30% is the conventional healthy threshold.
+                  subColor={
+                    utilisationPct == null
+                      ? undefined
+                      : utilisationPct < 30
+                        ? "var(--positive)"
+                        : "var(--negative)"
+                  }
                   tone="rose"
                   onClick={() => setShowOnlyOwedCards((v) => !v)}
                   active={showOnlyOwedCards}
-                  title={showOnlyOwedCards ? "Show all cards" : "Show only cards with a balance owed"}
                 />
               ) : null}
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 pt-3 text-xs text-muted dark:border-slate-800">
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
               {feesPaid > 0 ? (
                 <button
                   type="button"
@@ -762,17 +1035,66 @@ function CreditCardSection({
                 </button>
               ) : null}
               {feesAll > 0 ? (
-                <span title={`${formatMoney(feesWaived, currency)}/yr waived`}>
-                  Fees before waivers <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
+                <span>
+                  Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
                 </span>
               ) : null}
-              <span className="sm:ml-auto">
-                <span className="font-semibold tabular-nums text-foreground">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span> travel
-                <span className="mx-1.5 text-slate-400">·</span>
-                <span className="font-semibold tabular-nums text-foreground">{accounts.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span> hotel
-                <span className="mx-1.5 text-slate-400">·</span>
-                <span className="font-semibold tabular-nums text-foreground">{accounts.length}</span> total
-              </span>
+              {/* Holder filter — chip per unique cardholder plus an "All" reset.
+                  Clicking narrows every card list (Travel / Hotel / Other) to
+                  that person's cards. */}
+              {(() => {
+                const holders = Array.from(
+                  new Set(
+                    allCreditCards
+                      .map((a) => (a.holder ?? "").trim())
+                      .filter(Boolean),
+                  ),
+                ).sort();
+                if (holders.length < 2) return null;
+                const chip = (active: boolean) =>
+                  `rounded-md px-2 py-1 font-semibold transition ${
+                    active
+                      ? "text-white"
+                      : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`;
+                return (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setHolderFilter(null)}
+                      className={chip(holderFilter == null)}
+                      style={holderFilter == null ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                    >
+                      All
+                    </button>
+                    {holders.map((h) => (
+                      <button
+                        key={h}
+                        type="button"
+                        onClick={() =>
+                          setHolderFilter((prev) => (prev === h ? null : h))
+                        }
+                        className={chip(holderFilter === h)}
+                        style={holderFilter === h ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                      >
+                        {h}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+              {(() => {
+                const scoped = holderScoped(accounts);
+                return (
+                  <span className="sm:ml-auto">
+                    <span className="font-semibold tabular-nums text-foreground">{scoped.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span> travel
+                    <span className="mx-1.5 text-slate-400">·</span>
+                    <span className="font-semibold tabular-nums text-foreground">{scoped.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span> hotel
+                    <span className="mx-1.5 text-slate-400">·</span>
+                    <span className="font-semibold tabular-nums text-foreground">{scoped.length}</span> total
+                  </span>
+                );
+              })()}
             </div>
             </>
           ) : null}
@@ -821,7 +1143,7 @@ function CreditCardSection({
               <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
                 {showOnlyHotelRedeem ? <section aria-hidden /> : (
                 <section>
-                  <div className="flex items-center gap-2.5 border-b border-line bg-slate-50/70 px-4 py-3 dark:bg-slate-900/40">
+                  <div className="flex items-center gap-2.5 border-b border-line bg-background/60 px-4 py-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
@@ -840,7 +1162,7 @@ function CreditCardSection({
                 )}
                 {showOnlyTravelRedeem ? <section aria-hidden /> : (
                 <section>
-                  <div className="flex items-center gap-2.5 border-b border-line bg-slate-50/70 px-4 py-3 dark:bg-slate-900/40">
+                  <div className="flex items-center gap-2.5 border-b border-line bg-background/60 px-4 py-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 21V7l7-4v4h11v14" />
@@ -981,7 +1303,7 @@ function RewardsActivityLedger({
             <button
               type="button"
               onClick={() => setShowArchived((value) => !value)}
-              className={`rounded-md border px-2 py-1 text-xs font-semibold transition ${showArchived ? "border-brand/40 bg-brand-soft text-brand" : "border-line bg-white text-muted hover:text-foreground dark:bg-slate-950"}`}
+              className={`rounded-md border px-2 py-1 text-xs font-semibold transition ${showArchived ? "border-brand/40 bg-brand-soft text-brand" : "border-line bg-background text-muted hover:text-foreground dark:bg-slate-950"}`}
             >
               {showArchived ? "Back to activity" : `Archived ${archivedEntries.length}`}
             </button>
@@ -1020,7 +1342,7 @@ function RewardActivityArchiveButton({ entry }: { entry: RewardActivity }) {
       <button
         type="submit"
         disabled={pending}
-        className="rounded-md border border-line bg-white px-2 py-1 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:text-foreground disabled:opacity-50 dark:bg-slate-950"
+        className="rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:text-foreground disabled:opacity-50 dark:bg-slate-950"
         title={archive ? "Archive this activity" : "Restore this activity"}
       >
         {pending ? "…" : archive ? "Archive" : "Restore"}
@@ -1068,7 +1390,7 @@ function CreditCardPanel({
   return (
     <li
       data-drop-key={`credit-card:${card.id}`}
-      className={`${expanded ? "bg-slate-50/70 dark:bg-slate-900/35" : "hover:bg-slate-50 dark:hover:bg-slate-900/30"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+      className={`${expanded ? "bg-background/60" : "hover:bg-background/40"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
       {/* Collapsed row */}
       <div className="flex items-center">
@@ -1200,7 +1522,7 @@ function CreditCardPanel({
       </div>
 
       {expanded ? (
-        <div className="border-t border-line bg-white dark:bg-slate-950">
+        <div className="border-t border-line bg-background">
           {editing ? (
             <EditCreditCardForm
               key={JSON.stringify(card.cardDetails) + card.annualFeeCents + card.dateOpened + card.dateClosed + card.holder + card.name}
@@ -1228,7 +1550,7 @@ function CreditCardPanel({
                     target="_blank"
                     rel="noreferrer"
                     title={`Open ${d.cardUrl}`}
-                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-line bg-white px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:border-brand/40 hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-line bg-background px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:border-brand/40 hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
                   >
                     <span className="sm:hidden">Site</span><span className="hidden sm:inline">Visit site</span> <span aria-hidden>↗</span>
                   </a>
@@ -1237,7 +1559,7 @@ function CreditCardPanel({
                   <button
                     type="button"
                     onClick={() => setLoggingRewards(true)}
-                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-brand/35 bg-white px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-brand/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
                   >
                     <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards log</span>
                   </button>
@@ -1449,6 +1771,8 @@ const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; va
 function StatTile({
   label,
   value,
+  sub,
+  subColor,
   tone,
   onClick,
   active,
@@ -1456,17 +1780,30 @@ function StatTile({
 }: {
   label: string;
   value: string;
+  // Optional smaller breakdown line under the value (e.g. "T 300k · H 1.1M").
+  sub?: string;
+  // Overrides the sub-line colour — used where the sub-line carries its own
+  // good/bad meaning (credit utilisation) rather than echoing the tile's tone.
+  subColor?: string;
   tone: StatTone;
   onClick?: () => void;
   active?: boolean;
   title?: string;
 }) {
   const t = STAT_TONES[tone];
-  const base = `rounded-lg px-2 py-2 text-center ring-1 ${active ? `${t.activeBg} ${t.ring}` : "bg-white ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"}`;
+  const base = `rounded-lg px-2 py-2 text-center ring-1 ${active ? `${t.activeBg} ${t.ring}` : "bg-background ring-line"}`;
   const inner = (
     <>
       <div className={`text-[9px] sm:text-[9px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
       <div className={`mt-0.5 text-sm font-bold tabular-nums sm:text-sm ${t.value}`}>{value}</div>
+      {sub ? (
+        <div
+          className={`mt-0.5 text-[9px] font-medium tabular-nums ${subColor ? "" : t.label}`}
+          style={subColor ? { color: subColor } : undefined}
+        >
+          {sub}
+        </div>
+      ) : null}
     </>
   );
   if (onClick) {
@@ -1511,7 +1848,7 @@ function EditCreditCardForm({
   );
 
   return (
-    <div className="bg-white p-3 dark:bg-slate-950">
+    <div className="bg-background p-3">
       {/* One form: saves both account-level basics AND rewards details together.
           All tabs stay mounted (hidden via CSS) so a single Save submits every field. */}
       <form
@@ -1536,7 +1873,7 @@ function EditCreditCardForm({
         <input type="hidden" name="subtype" value={card.subtype ?? ""} />
         <input type="hidden" name="active" value={card.active ? "on" : ""} />
 
-        <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_2rem] items-center border-b border-slate-200 dark:border-slate-800">
+        <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_2rem] items-center border-b border-line">
           {tabBtn("key", "Points & Dates", "Points")}
           {tabBtn("basics", "Basics & Rewards", "Basics")}
           {tabBtn("debt", "Debt tracking", "Debt")}
@@ -1555,7 +1892,7 @@ function EditCreditCardForm({
 
         {/* Tab 1: Key fields (default) */}
         <div className={activeTab === "key" ? "" : "hidden"}>
-          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/35">
+          <div className="rounded-lg border border-line bg-background/60 p-3">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-slate-300 [&_select]:bg-white [&_select]:ring-slate-300 dark:[&_input]:bg-slate-950 dark:[&_input]:ring-slate-700 dark:[&_select]:bg-slate-950 dark:[&_select]:ring-slate-700">
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
               <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
@@ -1654,7 +1991,7 @@ function EditCreditCardForm({
           </p>
         ) : null}
 
-        <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+        <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
           <div className="flex items-center gap-2">
             <button
               type="submit"
@@ -1915,25 +2252,69 @@ function PayCardModal({
   );
 }
 
+// Signed % change; null when we can't compute a meaningful comparison —
+// missing prior data, near-zero base, or an absurd swing (>500%) that
+// would just be visual noise. Same guardrails as the Insights hero.
+function deltaPct(current: number, prior: number | null): number | null {
+  if (prior == null || Math.abs(prior) < 10_00) return null;
+  const pct = ((current - prior) / Math.abs(prior)) * 100;
+  return Math.abs(pct) > 500 ? null : pct;
+}
+
 function SummaryStat({
   label,
   value,
   currency,
   tone,
   hint,
+  delta,
+  deltaAmount,
+  deltaGoodWhen,
+  priorLabel,
 }: {
   label: string;
   value: number;
   currency: string;
   tone: string;
   hint?: string;
+  delta?: number | null;
+  // Absolute dollar change vs the same prior period the % is computed against.
+  // Rendered alongside the % so the user sees both "how much" and "how much of".
+  deltaAmount?: number | null;
+  deltaGoodWhen?: "up" | "down";
+  priorLabel?: string;
 }) {
+  const flat = delta != null && Math.abs(delta) < 0.5;
+  const good =
+    delta == null || flat || !deltaGoodWhen
+      ? null
+      : deltaGoodWhen === "up"
+      ? delta > 0
+      : delta < 0;
+  // Hero cards on Accounts show whole-dollar totals — cents on six-figure
+  // balances add noise, not signal. Round to nearest dollar for both the
+  // headline and the delta amount.
+  const wholeDollar = (cents: number) => formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "");
+  const amountStr = deltaAmount != null ? wholeDollar(Math.abs(deltaAmount)) : null;
   return (
     <div className="flex min-w-0 flex-col items-center rounded-2xl bg-surface px-2 py-2.5 text-center shadow-sm ring-1 ring-black/5 sm:px-4 sm:py-3 dark:ring-white/10">
       <p className="text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">{label}</p>
       <p className={`mt-0.5 truncate text-xs font-bold tabular-nums sm:text-lg ${tone}`}>
-        {formatMoney(value, currency).replace(/\.00$/, "")}
+        {wholeDollar(value)}
       </p>
+      {delta != null && priorLabel ? (
+        flat ? (
+          <p className="mt-0.5 text-[10px] text-muted">about the same as {priorLabel}</p>
+        ) : (
+          <p className="mt-0.5 text-[10px] leading-tight">
+            <span className={good ? "font-semibold text-positive" : "font-semibold text-negative"}>
+              {amountStr ? `${amountStr} · ` : ""}
+              {Math.abs(delta).toFixed(0)}% {delta > 0 ? "more" : "less"}
+            </span>{" "}
+            <span className="text-muted">than {priorLabel}</span>
+          </p>
+        )
+      ) : null}
       {hint ? <p className="text-[10px] text-muted">{hint}</p> : null}
     </div>
   );
@@ -1944,6 +2325,7 @@ function AccountSection({
   accounts,
   currency,
   historyMonths,
+  periodSnapshotMonth,
   open,
   onToggle,
   isBucketsOpen,
@@ -1956,6 +2338,9 @@ function AccountSection({
   accounts: AccountData[];
   currency: string;
   historyMonths: [string, string, string];
+  // "YYYY-MM-01" of the snapshot the header's period picker points at.
+  // null = current period → use live balances (default). See `balanceOf`.
+  periodSnapshotMonth: string | null;
   open: boolean;
   onToggle: () => void;
   isBucketsOpen: (id: string) => boolean;
@@ -1978,9 +2363,17 @@ function AccountSection({
     setLocalAccounts(accounts);
   }, [accounts]);
 
+  // Prefer the snapshot for the picker's chosen month; fall back to live
+  // balance when there's no snapshot (rare, but happens for months before
+  // the account existed). Budget-debt extras always use their live balance
+  // — historical debt snapshots aren't in scope for the picker filter.
+  const balanceOf = (a: AccountData): number => {
+    if (!periodSnapshotMonth) return a.balanceCents;
+    return a.balancesByMonth?.[periodSnapshotMonth] ?? a.balanceCents;
+  };
   const accountsTotal = localAccounts
     .filter((a) => a.active)
-    .reduce((sum, a) => sum + a.balanceCents, 0);
+    .reduce((sum, a) => sum + balanceOf(a), 0);
   const extraDebtsTotal = extraDebts.reduce((sum, d) => sum + d.balanceCents, 0);
   const total = accountsTotal + extraDebtsTotal;
 
@@ -2006,33 +2399,41 @@ function AccountSection({
   return (
     <section className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header */}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5">
+      {/* Full-row click target — tapping anywhere on the header (label OR
+          amount) expands/collapses the section. The Debt/Loan Page link
+          stops propagation so it navigates instead of also toggling. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => {
+          if (open) setEditingId(null);
+          onToggle();
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          if (open) setEditingId(null);
+          onToggle();
+        }}
+        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 transition hover:bg-black/[0.02] dark:hover:bg-white/[0.04]"
+      >
         <div className="flex min-w-0 items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => {
-              if (open) setEditingId(null);
-              onToggle();
-            }}
-            className="flex min-w-0 items-center gap-2.5 text-left"
-            aria-expanded={open}
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
+          <span className="truncate font-semibold leading-tight">{section.label}</span>
+          <svg
+            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            aria-hidden
           >
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-            <span className="truncate font-semibold leading-tight">{section.label}</span>
-            <svg
-              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-              aria-hidden
-            >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
           {section.key === "loans" ? (
             <Link
               href="/snowball"
+              onClick={(e) => e.stopPropagation()}
               className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
-              title="Go to Debt & Loans page"
             >
               Debt/Loan Page →
             </Link>
@@ -2090,6 +2491,7 @@ function AccountSection({
                   section={section}
                   currency={currency}
                   historyMonths={historyMonths}
+                  isPastPeriod={periodSnapshotMonth != null}
                   editing={editingId === a.id}
                   onToggleEdit={() =>
                     setEditingId((id) => (id === a.id ? null : a.id))
@@ -2110,23 +2512,24 @@ function AccountSection({
                   className="grid grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 px-4 py-1.5"
                 >
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
-                  <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">{formatMoney(d.balanceCents, currency)}</span>
-                  <span className="flex w-full justify-end">
-                    {d.prevMonthCents != null ? (
-                      <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
-                        <span className="text-xs text-muted">{currencySymbol(currency)}</span>
-                        <span className="text-sm">{centsToDisplay(d.prevMonthCents)}</span>
-                      </span>
-                    ) : <span className="text-sm text-muted">—</span>}
+                  {/* Same as account rows: each column reads the snapshot for
+                      whichever month the header is currently showing. */}
+                  <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
+                    {formatMoney(d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents, currency)}
                   </span>
-                  <span className="flex w-full justify-end">
-                    {d.prev2MonthCents != null ? (
-                      <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
-                        <span className="text-xs text-muted">{currencySymbol(currency)}</span>
-                        <span className="text-sm">{centsToDisplay(d.prev2MonthCents)}</span>
+                  {[1, 2].map((col) => {
+                    const v = d.balancesByMonth?.[historyMonths[col]] ?? null;
+                    return (
+                      <span key={col} className="flex w-full justify-end">
+                        {v != null ? (
+                          <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
+                            <span className="text-xs text-muted">{currencySymbol(currency)}</span>
+                            <span className="text-sm">{centsToDisplay(v)}</span>
+                          </span>
+                        ) : <span className="text-sm text-muted">—</span>}
                       </span>
-                    ) : <span className="text-sm text-muted">—</span>}
-                  </span>
+                    );
+                  })}
                 </li>
               ))}
             </ul>
@@ -2240,6 +2643,7 @@ function AccountRow({
   section,
   currency,
   historyMonths,
+  isPastPeriod,
   editing,
   onToggleEdit,
   onDragStart,
@@ -2251,6 +2655,8 @@ function AccountRow({
   section: Section;
   currency: string;
   historyMonths: [string, string, string];
+  /** True when the header is showing a month other than the current one. */
+  isPastPeriod: boolean;
   editing: boolean;
   onToggleEdit: () => void;
   onDragStart: () => void;
@@ -2266,6 +2672,11 @@ function AccountRow({
   // credit cards or loans.
   const allowBuckets = !section.liability;
   const bucketCount = account.buckets.length;
+  // Column values follow whichever three months the header is showing, rather
+  // than the fixed prevMonth/prev2Month the server computed for "today".
+  // Null means no snapshot was recorded for that month — rendered muted.
+  const balanceFor = (a: AccountData, columnIndex: number): number | null =>
+    a.balancesByMonth?.[historyMonths[columnIndex]] ?? null;
 
   const rowBg = editing ? "bg-brand-soft/30" : "hover:bg-brand-soft/25";
 
@@ -2338,40 +2749,54 @@ function AccountRow({
 
         {allowBuckets && bucketCount > 0 ? (
           <>
-            <DerivedBalance balanceCents={account.balanceCents} currency={currency} />
+            <DerivedBalance balanceCents={balanceFor(account, 0) ?? account.balanceCents} currency={currency} />
             <div className="hidden @[560px]:contents">
               <DerivedBalance
-                balanceCents={account.prevMonthCents ?? 0}
+                balanceCents={balanceFor(account, 1) ?? 0}
                 currency={currency}
-                muted={account.prevMonthCents == null}
+                muted={balanceFor(account, 1) == null}
               />
               <DerivedBalance
-                balanceCents={account.prev2MonthCents ?? 0}
+                balanceCents={balanceFor(account, 2) ?? 0}
                 currency={currency}
-                muted={account.prev2MonthCents == null}
+                muted={balanceFor(account, 2) == null}
               />
             </div>
           </>
         ) : (
           <>
-            <BalanceInput
-              id={account.id}
-              balanceCents={account.balanceCents}
-              currency={currency}
-              liability={section.liability}
-            />
+            {isPastPeriod ? (
+              // The column is headed with a past month, so writing here has to
+              // land on that month's snapshot. Using the live BalanceInput
+              // would show today's figure under a JUL heading and overwrite
+              // today's balance when edited.
+              <HistoricBalanceInput
+                accountId={account.id}
+                month={historyMonths[0]}
+                balanceCents={balanceFor(account, 0)}
+                currency={currency}
+                liability={section.liability}
+              />
+            ) : (
+              <BalanceInput
+                id={account.id}
+                balanceCents={account.balanceCents}
+                currency={currency}
+                liability={section.liability}
+              />
+            )}
             <div className="hidden @[560px]:contents">
               <HistoricBalanceInput
                 accountId={account.id}
                 month={historyMonths[1]}
-                balanceCents={account.prevMonthCents}
+                balanceCents={balanceFor(account, 1)}
                 currency={currency}
                 liability={section.liability}
               />
               <HistoricBalanceInput
                 accountId={account.id}
                 month={historyMonths[2]}
-                balanceCents={account.prev2MonthCents}
+                balanceCents={balanceFor(account, 2)}
                 currency={currency}
                 liability={section.liability}
               />

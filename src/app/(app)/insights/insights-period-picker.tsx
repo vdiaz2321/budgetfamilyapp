@@ -9,7 +9,7 @@ import {
   type Granularity,
 } from "./period";
 
-const GRANULARITIES: { value: Granularity; label: string }[] = [
+const ALL_GRANULARITIES: { value: Granularity; label: string }[] = [
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
   { value: "quarterly", label: "Quarterly" },
@@ -18,18 +18,30 @@ const GRANULARITIES: { value: Granularity; label: string }[] = [
 
 // One control, three segments: [Last month] [This month] [<selected> ▾].
 // The third segment opens a two-level menu (granularity → specific period),
-// mirroring the Rocket Money period picker.
+// mirroring the Rocket Money period picker. When `onSelect` is provided, the
+// picker calls it with the chosen granularity+period key (used on pages that
+// keep the period in local state, like Accounts). Otherwise it navigates
+// to /insights with the params — the original Insights-page behavior.
 export function PeriodPicker({
   granularity,
   periodKey,
   label,
   minYear,
+  onSelect,
+  granularities,
 }: {
   granularity: Granularity;
   periodKey: string;
   label: string;
   minYear: number;
+  onSelect?: (granularity: Granularity, periodKey: string) => void;
+  // Optional subset of granularities. Defaults to all four. Accounts, for
+  // example, drops "weekly" — weekly account balances don't make sense.
+  granularities?: Granularity[];
 }) {
+  const GRANULARITIES = granularities
+    ? ALL_GRANULARITIES.filter((g) => granularities.includes(g.value))
+    : ALL_GRANULARITIES;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [submenu, setSubmenu] = useState<Granularity | null>(null);
@@ -37,7 +49,8 @@ export function PeriodPicker({
   const go = (g: Granularity, p: string) => {
     setOpen(false);
     setSubmenu(null);
-    router.push(`/insights?g=${g}&p=${encodeURIComponent(p)}`);
+    if (onSelect) onSelect(g, p);
+    else router.push(`/insights?g=${g}&p=${encodeURIComponent(p)}`);
   };
 
   const thisMonth = currentPeriodKey("monthly");

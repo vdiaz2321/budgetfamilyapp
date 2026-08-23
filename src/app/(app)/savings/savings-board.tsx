@@ -1,8 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { TransactionModal } from "../budget/transaction-modal";
 import type { AccountOption, SubOption } from "../budget/types";
+import { centsToDisplay } from "@/lib/money";
+import { updateSavingsGoalFields } from "./actions";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { IRS_LIMITS_URL, contributionDeadline, monthsUntilDeadline } from "@/lib/contribution-limits";
 
 export type SavingsTxData = {
   id: string;
@@ -35,6 +39,12 @@ export type SavingsCardData = {
 type Props = {
   cards: SavingsCardData[];
   currency: string;
+  emergencyFund?: EmergencyFundData | null;
+  contributionLimits?: ContributionLimitRow[];
+  capYear?: number;
+  capsPublished?: boolean;
+  latestCapYear?: number;
+  pendingCapYear?: number | null;
   incomeReceivedCents: number;
   currentMonthKey: string;
   currentMonthLabel: string;
@@ -88,9 +98,349 @@ function statsFor(cards: SavingsCardData[]) {
   };
 }
 
+export type EmergencyFundData = {
+  name: string;
+  balanceCents: number;
+  monthlyEssentialCents: number;
+  monthsCovered: number;
+  basisMonths: number;
+};
+
+// Months of essential spending the emergency fund covers. 3 months is the
+// usual floor, 6 the usual target — shown as a track with both marked so the
+// number lands as a judgement, not just a figure.
+function EmergencyFundCard({ data, currency }: { data: EmergencyFundData; currency: string }) {
+  // Collapsed on a fresh login, then remembers the choice while navigating —
+  // same pattern as the Budget hero and the Accounts sections.
+  const [state, setState] = useSessionCollapse("savings-emergency-fund", () => ({ open: false }));
+  const open = state.open === true;
+  const { monthsCovered } = data;
+  const tone = monthsCovered >= 6 ? "var(--positive)" : monthsCovered >= 3 ? "var(--viz-savings)" : "var(--negative)";
+  const verdict =
+    monthsCovered >= 6 ? "Fully funded" : monthsCovered >= 3 ? "Solid floor" : "Below 3 months";
+  // Track runs to 6 months; anything beyond simply fills it.
+  const fillPct = Math.min(100, (monthsCovered / 6) * 100);
+  // What each milestone actually costs — a months figure is a diagnosis, but a
+  // dollar figure is something you can set a goal against.
+  const targetFor = (months: number) => data.monthlyEssentialCents * months;
+  const gapFor = (months: number) => Math.max(0, targetFor(months) - data.balanceCents);
+
+  return (
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <button
+        type="button"
+        onClick={() => setState((s) => ({ ...s, open: !s.open }))}
+        aria-expanded={open}
+        className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line/70 px-4 py-3 text-left transition hover:bg-brand-soft/15"
+      >
+        <span className="flex items-baseline gap-2">
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 self-center text-muted transition-transform ${open ? "rotate-90" : ""}`}
+            aria-hidden
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          <span className="text-base font-semibold">Emergency fund</span>
+        </span>
+        {/* Only while collapsed — expanded, the body states both again right
+            underneath, and repeating them in the header just reads as noise. */}
+        {!open ? (
+          <span className="flex items-baseline gap-2">
+            <span className="text-sm font-bold tabular-nums" style={{ color: tone }}>
+              {monthsCovered.toFixed(1)} mo
+            </span>
+            <span className="text-xs font-semibold" style={{ color: tone }}>{verdict}</span>
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+      <div className="px-4 py-3">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-2xl font-bold tabular-nums" style={{ color: tone }}>
+            {monthsCovered.toFixed(1)}
+          </span>
+          <span className="text-sm text-muted">months of essentials covered</span>
+          <span className="ml-auto text-xs font-semibold" style={{ color: tone }}>
+            {verdict}
+          </span>
+        </div>
+
+        <div className="relative mt-3 h-2 w-full overflow-hidden rounded-full bg-line/60">
+          <div
+            className="h-full rounded-full transition-[width] duration-500"
+            style={{ width: `${fillPct}%`, backgroundColor: tone }}
+          />
+          {/* 3-month floor marker */}
+          <span className="absolute inset-y-0 w-px bg-foreground/40" style={{ left: "50%" }} aria-hidden />
+        </div>
+        <div className="mt-1 flex justify-between text-[10px] text-muted">
+          <span>0</span>
+          <span>3 mo floor</span>
+          <span>6 mo</span>
+        </div>
+
+        <p className="mt-3 text-xs leading-relaxed text-muted">
+          <span className="font-semibold text-foreground">{formatSavingsMoney(data.balanceCents, currency)}</span>{" "}
+          set aside against{" "}
+          <span className="font-semibold text-foreground">
+            {formatSavingsMoney(data.monthlyEssentialCents, currency)}
+          </span>{" "}
+          of average monthly bills and expenses
+          {data.basisMonths < 3 ? ` (${data.basisMonths}-month basis)` : ""}.
+        </p>
+
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {[3, 6].map((months) => {
+            const target = targetFor(months);
+            const gap = gapFor(months);
+            const reached = gap <= 0;
+            return (
+              <div key={months} className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    {months}-month {months === 3 ? "floor" : "target"}
+                  </span>
+                  <span className="text-xs font-semibold tabular-nums">
+                    {formatSavingsMoney(target, currency)}
+                  </span>
+                </div>
+                {/* Target and shortfall only. A "months to get there" figure
+                    would need a savings rate for this fund, which isn't
+                    recorded anywhere — inventing one would read as advice. */}
+                <p className="mt-0.5 text-[11px] tabular-nums" style={{ color: reached ? "var(--positive)" : "var(--muted)" }}>
+                  {reached ? (
+                    "Reached"
+                  ) : (
+                    <>
+                      <span className="font-semibold" style={{ color: "var(--viz-savings)" }}>
+                        {formatSavingsMoney(gap, currency)}
+                      </span>{" "}
+                      to go
+                    </>
+                  )}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      ) : null}
+    </section>
+  );
+}
+
+export type ContributionLimitRow = {
+  subId: string;
+  name: string;
+  kind: string;
+  /** Which deadline applies — payroll year-end, or the tax filing deadline. */
+  capKind: "electiveDeferral" | "ira";
+  limitCents: number;
+  contributedCents: number;
+};
+
+// Annual caps on tax-advantaged accounts. Unused room doesn't roll over, so
+// the useful framing is what's left and how long is left to use it.
+function ContributionLimits({ rows, currency, year, published, latestYear, pendingYear }: { rows: ContributionLimitRow[]; currency: string; year: number; published: boolean; latestYear: number; pendingYear: number | null }) {
+  const [state, setState] = useSessionCollapse("savings-contribution-limits", () => ({ open: false }));
+  const open = state.open === true;
+  const anyMaxed = rows.some((r) => r.contributedCents >= r.limitCents);
+  // The rows are paced to 31 December. An IRA's real cutoff runs months past
+  // that, which matters only if the year goes badly — so it's said once, here,
+  // instead of on every row where it would soften the target.
+  const anyIra = rows.some((r) => r.capKind === "ira");
+  const iraGrace = contributionDeadline("ira", year);
+  const totalRoom = rows.reduce((s, r) => s + Math.max(0, r.limitCents - r.contributedCents), 0);
+  const fmtDeadline = (d: Date) =>
+    `${MONTHS[d.getMonth()]} ${d.getDate()}${d.getFullYear() !== year ? `, ${d.getFullYear()}` : ""}`;
+
+  return (
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <button
+        type="button"
+        onClick={() => setState((s) => ({ ...s, open: !s.open }))}
+        aria-expanded={open}
+        className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line/70 px-4 py-3 text-left transition hover:bg-brand-soft/15"
+      >
+        <span className="flex items-baseline gap-2">
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 self-center text-muted transition-transform ${open ? "rotate-90" : ""}`}
+            aria-hidden
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          <span className="text-base font-semibold">Retirement contributions</span>
+          {/* The card is collapsed by default, so a reminder that lived only in
+              the body could go a whole autumn unseen. This chip is the part
+              that has to be visible while collapsed. */}
+          {pendingYear ? (
+            <span
+              className="shrink-0 whitespace-nowrap rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide dark:bg-white/10"
+              style={{ color: "var(--viz-savings)" }}
+            >
+              {pendingYear} caps due
+            </span>
+          ) : null}
+        </span>
+        {/* Deadlines differ per account type, so the header states the room
+            only — each row carries its own cutoff date. */}
+        <span className="flex items-baseline gap-2 text-xs">
+          <span className="font-bold tabular-nums" style={{ color: totalRoom > 0 ? "var(--viz-savings)" : "var(--positive)" }}>
+            {totalRoom > 0 ? formatSavingsMoney(totalRoom, currency) : "All maxed"}
+          </span>
+          {totalRoom > 0 ? <span className="text-muted">still allowed for {year}</span> : null}
+        </span>
+      </button>
+
+      {open ? (
+        <div className="space-y-2.5 px-4 py-3">
+          {/* Caps are published per tax year. If this year hasn't been added
+              yet, say so and link out rather than measuring against a stale
+              figure — a wrong cap is worse than no cap. */}
+          {!published ? (
+            <div className="rounded-lg bg-background px-3 py-2.5 ring-1 ring-line">
+              <p className="text-xs leading-relaxed text-muted">
+                Contribution caps for <span className="font-semibold text-foreground">{year}</span>{" "}
+                haven&rsquo;t been added yet — the most recent on file are for {latestYear}. Rather
+                than measure against last year&rsquo;s figures, this card stays empty until they
+                are.{" "}
+                <a
+                  href={IRS_LIMITS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold underline underline-offset-2"
+                  style={{ color: "var(--viz-savings)" }}
+                >
+                  Check the current IRS limits ↗
+                </a>
+              </p>
+            </div>
+          ) : null}
+          {/* From November, next year's figures are published but not yet on
+              file here. Asking now means the card never empties itself in
+              January; it disappears once the year is added. */}
+          {pendingYear ? (
+            <div className="rounded-lg bg-background px-3 py-2.5 ring-1 ring-line">
+              <p className="text-xs leading-relaxed text-muted">
+                The IRS usually publishes {pendingYear}{" "}limits around now. Once they&rsquo;re added,
+                this card carries over on 1 January — until then it will show {pendingYear} as
+                unpublished rather than measure against {year} figures.{" "}
+                <a
+                  href={IRS_LIMITS_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold underline underline-offset-2"
+                  style={{ color: "var(--viz-savings)" }}
+                >
+                  Check the {pendingYear} IRS limits ↗
+                </a>
+              </p>
+            </div>
+          ) : null}
+          {rows.map((r) => {
+            const pct = r.limitCents > 0 ? Math.min(100, (r.contributedCents / r.limitCents) * 100) : 0;
+            const room = Math.max(0, r.limitCents - r.contributedCents);
+            const maxed = room <= 0;
+            // Every row is paced to 31 December, so the goal finishes inside
+            // the tax year it belongs to. An IRA can legally be funded until
+            // about 15 April, but treating that as the target stretches a
+            // 12-month goal to 16 and quietly lowers the monthly figure — it's
+            // a fallback for a bad year, so it's stated once in the footnote
+            // rather than built into the pace.
+            const monthsLeft = monthsUntilDeadline("electiveDeferral", year);
+            const deadline = contributionDeadline("electiveDeferral", year);
+            const perMonth = monthsLeft > 0 ? Math.ceil(room / monthsLeft) : room;
+            return (
+              <div key={r.subId}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                  <span className="text-sm font-semibold">{r.name}</span>
+                  <span className="text-xs tabular-nums text-muted">
+                    <span className="font-semibold text-foreground">
+                      {formatSavingsMoney(r.contributedCents, currency)}
+                    </span>{" "}
+                    of {formatSavingsMoney(r.limitCents, currency)}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                  <div
+                    className="h-full rounded-full transition-[width] duration-500"
+                    style={{
+                      width: `${pct}%`,
+                      backgroundColor: maxed ? "var(--positive)" : "var(--viz-savings)",
+                    }}
+                  />
+                </div>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
+                  <span className="uppercase tracking-wide">{r.kind}</span>
+                  {" · "}
+                  {maxed ? (
+                    <span style={{ color: "var(--positive)" }}>Maxed for {year}</span>
+                  ) : (
+                    <>
+                      Can still add{" "}
+                      <span className="font-semibold tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                        {formatSavingsMoney(room, currency)}
+                      </span>{" "}
+                      {/* The date is the useful part. "5 mo" alone doesn't say
+                          five months until what — and the two account types
+                          don't even share a cutoff. */}
+                      by {fmtDeadline(deadline)}
+                      {monthsLeft > 0 ? (
+                        <>
+                          {" — "}
+                          <span className="tabular-nums">
+                            {formatSavingsMoney(perMonth, currency)}/mo
+                          </span>{" "}
+                          over the {monthsLeft} month{monthsLeft === 1 ? "" : "s"} left
+                        </>
+                      ) : null}
+                    </>
+                  )}
+                </p>
+              </div>
+            );
+          })}
+          {published ? (
+            <p className="border-t border-line/60 pt-2 text-[11px] leading-relaxed text-muted">
+              {anyIra ? (
+                <>
+                  Targets run to Dec 31 — IRA money still counts toward {year} until about{" "}
+                  <span className="font-semibold text-foreground">{fmtDeadline(iraGrace)}</span>,
+                  TSP doesn&rsquo;t.{" "}
+                </>
+              ) : null}
+              Caps are per person across all IRAs, before catch-up.
+              {anyMaxed ? " Over-contributing is correctable but taxable." : ""}{" "}
+              <a
+                href={IRS_LIMITS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                {year} IRS limits ↗
+              </a>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function SavingsBoard({
   cards,
   currency,
+  contributionLimits = [],
+  capYear = new Date().getFullYear(),
+  capsPublished = true,
+  latestCapYear: latestCapYearProp = capYear,
+  pendingCapYear = null,
+  emergencyFund,
   incomeReceivedCents,
   currentMonthKey,
   currentMonthLabel,
@@ -132,6 +482,25 @@ export function SavingsBoard({
         </section>
       ) : (
         <>
+          {/* Two independent readouts of the same question — are the long-term
+              pots on track — so they sit side by side on desktop and stack on
+              mobile. `items-start` keeps each card at its own height rather
+              than stretching the collapsed one to match the expanded one. */}
+          {emergencyFund || contributionLimits.length > 0 || !capsPublished ? (
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              {emergencyFund ? <EmergencyFundCard data={emergencyFund} currency={currency} /> : null}
+              {contributionLimits.length > 0 || !capsPublished ? (
+                <ContributionLimits
+                  rows={contributionLimits}
+                  currency={currency}
+                  year={capYear}
+                  published={capsPublished}
+                  latestYear={latestCapYearProp}
+                  pendingYear={pendingCapYear}
+                />
+              ) : null}
+            </div>
+          ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,.75fr)]">
             <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 bg-brand-soft/35 px-4 py-3 dark:bg-brand-soft/15">
@@ -164,7 +533,7 @@ export function SavingsBoard({
                   <span className="tabular-nums text-muted"><span className="text-positive">{formatSavingsMoney(stats.saved, currency)}</span> of {formatSavingsMoney(stats.goal, currency)}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-line/60">
-                  <div className="h-full rounded-full bg-brand transition-[width] duration-500" style={{ width: `${Math.min(100, Math.max(0, stats.goalPct))}%` }} />
+                  <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, Math.max(0, stats.goalPct))}%`, backgroundColor: "var(--viz-savings)" }} />
                 </div>
                 <div className="flex items-center justify-between gap-3 text-[11px] text-muted">
                   <span>{Math.min(100, Math.max(0, stats.goalPct)).toFixed(1)}% complete</span>
@@ -284,7 +653,7 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
         </span>
         <span className="min-w-0">
           <span className="flex items-center justify-between gap-2 text-[10px] text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
-          <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60"><span className={`block h-full rounded-full ${card.pace === "reached" ? "bg-positive" : "bg-brand"}`} style={{ width: `${progress}%` }} /></span>
+          <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60"><span className={`block h-full rounded-full ${card.pace === "reached" ? "bg-positive" : ""}`} style={{ width: `${progress}%`, ...(card.pace === "reached" ? {} : { backgroundColor: "var(--viz-savings)" }) }} /></span>
         </span>
         <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-[10px] text-muted">Of income</span><span className="text-sm font-semibold tabular-nums">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`hidden text-muted transition-transform md:block ${expanded ? "rotate-90" : ""}`} aria-hidden><path d="M9 18l6-6-6-6" /></svg>
@@ -298,6 +667,8 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
             <Detail label="Left to save" value={hasGoal ? formatSavingsMoney(Math.max(0, card.leftToSaveCents), currency) : "—"} />
             <Detail label="Target / pace" value={card.targetDate ? monthLabel(card.targetDate) : "No target date"} sub={card.requiredMonthlyCents != null && card.pace !== "reached" ? `${formatSavingsMoney(card.requiredMonthlyCents, currency)}/mo needed` : undefined} />
           </div>
+
+          <GoalEditor card={card} currency={currency} />
           <div className="mt-3 overflow-hidden rounded-xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
             <div className="flex items-center justify-between border-b border-line/60 px-3 py-2"><p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Recent transactions</p><span className="text-[10px] text-muted">Up to 12</span></div>
             {card.transactions.length === 0 ? <p className="px-3 py-4 text-center text-xs text-muted">No transactions yet</p> : (
@@ -318,6 +689,121 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
   );
 }
 
+// Goal amount, monthly contribution and target date, editable here rather than
+// via a round trip to Budget. Writes through a narrow action that preserves
+// the opening balance this form doesn't manage.
+function GoalEditor({ card, currency }: { card: SavingsCardData; currency: string }) {
+  const [open, setOpen] = useState(false);
+  const [goal, setGoal] = useState(centsToDisplay(card.goalCents));
+  const [monthly, setMonthly] = useState(centsToDisplay(card.monthlyCents));
+  const [targetDate, setTargetDate] = useState(card.targetDate ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [pending, start] = useTransition();
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setGoal(centsToDisplay(card.goalCents));
+          setMonthly(centsToDisplay(card.monthlyCents));
+          setTargetDate(card.targetDate ?? "");
+          setSaved(false);
+          setError(null);
+          setOpen(true);
+        }}
+        className="mt-3 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+        style={{ backgroundColor: "var(--viz-savings)" }}
+      >
+        {card.goalCents > 0 ? "Edit goal" : "Set a goal"}
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-xl bg-surface p-3 ring-1 ring-black/5 dark:ring-white/10">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        {card.name} goal
+      </p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <label className="block">
+          <span className="mb-1 block text-[10px] text-muted">Goal amount</span>
+          <input
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            inputMode="decimal"
+            className="w-full rounded-lg bg-background px-2.5 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[10px] text-muted">Monthly contribution</span>
+          <input
+            value={monthly}
+            onChange={(e) => setMonthly(e.target.value)}
+            inputMode="decimal"
+            className="w-full rounded-lg bg-background px-2.5 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[10px] text-muted">Target date</span>
+          <input
+            type="date"
+            value={targetDate}
+            onChange={(e) => setTargetDate(e.target.value)}
+            className="w-full rounded-lg bg-background px-2.5 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
+        {error ? (
+          <p className="mr-auto text-xs text-negative">{error}</p>
+        ) : saved ? (
+          <p className="mr-auto text-xs font-semibold" style={{ color: "var(--positive)" }}>
+            Saved.
+          </p>
+        ) : (
+          <p className="mr-auto text-[11px] text-muted">
+            Opening balance of {formatSavingsMoney(card.startCents, currency)} is left unchanged.
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-muted hover:text-foreground"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            setError(null);
+            const fd = new FormData();
+            fd.set("subcategoryId", card.id);
+            fd.set("goal", goal);
+            fd.set("monthly", monthly);
+            fd.set("targetDate", targetDate);
+            start(async () => {
+              const res = await updateSavingsGoalFields(fd);
+              if (res?.error) setError(res.error);
+              else {
+                setSaved(true);
+                setOpen(false);
+              }
+            });
+          }}
+          className="rounded-lg px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+          style={{ backgroundColor: "var(--viz-savings)" }}
+        >
+          {pending ? "Saving…" : "Save goal"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Detail({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-black/5 dark:ring-white/10"><p className="text-[10px] text-muted">{label}</p><p className="mt-0.5 truncate text-xs font-semibold tabular-nums">{value}</p>{sub ? <p className="mt-0.5 truncate text-[10px] text-muted">{sub}</p> : null}</div>;
 }
@@ -328,7 +814,7 @@ function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal
     none: null,
     reached: { label: "✓ Reached", className: "text-positive" },
     on_track: { label: "✓ On track", className: "text-positive" },
-    behind: { label: "Behind pace", className: "text-amber-600 dark:text-amber-400" },
+    behind: { label: "Behind pace", className: "text-negative" },
     overdue: { label: "Overdue", className: "text-negative" },
   };
   const badge = badges[pace];

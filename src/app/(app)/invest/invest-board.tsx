@@ -29,6 +29,7 @@ export type InvestAccount = {
   name: string;
   holder: string | null;
   subtype: string | null;
+  balanceCents: number;
   isKids: boolean;
   sortOrder: number;
   cells: Record<number, YearCell>;
@@ -111,13 +112,59 @@ type Props = {
   imports: InvestmentImportView[];
 };
 
+// ---- Tax treatment ------------------------------------------------------
+//
+// How a dollar is taxed decides where the next one should go, and it's the
+// first slice of any portfolio review. There's no dedicated column for it, so
+// it's inferred from the bucket name first and the account subtype second —
+// bucket first because it's the more specific label. Fidelity is exactly why:
+// its subtype is "Brokerage", but it holds a taxable bucket alongside two Roth
+// buckets, so classifying by account alone would file all three as taxable.
+type TaxTreatment = "taxable" | "deferred" | "free" | "education";
+
+const TAX_LABEL: Record<TaxTreatment, string> = {
+  taxable: "Taxable",
+  deferred: "Tax-deferred",
+  free: "Tax-free",
+  education: "Education",
+};
+
+// Cool tokens only, per the project's no-purple/no-orange rule for data.
+const TAX_COLOR: Record<TaxTreatment, string> = {
+  taxable: "var(--viz-expenses)",
+  deferred: "var(--viz-income)",
+  free: "var(--viz-bills)",
+  education: "var(--viz-savings)",
+};
+
+function classifyTax(label: string | null | undefined): TaxTreatment | null {
+  if (!label) return null;
+  const s = label.toLowerCase();
+  if (/\b529\b|utma|ugma|coverdell/.test(s)) return "education";
+  if (/roth/.test(s)) return "free";
+  if (/401|403b|tsp|traditional|sep|simple|\bira\b|pension/.test(s)) return "deferred";
+  if (/taxable|brokerage|reit|crypto|individual/.test(s)) return "taxable";
+  return null;
+}
+
+// Account-level fallback so an unlabelled bucket still lands somewhere sane.
+function taxFor(accountSubtype: string | null, bucketName?: string | null): TaxTreatment {
+  return classifyTax(bucketName) ?? classifyTax(accountSubtype) ?? "taxable";
+}
+
 const gainTone = (cents: number) =>
   cents > 0 ? "text-positive" : cents < 0 ? "text-negative" : "text-foreground";
 
-// Return in DOLLARS (cents): gains − contributions. Positive when investments made
-// more than the year's deposits, negative when they didn't. Shown green / red.
-// Returns null when neither contributed nor gained (nothing to compare).
-function returnPct(cell: {
+// Gain measured against the year's deposits, in DOLLARS (cents): gains −
+// contributions. Positive when investments made more than was paid in that
+// year. Null when neither contributed nor gained (nothing to compare).
+//
+// Deliberately NOT a rate of return: a true return needs the beginning
+// balance, and `investment_years.start_cents` is empty for every historical
+// year. Account snapshots only begin Jan 2026, so a real return is computable
+// for 2026 onward at the earliest — until then this stays a dollar figure and
+// is labelled as one.
+function gainVsContributed(cell: {
   startBalanceCents: number | null;
   contributedCents: number;
   accruedCents: number;
@@ -156,6 +203,53 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
     return { contributed, gains, current, accountCount };
   }, [mine, year]);
 
+  // Current balances grouped by tax treatment. Uses live balances (not the
+  // year grid) because "what do I hold, and how is it taxed" is a question
+  // about today, not about a historical contribution year.
+  const taxSplit = useMemo(() => {
+    const totals = new Map<TaxTreatment, number>();
+    let total = 0;
+    for (const a of mine) {
+      if (a.buckets.length > 0) {
+        for (const b of a.buckets) {
+          const t = taxFor(a.subtype, b.name);
+          totals.set(t, (totals.get(t) ?? 0) + b.balanceCents);
+          total += b.balanceCents;
+        }
+      } else {
+        const t = taxFor(a.subtype, null);
+        totals.set(t, (totals.get(t) ?? 0) + a.balanceCents);
+        total += a.balanceCents;
+      }
+    }
+    const rows = (["taxable", "deferred", "free", "education"] as TaxTreatment[])
+      .map((t) => ({ treatment: t, cents: totals.get(t) ?? 0 }))
+      .filter((r) => r.cents > 0)
+      .sort((a, b) => b.cents - a.cents);
+    return { rows, total };
+  }, [mine]);
+
+  // Where the money actually sits, by holding. Built from account and bucket
+  // balances — which are complete — rather than from imported positions, which
+  // currently cover only part of the portfolio; a symbol-level chart drawn from
+  // partial imports would misrepresent the whole as whichever slice happens to
+  // have been imported.
+  const allocation = useMemo(() => {
+    const rows: { label: string; cents: number }[] = [];
+    for (const a of mine) {
+      if (a.buckets.length > 0) {
+        for (const b of a.buckets) {
+          if (b.balanceCents > 0) rows.push({ label: `${a.name} · ${b.name}`, cents: b.balanceCents });
+        }
+      } else if (a.balanceCents > 0) {
+        rows.push({ label: a.name, cents: a.balanceCents });
+      }
+    }
+    const total = rows.reduce((s, r) => s + r.cents, 0);
+    rows.sort((a, b) => b.cents - a.cents);
+    return { rows, total, top: rows[0] ?? null };
+  }, [mine]);
+
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-7">
       {/* Header: title + hero total return + year nav */}
@@ -167,7 +261,7 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
             Contributions vs. unrealized gains, per account, per year.
             </p>
           </div>
-          <div className="flex items-center justify-between gap-4 lg:justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 lg:flex-nowrap lg:justify-end">
             <button
               type="button"
               onClick={() => setShowTransfer(true)}
@@ -274,11 +368,101 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
             <SummaryStat
               label="Unrealized gains"
               value={formatMoney(summary.gains, currency)}
-              tone={summary.gains >= 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"}
+              tone={summary.gains >= 0 ? "text-[color:var(--viz-bills)]" : "text-negative"}
             />
             <SummaryStat label="Current value" value={formatMoney(summary.current, currency)} />
             <SummaryStat label="Accounts" value={String(summary.accountCount)} />
           </div>
+
+          {taxSplit.rows.length > 1 ? (
+            <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <div className="flex items-baseline justify-between gap-2">
+                <h2 className="text-sm font-bold">How it&rsquo;s taxed</h2>
+                <span className="text-[11px] tabular-nums text-muted">
+                  {formatMoney(taxSplit.total, currency)} total
+                </span>
+              </div>
+              <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-line/60">
+                {taxSplit.rows.map((r) => (
+                  <span
+                    key={r.treatment}
+                    style={{
+                      width: `${(r.cents / taxSplit.total) * 100}%`,
+                      backgroundColor: TAX_COLOR[r.treatment],
+                    }}
+                  />
+                ))}
+              </div>
+              <ul className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5">
+                {taxSplit.rows.map((r) => (
+                  <li key={r.treatment} className="flex items-center gap-1.5 text-xs">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: TAX_COLOR[r.treatment] }}
+                      aria-hidden
+                    />
+                    <span className="text-muted">{TAX_LABEL[r.treatment]}</span>
+                    <span className="font-semibold tabular-nums">
+                      {formatMoney(r.cents, currency)}
+                    </span>
+                    <span className="tabular-nums text-muted">
+                      {((r.cents / taxSplit.total) * 100).toFixed(0)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {allocation.rows.length > 1 && allocation.total > 0 ? (
+            <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <h2 className="text-sm font-bold">Where it sits</h2>
+                {allocation.top ? (
+                  <span className="text-[11px] text-muted">
+                    largest holding{" "}
+                    <span
+                      className="font-semibold tabular-nums"
+                      style={{
+                        color:
+                          (allocation.top.cents / allocation.total) > 0.4
+                            ? "var(--negative)"
+                            : "var(--viz-savings)",
+                      }}
+                    >
+                      {((allocation.top.cents / allocation.total) * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                ) : null}
+              </div>
+              <ul className="mt-2.5 space-y-1.5">
+                {allocation.rows.slice(0, 8).map((r) => {
+                  const pct = (r.cents / allocation.total) * 100;
+                  return (
+                    <li key={r.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
+                      <div className="min-w-0">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-xs">{r.label}</span>
+                          <span className="shrink-0 text-xs font-semibold tabular-nums">
+                            {formatMoney(r.cents, currency)}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }}
+                          />
+                        </div>
+                      </div>
+                      <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-muted">
+                        {pct.toFixed(0)}%
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : null}
 
           {showTransfer && (
             <TransferModal
@@ -506,6 +690,8 @@ function PerformanceChart({
           if (c.endBalanceCents != null) { endBal += c.endBalanceCents; endAny = true; }
         }
         // Simple return: gains ÷ contributions × 100.
+        // Gain as a percentage of the year's contributions. NOT a rate of return
+        // (that needs a beginning balance, which is not recorded before 2026).
         const returnPctVal = contrib > 0 ? (gain / contrib) * 100 : 0;
         return { year: y, contrib, gain, endBal: endAny ? endBal : null, returnPct: returnPctVal };
       }),
@@ -579,7 +765,7 @@ function PerformanceChart({
               {selectedName ? <span className="ml-1.5 font-medium text-brand">· {selectedName}</span> : null}
             </h2>
             <p className="text-xs text-muted">
-              {mode === "stacked" ? "Stacked: contributions + gains" : mode === "grouped" ? "Grouped: side-by-side comparison" : "% Return: gain vs. base each year"}
+              {mode === "stacked" ? "Stacked: contributions + gains" : mode === "grouped" ? "Grouped: side-by-side comparison" : "Gain vs contributions each year — not a rate of return"}
             </p>
           </div>
         </button>
@@ -593,7 +779,7 @@ function PerformanceChart({
                 onClick={() => setMode(m)}
                 className={`px-2.5 py-1 font-medium capitalize transition ${mode === m ? "bg-brand-soft text-brand" : "text-muted hover:bg-brand-soft/40 hover:text-foreground"}`}
               >
-                {m === "return" ? "% Return" : m}
+                {m === "return" ? "Gain" : m}
               </button>
             ))}
           </div>
@@ -613,17 +799,17 @@ function PerformanceChart({
       {/* Legend */}
       <div className="flex items-center gap-4 px-4 pb-2 text-xs text-muted">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-chart-1, #2563eb)" }} />
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-savings)" }} />
           Contributed
         </span>
         {mode !== "return" ? (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-chart-5, #0891b2)" }} />
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-bills)" }} />
             Unrealized gains
           </span>
         ) : (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--color-chart-5, #0891b2)" }} />
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-bills)" }} />
             Annual return %
           </span>
         )}
@@ -670,13 +856,13 @@ function PerformanceChart({
               const gainH = scale(Math.max(b.gain, 0));
               const bx = cx - barW / 2;
               if (contribH > 0) {
-                rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: contribH, fill: "var(--color-chart-1, #2563eb)" });
+                rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: contribH, fill: "var(--viz-savings)" });
               }
               if (gainH > 0) {
-                rects.push({ x: bx, y: PAD.top + chartH - contribH - gainH, w: barW, h: gainH, fill: "var(--color-chart-5, #0891b2)" });
+                rects.push({ x: bx, y: PAD.top + chartH - contribH - gainH, w: barW, h: gainH, fill: "var(--viz-bills)" });
               }
               if (b.gain < 0) {
-                rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--color-negative, #ef4444)" });
+                rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--negative)" });
               }
               totalTopY = PAD.top + chartH - contribH - gainH;
             } else if (mode === "grouped") {
@@ -686,20 +872,20 @@ function PerformanceChart({
               const bxL = cx - barW - gap / 2;
               const bxR = cx + gap / 2;
               if (contribH > 0) {
-                rects.push({ x: bxL, y: PAD.top + chartH - contribH, w: barW, h: contribH, fill: "var(--color-chart-1, #2563eb)" });
+                rects.push({ x: bxL, y: PAD.top + chartH - contribH, w: barW, h: contribH, fill: "var(--viz-savings)" });
               }
               if (gainH > 0) {
-                rects.push({ x: bxR, y: PAD.top + chartH - gainH, w: barW, h: gainH, fill: "var(--color-chart-5, #0891b2)" });
+                rects.push({ x: bxR, y: PAD.top + chartH - gainH, w: barW, h: gainH, fill: "var(--viz-bills)" });
               }
               if (b.gain < 0) {
-                rects.push({ x: bxR, y: PAD.top + chartH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--color-negative, #ef4444)" });
+                rects.push({ x: bxR, y: PAD.top + chartH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--negative)" });
               }
               totalTopY = PAD.top + chartH - Math.max(contribH, gainH);
             } else {
               // return: single bar for return pct
               const h = scale(Math.abs(b.returnPct));
               const bx = cx - barW / 2;
-              const fill = b.returnPct >= 0 ? "var(--color-chart-5, #0891b2)" : "var(--color-negative, #ef4444)";
+              const fill = b.returnPct >= 0 ? "var(--viz-bills)" : "var(--negative)";
               rects.push({ x: bx, y: PAD.top + chartH - h, w: barW, h, fill });
               totalTopY = PAD.top + chartH - h;
             }
@@ -797,12 +983,12 @@ function ChartTooltip({
         <div>Contributed <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
         <div>
           Unrealized gains{" "}
-          <span className="font-medium" style={{ color: b.gain >= 0 ? "var(--color-chart-5, #0891b2)" : "var(--color-negative)" }}>
+          <span className="font-medium" style={{ color: b.gain >= 0 ? "var(--viz-bills)" : "var(--color-negative)" }}>
             {formatMoney(b.gain, currency)}
           </span>
         </div>
         {mode === "return" ? (
-          <div>Return <span className={`font-medium ${b.returnPct >= 0 ? "text-positive" : "text-negative"}`}>{b.returnPct >= 0 ? "+" : ""}{b.returnPct.toFixed(1)}%</span></div>
+          <div>Gain vs contrib <span className={`font-medium ${b.returnPct >= 0 ? "text-positive" : "text-negative"}`}>{b.returnPct >= 0 ? "+" : ""}{b.returnPct.toFixed(1)}%</span></div>
         ) : null}
         {b.endBal != null && b.year < new Date().getFullYear() && (
           <div>End balance <span className="font-medium text-foreground">{formatMoney(b.endBal, currency)}</span></div>
@@ -891,7 +1077,7 @@ function PerfTable({
     contribSum += c.contributedCents;
     accruedSum += c.accruedCents;
   }
-  const totalReturn = returnPct(
+  const totalReturn = gainVsContributed(
     { startBalanceCents: effStartAny ? effStartSum : null, contributedCents: contribSum, accruedCents: accruedSum },
   );
 
@@ -927,7 +1113,7 @@ function PerfTable({
         {collapsed && (
           <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs tabular-nums text-muted">
             <span>Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
-            <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--color-chart-5, #0891b2)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
+            <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
             {endAny && <span>Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
           </div>
         )}
@@ -941,10 +1127,10 @@ function PerfTable({
             <tr className="text-[11px] font-medium text-muted">
               <th className="px-4 py-2 text-left">Account</th>
               {showStart ? <th className="px-3 py-2 text-left">Start</th> : null}
-              <th className="px-3 py-2 text-left">Contrib</th>
-              <th className="px-3 py-2 text-left">Gains</th>
-              <th className="px-3 py-2 text-left">Current</th>
-              <th className="px-4 py-2 text-left">Return</th>
+              <th className="px-3 py-2 text-center">Contrib</th>
+              <th className="px-3 py-2 text-center">Gains</th>
+              <th className="px-3 py-2 text-center">Current</th>
+              <th className="px-4 py-2 text-center">Gain vs contrib</th>
             </tr>
           </thead>
           <tbody>
@@ -955,7 +1141,7 @@ function PerfTable({
               // When no buckets, that equals the account cell exactly.
               const eff = effectiveCell(a, year);
               const priorEff = effectiveCell(a, year - 1);
-              const ret = returnPct({
+              const ret = gainVsContributed({
                 startBalanceCents: eff.startBalanceCents ?? priorEff.endBalanceCents ?? null,
                 contributedCents: eff.contributedCents,
                 accruedCents: eff.accruedCents,
@@ -993,7 +1179,7 @@ function PerfTable({
                           type="button"
                           onClick={() => onSelect(a.id)}
                           className="flex items-baseline gap-1.5 text-left"
-                          title={isSelected ? "Click to clear filter" : "Filter chart to this account"}
+
                         >
                           <span className={`font-medium ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
                           {a.subtype ? (
@@ -1034,11 +1220,11 @@ function PerfTable({
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-left text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--color-chart-5, #0891b2)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        <span className={`block text-left text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
                         </span>
                       ) : (
-                        <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                        <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
                       )}
                     </td>
                     <td className="px-1 py-1">
@@ -1071,7 +1257,7 @@ function PerfTable({
                             <EditCell accountId={a.id} year={year} field="contributed" cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
                           <td className="px-1 py-1">
-                            <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                            <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
                           </td>
                           <td className="px-1 py-1">
                             <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
@@ -1095,7 +1281,7 @@ function PerfTable({
                               <EditCell accountId={a.id} bucketId={b.id} year={year} field="contributed" cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
                             <td className="px-1 py-1">
-                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--color-chart-5,#0891b2)]" : "text-negative"} />
+                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
                             </td>
                             <td className="px-1 py-1">
                               <span className={`block text-left text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
@@ -1123,7 +1309,7 @@ function PerfTable({
               <td className={`px-3 py-2 text-left tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
               <td
                 className={`px-3 py-2 text-left tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
-                style={accruedSum > 0 ? { color: "var(--color-chart-5, #0891b2)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
+                style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
               >
                 {formatMoney(accruedSum, currency)}
               </td>
@@ -1459,9 +1645,11 @@ function TransferModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    // Scrollable and viewport-capped: with six fields plus the iOS keyboard the
+    // submit button used to end up below the fold with no way to reach it.
+    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/40 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="w-full max-w-md rounded-2xl bg-surface shadow-xl ring-1 ring-black/10 dark:ring-white/10"
+        className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-2xl bg-surface shadow-xl ring-1 ring-black/10 sm:rounded-2xl dark:ring-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
@@ -1591,7 +1779,7 @@ function GripHandle({ onMouseDown }: { onMouseDown: () => void }) {
         e.preventDefault();
         onMouseDown();
       }}
-      title="Drag to reorder"
+
       className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
     >
       <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>

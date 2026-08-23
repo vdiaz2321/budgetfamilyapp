@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { addMonths, monthsBetween, projectSnowball, type MonthlyEntry } from "@/lib/snowball";
-import { recordDebtInterest } from "./actions";
+import { applyPayoffPlan, recordDebtInterest } from "./actions";
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Debt card tints. Cool tones only — these sit behind money values, which
+// AGENTS.md keeps clear of purple and amber.
 const CARD_COLORS = [
   "bg-sky-100 dark:bg-sky-500/15",
-  "bg-violet-100 dark:bg-violet-500/15",
-  "bg-amber-100 dark:bg-amber-500/15",
+  "bg-blue-100 dark:bg-blue-500/15",
+  "bg-teal-100 dark:bg-teal-500/15",
   "bg-rose-100 dark:bg-rose-500/15",
   "bg-emerald-100 dark:bg-emerald-500/15",
 ];
@@ -33,17 +35,49 @@ type Row = {
   interestPaidCents: number;
   escrowCents: number;
   apr: number;
+  promoEndsOn: string | null;
+  postPromoApr: number | null;
   dueDay: number | null;
   debtKind: string | null;
   accountKind: "credit_card" | "debt_loan" | "budget";
   interestMethod: "monthly_estimate" | "statement_manual";
 };
 
+// A debt still inside a promotional-rate window, with what will be left when
+// that window closes at the current payment.
+export type PromoOutlook = {
+  subId: string;
+  name: string;
+  promoEndsOn: string;
+  monthsRemaining: number;
+  currentPaymentCents: number;
+  balanceAtEndCents: number;
+  clearPaymentCents: number | null;
+  postPromoApr: number | null;
+  annualCostCents: number | null;
+};
+
 type Mode = "planned" | "classic";
 type Filter = "all" | "loans" | "cards" | "paid";
 
+// Snowball (smallest balance first) vs avalanche (highest rate first), run
+// over the same debts with the same monthly capacity.
+export type PayoffComparison = {
+  snowballInterestCents: number;
+  avalancheInterestCents: number;
+  interestSavedCents: number;
+  snowballFinish: string | null;
+  avalancheFinish: string | null;
+  monthsSaved: number;
+};
+
 type Props = {
   rows: Row[];
+  promoOutlook?: PromoOutlook[];
+  payoffComparison?: PayoffComparison | null;
+  // Recorded month-end balances: household total, and per debt subcategory.
+  totalHistory?: { month: string; balanceCents: number }[];
+  historyBySub?: Record<string, { month: string; balanceCents: number }[]>;
   startMonth: string;
   focusId: string | null;
   totalBalanceCents: number;
@@ -61,7 +95,7 @@ type Props = {
 
 export function SnowballBoard(props: Props) {
   const {
-    rows, startMonth, focusId, totalBalanceCents, totalMinCents, plannedTotalCents,
+    rows, promoOutlook = [], payoffComparison = null, totalHistory = [], historyBySub = {}, startMonth, focusId, totalBalanceCents, totalMinCents, plannedTotalCents,
     currentExtraCents, monthlyAttackCents, plannedPayoffMonth, plannedLedger,
     classicPayoffMonth, classicLedger, currency, settings,
   } = props;
@@ -100,7 +134,7 @@ export function SnowballBoard(props: Props) {
           : "Minimums plus extra money attack the smallest balance first."}
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <SummaryCard label="Total debt" value={formatMoney(totalBalanceCents, currency)} />
         <SummaryCard label="Minimums / mo" value={formatMoney(totalMinCents, currency)} />
         <SummaryCard
@@ -111,6 +145,14 @@ export function SnowballBoard(props: Props) {
         />
         <SummaryCard label="Paid this month" value={formatMoney(rows.reduce((sum, row) => sum + row.paidThisMonthCents, 0), currency)} />
       </div>
+
+      {promoOutlook.length > 0 ? (
+        <PromoWatch items={promoOutlook} currency={currency} />
+      ) : null}
+
+      {payoffComparison && mode === "classic" ? (
+        <OrderComparison data={payoffComparison} currency={currency} />
+      ) : null}
 
       <div className="flex flex-wrap gap-2 rounded-xl bg-surface p-2 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <FilterButton active={filter === "all"} onClick={() => setFilter("all")}>All ({rows.length})</FilterButton>
@@ -158,7 +200,7 @@ export function SnowballBoard(props: Props) {
           {progressOpen ? (
             <div className="space-y-4 border-t border-line p-4">
               <ProgressOverview row={selected} ledger={selectedMonths} currency={currency} />
-              <BalanceChart startingBalance={selected.balanceCents} entries={selectedMonths} currency={currency} />
+              <BalanceChart startingBalance={selected.balanceCents} entries={selectedMonths} history={historyBySub[selected.subId] ?? []} currency={currency} />
               {selectedMonths.length ? (
                 <div className="rounded-lg bg-brand-soft/80 px-4 py-3 text-center text-sm text-foreground">
                   Your planned payment of <strong className="rounded bg-brand/15 px-1.5 py-0.5 tabular-nums">{formatMoney(Math.max(selected.minCents, selected.plannedCents), currency)}</strong>{" "}
@@ -189,7 +231,7 @@ export function SnowballBoard(props: Props) {
           {progressOpen ? (
             <div className="space-y-4 border-t border-line p-4">
               <MasterProgressOverview rows={rows} ledger={masterMonths} currency={currency} />
-              <BalanceChart startingBalance={totalBalanceCents} entries={masterMonths} currency={currency} />
+              <BalanceChart startingBalance={totalBalanceCents} entries={masterMonths} history={totalHistory} currency={currency} />
               {masterMonths.length && masterMonths.at(-1)?.balanceCents === 0 ? (
                 <div className="rounded-lg bg-brand-soft/80 px-4 py-3 text-center text-sm text-foreground">
                   Your combined payment plan pays off all tracked debt in <strong className="rounded bg-brand/15 px-1.5 py-0.5">{formatDuration(masterMonths.length)}</strong>.
@@ -306,9 +348,13 @@ function MasterProgressOverview({ rows, ledger, currency }: { rows: Row[]; ledge
   );
 }
 
-function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonTone = "positive", currency, compact = false }: {
+function BalanceChart({ startingBalance, entries, history = [], comparisonEntries, comparisonTone = "positive", currency, compact = false }: {
   startingBalance: number;
   entries: MonthlyEntry[];
+  // Recorded balances from months already gone, oldest first. Drawn solid to
+  // the left of "Now" so the projection has a track record behind it — and so
+  // a projection that has been drifting away from reality is visible.
+  history?: { month: string; balanceCents: number }[];
   comparisonEntries?: MonthlyEntry[];
   comparisonTone?: "positive" | "negative";
   currency: string;
@@ -316,23 +362,37 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const width = 760, height = compact ? 190 : 220, padY = 24;
+  // "Now" sits at this index; everything before it is recorded, after projected.
+  const originIndex = history.length;
+  const historyValues = history.map((h) => h.balanceCents);
   const currentValues = [startingBalance, ...entries.map((entry) => entry.balanceCents)];
   const comparisonValues = comparisonEntries ? [startingBalance, ...comparisonEntries.map((entry) => entry.balanceCents)] : null;
-  const values = [...currentValues, ...(comparisonValues ?? [])];
+  const values = [...historyValues, ...currentValues, ...(comparisonValues ?? [])];
   const max = Math.max(1, ...values);
   // Reserve enough room for the widest Y-axis amount. A fixed 46px gutter
   // clipped larger balances such as $365,270.00.
   const padX = Math.min(104, Math.max(54, formatMoney(Math.round(max), currency).length * 6 + 12));
-  const longest = Math.max(entries.length, comparisonEntries?.length ?? 0, 1);
+  const forwardLen = Math.max(entries.length, comparisonEntries?.length ?? 0, 1);
+  // Total domain spans recorded months + projected months.
+  const longest = originIndex + forwardLen;
   const longestEntries = (comparisonEntries?.length ?? 0) > entries.length ? comparisonEntries! : entries;
   const lastEntry = (comparisonEntries?.length ?? 0) > entries.length ? comparisonEntries?.at(-1) : entries.at(-1);
   const xFor = (index: number) => padX + (index / longest) * (width - padX * 2);
   const yFor = (value: number) => padY + (1 - value / max) * (height - padY * 2);
+  // Projected series start at "Now", so their points are offset by the
+  // recorded months sitting to the left of it.
   const pointsFor = (series: MonthlyEntry[]) => [startingBalance, ...series.map((entry) => entry.balanceCents)].map((value, index) => {
-    const x = xFor(index);
+    const x = xFor(originIndex + index);
     const y = yFor(value);
     return `${x},${y}`;
   }).join(" ");
+  // Recorded line runs from the oldest snapshot up to and including "Now", so
+  // it joins the projection without a gap.
+  const historyPoints = history.length
+    ? [...historyValues, startingBalance]
+        .map((value, index) => `${xFor(index)},${yFor(value)}`)
+        .join(" ")
+    : null;
   const ticks = [0, 0.5, 1];
   const xTickDivisions = compact ? 3 : 4;
   const xTicks = lastEntry
@@ -344,16 +404,35 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
         ),
       ).map((index) => ({
         index,
-        label: index === 0 ? "Now" : monthLabel(longestEntries[index - 1]?.month ?? lastEntry.month),
+        label:
+          index === originIndex
+            ? "Now"
+            : index < originIndex
+              ? monthLabel(history[index]?.month ?? "")
+              : monthLabel(longestEntries[index - originIndex - 1]?.month ?? lastEntry.month),
       }))
-    : [{ index: 0, label: "Now" }];
-  const hoveredCurrent = hoverIndex != null && hoverIndex < currentValues.length ? currentValues[hoverIndex] : null;
-  const hoveredComparison = hoverIndex != null && comparisonValues && hoverIndex < comparisonValues.length ? comparisonValues[hoverIndex] : null;
+    : [{ index: originIndex, label: "Now" }];
+  // Hover reads from the recorded series left of Now, the projection right of it.
+  const fwdIndex = hoverIndex == null ? null : hoverIndex - originIndex;
+  const hoveredCurrent =
+    hoverIndex == null
+      ? null
+      : hoverIndex < originIndex
+        ? historyValues[hoverIndex] ?? null
+        : fwdIndex != null && fwdIndex < currentValues.length
+          ? currentValues[fwdIndex]
+          : null;
+  const hoveredComparison =
+    fwdIndex != null && fwdIndex >= 0 && comparisonValues && fwdIndex < comparisonValues.length
+      ? comparisonValues[fwdIndex]
+      : null;
   const hoveredMonth = hoverIndex == null
     ? null
-    : hoverIndex === 0
-      ? "Now"
-      : comparisonEntries?.[hoverIndex - 1]?.month ?? entries[hoverIndex - 1]?.month ?? null;
+    : hoverIndex < originIndex
+      ? history[hoverIndex]?.month ?? null
+      : hoverIndex === originIndex
+        ? "Now"
+        : comparisonEntries?.[hoverIndex - originIndex - 1]?.month ?? entries[hoverIndex - originIndex - 1]?.month ?? null;
   const hoverX = hoverIndex == null ? null : xFor(hoverIndex);
   const tooltipAlignment = hoverIndex != null && hoverIndex > longest * 0.72
     ? "-translate-x-full"
@@ -362,7 +441,7 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
       : "-translate-x-1/2";
   return (
     <div className="overflow-x-auto">
-      <div className={`relative ${compact ? "min-w-0" : "min-w-[560px]"}`}>
+      <div className={`relative ${compact ? "min-w-0" : "min-w-0 sm:min-w-[560px]"}`}>
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="w-full cursor-crosshair touch-none"
@@ -381,12 +460,20 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
             const value = Math.round(max * (1 - tick));
             return <g key={tick}><line x1={padX} x2={width - padX} y1={y} y2={y} stroke="currentColor" className="text-line" strokeDasharray="3 5" /><text x={padX - 7} y={y + 4} textAnchor="end" className="fill-muted text-[10px]">{formatMoney(value, currency)}</text></g>;
           })}
-          <polyline points={pointsFor(entries)} fill="none" stroke="var(--brand)" strokeWidth="3" strokeDasharray="8 7" strokeLinecap="round" strokeLinejoin="round" />
-          {comparisonEntries ? <polyline points={pointsFor(comparisonEntries)} fill="none" stroke={comparisonTone === "positive" ? "#84cc16" : "#f59e0b"} strokeWidth="2.5" strokeDasharray="8 7" strokeLinecap="round" strokeLinejoin="round" /> : null}
-          <circle cx={padX} cy={padY} r="5" fill="var(--surface)" stroke="var(--brand)" strokeWidth="3" />
+          {/* Recorded balances: solid, to distinguish what happened from what
+              is merely projected (dashed). */}
+          {historyPoints ? (
+            <>
+              <polyline points={historyPoints} fill="none" stroke="var(--viz-savings)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+              <line x1={xFor(originIndex)} x2={xFor(originIndex)} y1={padY} y2={height - padY} stroke="currentColor" strokeDasharray="3 4" className="text-line" />
+            </>
+          ) : null}
+          <polyline points={pointsFor(entries)} fill="none" stroke="var(--viz-debt)" strokeWidth="3" strokeDasharray="8 7" strokeLinecap="round" strokeLinejoin="round" />
+          {comparisonEntries ? <polyline points={pointsFor(comparisonEntries)} fill="none" stroke={comparisonTone === "positive" ? "var(--positive)" : "var(--negative)"} strokeWidth="2.5" strokeDasharray="8 7" strokeLinecap="round" strokeLinejoin="round" /> : null}
+          <circle cx={xFor(originIndex)} cy={yFor(startingBalance)} r="5" fill="var(--surface)" stroke="var(--viz-debt)" strokeWidth="3" />
           {hoverX != null ? <line x1={hoverX} x2={hoverX} y1={padY} y2={height - padY} stroke="currentColor" className="text-muted/50" strokeWidth="1" strokeDasharray="3 4" /> : null}
-          {hoverX != null && hoveredCurrent != null ? <circle cx={hoverX} cy={yFor(hoveredCurrent)} r="5" fill="var(--brand)" stroke="var(--surface)" strokeWidth="2" /> : null}
-          {hoverX != null && hoveredComparison != null ? <circle cx={hoverX} cy={yFor(hoveredComparison)} r="5" fill={comparisonTone === "positive" ? "#84cc16" : "#f59e0b"} stroke="var(--surface)" strokeWidth="2" /> : null}
+          {hoverX != null && hoveredCurrent != null ? <circle cx={hoverX} cy={yFor(hoveredCurrent)} r="5" fill="var(--viz-debt)" stroke="var(--surface)" strokeWidth="2" /> : null}
+          {hoverX != null && hoveredComparison != null ? <circle cx={hoverX} cy={yFor(hoveredComparison)} r="5" fill={comparisonTone === "positive" ? "var(--positive)" : "var(--negative)"} stroke="var(--surface)" strokeWidth="2" /> : null}
           {xTicks.map((tick, index) => {
             const x = xFor(tick.index);
             const anchor = index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle";
@@ -405,13 +492,13 @@ function BalanceChart({ startingBalance, entries, comparisonEntries, comparisonT
           >
             <p className="border-b border-line px-3 py-2 font-bold">{hoveredMonth === "Now" ? "Now" : monthLabel(hoveredMonth)}</p>
             <div className="space-y-2 px-3 py-2">
-              {hoveredCurrent != null ? <div className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-brand" /><span>Current Track</span><strong className="ml-auto tabular-nums">{formatMoney(hoveredCurrent, currency)}</strong></div> : null}
-              {hoveredComparison != null ? <div className="flex items-center gap-2"><span className={`w-5 border-t-2 border-dashed ${comparisonTone === "positive" ? "border-lime-500" : "border-amber-500"}`} /><span>Simulation</span><strong className="ml-auto tabular-nums">{formatMoney(hoveredComparison, currency)}</strong></div> : null}
+              {hoveredCurrent != null ? <div className="flex items-center gap-2"><span className="w-5 border-t-2 border-dashed border-[color:var(--viz-debt)]" /><span>Current Track</span><strong className="ml-auto tabular-nums">{formatMoney(hoveredCurrent, currency)}</strong></div> : null}
+              {hoveredComparison != null ? <div className="flex items-center gap-2"><span className={`w-5 border-t-2 border-dashed ${comparisonTone === "positive" ? "border-positive" : "border-negative"}`} /><span>Simulation</span><strong className="ml-auto tabular-nums">{formatMoney(hoveredComparison, currency)}</strong></div> : null}
             </div>
           </div>
         ) : null}
       </div>
-      {comparisonEntries ? <div className="flex justify-center gap-5 text-[11px] font-semibold"><span className="flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed border-brand" />Current track</span><span className="flex items-center gap-1.5"><span className={`w-5 border-t-2 border-dashed ${comparisonTone === "positive" ? "border-lime-500" : "border-amber-500"}`} />Simulation</span></div> : null}
+      {comparisonEntries ? <div className="flex justify-center gap-5 text-[11px] font-semibold"><span className="flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed border-[color:var(--viz-debt)]" />Current track</span><span className="flex items-center gap-1.5"><span className={`w-5 border-t-2 border-dashed ${comparisonTone === "positive" ? "border-positive" : "border-negative"}`} />Simulation</span></div> : null}
     </div>
   );
 }
@@ -453,7 +540,7 @@ function SimulationOutcome({ paymentDelta, oneTimeCents, interestSavings, timeSa
   months: number;
   currency: string;
 }) {
-  const tone = damaged ? "border-amber-400 bg-amber-100/80 text-amber-950" : improved ? "border-brand bg-brand-soft/80" : "border-line bg-background";
+  const tone = damaged ? "border-negative/50 bg-negative/10 text-foreground" : improved ? "border-brand bg-brand-soft/80" : "border-line bg-background";
   let heading = "Following your current payment plan";
   if (paymentDelta > 0) heading = `Paying +${formatMoney(paymentDelta, currency)} extra every month`;
   else if (paymentDelta < 0) heading = `Paying ${formatMoney(Math.abs(paymentDelta), currency)} less every month`;
@@ -482,20 +569,33 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
   const baselinePayment = Math.max(row.minCents, row.plannedCents);
   const [payment, setPayment] = useState(centsToDisplay(baselinePayment));
   const [oneTimeExtra, setOneTimeExtra] = useState("");
+  const [applyPending, startApply] = useTransition();
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [applied, setApplied] = useState(false);
   const monthlyCents = Math.max(0, Math.round(Number(payment || 0) * 100));
   const oneTimeCents = Math.max(0, Math.round(Number(oneTimeExtra || 0) * 100));
+  // Both projections carry the promotional-rate schedule. Without it the
+  // simulator modelled a 0% card as 0% forever, so it disagreed with the main
+  // page's own projection for exactly the debts where the deadline matters.
+  const rateSchedule = {
+    apr: row.apr,
+    promoEndsOn: row.promoEndsOn,
+    postPromoApr: row.postPromoApr,
+  };
   const baselineResult = useMemo(() => projectSnowball(
-    [{ id: row.subId, balanceCents: row.balanceCents, minCents: baselinePayment, apr: row.apr }],
+    [{ id: row.subId, balanceCents: row.balanceCents, minCents: baselinePayment, ...rateSchedule }],
     0, startMonth, 480, true,
-  ), [baselinePayment, row.apr, row.balanceCents, row.subId, startMonth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [baselinePayment, row.apr, row.promoEndsOn, row.postPromoApr, row.balanceCents, row.subId, startMonth]);
   const result = useMemo(() => projectSnowball(
-    [{ id: row.subId, balanceCents: row.balanceCents, minCents: monthlyCents, apr: row.apr }],
+    [{ id: row.subId, balanceCents: row.balanceCents, minCents: monthlyCents, ...rateSchedule }],
     0,
     startMonth,
     480,
     true,
     { oneTimeMonth: startMonth, oneTimeExtraCents: oneTimeCents },
-  ), [monthlyCents, oneTimeCents, row.apr, row.balanceCents, row.subId, startMonth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [monthlyCents, oneTimeCents, row.apr, row.promoEndsOn, row.postPromoApr, row.balanceCents, row.subId, startMonth]);
   const ledger = result.ledger.get(row.subId) ?? [];
   const payoff = result.payoffMonth.get(row.subId) ?? null;
   const interest = result.totalInterestCents.get(row.subId) ?? 0;
@@ -538,10 +638,42 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
                 ? `${formatMoney(monthlyCents, currency)} is less than your minimum payment.`
                 : payoff ? `Pays off this debt in ${formatDuration(ledger.length)}.` : "This payment does not produce a payoff date."}
             </p>
-            <label className="block text-xs font-bold">Payoff Date<select value={payoff ?? ""} onChange={(event) => choosePayoffMonth(event.target.value)} className="mt-1 w-full rounded-md bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-              {!payoff ? <option value="">Beyond 40 years</option> : null}
-              {Array.from({ length: 480 }, (_, index) => addMonths(startMonth, index)).map((month) => <option key={month} value={month}>{monthLabel(month)}</option>)}
-            </select></label>
+            {/* Month + year, rather than one 480-option list. On iOS that list
+                rendered as a 480-row wheel and was re-created on every
+                keystroke in the payment field. */}
+            <fieldset className="block">
+              <legend className="text-xs font-bold">Payoff Date</legend>
+              <div className="mt-1 grid grid-cols-[1fr_auto] gap-1.5">
+                <select
+                  value={payoff ? payoff.slice(5, 7) : ""}
+                  onChange={(event) => {
+                    const y = payoff ? payoff.slice(0, 4) : String(new Date(startMonth).getFullYear());
+                    choosePayoffMonth(`${y}-${event.target.value}-01`);
+                  }}
+                  aria-label="Payoff month"
+                  className="w-full rounded-md bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  {!payoff ? <option value="">Beyond 40 years</option> : null}
+                  {MONTHS_SHORT.map((label, i) => (
+                    <option key={label} value={String(i + 1).padStart(2, "0")}>{label}</option>
+                  ))}
+                </select>
+                <select
+                  value={payoff ? payoff.slice(0, 4) : ""}
+                  onChange={(event) => {
+                    const m = payoff ? payoff.slice(5, 7) : "01";
+                    choosePayoffMonth(`${event.target.value}-${m}-01`);
+                  }}
+                  aria-label="Payoff year"
+                  className="rounded-md bg-background px-2.5 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  {!payoff ? <option value="">—</option> : null}
+                  {Array.from({ length: 40 }, (_, i) => Number(startMonth.slice(0, 4)) + i).map((y) => (
+                    <option key={y} value={String(y)}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            </fieldset>
             <p className="-mt-3 text-[10px] text-muted">Original payoff date: {baselinePayoff ? monthLabel(baselinePayoff) : "not projected"}.</p>
             <label className="block text-xs font-bold">One-time extra this month<input value={oneTimeExtra} onChange={(event) => setOneTimeExtra(event.target.value)} type="number" min="0" step="0.01" className="mt-1 w-full rounded-md bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></label>
             <p className="-mt-3 text-[10px] text-muted">Extra payments reduce principal immediately. Escrow is excluded.</p>
@@ -562,7 +694,7 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
               months={ledger.length}
               currency={currency}
             />
-            {monthlyCents < row.minCents ? <p className="flex gap-2 text-xs text-muted"><span className="text-amber-500">▲</span>Your lender may charge fees, which could further increase payoff time and interest.</p> : null}
+            {monthlyCents < row.minCents ? <p className="flex gap-2 text-xs text-muted"><span className="text-negative">▲</span>Your lender may charge fees, which could further increase payoff time and interest.</p> : null}
             <div className="space-y-1 border-t border-line pt-2 text-xs">
               <div className="flex justify-between border-b border-line pb-2 text-sm"><span className="font-semibold">Remaining to Pay</span><strong>{formatMoney(remaining, currency)}</strong></div>
               <div className="flex justify-between text-muted"><span>Principal</span><span>{formatMoney(row.balanceCents, currency)}</span></div>
@@ -570,7 +702,46 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
             </div>
           </div>
         </div>
-        <div className="flex justify-end border-t border-line px-4 py-3"><button type="button" onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white">Done</button></div>
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3">
+          {applyError ? (
+            <p className="mr-auto text-xs text-negative">{applyError}</p>
+          ) : applied ? (
+            <p className="mr-auto text-xs font-semibold" style={{ color: "var(--positive)" }}>
+              Saved to Budget.
+            </p>
+          ) : changed ? (
+            <p className="mr-auto text-xs text-muted">
+              Applying sets this debt&rsquo;s planned payment to{" "}
+              <span className="font-semibold tabular-nums text-foreground">
+                {formatMoney(monthlyCents, currency)}
+              </span>
+              .
+            </p>
+          ) : null}
+          {/* Without this the simulator was a dead end: its answer had to be
+              remembered and re-typed on the Budget page. */}
+          <button
+            type="button"
+            disabled={!changed || applyPending}
+            onClick={() => {
+              setApplyError(null);
+              const fd = new FormData();
+              fd.set("subcategoryId", row.subId);
+              fd.set("month", startMonth);
+              fd.set("payment", centsToDisplay(monthlyCents));
+              startApply(async () => {
+                const res = await applyPayoffPlan(fd);
+                if (res?.error) setApplyError(res.error);
+                else setApplied(true);
+              });
+            }}
+            className="rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
+            style={{ backgroundColor: "var(--viz-savings)" }}
+          >
+            {applyPending ? "Saving…" : "Apply to Budget"}
+          </button>
+          <button type="button" onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white">Done</button>
+        </div>
       </div>
     </div>
   );
@@ -596,7 +767,145 @@ function InterestForm({ debtId }: { debtId: string }) {
 function ModeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button type="button" onClick={onClick} className={`rounded-lg py-2 text-sm font-semibold transition ${active ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground"}`}>{children}</button>; }
 function humanizeDebtKind(value: string | null) { return value ? value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Loan"; }
 function formatDuration(months: number) { const years = Math.floor(months / 12); const remainder = months % 12; return years > 0 ? `${years} ${years === 1 ? "yr" : "yrs"}, ${remainder} ${remainder === 1 ? "mo" : "mos"}` : `${remainder} ${remainder === 1 ? "mo" : "mos"}`; }
-function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${active ? "bg-brand-soft text-brand ring-1 ring-brand/20" : "bg-background text-muted hover:text-foreground"}`}>{children}</button>; }
-function CardRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) { return <div className="flex items-center justify-between gap-1"><span className="text-[10px] text-muted">{label}</span><span className={`text-[11px] font-semibold tabular-nums ${highlight ? "text-brand" : ""}`}>{value}</span></div>; }
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button type="button" onClick={onClick} className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${active ? "bg-foreground text-background" : "bg-background text-muted hover:text-foreground"}`}>{children}</button>; }
+function CardRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) { return <div className="flex items-center justify-between gap-1"><span className="text-[10px] text-muted">{label}</span><span className={`text-[11px] font-semibold tabular-nums ${highlight ? "font-bold" : ""}`}>{value}</span></div>; }
 function MiniMetric({ label, value, padded }: { label: string; value: string; padded?: boolean }) { return <div className={padded ? "p-4" : ""}><p className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</p><p className="mt-0.5 text-base font-bold tabular-nums">{value}</p></div>; }
-function SummaryCard({ label, value, hint, highlight }: { label: string; value: string; hint?: string; highlight?: boolean }) { return <div className={`rounded-2xl px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${highlight ? "bg-brand text-white ring-0" : "bg-surface"}`}><p className={`text-xs font-medium uppercase tracking-wide ${highlight ? "text-white/80" : "text-muted"}`}>{label}</p><p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>{hint ? <p className={`text-[11px] ${highlight ? "text-white/80" : "text-muted"}`}>{hint}</p> : null}</div>; }
+// Promotional-rate deadlines. Each row answers the only question that matters
+// on a 0% card: at what you're paying now, how much is still owed the day the
+// rate resets — and what payment would clear it before then.
+function PromoWatch({ items, currency }: { items: PromoOutlook[]; currency: string }) {
+  const fmtDate = (d: string) => {
+    const [y, m, day] = d.split("-").map(Number);
+    return `${MONTHS_SHORT[m - 1]} ${day}, ${y}`;
+  };
+  return (
+    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-baseline justify-between gap-2 border-b border-line px-4 py-2.5">
+        <h2 className="text-sm font-bold">Promotional rates ending</h2>
+        <span className="text-[11px] text-muted">
+          {items.length} card{items.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <ul className="divide-y divide-line">
+        {items.map((p) => (
+          <li key={p.subId} className="px-4 py-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <span className="text-sm font-semibold">{p.name}</span>
+              <span className="text-[11px] tabular-nums text-muted">
+                {fmtDate(p.promoEndsOn)} · {p.monthsRemaining} mo left
+              </span>
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted">
+              At {formatMoney(p.currentPaymentCents, currency)}/mo,{" "}
+              <span className="font-semibold tabular-nums" style={{ color: "var(--viz-debt)" }}>
+                {formatMoney(p.balanceAtEndCents, currency)}
+              </span>{" "}
+              will still be owed when the rate resets
+              {p.annualCostCents != null ? (
+                <>
+                  {" "}— about{" "}
+                  <span className="font-semibold tabular-nums" style={{ color: "var(--viz-debt)" }}>
+                    {formatMoney(p.annualCostCents, currency)}/yr
+                  </span>{" "}
+                  at {p.postPromoApr}%
+                </>
+              ) : null}
+              .
+            </p>
+            {p.clearPaymentCents != null ? (
+              <p className="mt-1 text-xs leading-relaxed text-muted">
+                Pay{" "}
+                <span className="font-semibold tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                  {formatMoney(p.clearPaymentCents, currency)}/mo
+                </span>{" "}
+                to clear it interest-free before the deadline.
+              </p>
+            ) : null}
+            {p.postPromoApr == null ? (
+              <p className="mt-1 text-[11px] text-muted">
+                Go-to rate not set — add it in Accounts to see the interest cost.
+              </p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// The highlighted card marks the active monthly figure. It used to be a solid
+// indigo tile with a money value on it; now it stays on the normal surface and
+// is marked by a viz-palette left edge, keeping brand colour off the data.
+// Snowball vs avalanche, same money either way. When every rate is equal the
+// two orderings are mathematically identical — say that plainly instead of
+// dressing up a $0 difference as a decision.
+function OrderComparison({ data, currency }: { data: PayoffComparison; currency: string }) {
+  const saves = data.interestSavedCents > 0 || data.monthsSaved > 0;
+  return (
+    <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-bold">Attack order</h2>
+        <span className="text-[11px] text-muted">same monthly payment either way</span>
+      </div>
+      {saves ? (
+        <>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted">
+            Paying the <span className="font-semibold text-foreground">highest rate first</span>{" "}
+            instead of the smallest balance would save{" "}
+            {data.interestSavedCents > 0 ? (
+              <span className="font-semibold tabular-nums" style={{ color: "var(--positive)" }}>
+                {formatMoney(data.interestSavedCents, currency)}
+              </span>
+            ) : null}
+            {data.interestSavedCents > 0 && data.monthsSaved > 0 ? " and " : ""}
+            {data.monthsSaved > 0 ? (
+              <span className="font-semibold tabular-nums" style={{ color: "var(--positive)" }}>
+                {data.monthsSaved} month{data.monthsSaved === 1 ? "" : "s"}
+              </span>
+            ) : null}
+            .
+          </p>
+          <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg bg-background px-3 py-2">
+              <dt className="text-[10px] uppercase tracking-wide text-muted">Smallest first</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums">
+                {formatMoney(data.snowballInterestCents, currency)} interest
+              </dd>
+              {data.snowballFinish ? (
+                <dd className="text-[11px] text-muted">done {monthLabel(data.snowballFinish)}</dd>
+              ) : null}
+            </div>
+            <div className="rounded-lg bg-background px-3 py-2">
+              <dt className="text-[10px] uppercase tracking-wide text-muted">Highest rate first</dt>
+              <dd className="mt-0.5 font-semibold tabular-nums">
+                {formatMoney(data.avalancheInterestCents, currency)} interest
+              </dd>
+              {data.avalancheFinish ? (
+                <dd className="text-[11px] text-muted">done {monthLabel(data.avalancheFinish)}</dd>
+              ) : null}
+            </div>
+          </dl>
+        </>
+      ) : (
+        <p className="mt-1.5 text-xs leading-relaxed text-muted">
+          No difference at your current rates — every tracked debt carries the same rate, so
+          smallest-balance-first and highest-rate-first pay off on the same date for the same cost.
+          This will start to matter once a debt at a different rate is added.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function SummaryCard({ label, value, hint, highlight }: { label: string; value: string; hint?: string; highlight?: boolean }) {
+  return (
+    <div
+      className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10"
+      style={highlight ? { borderLeft: "3px solid var(--viz-savings)" } : undefined}
+    >
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
+      {hint ? <p className="text-[11px] text-muted">{hint}</p> : null}
+    </div>
+  );
+}

@@ -2,13 +2,14 @@ import { captureSnapshots } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
+import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
-// Credit cards remain rewards/spending accounts. Loan accounts explicitly
-// created from Accounts use debt_tracking_mode='account' and count once here;
-// older Budget-managed loan rows remain excluded to prevent double-counting.
-const LIABILITY_KINDS = ["credit_card", "debt_loan"];
+// Liability-kind accounts are presentations of a debt, never the debt itself —
+// the `debts` table is the sole liability ledger. See lib/debt-identity.ts for
+// the full rule and why `debt_tracking_mode` is no longer consulted.
+const LIABILITY_KINDS: readonly string[] = SHARED_LIABILITY_KINDS;
 
 export default async function NetworthPage() {
   const { supabase, household } = await getSessionContext();
@@ -43,7 +44,7 @@ export default async function NetworthPage() {
       .order("month"),
     supabase
       .from("accounts")
-      .select("id, name, kind, is_kids_account, bank_group, debt_tracking_mode, sort_order")
+      .select("id, name, kind, is_kids_account, bank_group, sort_order")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -79,9 +80,6 @@ export default async function NetworthPage() {
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
   const bankGroupById = new Map(
     (accountRows ?? []).map((a) => [a.id, (a as { bank_group?: string | null }).bank_group ?? null]),
-  );
-  const debtTrackingModeById = new Map(
-    (accountRows ?? []).map((a) => [a.id, (a as { debt_tracking_mode?: string | null }).debt_tracking_mode ?? "budget"]),
   );
   const isKidsAccount = new Set(
     (accountRows ?? []).filter((a) => a.is_kids_account).map((a) => a.id),
@@ -121,12 +119,15 @@ export default async function NetworthPage() {
 
   for (const s of accSnaps ?? []) {
     snapshotMonths.add(s.month);
-    if (s.kind === "debt_loan" && debtTrackingModeById.get(s.account_id) === "account") {
-      const t = derived.get(s.month) ?? zero();
-      t.debt += Math.abs(s.balance_cents);
-      derived.set(s.month, t);
-      continue;
-    }
+    // No account balance is a liability here — the `debts` table is the only
+    // liability ledger (see lib/debt-identity.ts). A `debt_loan` account falls
+    // through to sliceForAccount, which returns null for liability kinds, so it
+    // contributes to neither side; its debt arrives via debtSnaps below.
+    //
+    // This replaces a `debt_tracking_mode === 'account'` branch that was
+    // unreachable (nothing ever wrote that value) and which skipped the
+    // mortgage exclusion applied everywhere else — the one way these totals
+    // could have drifted apart from the Accounts page.
     const slice = sliceForAccount(s.account_id, s.kind);
     if (!slice) continue;
     const t = derived.get(s.month) ?? zero();

@@ -24,7 +24,7 @@ export default async function InvestPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, holder, subtype, is_kids_account, sort_order")
+      .select("id, name, holder, subtype, is_kids_account, sort_order, current_balance_cents")
       .eq("household_id", household.id)
       .or("kind.eq.investment,is_kids_account.eq.true")
       .order("sort_order")
@@ -186,6 +186,7 @@ export default async function InvestPage() {
       holder: a.holder ?? null,
       subtype: a.subtype ?? null,
       isKids: !!a.is_kids_account,
+      balanceCents: a.current_balance_cents ?? 0,
       sortOrder: a.sort_order ?? 0,
       cells,
       buckets,

@@ -66,21 +66,30 @@ export default async function AccountsPage() {
       .eq("household_id", household.id)
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false }),
+    // Pull ALL account_snapshots (not just historyMonths) so the period
+    // picker on the header can resolve balances back to any historical
+    // month/quarter/year. Small table — a household has one row per
+    // account per month, ~103 rows for 2026. Buckets + debt snapshots
+    // stay scoped to the 3-month history window since they only feed
+    // the per-row "Prior 3 months" display, not the picker filter.
     supabase
       .from("account_snapshots")
       .select("account_id, month, balance_cents")
-      .eq("household_id", household.id)
-      .in("month", historyMonths),
+      .eq("household_id", household.id),
     supabase
       .from("bucket_snapshots")
       .select("bucket_id, month, balance_cents")
       .eq("household_id", household.id)
       .in("month", historyMonths),
+    // Pull ALL debt_snapshots (matching account_snapshots above) so the header
+    // period picker can compute a real "% vs last period" delta on the Debts
+    // and Net Worth cards. Bucket snapshots stay scoped to the 3-month
+    // history window since those only feed the row-level "Prior months"
+    // columns, not the picker.
     supabase
       .from("debt_snapshots")
       .select("subcategory_id, month, balance_cents")
-      .eq("household_id", household.id)
-      .in("month", historyMonths),
+      .eq("household_id", household.id),
   ]);
 
   // Keep the Accounts page usable before the user applies the new SQL in
@@ -111,12 +120,22 @@ export default async function AccountsPage() {
   for (const s of debtSnapshotRows ?? []) {
     debtHistory.set(`${s.subcategory_id}:${s.month}`, s.balance_cents ?? 0);
   }
+  // Per-subcategory balance history keyed by "YYYY-MM-01", built from ALL
+  // debt_snapshots so the header period picker can resolve Debts and Net
+  // Worth cards back to a historical month.
+  const debtBalancesBySub = new Map<string, Record<string, number>>();
+  for (const s of debtSnapshotRows ?? []) {
+    const map = debtBalancesBySub.get(s.subcategory_id) ?? {};
+    map[s.month] = s.balance_cents ?? 0;
+    debtBalancesBySub.set(s.subcategory_id, map);
+  }
   const budgetDebts: BudgetDebt[] = (debtRows ?? []).filter((d) => d.tracking_enabled !== false).map((d) => ({
     subcategoryId: d.subcategory_id,
     name: subName.get(d.subcategory_id) ?? "Debt",
     balanceCents: d.current_balance_cents ?? 0,
     prevMonthCents: debtHistory.get(`${d.subcategory_id}:${prevMonth}`) ?? null,
     prev2MonthCents: debtHistory.get(`${d.subcategory_id}:${prev2Month}`) ?? null,
+    balancesByMonth: debtBalancesBySub.get(d.subcategory_id) ?? {},
     debtKind: d.debt_kind ?? null,
     accountId: d.account_id ?? null,
   }));
@@ -160,8 +179,14 @@ export default async function AccountsPage() {
       benefitUsedOn: d.benefit_used_on ?? null,
       spendingLimitCents: d.spending_limit_cents ?? null,
       remarks: d.remarks ?? null,
-      isRevolvingDebt: d.is_revolving_debt ?? false,
-      debtSubcategoryId: d.debt_subcategory_id ?? null,
+      // Derived from the `debts` table, not from
+      // `credit_card_details.is_revolving_debt` / `debt_subcategory_id`. Those
+      // were a second encoding of "this card carries a tracked debt" and had
+      // already drifted out of sync — 3191 VentureJ held a live debt row while
+      // its detail flags said otherwise, so the card showed no Debt badge.
+      // One ledger, one answer (see lib/debt-identity.ts).
+      isRevolvingDebt: debtByAccount.has(d.account_id),
+      debtSubcategoryId: debtByAccount.get(d.account_id)?.subcategory_id ?? null,
       cardUrl: d.card_url ?? null,
       benefitCadence: d.benefit_cadence ?? null,
       payoffBalanceCents: payoff?.current_balance_cents ?? 0,
@@ -248,6 +273,16 @@ export default async function AccountsPage() {
     monthSpendCents: cardMonthSpend.get(a.id) ?? 0,
     prevMonthCents: acctHistory.get(`${a.id}:${prevMonth}`) ?? null,
     prev2MonthCents: acctHistory.get(`${a.id}:${prev2Month}`) ?? null,
+    // Per-account snapshots keyed by "YYYY-MM-01" so the header's period
+    // picker can resolve section totals back to any historical month.
+    // Filled from account_snapshots (unfiltered — small table).
+    balancesByMonth: (() => {
+      const map: Record<string, number> = {};
+      for (const s of acctSnapshotRows ?? []) {
+        if (s.account_id === a.id) map[s.month] = s.balance_cents ?? 0;
+      }
+      return map;
+    })(),
     buckets: (bucketRows ?? [])
       .filter((b) => b.account_id === a.id)
       .map((b) => ({

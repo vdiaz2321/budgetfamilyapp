@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
+import { saveDebt } from "@/lib/save-debt";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } from "@/lib/buckets";
 import { adjustAccountLedger } from "@/lib/account-ledger";
@@ -136,32 +137,32 @@ async function ensurePayoffDebt(
     }
   }
 
+  // Shared write path (lib/save-debt.ts) — same helper the Budget editor uses,
+  // so the two can no longer store different subsets of a debt. This editor
+  // manages the full field set, so it passes all of them.
   const originalBalance = Math.max(
     input.balanceCents,
     input.originalBalanceCents ?? 0,
     Number(linked?.original_balance_cents ?? 0),
   );
-  const { error: debtError } = await supabase.from("debts").upsert({
-    household_id: householdId,
-    subcategory_id: subcategoryId,
-    account_id: input.accountId,
-    current_balance_cents: Math.max(0, input.balanceCents),
-    original_balance_cents: originalBalance,
-    min_payment_cents: Math.max(0, input.minPaymentCents),
-    target_payment_cents: Math.max(input.minPaymentCents, input.targetPaymentCents),
-    apr: Math.max(0, input.apr),
-    due_day: input.dueDay,
-    debt_kind: input.debtKind,
-    escrow_cents: Math.max(0, input.escrowCents ?? 0),
-    term_months: input.termMonths,
-    loan_start_date: input.loanStartDate,
-    promo_apr_ends_on: input.promoAprEndsOn,
-    interest_method: input.interestMethod,
-    tracking_enabled: true,
-    paid_off_at: input.balanceCents <= 0 ? new Date().toISOString().slice(0, 10) : null,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "household_id,subcategory_id" });
-  if (debtError) throw new Error(debtError.message);
+  const { error: debtSaveError } = await saveDebt(supabase, householdId, {
+    subcategoryId,
+    balanceCents: input.balanceCents,
+    minPaymentCents: input.minPaymentCents,
+    apr: input.apr,
+    originalBalanceCents: originalBalance,
+    targetPaymentCents: Math.max(input.minPaymentCents, input.targetPaymentCents),
+    accountId: input.accountId,
+    dueDay: input.dueDay,
+    debtKind: input.debtKind,
+    escrowCents: Math.max(0, input.escrowCents ?? 0),
+    termMonths: input.termMonths,
+    loanStartDate: input.loanStartDate,
+    promoAprEndsOn: input.promoAprEndsOn,
+    interestMethod: input.interestMethod,
+    trackingEnabled: true,
+  });
+  if (debtSaveError) throw new Error(debtSaveError);
 
   if (input.targetPaymentCents > 0) {
     await supabase.from("budget_plans").upsert({
@@ -613,7 +614,20 @@ export async function upsertCardDetails(formData: FormData) {
   const cardUrl = rawCardUrl && !/^https?:\/\//i.test(rawCardUrl) ? `https://${rawCardUrl}` : rawCardUrl;
 
   const trackAsPayoffDebt = formData.get("trackAsPayoffDebt") === "on";
-  let debtSubcategoryId = (existingDetails?.debt_subcategory_id as string | null) ?? null;
+  // Resolve the linked debt from the `debts` table first, falling back to the
+  // details column. Reading the column alone is what let the two drift apart:
+  // when `debt_subcategory_id` was null but a debts row existed, the "off"
+  // branch below silently did nothing and the debt stayed tracked forever.
+  const { data: existingLinkedDebt } = await supabase
+    .from("debts")
+    .select("subcategory_id")
+    .eq("household_id", householdId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  let debtSubcategoryId =
+    (existingLinkedDebt?.subcategory_id as string | null) ??
+    (existingDetails?.debt_subcategory_id as string | null) ??
+    null;
   if (trackAsPayoffDebt) {
     const aprValue = Number(String(formData.get("payoffApr") ?? "0"));
     const rawDue = Number(String(formData.get("payoffDueDay") ?? "0"));
@@ -931,16 +945,23 @@ export async function payCard(formData: FormData) {
     await adjustAccountLedger(supabase, householdId, sourceAccountId, -amountCents);
   }
 
-  // If this card is revolving-debt and linked to a debt subcategory, also
-  // decrement that debt balance so Budget/Net Worth stay honest.
-  const { data: details } = await supabase
-    .from("credit_card_details")
-    .select("is_revolving_debt, debt_subcategory_id")
-    .eq("account_id", cardId)
+  // If a debt is tracked against this card, decrement it too so Budget and Net
+  // Worth stay honest.
+  //
+  // Read from `debts` — the single liability ledger — rather than from
+  // `credit_card_details.is_revolving_debt` / `debt_subcategory_id`. Those were
+  // a second encoding of the same fact and had already drifted: card 3191
+  // VentureJ carried a live $1,968 debt row while its details flags said it
+  // wasn't a payoff debt, so paying it here moved money out of the bank and
+  // left the debt untouched.
+  const { data: linkedDebt } = await supabase
+    .from("debts")
+    .select("subcategory_id")
     .eq("household_id", householdId)
+    .eq("account_id", cardId)
     .maybeSingle();
-  if (details?.is_revolving_debt && details.debt_subcategory_id) {
-    await adjustDebtBalance(supabase, householdId, details.debt_subcategory_id, -amountCents);
+  if (linkedDebt?.subcategory_id) {
+    await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, -amountCents);
   }
 
   await captureSnapshots(supabase, householdId);

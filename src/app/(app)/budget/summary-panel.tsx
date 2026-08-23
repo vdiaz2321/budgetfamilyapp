@@ -191,9 +191,11 @@ export function SummaryPanel({ groups, currency }: Props) {
             </div>
           </div>
 
-          {/* Legend */}
+          {/* Legend — sorted by share (highest % → lowest) for whichever mode
+              is active (Planned or Spent). The donut order above is left alone;
+              only this list reorders. */}
           <ul className="divide-y divide-line px-2 py-3">
-            {segments.map((s) => {
+            {[...segments].sort((a, b) => b.arcValue - a.arcValue).map((s) => {
               const pct = total > 0 ? Math.round((s.arcValue / total) * 100) : 0;
               const isOpen = expanded === s.categoryId;
               const subRows = isOpen ? subRowsFor(s.categoryId) : [];
