@@ -19,21 +19,6 @@ const CYCLE_LABEL: Record<string, string> = {
   weekly: "Weekly",
 };
 
-// Divide any billing cycle down to its monthly-equivalent cost, so the
-// header total is comparable across mixed cycles.
-function monthlyEquivalent(amountCents: number, cycle: string): number {
-  switch (cycle) {
-    case "annual":
-      return amountCents / 12;
-    case "quarterly":
-      return amountCents / 3;
-    case "weekly":
-      return amountCents * (52 / 12);
-    default:
-      return amountCents;
-  }
-}
-
 function daysUntil(dateStr: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -115,12 +100,14 @@ export function SubscriptionsBoard({
   irregularBills,
   creditCards = [],
   showOnly,
+  initialSubscriptionEdit,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
   showOnly?: "subscriptions" | "irregular";
+  initialSubscriptionEdit?: string | "new";
 }) {
   const monthlyTotal = subscriptions
     .filter((s) => s.isActive && s.billingCycle === "monthly")
@@ -134,6 +121,7 @@ export function SubscriptionsBoard({
           currency={currency}
           monthlyTotal={monthlyTotal}
           creditCards={creditCards}
+          initialEdit={initialSubscriptionEdit}
         />
       )}
 
@@ -153,14 +141,16 @@ function SubscriptionsSection({
   currency,
   monthlyTotal,
   creditCards = [],
+  initialEdit,
 }: {
   subscriptions: SubscriptionRow[];
   currency: string;
   monthlyTotal: number;
   creditCards?: CreditCardOption[];
+  initialEdit?: string | "new";
 }) {
   const [open, setOpen] = useState(true);
-  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [editing, setEditing] = useState<string | "new" | null>(initialEdit ?? null);
   const [rows, setRows] = useState(initialSubscriptions);
   const [, startReorder] = useTransition();
   const currentYear = new Date().getFullYear();

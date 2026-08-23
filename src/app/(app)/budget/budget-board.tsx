@@ -133,7 +133,11 @@ export function BudgetBoard({
     (count, group) => count + group.rows.filter((row) => isOverspentRow(group.kind, row)).length,
     0,
   );
-  const displayedGroups = rowFilter === "all"
+  // A server revalidation does not remount this client board. Treat an empty
+  // overspent result as the normal list immediately, including for updates
+  // made outside the cover-overage flow.
+  const showingOverspent = rowFilter === "overspent" && overspentCount > 0;
+  const displayedGroups = !showingOverspent
     ? groups
     : groups
         .map((group) => ({
@@ -297,6 +301,10 @@ export function BudgetBoard({
         onClose={() => setSelected(null)}
         onAddTransaction={() => setQuickAdd(true)}
         onEditTransaction={(tx) => setQuickAdd(tx)}
+        onOverspentCovered={() => {
+          setRowFilter("all");
+          setSelected(null);
+        }}
       />
     ) : null;
 
@@ -379,10 +387,10 @@ export function BudgetBoard({
           <div className="flex flex-nowrap items-center gap-1.5 rounded-xl px-0.5 py-1 sm:flex-wrap sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
             <button
               type="button"
-              onClick={() => rowFilter === "overspent" ? setRowFilter("all") : showOverspent()}
-              aria-pressed={rowFilter === "overspent"}
+              onClick={() => showingOverspent ? setRowFilter("all") : showOverspent()}
+              aria-pressed={showingOverspent}
               disabled={overspentCount === 0}
-              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${rowFilter === "overspent" ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${showingOverspent ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
@@ -397,7 +405,7 @@ export function BudgetBoard({
                 onClick={() => setShowAddModal(true)}
                 className="h-7 shrink-0 rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
               >
-                + Add
+                + Transaction
               </button>
             </div>
             {/* Desktop only: + Transaction */}
@@ -463,13 +471,13 @@ export function BudgetBoard({
               />
             ))}
 
-            {rowFilter === "overspent" && displayedGroups.length === 0 ? (
+            {showingOverspent && displayedGroups.length === 0 ? (
               <div className="rounded-xl bg-surface px-4 py-8 text-center text-sm text-muted shadow-sm ring-1 ring-black/5 dark:ring-white/10">
                 Nothing is overspent this month.
               </div>
             ) : null}
 
-            {rowFilter === "all" ? (
+            {!showingOverspent ? (
               <>
                 <SubscriptionsSummaryCard
                   currency={currency}
@@ -653,7 +661,7 @@ function AssignLeftover({
 }) {
   const [open, setOpen] = useState(false);
   const [toId, setToId] = useState("");
-  const [amount, setAmount] = useState(centsToDisplay(leftoverCents));
+  const [amount, setAmount] = useState("0");
   const [filter, setFilter] = useState("");
   const [pending, start] = useTransition();
 
@@ -688,7 +696,7 @@ function AssignLeftover({
     <>
       <button
         type="button"
-        onClick={() => { setAmount(centsToDisplay(leftoverCents)); setOpen(true); }}
+        onClick={() => { setAmount("0"); setOpen(true); }}
         className="mt-1 text-[11px] font-semibold text-brand underline-offset-2 hover:underline"
       >
         Give it a job
@@ -715,6 +723,9 @@ function AssignLeftover({
                 autoFocus
                 className="w-full rounded-xl bg-background px-3 py-2.5 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
+              <p className="mt-1.5 text-xs leading-snug text-muted">
+                Enter how much of the unassigned income to assign. You can assign the rest later.
+              </p>
             </label>
 
             <div>

@@ -11,6 +11,7 @@ export function SubscriptionsModal({
   creditCards,
   onClose,
   showOnly,
+  initialSubscriptionEdit,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
@@ -18,10 +19,13 @@ export function SubscriptionsModal({
   creditCards?: CreditCardOption[];
   onClose: () => void;
   showOnly?: "subscriptions" | "irregular";
+  initialSubscriptionEdit?: string | "new";
 }) {
   const title =
     showOnly === "subscriptions"
-      ? "Manage Subscriptions"
+      ? initialSubscriptionEdit === "new"
+        ? "Add subscription"
+        : "Edit subscription"
       : showOnly === "irregular"
       ? "Manage Irregular Bills"
       : "Manage Subscriptions & Irregular Bills";
@@ -33,6 +37,7 @@ export function SubscriptionsModal({
         irregularBills={irregularBills}
         creditCards={creditCards}
         showOnly={showOnly}
+        initialSubscriptionEdit={initialSubscriptionEdit}
       />
     </ModalShell>
   );

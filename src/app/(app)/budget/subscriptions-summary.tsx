@@ -14,26 +14,6 @@ const DragHandle = (
   </svg>
 );
 
-function monthlyEquivalent(amountCents: number, cycle: string): number {
-  switch (cycle) {
-    case "annual":
-      return amountCents / 12;
-    case "quarterly":
-      return amountCents / 3;
-    case "weekly":
-      return amountCents * (52 / 12);
-    default:
-      return amountCents;
-  }
-}
-
-const GearIcon = (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-  </svg>
-);
-
 export function SubscriptionsSummaryCard({
   currency,
   subscriptions,
@@ -55,11 +35,12 @@ export function SubscriptionsSummaryCard({
   monthPlannedCents: number;
   monthSpentCents: number;
 }) {
-  const [managing, setManaging] = useState(false);
+  const [editorTarget, setEditorTarget] = useState<string | "new" | null>(null);
   const [rows, setRows] = useState(subscriptions);
   const [, startReorder] = useTransition();
   useEffect(() => {
-    setRows(subscriptions);
+    const reset = window.setTimeout(() => setRows(subscriptions), 0);
+    return () => window.clearTimeout(reset);
   }, [subscriptions]);
   const { dragOverId, startDrag } = usePointerReorder(rows, (next) => {
     setRows(next);
@@ -94,7 +75,6 @@ export function SubscriptionsSummaryCard({
             <button
               type="button"
               onClick={onOpenSpent}
-              title="View subscription transactions this month"
               className="cursor-pointer grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
             >
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(monthPlannedCents, currency)}</span></span>
@@ -108,11 +88,10 @@ export function SubscriptionsSummaryCard({
           )}
           <button
             type="button"
-            onClick={() => setManaging(true)}
-            aria-label="Manage subscriptions"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-muted transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            onClick={() => setEditorTarget("new")}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-brand/30 px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
           >
-            {GearIcon}
+            + Add
           </button>
         </div>
       </div>
@@ -124,7 +103,7 @@ export function SubscriptionsSummaryCard({
               <p className="text-sm text-muted">No subscriptions yet.</p>
               <button
                 type="button"
-                onClick={() => setManaging(true)}
+                onClick={() => setEditorTarget("new")}
                 className="rounded-lg px-3 py-1.5 text-sm font-semibold text-brand transition hover:bg-brand-soft"
               >
                 + Add one
@@ -152,11 +131,20 @@ export function SubscriptionsSummaryCard({
                   <div
                     key={s.id}
                     data-reorder-id={s.id}
-                    className={`group grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setEditorTarget(s.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setEditorTarget(s.id);
+                      }
+                    }}
+                    className={`group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm transition hover:bg-brand-soft/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
                   >
                     <span
-                      onMouseDown={(e) => { e.preventDefault(); startDrag(s.id); }}
-                      title="Drag to reorder"
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startDrag(s.id); }}
                       className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
                     >
                       {DragHandle}
@@ -166,12 +154,12 @@ export function SubscriptionsSummaryCard({
                       {/* Due badge sits inline right of the name on mobile —
                           no extra row. On sm+ this hides and the dedicated
                           Due column to the right takes over. */}
-                      <span className="shrink-0 sm:hidden">
+                      <span className="shrink-0 sm:hidden" onClick={(event) => event.stopPropagation()}>
                         <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
                       </span>
                     </div>
                     <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
-                    <span className="hidden sm:flex sm:items-center sm:justify-center">
+                    <span className="hidden sm:flex sm:items-center sm:justify-center" onClick={(event) => event.stopPropagation()}>
                       <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
                     </span>
                     <span className="hidden min-w-0 truncate text-xs text-muted sm:inline">{cardName ?? "—"}</span>
@@ -184,14 +172,15 @@ export function SubscriptionsSummaryCard({
         </div>
       ) : null}
 
-      {managing ? (
+      {editorTarget ? (
         <SubscriptionsModal
           currency={currency}
           subscriptions={subscriptions}
           irregularBills={irregularBills}
           creditCards={creditCards}
-          onClose={() => setManaging(false)}
+          onClose={() => setEditorTarget(null)}
           showOnly="subscriptions"
+          initialSubscriptionEdit={editorTarget}
         />
       ) : null}
     </section>
@@ -322,9 +311,7 @@ function buildDueDate(value: string, currentDate: string | null, monthly: boolea
 
 export function IrregularBillsSummaryCard({
   currency,
-  subscriptions,
   irregularBills,
-  creditCards,
   open,
   onToggle,
   onOpenSpent,
@@ -340,7 +327,8 @@ export function IrregularBillsSummaryCard({
   const [rows, setRows] = useState(irregularBills);
   const [, startReorder] = useTransition();
   useEffect(() => {
-    setRows(irregularBills);
+    const reset = window.setTimeout(() => setRows(irregularBills), 0);
+    return () => window.clearTimeout(reset);
   }, [irregularBills]);
   const { dragOverId, startDrag } = usePointerReorder(rows, (next) => {
     setRows(next);
@@ -369,7 +357,6 @@ export function IrregularBillsSummaryCard({
             <button
               type="button"
               onClick={onOpenSpent}
-              title="View irregular bill transactions this month"
               className="cursor-pointer grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_7rem] sm:gap-3 items-center rounded px-2 py-0.5 text-right text-muted transition hover:bg-brand-soft/50 hover:text-foreground"
             >
               <span>Plan: <span className="font-semibold text-foreground">{formatMoney(totalPlanned, currency)}</span></span>
@@ -410,7 +397,6 @@ export function IrregularBillsSummaryCard({
                   >
                     <span
                       onMouseDown={(e) => { e.preventDefault(); startDrag(b.id); }}
-                      title="Drag to reorder"
                       className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
                     >
                       {DragHandle}

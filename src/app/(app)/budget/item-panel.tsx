@@ -49,6 +49,7 @@ type Props = {
   onClose: () => void;
   onAddTransaction: () => void;
   onEditTransaction: (tx: TxData) => void;
+  onOverspentCovered: () => void;
 };
 
 // Move planned dollars from a category that has room into this overspent one.
@@ -60,12 +61,14 @@ function CoverOverspend({
   currency,
   shortfallCents,
   subOptions,
+  onCovered,
 }: {
   row: RowData;
   monthKey: string;
   currency: string;
   shortfallCents: number;
   subOptions: SubOption[];
+  onCovered: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [fromId, setFromId] = useState("");
@@ -141,7 +144,10 @@ function CoverOverspend({
                   start(async () => {
                     const res = await coverOverspend(fd);
                     if (res?.error) setError(res.error);
-                    else setOpen(false);
+                    else {
+                      setOpen(false);
+                      onCovered();
+                    }
                   });
                 }}
                 className="rounded-lg bg-brand px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
@@ -181,6 +187,7 @@ export function ItemPanel({
   onClose,
   onAddTransaction,
   onEditTransaction,
+  onOverspentCovered,
 }: Props) {
   const [showItemDetails, setShowItemDetails] = useState(false);
   const isPlainForm = !(kind === "debt" && row.debt) && !(kind === "savings" && row.savings);
@@ -257,6 +264,7 @@ export function ItemPanel({
           currency={currency}
           shortfallCents={-remaining}
           subOptions={subOptions}
+          onCovered={onOverspentCovered}
         />
       ) : null}
 
