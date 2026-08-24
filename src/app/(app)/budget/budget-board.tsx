@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
-import type { CategoryKind } from "@/lib/categories";
+import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { addToPlan, copyPlansFromPreviousMonth, restorePlansSnapshot, setRollover, setRolloverOverride } from "./actions";
 import { advanceSubscriptionRenewal } from "../subscriptions/actions";
@@ -193,19 +193,23 @@ export function BudgetBoard({
         spentBySubId.set(row.subId, row.spentCents);
       }
     }
+    // Every kind that can carry a due day (bills, expenses, debt) contributes
+    // to Due this week — not just the Bills group. Debt rows show what's still
+    // outstanding this month against the planned payment.
     const budgetItems = groups
-      .filter((group) => group.kind === "bills")
-      .flatMap((group) => group.rows)
-      .flatMap((row) => {
-        if (!row.dueDay) return [];
-        const due = new Date(start.getFullYear(), start.getMonth(), Math.min(row.dueDay, new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()));
+      .filter((group) => KINDS_WITH_DUE.includes(group.kind))
+      .flatMap((group) => group.rows.map((row) => ({ row, kind: group.kind })))
+      .flatMap(({ row, kind }) => {
+        const dueDay = kind === "debt" ? (row.debt?.dueDay ?? row.dueDay) : row.dueDay;
+        if (!dueDay) return [];
+        const due = new Date(start.getFullYear(), start.getMonth(), Math.min(dueDay, new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()));
         const amountCents = Math.max(0, row.plannedCents - row.spentCents);
         if (!inWindow(due) || amountCents <= 0) return [];
         const dueDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
         return [{
           id: row.subId,
           name: row.name,
-          kind: "bills" as const,
+          kind,
           subId: row.subId,
           dueDate,
           amountCents,

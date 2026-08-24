@@ -701,11 +701,9 @@ function SplitRows({
 }
 
 // The main "$ amount" field. Supports arithmetic expressions (e.g. "26.10 + 8.19"
-// via moneyExpressionToCents). On mobile the iOS numeric/decimal keypad omits
-// operator keys entirely, so a compact "+ − × ÷" chip strip appears while the
-// field is focused; each chip inserts its symbol into the input and keeps focus
-// so the keypad stays up. On desktop the operators can be typed directly, so
-// the strip is hidden (sm:hidden).
+// via moneyExpressionToCents), which desktop users can type directly. On mobile
+// the total is normally a single number, so the operator chips live on the split
+// rows instead (where multiple items get combined more often).
 function AmountInput({
   inputRef,
   defaultValue,
@@ -735,23 +733,6 @@ function AmountInput({
     if (inputRef.current) inputRef.current.value = display;
   };
 
-  // Insert a character at the caret without losing focus. Used by the mobile
-  // operator chips. Falls back to appending if the caret can't be read.
-  const insertAtCaret = (ch: string) => {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? el.value.length;
-    const end = el.selectionEnd ?? el.value.length;
-    const next = el.value.slice(0, start) + ch + el.value.slice(end);
-    setRaw(next);
-    el.value = next;
-    const caret = start + ch.length;
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(caret, caret);
-    });
-  };
-
   return (
     <div className="flex flex-col gap-1">
       <div className="relative">
@@ -779,34 +760,6 @@ function AmountInput({
           className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
         />
       </div>
-      {focused ? (
-        <div className="flex gap-1 sm:hidden">
-          {[
-            { label: "+", ch: "+" },
-            { label: "−", ch: "-" },
-            { label: "=", ch: "=" },
-          ].map((k) => (
-            <button
-              key={k.label}
-              type="button"
-              // Prevent the input from losing focus (which would close the
-              // iOS keypad and dismiss these chips before the tap registers).
-              onMouseDown={(e) => e.preventDefault()}
-              onTouchStart={(e) => e.preventDefault()}
-              onClick={() => {
-                if (k.ch === "=") {
-                  commit(raw);
-                  return;
-                }
-                insertAtCaret(k.ch);
-              }}
-              className="flex-1 rounded-lg bg-black/[0.06] px-2 py-2 text-base font-semibold tabular-nums text-foreground active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -815,6 +768,8 @@ function AmountInput({
 // Accepts arithmetic expressions (e.g. "45 + 12.50 - 3") — Enter evaluates.
 function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onChange: (cents: number) => void }) {
   const [raw, setRaw] = useState(amountCents === 0 ? "" : (amountCents / 100).toFixed(2));
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const commit = (value: string) => {
     const cents = moneyExpressionToCents(value);
@@ -822,29 +777,68 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
     setRaw(cents === 0 ? "" : (cents / 100).toFixed(2));
   };
 
+  const insertAtCaret = (ch: string) => {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? el.value.length;
+    const next = el.value.slice(0, start) + ch + el.value.slice(end);
+    setRaw(next);
+    el.value = next;
+    const caret = start + ch.length;
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
   return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={raw}
-      placeholder="0.00"
-      onFocus={(e) => e.currentTarget.select()}
-      onChange={(e) => {
-        setRaw(e.target.value);
-        const v = parseFloat(e.target.value);
-        onChange(isNaN(v) ? 0 : Math.round(v * 100));
-      }}
-      onKeyDown={(e) => {
-        // Enter evaluates the expression instead of submitting the form.
-        if (e.key === "Enter") {
-          e.preventDefault();
-          commit(raw);
-        }
-      }}
-      onBlur={() => commit(raw)}
-      title="Type a value or expression, e.g. 45 + 12.50"
-      className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-    />
+    <div className="flex flex-col items-end gap-1">
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="decimal"
+        value={raw}
+        placeholder="0.00"
+        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
+        onBlur={() => { setTimeout(() => setFocused(false), 150); commit(raw); }}
+        onChange={(e) => {
+          setRaw(e.target.value);
+          const v = parseFloat(e.target.value);
+          onChange(isNaN(v) ? 0 : Math.round(v * 100));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit(raw);
+          }
+        }}
+        className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+      {focused ? (
+        <div className="flex w-24 gap-1 sm:hidden">
+          {[
+            { label: "+", ch: "+" },
+            { label: "−", ch: "-" },
+            { label: "=", ch: "=" },
+          ].map((k) => (
+            <button
+              key={k.label}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.preventDefault()}
+              onClick={() => {
+                if (k.ch === "=") { commit(raw); return; }
+                insertAtCaret(k.ch);
+              }}
+              className="flex-1 rounded-lg bg-black/[0.06] px-1 py-1.5 text-sm font-semibold tabular-nums text-foreground active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

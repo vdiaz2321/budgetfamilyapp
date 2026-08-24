@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
@@ -643,6 +644,7 @@ function PlannedForm({
   onAddTransaction: () => void;
 }) {
   const [, startDue] = useTransition();
+  const router = useRouter();
 
   const plannedInput = (
     <label className="block flex-1 min-w-0">
@@ -669,10 +671,14 @@ function PlannedForm({
         action={(fd) => startDue(async () => {
           if (!autoPlanned) await upsertPlan(fd);
           await updateSubcategory(fd);
+          router.refresh();
         })}
         className="space-y-2"
       >
-        <input type="hidden" name="id" value={subId} />
+        {/* Never name a hidden input just "id" — that clashes with React 19's
+            form-action wiring (named form controls shadow form.id, and the
+            submit falls through to a native GET that reloads the page without
+            calling the server action). */}
         <input type="hidden" name="name" value={itemName} />
         <input type="hidden" name="subcategoryId" value={subId} />
         <input type="hidden" name="month" value={monthKey} />
@@ -912,6 +918,7 @@ function DebtForm({
   onAddTransaction: () => void;
 }) {
   const [pending, start] = useTransition();
+  const router = useRouter();
   const plannedRef = useRef<HTMLInputElement>(null);
   const d = row.debt!;
   // What the Snowball page currently schedules for this debt this month —
@@ -921,7 +928,7 @@ function DebtForm({
   const scheduledCents = d.minCents + (isSnowballFocus ? snowballExtraCents : 0);
   return (
     <Section title="Debt details">
-      <form id={`plan-form-${row.subId}`} action={(fd) => start(() => upsertDebtAndPlan(fd))} className="space-y-2">
+      <form id={`plan-form-${row.subId}`} action={(fd) => start(async () => { await upsertDebtAndPlan(fd); router.refresh(); })} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <label className="block">
@@ -1035,6 +1042,7 @@ function savingsPace(goalCents: number, startCents: number, monthlyCents: number
 
 function SavingsForm({ row, bucketOptions, monthKey, onAddTransaction }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; onAddTransaction: () => void }) {
   const [pending, start] = useTransition();
+  const router = useRouter();
   const s = row.savings!;
   const [goal, setGoal] = useState(centsToDisplay(s.goalCents));
   const [savingsStart, setSavingsStart] = useState(centsToDisplay(s.startCents));
@@ -1070,7 +1078,7 @@ function SavingsForm({ row, bucketOptions, monthKey, onAddTransaction }: { row: 
           <span>✓</span> On track
         </p>
       )}
-      <form action={(fd) => start(() => upsertSavingsGoalAndLink(fd))} className="space-y-2">
+      <form id={`plan-form-${row.subId}`} action={(fd) => start(async () => { await upsertSavingsGoalAndLink(fd); router.refresh(); })} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <Grid>

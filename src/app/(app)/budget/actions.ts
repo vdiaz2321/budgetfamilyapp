@@ -506,7 +506,10 @@ export async function addSubcategoriesBulk(
 
 export async function updateSubcategory(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
-  const id = String(formData.get("id") ?? "");
+  // Accept either "subcategoryId" (preferred — a hidden input named "id" in a
+  // React 19 form breaks the form action, see PlannedForm) or "id" for older
+  // callers like the inline rename form.
+  const id = String(formData.get("subcategoryId") ?? formData.get("id") ?? "");
   const name = String(formData.get("name") ?? "").trim();
   if (!id || !name) return;
 
@@ -537,6 +540,31 @@ export async function updateSubcategory(formData: FormData) {
     .update(update)
     .eq("id", id)
     .eq("household_id", householdId);
+
+  // If this subcategory is bound to any active subscriptions, shift each
+  // subscription's next_renewal_date to the new day-of-month. Without this
+  // sync, the "Due this week" strip and the Subscriptions page keep showing
+  // the old due date because they read next_renewal_date, not due_day.
+  if (dueDay != null) {
+    const { data: subs } = await supabase
+      .from("subscriptions")
+      .select("id, next_renewal_date")
+      .eq("household_id", householdId)
+      .eq("subcategory_id", id);
+    for (const sub of subs ?? []) {
+      if (!sub.next_renewal_date) continue;
+      const [y, m] = sub.next_renewal_date.split("-").map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const day = Math.min(dueDay, lastDay);
+      const iso = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      if (iso === sub.next_renewal_date) continue;
+      await supabase
+        .from("subscriptions")
+        .update({ next_renewal_date: iso, updated_at: new Date().toISOString() })
+        .eq("id", sub.id)
+        .eq("household_id", householdId);
+    }
+  }
 
   revalidatePath("/budget");
 }
