@@ -25,7 +25,7 @@ This repo is worked on from both a Mac and a PC, in VS Code, using Claude Code C
    ```
 6. **Create `.env.local`** in the project root (never committed — see `.env.example` for the shape):
    ```
-   NEXT_PUBLIC_SUPABASE_URL=https://mzkvyqiovomurvxjtlni.supabase.co
+   NEXT_PUBLIC_SUPABASE_URL=https://xgrvrbydzwprmrvsqoiz.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable key from Supabase dashboard → Project Settings → API>
    ```
    The "publishable" key is Supabase's current name for what used to be called "anon" — safe to expose client-side. Never put the "secret" (service_role) key in this file unless working on the server-side history importer.

@@ -28,7 +28,7 @@ Repo is already on GitHub. Steps are manual (Victor does in browser):
 1. Sign up at vercel.com with GitHub account (free, no card)
 2. "Add New Project" → import the Budget Family App repo
 3. Add env vars in Vercel project settings:
-   - `NEXT_PUBLIC_SUPABASE_URL` = `https://mzkvyqiovomurvxjtlni.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_URL` = `https://xgrvrbydzwprmrvsqoiz.supabase.co`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = publishable key from Supabase → Project Settings → API
 4. Click Deploy (first build ~2 min)
 5. Supabase Dashboard → Authentication → URL Configuration → add the Vercel URL to Site URL + Redirect URLs
@@ -112,5 +112,5 @@ Stack when we get there: Expo SDK 52, expo-router v4, NativeWind v4, Supabase di
 
 - **Migration 0032** (`supabase/migrations/0032_rollover_override.sql`): adds `override_cents` to `budget_rollovers`. Must be run in Supabase SQL Editor if not already done.
 - **Auto-planned rows**: Subscriptions and Irregular Bills budget rows derive their planned amount from the subscriptions/irregular-bills data — the planned input is read-only on those rows.
-- **Supabase project**: `mzkvyqiovomurvxjtlni.supabase.co`
+- **Supabase project**: `xgrvrbydzwprmrvsqoiz.supabase.co`
 - **Stack**: Next.js 16 App Router, React 19, TypeScript, Tailwind CSS v4, Supabase Postgres with RLS
