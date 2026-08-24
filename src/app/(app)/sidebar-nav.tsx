@@ -126,7 +126,11 @@ export default function SidebarNav({
                 {badge}
               </span>
             ) : (
-              <span className="ml-auto shrink-0 rounded-full bg-[#1A2238] px-2.5 py-1 text-[11px] font-semibold text-white">
+              // The sidebar is dark in both themes, so the pill lifts off it
+              // with a white overlay rather than a fixed hex — the old
+              // #1A2238 was within a couple of steps of the dark-mode
+              // sidebar (#1a1d36) and read as no pill at all.
+              <span className="ml-auto shrink-0 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white">
                 {badge}
               </span>
             )}
