@@ -1126,3 +1126,122 @@ export async function deleteBucket(formData: FormData) {
   await captureSnapshots(supabase, householdId);
   revalidate();
 }
+
+// Move money between two of your own accounts (USAA checking → Amex, cash →
+// savings bucket, and so on).
+//
+// One transaction row carries the whole movement: `account_id` is the source
+// (debit) and `paid_to_account_id` the destination (credit) — the same shape
+// `payCard` uses, so Insights already excludes it from spending and the
+// Transactions grid already labels it by destination account.
+//
+// `subcategory_id` stays null on purpose. Moving your own money between your
+// own accounts is not income and not spending, so it must not touch Planned
+// or Spent — net worth is unchanged by definition. Funding a savings GOAL is
+// a different act with a real budget line, and still belongs on the Budget
+// page's Savings row; this action deliberately doesn't try to be both.
+export async function transferBetweenAccounts(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+
+  const fromAccountId = String(formData.get("fromAccountId") ?? "");
+  const toAccountId = String(formData.get("toAccountId") ?? "");
+  const fromBucketId = String(formData.get("fromBucketId") ?? "").trim() || null;
+  const toBucketId = String(formData.get("toBucketId") ?? "").trim() || null;
+  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  const dateStr =
+    String(formData.get("date") ?? "").trim() || new Date().toISOString().slice(0, 10);
+  const memo = String(formData.get("memo") ?? "").trim() || null;
+
+  if (!fromAccountId || !toAccountId) return { error: "Pick both accounts." };
+  if (fromAccountId === toAccountId) return { error: "Pick two different accounts." };
+  if (amountCents <= 0) return { error: "Enter an amount." };
+
+  // Both accounts, fetched together so one round trip validates ownership.
+  const { data: accts } = await supabase
+    .from("accounts")
+    .select("id, name, kind")
+    .eq("household_id", householdId)
+    .in("id", [fromAccountId, toAccountId]);
+  const from = (accts ?? []).find((a) => a.id === fromAccountId);
+  const to = (accts ?? []).find((a) => a.id === toAccountId);
+  if (!from || !to) return { error: "Account not found." };
+
+  // Cards and investments each have their own flow that does more than move a
+  // balance — paying a card also lowers its tracked debt, and an investment
+  // withdrawal has cost-basis meaning. Sending them through here would move
+  // the money while silently skipping that, so refuse and say where to go.
+  if (to.kind === "credit_card" || from.kind === "credit_card") {
+    return { error: "For a card, use Pay card on the Accounts page." };
+  }
+  if (to.kind === "investment" || from.kind === "investment") {
+    return { error: "For an investment account, use Transfer / Withdraw on Investments." };
+  }
+
+  // An account that holds buckets keeps its balance as the sum of them
+  // (adjustAccountLedger refuses such accounts outright), so the transfer has
+  // to name which bucket the money leaves from or lands in.
+  const bucketCounts = new Map<string, number>();
+  for (const id of [fromAccountId, toAccountId]) {
+    const { count } = await supabase
+      .from("buckets")
+      .select("id", { count: "exact", head: true })
+      .eq("account_id", id)
+      .eq("household_id", householdId);
+    bucketCounts.set(id, count ?? 0);
+  }
+  if (bucketCounts.get(fromAccountId) && !fromBucketId) {
+    return { error: `Pick which ${from.name} bucket the money comes from.` };
+  }
+  if (bucketCounts.get(toAccountId) && !toBucketId) {
+    return { error: `Pick which ${to.name} bucket the money goes into.` };
+  }
+
+  // Buckets must belong to the account they were chosen for — otherwise a
+  // stale form value could move money into another account's bucket.
+  for (const [bucketId, accountId] of [
+    [fromBucketId, fromAccountId],
+    [toBucketId, toAccountId],
+  ] as const) {
+    if (!bucketId) continue;
+    const { data: bucket } = await supabase
+      .from("buckets")
+      .select("id")
+      .eq("id", bucketId)
+      .eq("account_id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    if (!bucket) return { error: "That bucket doesn't belong to the account picked." };
+  }
+
+  const { error: txError } = await supabase.from("transactions").insert({
+    household_id: householdId,
+    occurred_on: dateStr,
+    amount_cents: amountCents,
+    account_id: fromAccountId,
+    paid_to_account_id: toAccountId,
+    bucket_id: fromBucketId,
+    subcategory_id: null,
+    is_withdrawal: false,
+    memo: memo ?? `Transfer to ${to.name}`,
+    source: "manual",
+  });
+  if (txError) return { error: "Couldn't record the transfer — please try again." };
+
+  // Debit the source, credit the destination.
+  if (fromBucketId) {
+    await adjustBucketBalance(supabase, householdId, fromBucketId, -amountCents);
+  } else {
+    await adjustAccountLedger(supabase, householdId, fromAccountId, -amountCents);
+  }
+  if (toBucketId) {
+    await adjustBucketBalance(supabase, householdId, toBucketId, amountCents);
+  } else {
+    await adjustAccountLedger(supabase, householdId, toAccountId, amountCents);
+  }
+
+  await captureSnapshots(supabase, householdId);
+  revalidate();
+  revalidatePath("/transactions");
+  revalidatePath("/networth");
+  return { error: null };
+}

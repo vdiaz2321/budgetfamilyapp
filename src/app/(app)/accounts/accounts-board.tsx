@@ -14,6 +14,7 @@ import {
   logCreditCardRewardActivity,
   setCreditCardRewardActivityArchived,
   payCard,
+  transferBetweenAccounts,
   reorderAccounts,
   reorderBuckets,
   reopenCard,
@@ -298,6 +299,7 @@ export function AccountsBoard({
   historyMonths,
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
   // filtering DOES NOT extend to the Credit Card Rewards section below —
@@ -638,10 +640,17 @@ export function AccountsBoard({
       <div className="flex items-center justify-end gap-2">
         <button
           type="button"
+          onClick={() => setTransferOpen(true)}
+          className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+        >
+          Transfer Funds
+        </button>
+        <button
+          type="button"
           onClick={() => setAddOpen(true)}
           className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
         >
-          + Add account
+          Add account
         </button>
         <button
           type="button"
@@ -712,6 +721,13 @@ export function AccountsBoard({
         })}
       </div>
       {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} /> : null}
+      {transferOpen ? (
+        <TransferModal
+          accounts={accounts}
+          allBuckets={accounts.flatMap((a) => a.buckets)}
+          onClose={() => setTransferOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2103,6 +2119,170 @@ function LabeledInput({
       )}
       {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
     </label>
+  );
+}
+
+// Move money between two of your own accounts. Budget-neutral by design —
+// see `transferBetweenAccounts` for why funding a savings goal stays on the
+// Budget page instead of being folded in here.
+function TransferModal({
+  accounts,
+  allBuckets,
+  onClose,
+}: {
+  accounts: AccountData[];
+  allBuckets: BucketData[];
+  onClose: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Cards and investments each have a dedicated flow that does more than move
+  // a balance, so they're not offered here at all rather than being offered
+  // and then refused on submit.
+  const movable = accounts.filter((a) => a.kind !== "credit_card" && a.kind !== "investment");
+  const [fromId, setFromId] = useState<string>(movable[0]?.id ?? "");
+  const [toId, setToId] = useState<string>(movable[1]?.id ?? "");
+  const [fromBucketId, setFromBucketId] = useState("");
+  const [toBucketId, setToBucketId] = useState("");
+
+  const fromBuckets = allBuckets.filter((b) => b.accountId === fromId);
+  const toBuckets = allBuckets.filter((b) => b.accountId === toId);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm space-y-3 rounded-xl bg-surface p-4 shadow-lg ring-1 ring-black/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold">Transfer between accounts</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form
+          action={(fd) =>
+            start(async () => {
+              setErrorMsg(null);
+              const r = await transferBetweenAccounts(fd);
+              if (r?.error) setErrorMsg(r.error);
+              else onClose();
+            })
+          }
+          className="space-y-2"
+        >
+          <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
+          <LabeledInput
+            label="Date"
+            name="date"
+            type="date"
+            defaultValue={new Date().toISOString().slice(0, 10)}
+            required
+          />
+
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+              From
+            </span>
+            <select
+              name="fromAccountId"
+              value={fromId}
+              onChange={(e) => { setFromId(e.target.value); setFromBucketId(""); }}
+              required
+              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              {movable.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+          {fromBuckets.length > 0 ? (
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                From bucket
+              </span>
+              <select
+                name="fromBucketId"
+                value={fromBucketId}
+                onChange={(e) => setFromBucketId(e.target.value)}
+                required
+                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Choose a bucket…</option>
+                {fromBuckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <label className="block">
+            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+              To
+            </span>
+            <select
+              name="toAccountId"
+              value={toId}
+              onChange={(e) => { setToId(e.target.value); setToBucketId(""); }}
+              required
+              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            >
+              {movable.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </label>
+          {toBuckets.length > 0 ? (
+            <label className="block">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                To bucket
+              </span>
+              <select
+                name="toBucketId"
+                value={toBucketId}
+                onChange={(e) => setToBucketId(e.target.value)}
+                required
+                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Choose a bucket…</option>
+                {toBuckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <LabeledInput label="Note" name="memo" />
+          {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={pending}
+              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+            >
+              {pending ? "Transferring…" : "Transfer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
