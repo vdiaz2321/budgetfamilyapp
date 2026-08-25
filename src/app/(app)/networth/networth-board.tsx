@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setNetworthHistory, upsertNetworthYear } from "./actions";
@@ -97,7 +97,7 @@ export type GridRow = {
   // Funding or a mortgage whose matching home equity is tracked elsewhere).
   excluded?: boolean;
   // Same grouping as the sidebar, so the two views read as one system.
-  section: "Banking" | "Investments" | "Kids Funding" | "Credit Cards" | "Loans";
+  section: "Banking" | "Investments" | "Kids Funding" | "Debt";
   balances: (number | null)[]; // aligned to gridMonths
   // A bucket / "Unallocated" sub-row indented under its parent account.
   indent?: boolean;
@@ -124,8 +124,7 @@ export type GridRow = {
 const SECTION_ORDER: GridRow["section"][] = [
   "Banking",
   "Investments",
-  "Credit Cards",
-  "Loans",
+  "Debt",
   "Kids Funding",
 ];
 
@@ -921,7 +920,7 @@ function BalanceGrid({
   // it read as a distracting green wash (see feedback: "looks horrible").
   const zebraBg = (r: GridRow) => (r.indent ? "bg-background/30" : "");
 
-  const stickyCls = "sticky left-0 z-10 min-w-[14rem] pr-3";
+  const stickyCls = "sticky left-0 z-10 pr-2 sm:pr-3";
 
   // A handful of months fills the card width evenly (Account column gets the
   // rest); once there are more than that, fixed compact columns + horizontal
@@ -959,18 +958,34 @@ function BalanceGrid({
         <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
       <div className={wideLayout ? "" : "overflow-x-auto"}>
-        <table className={`border-collapse text-sm ${wideLayout ? "w-full table-fixed" : ""}`}>
-          {wideLayout ? (
-            <colgroup>
-              <col style={{ width: `${acctPct}%` }} />
-              {months.map((m) => (
-                <col key={m} style={{ width: `${monthPct}%` }} />
-              ))}
-            </colgroup>
-          ) : null}
+        <table
+          className={`table-fixed border-collapse text-sm ${
+            wideLayout
+              ? "w-full"
+              : "w-[calc(10.5rem+var(--month-count)*7rem)] sm:w-[calc(14rem+var(--month-count)*7rem)]"
+          }`}
+          style={wideLayout ? undefined : ({ "--month-count": months.length } as CSSProperties)}
+        >
+          <colgroup>
+            {wideLayout ? (
+              <>
+               <col style={{ width: `${acctPct}%` }} />
+               {months.map((m) => (
+                 <col key={m} style={{ width: `${monthPct}%` }} />
+               ))}
+              </>
+            ) : (
+              <>
+                <col className="w-[10.5rem] sm:w-56" />
+                {months.map((m) => (
+                  <col key={m} style={{ width: "7rem" }} />
+                ))}
+              </>
+            )}
+          </colgroup>
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-line">
-              <th className={`${stickyCls} bg-surface ${wideLayout ? "" : "min-w-[14rem]"} px-4 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted`}>
+              <th className={`${stickyCls} bg-surface px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted sm:px-4`}>
                 Account
               </th>
               {months.map((m) => (
@@ -1000,7 +1015,7 @@ function BalanceGrid({
               });
               const totalRow = (
                 <tr className="border-y-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
-                  <td className="sticky left-0 z-10 min-w-[14rem] bg-surface pr-3 px-4 py-2">
+                  <td className="sticky left-0 z-10 bg-surface px-3 py-2 pr-2 sm:px-4 sm:pr-3">
                     <span className="whitespace-nowrap text-sm font-bold uppercase tracking-wider text-foreground">
                       Total Net Worth
                     </span>
@@ -1042,7 +1057,7 @@ function BalanceGrid({
                           </>
                         ) : null}
                   <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
-                    <td className="sticky left-0 z-10 min-w-[14rem] bg-surface pr-3 p-0">
+                    <td className="sticky left-0 z-10 bg-surface p-0 pr-2 sm:pr-3">
                       <button
                         type="button"
                         onClick={() => toggle(g.section)}
@@ -1060,7 +1075,7 @@ function BalanceGrid({
                         <span className="whitespace-nowrap text-sm font-bold uppercase tracking-wider text-foreground">
                           {g.section}
                         </span>
-                        <span className="whitespace-nowrap text-xs font-normal normal-case text-muted">
+                        <span className="hidden whitespace-nowrap text-xs font-normal normal-case text-muted sm:inline">
                           {accountCount} {accountCount === 1 ? "account" : "accounts"}
                         </span>
                       </button>

@@ -15,7 +15,10 @@ type TransactionQueryRow = {
   subcategory_id: string | null;
   payee_id: string | null;
   account_id: string | null;
+  bucket_id: string | null;
   paid_to_account_id: string | null;
+  paid_to_bucket_id: string | null;
+  movement_type: "account_transfer" | "card_payment" | "investment_transfer" | null;
   cleared: boolean | null;
   is_withdrawal: boolean | null;
 };
@@ -41,7 +44,7 @@ export default async function TransactionsPage({
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, paid_to_account_id, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -129,6 +132,7 @@ export default async function TransactionsPage({
   );
   const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  const accountKindById = new Map((accounts ?? []).map((a) => [a.id, a.kind]));
 
   const subOptions: SubOption[] = (subs ?? []).map((s) => {
     const planned = plannedBySub.get(s.id) ?? 0;
@@ -165,26 +169,47 @@ export default async function TransactionsPage({
     (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.name });
   }
 
-  const transactions: TxData[] = txRows.map((t) => ({
-    id: t.id,
-    date: t.occurred_on,
-    amountCents: t.amount_cents,
-    memo: t.memo,
-    payee: t.paid_to_account_id
-      ? accountNameById.get(t.paid_to_account_id) ?? "Credit card"
-      : t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
-    subId: t.subcategory_id ?? null,
-    subName: t.paid_to_account_id
-      ? "Card payment"
-      : t.subcategory_id
-      ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
-      : "Uncategorized",
-    accountId: t.account_id ?? null,
-    kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
-    isCardPayment: Boolean(t.paid_to_account_id),
-    cleared: t.cleared ?? false,
-    isWithdrawal: t.is_withdrawal ?? false,
-  }));
+  const transactions: TxData[] = txRows.map((t) => {
+    const movementType = t.movement_type ?? (
+      t.paid_to_account_id
+        ? accountKindById.get(t.paid_to_account_id) === "credit_card"
+          ? "card_payment"
+          : accountKindById.get(t.account_id ?? "") === "investment"
+            ? "investment_transfer"
+            : "account_transfer"
+        : null
+    );
+    return {
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: t.amount_cents,
+      memo: t.memo,
+      payee: t.paid_to_account_id
+        ? accountNameById.get(t.paid_to_account_id) ?? "Destination account"
+        : t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+      subId: t.subcategory_id ?? null,
+      subName: movementType === "account_transfer"
+        ? "Transfer"
+        : movementType === "investment_transfer"
+          ? "Investment transfer"
+          : movementType === "card_payment"
+            ? "Card payment"
+            : t.subcategory_id
+              ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
+              : "Uncategorized",
+      accountId: t.account_id ?? null,
+      toAccountId: t.paid_to_account_id ?? null,
+      fromBucketId: t.bucket_id ?? null,
+      toBucketId: t.paid_to_bucket_id ?? null,
+      kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
+      movementType,
+      isCardPayment: movementType === "card_payment",
+      isTransfer: movementType === "account_transfer",
+      isInvestmentTransfer: movementType === "investment_transfer",
+      cleared: t.cleared ?? false,
+      isWithdrawal: t.is_withdrawal ?? false,
+    };
+  });
 
   const payeeLineItems: PayeeLineItem[] = [
     ...(subscriptions ?? []).map((s) => ({
@@ -213,6 +238,7 @@ export default async function TransactionsPage({
       subOptions={subOptions}
       accountOptions={accountOptions}
       bucketsByAccount={bucketsByAccount}
+      transferBuckets={(buckets ?? []).map((b) => ({ id: b.id, accountId: b.account_id, name: b.name }))}
       payeeOptions={payees ?? []}
       payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}

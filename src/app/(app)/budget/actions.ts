@@ -1145,11 +1145,31 @@ export async function updateTransactionAmount(formData: FormData) {
 
   const { data: tx } = await supabase
     .from("transactions")
-    .select("amount_cents, subcategory_id, category_id, account_id, bucket_id, is_withdrawal")
+    .select("occurred_on, amount_cents, memo, subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, is_withdrawal")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
   if (!tx || tx.amount_cents === amountCents) return;
+
+  if (tx.movement_type === "account_transfer") {
+    const { error } = await supabase.rpc("mutate_account_transfer", {
+      p_action: "update",
+      p_transaction_id: id,
+      p_occurred_on: tx.occurred_on,
+      p_amount_cents: amountCents,
+      p_from_account_id: tx.account_id,
+      p_to_account_id: tx.paid_to_account_id,
+      p_from_bucket_id: tx.bucket_id,
+      p_to_bucket_id: tx.paid_to_bucket_id,
+      p_memo: tx.memo,
+    });
+    if (!error) await captureSnapshots(supabase, householdId);
+    revalidatePath("/budget");
+    revalidatePath("/transactions");
+    revalidatePath("/accounts");
+    revalidatePath("/networth");
+    return;
+  }
 
   const deltaCents = amountCents - tx.amount_cents;
   await supabase
@@ -1204,10 +1224,32 @@ export async function deleteTransaction(formData: FormData) {
 
   const { data: tx } = await supabase
     .from("transactions")
-    .select("subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal")
+    .select("subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal, movement_type")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
+
+  if (tx?.movement_type === "account_transfer") {
+    const { error } = await supabase.rpc("mutate_account_transfer", {
+      p_action: "delete",
+      p_transaction_id: id,
+      p_occurred_on: null,
+      p_amount_cents: null,
+      p_from_account_id: null,
+      p_to_account_id: null,
+      p_from_bucket_id: null,
+      p_to_bucket_id: null,
+      p_memo: null,
+    });
+    if (!error) await captureSnapshots(supabase, householdId);
+    revalidatePath("/budget");
+    revalidatePath("/transactions");
+    revalidatePath("/accounts");
+    revalidatePath("/networth");
+    revalidatePath("/annual");
+    revalidatePath("/savings");
+    return;
+  }
 
   await supabase
     .from("transactions")

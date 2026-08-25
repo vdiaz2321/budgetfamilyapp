@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import React, { useEffect, useRef, useState, useTransition } from "react";
-import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { centsToDisplay, centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
   addAccount,
@@ -207,7 +207,7 @@ const SECTIONS: Section[] = [
   {
     key: "banking",
     label: "Banking",
-    dot: "bg-brand",
+    dot: "bg-[color:var(--viz-savings)]",
     liability: false,
     match: (a) => !a.isKidsAccount && (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "cash"),
     kindLabels: { checking: "Checking", savings_bucket: "Savings", cash: "Cash" },
@@ -262,7 +262,7 @@ const SECTIONS: Section[] = [
   {
     key: "loans",
     label: "Debts",
-    dot: "bg-accent",
+    dot: "bg-[color:var(--viz-debt)]",
     liability: true,
     match: (a) => a.kind === "debt_loan",
     kindLabels: { debt_loan: "Loan" },
@@ -273,7 +273,7 @@ const SECTIONS: Section[] = [
   {
     key: "kids",
     label: "Kids Funding",
-    dot: "bg-violet-500",
+    dot: "bg-[color:var(--viz-bills)]",
     liability: false,
     match: (a) => a.isKidsAccount,
     kindLabels: { checking: "Checking", savings_bucket: "Savings", investment: "Investment" },
@@ -641,21 +641,21 @@ export function AccountsBoard({
         <button
           type="button"
           onClick={() => setTransferOpen(true)}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+          className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
         >
           Transfer Funds
         </button>
         <button
           type="button"
           onClick={() => setAddOpen(true)}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+          className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
         >
           Add account
         </button>
         <button
           type="button"
           onClick={toggleAll}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand shadow-sm ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-sm ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
         >
           {allOpen ? "Collapse all" : "Expand all"}
         </button>
@@ -2636,11 +2636,11 @@ function AccountSection({
         <div className="border-t border-line">
           {localAccounts.length > 0 || extraDebts.length > 0 ? (
             localAccounts.length === 0 && extraDebts.length > 0 ? (
-              <div className="grid grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              <div className="grid grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
                 <span />
                 <span className="text-center">{monthAbbr(historyMonths[0])}</span>
-                <span className="text-center">{monthAbbr(historyMonths[1])}</span>
-                <span className="text-center">{monthAbbr(historyMonths[2])}</span>
+                <span className="hidden text-center @[560px]:block">{monthAbbr(historyMonths[1])}</span>
+                <span className="hidden text-center @[560px]:block">{monthAbbr(historyMonths[2])}</span>
               </div>
             ) : (
               <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -2689,7 +2689,7 @@ function AccountSection({
               {extraDebts.map((d) => (
                 <li
                   key={`debt:${d.subcategoryId}`}
-                  className="grid grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 px-4 py-1.5"
+                  className="grid grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 px-4 py-1.5"
                 >
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
                   {/* Same as account rows: each column reads the snapshot for
@@ -2697,19 +2697,21 @@ function AccountSection({
                   <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
                     {formatMoney(d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents, currency)}
                   </span>
-                  {[1, 2].map((col) => {
-                    const v = d.balancesByMonth?.[historyMonths[col]] ?? null;
-                    return (
-                      <span key={col} className="flex w-full justify-end">
-                        {v != null ? (
-                          <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
-                            <span className="text-xs text-muted">{currencySymbol(currency)}</span>
-                            <span className="text-sm">{centsToDisplay(v)}</span>
-                          </span>
-                        ) : <span className="text-sm text-muted">—</span>}
-                      </span>
-                    );
-                  })}
+                  <div className="hidden @[560px]:contents">
+                    {[1, 2].map((col) => {
+                      const v = d.balancesByMonth?.[historyMonths[col]] ?? null;
+                      return (
+                        <span key={col} className="flex w-full justify-end">
+                          {v != null ? (
+                            <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
+                              <span className="text-xs text-muted">{currencySymbol(currency)}</span>
+                              <span className="text-sm">{centsToGroupedDisplay(v)}</span>
+                            </span>
+                          ) : <span className="text-sm text-muted">—</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -2799,7 +2801,7 @@ function BudgetDebtsSection({
                   </div>
                   <span className="inline-flex shrink-0 items-baseline gap-0 font-semibold tabular-nums">
                     <span className="text-sm text-muted">{currencySymbol(currency)}</span>
-                    <span className={`text-[0.9375rem] ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>{centsToDisplay(d.balanceCents)}</span>
+                    <span className={`text-[0.9375rem] ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>{centsToGroupedDisplay(d.balanceCents)}</span>
                   </span>
                 </li>
               );
@@ -2858,7 +2860,7 @@ function AccountRow({
   const balanceFor = (a: AccountData, columnIndex: number): number | null =>
     a.balancesByMonth?.[historyMonths[columnIndex]] ?? null;
 
-  const rowBg = editing ? "bg-brand-soft/30" : "hover:bg-brand-soft/25";
+  const rowBg = editing ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/[0.03] dark:hover:bg-white/[0.05]";
 
   return (
     <li
@@ -2873,7 +2875,7 @@ function AccountRow({
             onClick={onToggleBuckets}
             title={bucketsOpen ? "Hide buckets" : "Show buckets"}
             aria-expanded={bucketsOpen}
-            className="self-stretch flex w-full items-center justify-center rounded text-muted hover:bg-brand-soft/50 hover:text-brand"
+            className="self-stretch flex w-full items-center justify-center rounded text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
           >
             <svg
               width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -2890,18 +2892,18 @@ function AccountRow({
         <div
           role={allowBuckets ? "button" : undefined}
           onClick={allowBuckets ? onToggleBuckets : undefined}
-          className="flex min-w-0 w-full cursor-default items-center gap-1.5 text-left"
+          className="flex min-w-0 w-full cursor-default items-center gap-1.5 overflow-hidden text-left"
         >
-          <span className={`shrink-0 truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
+          <span className={`min-w-0 truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
           {account.holder ? (
-            <EditPill onClick={onToggleEdit} className="bg-brand-soft text-brand hover:ring-brand">
+            <EditPill onClick={onToggleEdit} className="hidden bg-black/5 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-white/10">
               {account.holder}
             </EditPill>
           ) : null}
           {account.ownership === "joint" ? (
-            <EditPill onClick={onToggleEdit} className="bg-violet-500/10 text-violet-700 hover:ring-violet-500 dark:text-violet-300">
+            <EditPill onClick={onToggleEdit} className="hidden bg-black/5 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-white/10">
               Joint
             </EditPill>
           ) : null}
@@ -2919,11 +2921,11 @@ function AccountRow({
             </EditPill>
           ) : null}
           {bucketCount > 0 ? (
-            <span className="shrink-0 text-[11px] text-muted">
+            <span className="hidden shrink-0 text-[11px] text-muted @[560px]:inline">
               {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
             </span>
           ) : null}
-          {maskAccountNumber(account.accountNumber) ? <span className="shrink-0 text-[11px] text-muted">{maskAccountNumber(account.accountNumber)}</span> : null}
+          {maskAccountNumber(account.accountNumber) ? <span className="hidden shrink-0 text-[11px] text-muted @[560px]:inline">{maskAccountNumber(account.accountNumber)}</span> : null}
           {!account.active ? <span className="shrink-0 text-[11px] text-muted">archived</span> : null}
         </div>
 
@@ -3174,7 +3176,7 @@ function BucketBalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = centsToDisplay(balanceCents);
+  const initial = centsToGroupedDisplay(balanceCents);
 
   return (
     <form
@@ -3222,7 +3224,7 @@ function HistoricBucketBalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = balanceCents == null ? "" : centsToDisplay(balanceCents);
+  const initial = balanceCents == null ? "" : centsToGroupedDisplay(balanceCents);
 
   return (
     <form
@@ -3347,7 +3349,7 @@ function DerivedBalance({
     >
       <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
       <span className={`text-[0.9375rem] tabular-nums ${negative ? "text-negative font-semibold" : ""}`}>
-        {centsToDisplay(balanceCents)}
+        {centsToGroupedDisplay(balanceCents)}
       </span>
     </div>
   );
@@ -3371,7 +3373,7 @@ function HistoricBalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = balanceCents == null ? "" : centsToDisplay(balanceCents);
+  const initial = balanceCents == null ? "" : centsToGroupedDisplay(balanceCents);
 
   return (
     <form
@@ -3425,7 +3427,7 @@ function BalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = centsToDisplay(balanceCents);
+  const initial = centsToGroupedDisplay(balanceCents);
 
   return (
     <div className="flex w-full items-center justify-end">

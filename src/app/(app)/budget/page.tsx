@@ -64,7 +64,7 @@ export default async function BudgetPage({
     supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, paid_to_account_id, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id)
       .gte("occurred_on", month.firstOfMonth)
@@ -121,6 +121,7 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, (s as { linked_account_id?: string | null }).linked_account_id ?? null]),
   );
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+  const accountKindById = new Map((accounts ?? []).map((a) => [a.id, a.kind]));
   // Match a bill row's tokens against payee names so ad-hoc naming
   // ("BOC Bike Repair" tx vs "Bike Repairs" bill) still credits the row.
   const billTokens = (name: string) =>
@@ -475,26 +476,47 @@ export default async function BudgetPage({
     }));
   bucketOptions.push(...bareInvestmentOptions);
 
-  const transactions: TxData[] = (txRows ?? []).map((t) => ({
-    id: t.id,
-    date: t.occurred_on,
-    amountCents: t.amount_cents,
-    memo: t.memo,
-    payee: t.paid_to_account_id
-      ? accountNameById.get(t.paid_to_account_id) ?? "Credit card"
-      : t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
-    subId: t.subcategory_id ?? null,
-    subName: t.paid_to_account_id
-      ? "Card payment"
-      : t.subcategory_id
-      ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
-      : "Uncategorized",
-    accountId: t.account_id ?? null,
-    kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
-    isCardPayment: Boolean(t.paid_to_account_id),
-    cleared: t.cleared ?? false,
-    isWithdrawal: t.is_withdrawal ?? false,
-  }));
+  const transactions: TxData[] = (txRows ?? []).map((t) => {
+    const movementType = t.movement_type ?? (
+      t.paid_to_account_id
+        ? accountKindById.get(t.paid_to_account_id) === "credit_card"
+          ? "card_payment"
+          : accountKindById.get(t.account_id ?? "") === "investment"
+            ? "investment_transfer"
+            : "account_transfer"
+        : null
+    );
+    return {
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: t.amount_cents,
+      memo: t.memo,
+      payee: t.paid_to_account_id
+        ? accountNameById.get(t.paid_to_account_id) ?? "Destination account"
+        : t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+      subId: t.subcategory_id ?? null,
+      subName: movementType === "account_transfer"
+        ? "Transfer"
+        : movementType === "investment_transfer"
+          ? "Investment transfer"
+          : movementType === "card_payment"
+            ? "Card payment"
+            : t.subcategory_id
+              ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
+              : "Uncategorized",
+      accountId: t.account_id ?? null,
+      toAccountId: t.paid_to_account_id ?? null,
+      fromBucketId: t.bucket_id ?? null,
+      toBucketId: t.paid_to_bucket_id ?? null,
+      kind: t.subcategory_id ? kindBySub.get(t.subcategory_id) ?? null : null,
+      movementType,
+      isCardPayment: movementType === "card_payment",
+      isTransfer: movementType === "account_transfer",
+      isInvestmentTransfer: movementType === "investment_transfer",
+      cleared: t.cleared ?? false,
+      isWithdrawal: t.is_withdrawal ?? false,
+    };
+  });
 
   const payeeLineItems: PayeeLineItem[] = [
     ...(subscriptions ?? [])

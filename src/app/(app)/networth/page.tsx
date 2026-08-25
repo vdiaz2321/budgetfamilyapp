@@ -65,13 +65,12 @@ export default async function NetworthPage() {
       .order("month"),
   ]);
 
-  // Same grouping as the sidebar (Budget / Investments / Credit Cards / Loans)
-  // so the two views read as one system.
+  // Debt rows share one Net Worth section so this view matches the sidebar and
+  // headline metric, regardless of whether the underlying debt is a card or loan.
   const { data: debtRows } = await supabase
     .from("debts")
     .select("subcategory_id, debt_kind")
     .eq("household_id", household.id);
-  const debtKindBySub = new Map((debtRows ?? []).map((d) => [d.subcategory_id, d.debt_kind as string | null]));
   const excludedDebtIds = new Set(
     (debtRows ?? [])
       .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind))
@@ -92,8 +91,7 @@ export default async function NetworthPage() {
     if (isKidsAccount.has(accountId)) return "Kids Funding";
     return accountKindById.get(accountId) === "investment" ? "Investments" : "Banking";
   };
-  const sectionForDebt = (subcategoryId: string): GridRow["section"] =>
-    debtKindBySub.get(subcategoryId) === "credit_card" ? "Credit Cards" : "Loans";
+  const sectionForDebt = (): GridRow["section"] => "Debt";
 
   // Which "bucket" of the four section totals does an asset account feed?
   //  - investment kind → Stocks
@@ -245,7 +243,7 @@ export default async function NetworthPage() {
         liability: true,
         linked: false,
         excluded: excludedDebtIds.has(s.subcategory_id),
-        section: sectionForDebt(s.subcategory_id),
+        section: sectionForDebt(),
         balances: months.map(() => null),
       };
       debtGrid.set(s.subcategory_id, r);

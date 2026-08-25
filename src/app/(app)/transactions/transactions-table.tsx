@@ -8,6 +8,7 @@ import { deleteTransaction, toggleCleared, updateTransactionAmount } from "../bu
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { ImportCsvModal } from "./import-csv-modal";
+import { TransferEditorModal } from "./transfer-editor-modal";
 import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 
@@ -34,6 +35,7 @@ type Props = {
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   bucketsByAccount?: import("../budget/types").BucketsByAccount;
+  transferBuckets?: { id: string; accountId: string; name: string }[];
   payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   dateRange: { from: string | null; to: string | null };
@@ -46,6 +48,7 @@ export function TransactionsTable({
   subOptions,
   accountOptions,
   bucketsByAccount = {},
+  transferBuckets = [],
   payeeOptions = [],
   payeeLineItems = [],
   dateRange,
@@ -53,6 +56,7 @@ export function TransactionsTable({
   const router = useRouter();
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
+  const [transferEdit, setTransferEdit] = useState<TxData | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -92,10 +96,15 @@ export function TransactionsTable({
     return next;
   });
   const selectedTxs = () => transactions.filter((t) => selectedIds.has(t.id));
-  const selectedNetCents = () => selectedTxs().reduce((sum, t) => sum + (t.kind === "income" ? t.amountCents : -t.amountCents), 0);
+  const selectedNetCents = () => selectedTxs().reduce(
+    (sum, t) => sum + (t.movementType ? 0 : t.kind === "income" ? t.amountCents : -t.amountCents),
+    0,
+  );
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
   const batchDelete = () => {
-    const ids = [...selectedIds];
+    const ids = selectedTxs()
+      .filter((tx) => !tx.isCardPayment && !tx.isInvestmentTransfer)
+      .map((tx) => tx.id);
     startBatch(async () => {
       for (const id of ids) {
         const fd = new FormData();
@@ -131,7 +140,7 @@ export function TransactionsTable({
           t.date,
           t.cleared ? "yes" : "no",
           (t.amountCents / 100).toFixed(2),
-          t.kind ? KIND_LABEL[t.kind] : "",
+          t.isTransfer ? "Transfer" : t.isInvestmentTransfer ? "Investment Transfer" : t.isCardPayment ? "Card Payment" : t.kind ? KIND_LABEL[t.kind] : "",
           t.subName,
           t.payee ?? "",
           t.accountId ? accountName.get(t.accountId) ?? "" : "",
@@ -176,7 +185,7 @@ export function TransactionsTable({
           qf(t.date),
           qf(t.cleared ? "Yes" : "No"),
           qf(((t.isWithdrawal ? -1 : 1) * t.amountCents / 100).toFixed(2)),
-          qf(t.isCardPayment ? "Card Payment" : (t.kind ? KIND_LABEL[t.kind] : "")),
+          qf(t.isTransfer ? "Transfer" : t.isInvestmentTransfer ? "Investment Transfer" : t.isCardPayment ? "Card Payment" : (t.kind ? KIND_LABEL[t.kind] : "")),
           qf(t.subName),
           qf(t.payee),
           qf(t.accountId ? accountName.get(t.accountId) : ""),
@@ -216,7 +225,7 @@ export function TransactionsTable({
     .filter((t) => t.kind === "income")
     .reduce((sum, t) => sum + t.amountCents, 0);
   const outflowTotal = filtered
-    .filter((t) => t.kind !== "income" && !t.isCardPayment)
+    .filter((t) => t.kind !== "income" && !t.movementType)
     .reduce((sum, t) => sum + t.amountCents, 0);
   const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
 
@@ -532,7 +541,8 @@ export function TransactionsTable({
                     selected={selectedIds.has(t.id)}
                     onSelect={() => toggleSelected(t.id)}
                     onEdit={() => {
-                      if (!t.isCardPayment) setModal(t);
+                      if (t.isTransfer) setTransferEdit(t);
+                      else if (!t.isCardPayment && !t.isInvestmentTransfer) setModal(t);
                     }}
                   />
                 ))}
@@ -564,7 +574,8 @@ export function TransactionsTable({
                 onSelect={() => toggleSelected(t.id)}
                 onTap={() => {
                   if (selectMode) toggleSelected(t.id);
-                  else if (!t.isCardPayment) setModal(t);
+                  else if (t.isTransfer) setTransferEdit(t);
+                  else if (!t.isCardPayment && !t.isInvestmentTransfer) setModal(t);
                 }}
               />
             ))}
@@ -585,6 +596,19 @@ export function TransactionsTable({
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}
               onClose={() => setModal(null)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {transferEdit ? (
+        <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+          <div className="w-full sm:max-w-[520px]">
+            <TransferEditorModal
+              transfer={transferEdit}
+              accounts={accountOptions}
+              buckets={transferBuckets}
+              onClose={() => setTransferEdit(null)}
             />
           </div>
         </div>
@@ -616,6 +640,7 @@ function BatchActionButtons({
     <div className={`flex items-center gap-1.5 ${mobile ? "w-full" : "shrink-0"}`}>
       <button type="button" onClick={onClear} className={`${buttonClass} bg-positive/10 text-positive hover:bg-positive/20`}>Clear</button>
       <button type="button" onClick={onUncheck} className={`${buttonClass} bg-line/60 text-foreground hover:bg-line`}>Uncheck</button>
+      <button type="button" onClick={onExport} className={`${buttonClass} bg-line/60 text-foreground hover:bg-line`}>Export</button>
       <button type="button" onClick={onDelete} className={`${buttonClass} bg-negative/10 text-negative hover:bg-negative/20`}>Delete</button>
     </div>
   );
@@ -644,7 +669,7 @@ function TxLine({
   const [amountValue, setAmountValue] = useState((tx.amountCents / 100).toFixed(2));
   const [amountPending, startAmountSave] = useTransition();
   const isIncome = tx.kind === "income";
-  const canEdit = !tx.isCardPayment;
+  const canEdit = !tx.isCardPayment && !tx.isInvestmentTransfer;
 
   const saveAmount = () => {
     const normalized = Number(amountValue.replace(",", "."));
@@ -760,7 +785,13 @@ function TxLine({
             Refund
           </span>
         ) : (
-          tx.kind ? KIND_LABEL[tx.kind] : "—"
+          tx.isTransfer
+            ? "Transfer"
+            : tx.isInvestmentTransfer
+              ? "Investment transfer"
+              : tx.isCardPayment
+                ? "Card payment"
+                : tx.kind ? KIND_LABEL[tx.kind] : "—"
         )}
       </span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
@@ -779,7 +810,7 @@ function TxLine({
         <input type="hidden" name="id" value={tx.id} />
         <button
           type="submit"
-          disabled={delPending}
+          disabled={delPending || !canEdit}
           title="Delete transaction"
           aria-label="Delete transaction"
           className="flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 transition hover:bg-negative/10 hover:text-negative group-hover:opacity-100 disabled:opacity-40"
@@ -810,7 +841,7 @@ function TxCard({
   onSelect: () => void;
   onTap: () => void;
 }) {
-  const canEdit = !tx.isCardPayment;
+  const canEdit = !tx.isCardPayment && !tx.isInvestmentTransfer;
   const isIncome = tx.kind === "income";
   const dateStr = `${tx.date.slice(5, 7)}/${tx.date.slice(8, 10)}`;
 
@@ -821,6 +852,7 @@ function TxCard({
   // horizontal we treat it as a scroll and don't intercept the gesture.
   const [dx, setDx] = useState(0);
   const [committed, setCommitted] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const startX = useRef(0);
   const startY = useRef(0);
   const direction = useRef<"h" | "v" | null>(null);
@@ -834,6 +866,7 @@ function TxCard({
     startY.current = e.touches[0].clientY;
     direction.current = null;
     setCommitted(false);
+    setDragging(true);
   };
   const onTouchMove = (e: React.TouchEvent) => {
     if (selectMode || !canEdit || startX.current === 0) return;
@@ -871,6 +904,7 @@ function TxCard({
       setDx(0);
     }
     startX.current = 0;
+    setDragging(false);
   };
 
   return (
@@ -893,7 +927,7 @@ function TxCard({
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        style={{ transform: `translateX(${dx}px)`, transition: committed ? "transform 200ms ease" : startX.current ? "none" : "transform 200ms ease" }}
+        style={{ transform: `translateX(${dx}px)`, transition: dragging && !committed ? "none" : "transform 200ms ease" }}
         className="relative flex items-center gap-2 bg-surface"
       >
         {selectMode ? (

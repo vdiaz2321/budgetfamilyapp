@@ -157,6 +157,7 @@ export async function transferFromInvestment(formData: FormData) {
     account_id: sourceAccountId,
     bucket_id: validBucketId,
     paid_to_account_id: destAccountId,
+    movement_type: "investment_transfer",
     is_withdrawal: true,
     memo: memo ?? `Transfer to ${destAcct.kind === "checking" || destAcct.kind === "savings_bucket" ? "banking" : "account"}`,
     source: "manual",

@@ -162,10 +162,16 @@ export type TxData = {
   subId: string | null;
   subName: string;
   accountId: string | null;
+  toAccountId: string | null;
+  fromBucketId: string | null;
+  toBucketId: string | null;
   kind: CategoryKind | null;
+  movementType: "account_transfer" | "card_payment" | "investment_transfer" | null;
   // A payment from a cash account toward a credit-card account. It affects
   // account balances, but is not new budget spending.
   isCardPayment: boolean;
+  isTransfer: boolean;
+  isInvestmentTransfer: boolean;
   cleared: boolean;
   isWithdrawal: boolean;
 };

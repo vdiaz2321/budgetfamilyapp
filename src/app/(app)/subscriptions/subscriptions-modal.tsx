@@ -30,7 +30,7 @@ export function SubscriptionsModal({
       ? "Manage Irregular Bills"
       : "Manage Subscriptions & Irregular Bills";
   return (
-    <ModalShell title={title} onClose={onClose} className="max-w-5xl">
+    <ModalShell title={title} onClose={onClose} className="max-w-5xl" mobileAlign="top">
       <SubscriptionsBoard
         currency={currency}
         subscriptions={subscriptions}
