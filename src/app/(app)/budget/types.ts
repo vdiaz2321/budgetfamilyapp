@@ -69,9 +69,6 @@ export type RowData = {
   // When true the planned amount is derived from subscriptions/irregular-bills
   // data and cannot be edited directly from the budget row.
   autoPlanned?: boolean;
-  // Average actual over the last 3 complete months, or null when this item
-  // has no history in that window. Used to sanity-check the planned amount.
-  avg3Cents?: number | null;
   savings: SavingsDetail | null;
   debt: DebtDetail | null;
   // True when this row's linked bucket/account belongs to a kids-marked

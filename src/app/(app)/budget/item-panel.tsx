@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { centsToDisplay, formatMoney } from "@/lib/money";
@@ -192,6 +192,10 @@ export function ItemPanel({
   onOverspentCovered,
 }: Props) {
   const [showItemDetails, setShowItemDetails] = useState(false);
+  // BudgetBoard keeps both the desktop rail and mobile sheet mounted. Each
+  // copy needs a unique form id so its external Save button submits the form
+  // in the panel the user actually edited.
+  const saveFormId = `plan-form-${useId()}`;
   const isPlainForm = !(kind === "debt" && row.debt) && !(kind === "savings" && row.savings);
   // Filter txs to this row's subcategory and the currently-viewed month. The
   // month is a "first of the month" ISO date; a tx belongs if its YYYY-MM
@@ -274,7 +278,7 @@ export function ItemPanel({
         subId={row.subId}
         onDeleted={onClose}
         onAddTransaction={onAddTransaction}
-        saveFormId={`plan-form-${row.subId}`}
+        saveFormId={saveFormId}
         onDetails={isPlainForm ? () => setShowItemDetails(true) : undefined}
       />
 
@@ -291,9 +295,10 @@ export function ItemPanel({
               accountOptions={debtAccountOptions}
               snowballExtraCents={snowballExtraCents}
               isSnowballFocus={isSnowballFocus}
+              formId={saveFormId}
             />
           ) : kind === "savings" && row.savings ? (
-            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} />
+            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} formId={saveFormId} />
           ) : (
             <PlannedForm
               subId={row.subId}
@@ -311,6 +316,7 @@ export function ItemPanel({
               showDetails={showItemDetails}
               onCloseDetails={() => setShowItemDetails(false)}
               onAddTransaction={onAddTransaction}
+              formId={saveFormId}
             />
           );
         return body ? <div className="space-y-4 px-5 pb-4 pt-4">{body}</div> : null;
@@ -422,42 +428,17 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
   );
 }
 
-// Save button that lives OUTSIDE its target form (targets via form="…"), so
-// we can't easily hook into the form's own useTransition. Instead we track a
-// short local "saving" flash on click and auto-clear after ~1.4s — long
-// enough to cover a normal save round-trip from Frankfurt, short enough that
-// a fast save doesn't leave the label stale.
+// This button lives outside its target form and associates through `form`.
+// Do not synchronously disable it from its click handler: doing so cancels the
+// browser's default submit activation before React receives the form action.
 function SaveButton({ saveFormId }: { saveFormId: string }) {
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (!saving) return;
-    const t = window.setTimeout(() => setSaving(false), 1400);
-    return () => window.clearTimeout(t);
-  }, [saving]);
   return (
     <button
       type="submit"
       form={saveFormId}
-      onClick={() => setSaving(true)}
-      disabled={saving}
-      className="flex shrink-0 items-center gap-1.5 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:cursor-wait disabled:opacity-70"
+      className="flex shrink-0 items-center gap-1.5 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
     >
-      {saving ? (
-        <>
-          <svg
-            className="h-3.5 w-3.5 animate-spin"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden
-          >
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
-            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-          Saving…
-        </>
-      ) : (
-        "Save"
-      )}
+      Save
     </button>
   );
 }
@@ -625,6 +606,7 @@ function PlannedForm({
   autoPlanned,
   showDetails,
   onCloseDetails,
+  formId,
 }: {
   subId: string;
   monthKey: string;
@@ -641,6 +623,7 @@ function PlannedForm({
   showDetails: boolean;
   onCloseDetails: () => void;
   onAddTransaction: () => void;
+  formId: string;
 }) {
   const [, startDue] = useTransition();
   const router = useRouter();
@@ -666,7 +649,7 @@ function PlannedForm({
   return (
     <>
       <form
-        id={`plan-form-${subId}`}
+        id={formId}
         action={(fd) => startDue(async () => {
           if (!autoPlanned) await upsertPlan(fd);
           await updateSubcategory(fd);
@@ -903,6 +886,7 @@ function DebtForm({
   accountOptions,
   snowballExtraCents,
   isSnowballFocus,
+  formId,
 }: {
   row: RowData;
   currency: string;
@@ -910,6 +894,7 @@ function DebtForm({
   accountOptions: AccountOption[];
   snowballExtraCents: number;
   isSnowballFocus: boolean;
+  formId: string;
 }) {
   const [, start] = useTransition();
   const router = useRouter();
@@ -922,7 +907,7 @@ function DebtForm({
   const scheduledCents = d.minCents + (isSnowballFocus ? snowballExtraCents : 0);
   return (
     <Section title="Debt details">
-      <form id={`plan-form-${row.subId}`} action={(fd) => start(async () => { await upsertDebtAndPlan(fd); router.refresh(); })} className="space-y-2">
+      <form id={formId} action={(fd) => start(async () => { await upsertDebtAndPlan(fd); router.refresh(); })} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <label className="block">
@@ -1034,7 +1019,7 @@ function savingsPace(goalCents: number, startCents: number, monthlyCents: number
   return monthlyCents >= required ? "on_track" as const : "behind" as const;
 }
 
-function SavingsForm({ row, bucketOptions, monthKey }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string }) {
+function SavingsForm({ row, bucketOptions, monthKey, formId }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; formId: string }) {
   const [pending, start] = useTransition();
   const router = useRouter();
   const s = row.savings!;
@@ -1072,7 +1057,7 @@ function SavingsForm({ row, bucketOptions, monthKey }: { row: RowData; bucketOpt
           <span>✓</span> On track
         </p>
       )}
-      <form id={`plan-form-${row.subId}`} action={(fd) => start(async () => { await upsertSavingsGoalAndLink(fd); router.refresh(); })} className="space-y-2">
+      <form id={formId} action={(fd) => start(async () => { await upsertSavingsGoalAndLink(fd); router.refresh(); })} className="space-y-2">
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <Grid>

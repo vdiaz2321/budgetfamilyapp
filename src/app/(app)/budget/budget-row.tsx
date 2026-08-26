@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
-import { deleteSubcategory, upsertPlan } from "./actions";
+import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
 
 const ACTUAL_WORD: Record<CategoryKind, string> = {
@@ -83,28 +83,11 @@ type Props = {
   autoPlanned?: boolean;
 };
 
-function DeleteButton({ subId }: { subId: string }) {
-  const [pending, start] = useTransition();
+function DueAccountIndicator({ dueDay, compact = false }: { dueDay: number; compact?: boolean }) {
   return (
-    <button
-      type="button"
-      disabled={pending}
-      onClick={() => {
-        if (!window.confirm("Delete this item? This cannot be undone.")) return;
-        const fd = new FormData();
-        fd.set("id", subId);
-        start(() => deleteSubcategory(fd));
-      }}
-      aria-label={`Delete item`}
-      // Hidden on mobile: an irreversible action sitting permanently under the
-      // scrolling thumb is too easy to hit by accident. On phones the item
-      // panel (tap the row) carries the delete instead.
-      className="absolute right-1 top-2 hidden rounded p-0.5 text-muted/50 transition-all hover:bg-negative/10 hover:text-negative disabled:pointer-events-none sm:top-1/2 sm:block sm:-translate-y-1/2 sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:text-muted/50"
-    >
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-        <path d="M18 6 6 18M6 6l12 12" />
-      </svg>
-    </button>
+    <span className="shrink-0 whitespace-nowrap rounded-full bg-black/5 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-muted ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+      {compact ? `D${dueDay}` : `Due ${dueDay}`} · linked
+    </span>
   );
 }
 
@@ -113,6 +96,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
   const elapsedPct = monthElapsedPct(monthKey);
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
+  const showDueAccount = row.dueDay != null && row.paymentAccountId != null;
   const plannedInputRef = useRef<HTMLInputElement>(null);
 
   const rawPct =
@@ -149,19 +133,23 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
   return (
     <li
       data-drop-key={`subcat:${row.subId}`}
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest("button, input, form, select, textarea, [data-row-click-ignore]")) return;
+        onSelect();
+      }}
       className={`group relative flex flex-col gap-1.5 px-3 py-2 sm:grid sm:grid-cols-12 sm:items-center sm:gap-2 ${compact ? "sm:py-1" : "sm:py-1.5"} ${baseClass}`}
     >
-      <DeleteButton subId={row.subId} />
-
       {/* Mobile row: the progress stripe spans Category + Planned only, so it
           stops before the Spent value instead of stretching across the row. */}
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-1.5 sm:hidden">
         <button
           type="button"
           onClick={onSelect}
-          className="min-w-0 truncate text-left text-sm text-foreground"
+          className="flex min-w-0 items-center gap-1.5 text-left text-sm text-foreground"
         >
-          {row.name}
+          <span className="min-w-0 truncate">{row.name}</span>
+          {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} compact /> : null}
         </button>
 
         <div className="text-[11px] tabular-nums text-muted">
@@ -234,6 +222,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
       <div className="hidden min-w-0 items-center gap-1.5 sm:col-span-4 sm:flex">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
+          data-row-click-ignore
           title="Drag to reorder"
           className="-ml-1 hidden shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing sm:flex"
         >
@@ -249,6 +238,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
             {row.name}
           </span>
+          {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} /> : null}
         </button>
 
       </div>
@@ -303,19 +293,13 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         )}
       </button>
 
-      {/* Desktop: % — with the 3-month average underneath when we have the
-          history, so the plan can be judged against what actually happens. */}
+      {/* Desktop progress percentage. */}
       <button
         type="button"
         onClick={onSelect}
         className="hidden sm:col-span-2 sm:block sm:text-center sm:tabular-nums"
       >
         <span className={`block text-xs font-semibold ${pctClass}`}>{displayPct}%</span>
-        {row.avg3Cents != null && row.avg3Cents > 0 && !paidOff ? (
-          <span className="block text-[10px] leading-tight text-muted">
-            avg {formatMoney(row.avg3Cents, currency)}
-          </span>
-        ) : null}
       </button>
 
       {detailsExpanded ? (

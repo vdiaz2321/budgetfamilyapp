@@ -452,9 +452,9 @@ export function BudgetBoard({
               type="button"
               role="switch"
               aria-checked={detailsExpanded}
-              aria-label="Show progress bars"
+              aria-label={`Progress ${detailsExpanded ? "On" : "Off"}`}
               onClick={() => setRowDetail((current) => ({ ...current, expanded: current.expanded !== true }))}
-              className={`hidden h-7 items-center rounded-full p-1 transition sm:flex ${
+              className={`group relative hidden h-7 items-center rounded-full p-1 transition sm:flex ${
                 detailsExpanded
                   ? "bg-brand-soft text-brand ring-1 ring-brand/20"
                   : "bg-[#ebe8e1] text-muted ring-1 ring-black/10 hover:text-foreground dark:bg-white/10 dark:ring-white/10"
@@ -469,6 +469,12 @@ export function BudgetBoard({
                     detailsExpanded ? "left-0.5" : "right-0.5"
                   }`}
                 />
+              </span>
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[10px] font-semibold text-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+              >
+                Progress {detailsExpanded ? "On" : "Off"}
               </span>
             </button>
           </div>
