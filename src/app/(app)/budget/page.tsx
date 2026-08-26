@@ -21,8 +21,12 @@ export default async function BudgetPage({
   const { supabase, household } = await getSessionContext();
   const snowballExtraCents = household.snowball_monthly_extra_cents ?? 0;
 
-  const categories = await ensureCategories(supabase, household.id);
-
+  // ---- One round trip for the whole page. `ensureCategories` and the
+  // rollover reads below used to be awaited separately, which made three
+  // serial trips to Supabase; none of them depend on each other's results
+  // (only on household.id and the resolved month), so they all go in one
+  // batch. See the ROLLOVER comment further down for what the last two feed.
+  const ROLLOVER_ANCHOR = "2026-01-01";
   const [
     { data: subs },
     { data: plans },
@@ -35,6 +39,9 @@ export default async function BudgetPage({
     { data: buckets },
     { data: subscriptions },
     { data: irregularBills },
+    categories,
+    { data: rolloverRows },
+    { data: allActuals },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -71,6 +78,9 @@ export default async function BudgetPage({
       .lt("occurred_on", nextFirst)
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false }),
+    // Names only — used server-side to label transactions and to match
+    // irregular bills to spend. The autocomplete list is fetched on demand by
+    // the client (listPayees) rather than serialised into every page payload.
     supabase
       .from("payees")
       .select("id, name")
@@ -102,6 +112,19 @@ export default async function BudgetPage({
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
+    ensureCategories(supabase, household.id),
+    supabase
+      .from("budget_rollovers")
+      .select("month, override_cents")
+      .eq("household_id", household.id)
+      .gte("month", ROLLOVER_ANCHOR)
+      .lte("month", month.firstOfMonth),
+    supabase
+      .from("v_monthly_actuals")
+      .select("month, subcategory_id, actual_cents")
+      .eq("household_id", household.id)
+      .gte("month", ROLLOVER_ANCHOR)
+      .lt("month", month.firstOfMonth),
   ]);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
@@ -294,22 +317,6 @@ export default async function BudgetPage({
   // balance whenever that month's rollover is enabled. Manual overrides on a
   // past month reset the incoming amount for that month; the accumulation
   // continues forward from there.
-  const ROLLOVER_ANCHOR = "2026-01-01";
-  const [{ data: rolloverRows }, { data: allActuals }] = await Promise.all([
-    supabase
-      .from("budget_rollovers")
-      .select("month, override_cents")
-      .eq("household_id", household.id)
-      .gte("month", ROLLOVER_ANCHOR)
-      .lte("month", month.firstOfMonth),
-    supabase
-      .from("v_monthly_actuals")
-      .select("month, subcategory_id, actual_cents")
-      .eq("household_id", household.id)
-      .gte("month", ROLLOVER_ANCHOR)
-      .lt("month", month.firstOfMonth),
-  ]);
-
   // Bucket actuals per month, converting each into a leftover (income − outflow).
   const leftoverByMonth = new Map<string, number>();
   for (const row of allActuals ?? []) {
@@ -418,6 +425,7 @@ export default async function BudgetPage({
     kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
     linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
     remainingCents: remainingBySub.get(s.id),
+    trimmableCents: Math.max(0, (plannedBySub.get(s.id) ?? 0) - (spentBySub.get(s.id) ?? 0)),
   }));
 
   // Disambiguate same-named accounts (e.g. two "Fidelity" accounts, one in
@@ -616,7 +624,6 @@ export default async function BudgetPage({
       debtAccountOptions={debtAccountOptions}
       bucketOptions={bucketOptions}
       bucketsByAccount={bucketsByAccount}
-      payeeOptions={payees ?? []}
       payeeLineItems={payeeLineItems}
       snowballExtraCents={snowballExtraCents}
       snowballFocusSubId={snowballFocusSubId}

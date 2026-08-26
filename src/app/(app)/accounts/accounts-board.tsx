@@ -534,54 +534,6 @@ export function AccountsBoard({
     );
   };
 
-  const exportCsv = () => {
-    const q = (v: string | number | null | undefined) => {
-      const s = String(v ?? "");
-      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const rows: string[] = [
-      ["Name", "Kind", "Subtype", "Holder", "Active", "Balance", "Owed", "Annual Fee", "Fee Waived", "Date Opened", "Date Closed", "Is Kids", "Bank Group", "Current Points", "Rewards Program"].join(","),
-    ];
-    for (const a of accounts) {
-      const d = a.cardDetails;
-      rows.push([
-        q(a.name),
-        q(a.kind),
-        q(a.subtype),
-        q(a.holder),
-        q(a.active ? "Yes" : "No"),
-        q((a.balanceCents / 100).toFixed(2)),
-        q(a.owedCents ? (a.owedCents / 100).toFixed(2) : ""),
-        q(a.annualFeeCents ? (a.annualFeeCents / 100).toFixed(2) : ""),
-        q(a.feeWaived ? "Yes" : ""),
-        q(a.dateOpened),
-        q(a.dateClosed),
-        q(a.isKidsAccount ? "Yes" : ""),
-        q(a.bankGroup),
-        q(d?.currentPoints ?? ""),
-        q(d?.rewardsProgram),
-      ].join(","));
-      for (const b of a.buckets) {
-        rows.push([
-          q(`  ${b.name}`),
-          q("bucket"),
-          q(""),
-          q(""),
-          q(""),
-          q((b.balanceCents / 100).toFixed(2)),
-          q(""), q(""), q(""), q(""), q(""), q(""), q(b.bankGroup), q(""), q(""),
-        ].join(","));
-      }
-    }
-    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `accounts-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
       {/* Title + period picker in one row, right-aligned like Insights.
@@ -2732,94 +2684,6 @@ function AccountSection({
   );
 }
 
-function BudgetDebtsSection({
-  debts,
-  currency,
-  open,
-  onToggle,
-}: {
-  debts: BudgetDebt[];
-  currency: string;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const total = debts.reduce((sum, d) => sum + d.balanceCents, 0);
-  const kindLabel = (kind: string | null) =>
-    DEBT_KINDS.find((k) => k.value === kind)?.label ?? "Debt";
-  return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="grid grid-cols-[minmax(0,1fr)_9rem] sm:grid-cols-[minmax(0,1fr)_15rem] items-center gap-2 px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <button
-            type="button"
-            onClick={onToggle}
-            className="flex min-w-0 items-center gap-2.5 text-left"
-            aria-expanded={open}
-          >
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-accent" />
-            <span className="truncate font-semibold">Debts</span>
-            <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-              {debts.length}
-            </span>
-            <svg
-              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-              aria-hidden
-            >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
-          <Link
-            href="/snowball"
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
-            title="Go to Debt & Loans page"
-          >
-            Manage →
-          </Link>
-        </div>
-        <span className={`text-right text-sm font-bold tabular-nums ${total > 0 ? "text-negative" : ""}`}>
-          {formatMoney(total, currency)}
-        </span>
-      </div>
-      {open ? (
-        <div className="border-t border-line">
-          <ul className="divide-y divide-line">
-            {debts.map((d) => {
-              const excluded = isDebtExcludedFromNetWorth(d.debtKind);
-              return (
-                <li
-                  key={d.subcategoryId}
-                  className="flex items-center justify-between gap-3 px-4 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{d.name}</p>
-                    <p className="truncate text-[11px] text-muted">
-                      {kindLabel(d.debtKind)}
-                      {excluded ? " · not in net worth" : ""}
-                    </p>
-                  </div>
-                  <span className="inline-flex shrink-0 items-baseline gap-0 font-semibold tabular-nums">
-                    <span className="text-sm text-muted">{currencySymbol(currency)}</span>
-                    <span className={`text-[0.9375rem] ${d.balanceCents > 0 ? "text-negative" : "text-muted"}`}>{centsToGroupedDisplay(d.balanceCents)}</span>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="border-t border-line px-4 py-2 text-[11px] text-muted">
-            Edit balances on the{" "}
-            <Link href="/snowball" className="font-medium text-brand hover:text-brand-strong">
-              Debt &amp; Loans
-            </Link>
-            {" "}page.
-          </p>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function AccountRow({
   account,
   section,
@@ -2846,10 +2710,6 @@ function AccountRow({
   bucketsOpen: boolean;
   onToggleBuckets: () => void;
 }) {
-  const kindLabel = section.kindLabels[account.kind] ?? account.kind;
-  // Banking rows already show a Savings/Checking chip (the Net Worth tag) —
-  // showing the structural kind label too just repeats the same word.
-  const showKind = section.key !== "banking" && Object.keys(section.kindLabels).length > 1;
   // Buckets make sense for asset accounts (savings/investments/cash), not for
   // credit cards or loans.
   const allowBuckets = !section.liability;

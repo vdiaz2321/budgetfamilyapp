@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { TransactionModal } from "../budget/transaction-modal";
 import type { AccountOption, SubOption } from "../budget/types";
 import { centsToDisplay } from "@/lib/money";
 import { updateSavingsGoalFields, saveContributionCaps } from "./actions";
+import { listPayees } from "../budget/actions";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { IRS_LIMITS_URL, contributionDeadline, monthsUntilDeadline } from "@/lib/contribution-limits";
@@ -53,7 +54,6 @@ type Props = {
   firstOfMonth: string;
   withdrawalSubOptions: SubOption[];
   withdrawalAccountOptions: AccountOption[];
-  withdrawalPayeeOptions: { id: string; name: string }[];
 };
 
 type Scope = "family" | "kids" | "all";
@@ -580,12 +580,23 @@ export function SavingsBoard({
   firstOfMonth,
   withdrawalSubOptions,
   withdrawalAccountOptions,
-  withdrawalPayeeOptions,
 }: Props) {
   const familyCards = cards.filter((card) => !card.isKids);
   const kidsCards = cards.filter((card) => card.isKids);
   const [scope, setScope] = useState<Scope>(familyCards.length > 0 ? "family" : "all");
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+  // Payee autocomplete for the withdrawal modal — the full household list is
+  // ~28KB, so it's fetched when the modal opens rather than shipped with the
+  // page. Same pattern as the budget board and the transactions table.
+  const [withdrawalPayeeOptions, setWithdrawalPayeeOptions] = useState<{ id: string; name: string }[]>([]);
+  const payeesRequested = useRef(false);
+  const openWithdrawal = () => {
+    if (!payeesRequested.current) {
+      payeesRequested.current = true;
+      void listPayees().then(setWithdrawalPayeeOptions);
+    }
+    setWithdrawalOpen(true);
+  };
   const scopedCards = scope === "family" ? familyCards : scope === "kids" ? kidsCards : cards;
   const stats = statsFor(scopedCards);
   const savingsRate = incomeReceivedCents > 0 ? (stats.net / incomeReceivedCents) * 100 : null;
@@ -658,7 +669,7 @@ export function SavingsBoard({
               <div className="grid grid-cols-1 divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
                 <Metric label="Of income" value={savingsRate == null ? "—" : `${savingsRate.toFixed(1)}%`} detail={`${formatSavingsMoney(incomeReceivedCents, currency)} received`} tone={savingsRate != null && savingsRate > 0 ? "text-positive" : undefined} />
                 <Metric label="This month’s savings" value={stats.planned > 0 ? `${Math.max(0, stats.planPct).toFixed(0)}% of plan` : "No plan"} detail={<><span className={stats.net >= 0 ? "text-positive" : "text-negative"}>{formatSavingsMoney(stats.net, currency)} saved</span> of {formatSavingsMoney(stats.planned, currency)} planned</>} />
-                <Metric label="Withdrawn" value={formatSavingsMoney(stats.withdrawals, currency)} detail={stats.withdrawals > 0 ? "moved out of goals" : "no withdrawals"} tone={stats.withdrawals > 0 ? "text-negative" : undefined} action={<button type="button" onClick={() => setWithdrawalOpen(true)} className="mt-2 rounded-md border border-brand/35 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft focus:outline-none focus:ring-2 focus:ring-brand">Withdraw funds</button>} />
+                <Metric label="Withdrawn" value={formatSavingsMoney(stats.withdrawals, currency)} detail={stats.withdrawals > 0 ? "moved out of goals" : "no withdrawals"} tone={stats.withdrawals > 0 ? "text-negative" : undefined} action={<button type="button" onClick={openWithdrawal} className="mt-2 rounded-md border border-brand/35 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft focus:outline-none focus:ring-2 focus:ring-brand">Withdraw funds</button>} />
               </div>
 
               <div className="space-y-2 border-t border-line/70 px-4 py-3">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useRef, useState, useTransition, type CSSProperties } from "react";
 import { currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setNetworthHistory, upsertNetworthYear } from "./actions";
@@ -151,10 +151,15 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
 
   // Clicking an account row filters the chart; Ctrl+click adds/removes from selection.
   const [selectedRows, setSelectedRows] = useState<GridRow[]>([]);
+  // Comparing several accounts used to require ctrl/cmd-click, which is
+  // undiscoverable on desktop and impossible on a phone — there is no modifier
+  // key, so the multi-series chart was unreachable on mobile entirely. The
+  // Compare toggle makes a plain tap additive; ctrl/cmd still works as before.
+  const [compare, setCompare] = useState(false);
   const handleSelectAccount = (row: GridRow, ctrlKey: boolean) => {
     setSelectedRows((prev) => {
       const already = prev.some((r) => r.accountId === row.accountId);
-      if (ctrlKey) {
+      if (ctrlKey || compare) {
         return already ? prev.filter((r) => r.accountId !== row.accountId) : [...prev, row];
       }
       return already && prev.length === 1 ? [] : [row];
@@ -197,6 +202,8 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
           open={chartOpen}
           onToggle={setChartOpen}
           selectedRows={selectedRows}
+          compare={compare}
+          onToggleCompare={() => setCompare((v) => !v)}
           gridMonths={gridMonths}
           onClearFilter={() => setSelectedRows([])}
         />
@@ -259,13 +266,17 @@ function Stat({
   );
 }
 
+// Categorical series colours for the per-account chart. Drawn from the --viz-*
+// tokens rather than raw hex: indigo/amber/purple are out (see AGENTS.md), and
+// tokens mean the series re-tint themselves in dark mode instead of staying at
+// their light-theme values. Ordered so neighbouring series stay far apart.
 const CHART_COLORS = [
-  "#22c55e", // green
-  "#6366f1", // indigo
-  "#f59e0b", // amber
-  "#ec4899", // pink
-  "#0ea5e9", // sky
-  "#a855f7", // purple
+  "var(--viz-bills)",    // teal
+  "var(--viz-debt)",     // rose
+  "var(--viz-income)",   // deep navy
+  "var(--positive)",     // green
+  "var(--viz-expenses)", // sky
+  "var(--viz-savings)",  // blue
 ];
 
 function ChartSection({
@@ -276,6 +287,8 @@ function ChartSection({
   selectedRows,
   gridMonths,
   onClearFilter,
+  compare,
+  onToggleCompare,
 }: {
   points: MonthPoint[];
   currency: string;
@@ -284,10 +297,12 @@ function ChartSection({
   selectedRows: GridRow[];
   gridMonths: string[];
   onClearFilter: () => void;
+  compare: boolean;
+  onToggleCompare: () => void;
 }) {
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between border-b border-line">
+      <div className="flex flex-wrap items-center justify-between border-b border-line">
         <button
           type="button"
           onClick={() => onToggle(!open)}
@@ -304,12 +319,24 @@ function ChartSection({
           </svg>
           <h2 className="font-semibold">Net Worth Graph Breakdown</h2>
         </button>
+        <button
+          type="button"
+          onClick={onToggleCompare}
+          aria-pressed={compare}
+          className={`mr-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+            compare
+              ? "bg-brand text-white"
+              : "bg-black/5 text-muted hover:text-foreground dark:bg-white/10"
+          }`}
+        >
+          Compare
+        </button>
         {selectedRows.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5 pr-4">
+          <div className="flex w-full flex-wrap items-center gap-1.5 px-4 pb-2 sm:w-auto sm:px-0 sm:pb-0 sm:pr-4">
             {selectedRows.map((r, i) => (
               <span
                 key={r.accountId}
-                className="rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+                className="max-w-[9rem] truncate whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold text-white sm:max-w-[12rem]"
                 style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
               >
                 {r.name}
@@ -403,8 +430,8 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
       >
         <defs>
           <linearGradient id="nw-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.28" />
-            <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="var(--viz-income)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--viz-income)" stopOpacity="0.02" />
           </linearGradient>
         </defs>
 
@@ -413,7 +440,7 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
           <g key={t}>
             <line
               x1={M.l} x2={W - M.r} y1={y(t)} y2={y(t)}
-              stroke="var(--border)" strokeWidth="1" strokeDasharray="2 4"
+              stroke="var(--viz-grid)" strokeWidth="1" strokeDasharray="2 4"
             />
             <text
               x={M.l - 8} y={y(t) + 3.5}
@@ -434,7 +461,7 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
           <path
             d={linePath}
             fill="none"
-            stroke="var(--brand)"
+            stroke="var(--viz-income)"
             strokeWidth="2.5"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -442,11 +469,11 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
         ) : null}
 
         <circle cx={x(lastIdx)} cy={y(points[lastIdx].net)} r="6" fill="var(--surface)" />
-        <circle cx={x(lastIdx)} cy={y(points[lastIdx].net)} r="4" fill="var(--brand)" />
+        <circle cx={x(lastIdx)} cy={y(points[lastIdx].net)} r="4" fill="var(--viz-income)" />
         {hover != null && hover !== lastIdx ? (
           <>
             <circle cx={x(hover)} cy={y(points[hover].net)} r="6" fill="var(--surface)" />
-            <circle cx={x(hover)} cy={y(points[hover].net)} r="4" fill="var(--brand)" />
+            <circle cx={x(hover)} cy={y(points[hover].net)} r="4" fill="var(--viz-income)" />
           </>
         ) : null}
 
@@ -549,7 +576,7 @@ function AccountChart({ rows, months, currency, colors }: { rows: GridRow[]; mon
       >
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={M.l} x2={W - M.r} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth="1" strokeDasharray="2 4" />
+            <line x1={M.l} x2={W - M.r} y1={y(t)} y2={y(t)} stroke="var(--viz-grid)" strokeWidth="1" strokeDasharray="2 4" />
             <text x={M.l - 8} y={y(t) + 3.5} textAnchor="end" fontSize="11" fill="var(--muted)">{compactMoney(t, currency)}</text>
           </g>
         ))}
@@ -673,14 +700,15 @@ function GridNameCell({
 // browsers, and never fires for synthetic input), and Pointer Events aren't
 // consistently synthesized from mouse-only input either. Mouse events are
 // the one thing every input path reliably produces.
-function GripHandle({ onMouseDown, title }: { onMouseDown: () => void; title: string }) {
+function GripHandle({ onMouseDown, label }: { onMouseDown: () => void; label: string }) {
   return (
     <span
       onMouseDown={(e) => {
         e.preventDefault();
         onMouseDown();
       }}
-      title={title}
+      role="button"
+      aria-label={label}
       className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-background/60 hover:text-muted active:cursor-grabbing"
     >
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
@@ -706,13 +734,16 @@ function BalanceGrid({
   onSelectAccount?: (row: GridRow, ctrlKey: boolean) => void;
 }) {
   // Reorder optimistically — a drag updates this local copy immediately;
-  // `rows` (from the server) wins once it's revalidated.
+  // `rows` (from the server) wins once it's revalidated. The hand-off is done
+  // during render against the previous prop rather than in an effect: an
+  // effect paints the stale order for a frame and then re-renders, which is
+  // visible as a flicker at the end of a drag.
   const [localRows, setLocalRows] = useState(rows);
-  useEffect(() => {
-    // Sync the optimistic local ordering after server revalidation.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  const [prevRows, setPrevRows] = useState(rows);
+  if (rows !== prevRows) {
+    setPrevRows(rows);
     setLocalRows(rows);
-  }, [rows]);
+  }
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
 
@@ -1124,13 +1155,12 @@ function BalanceGrid({
                                       ? "py-2 pl-9 text-[0.9375rem]"
                                       : "px-4 py-2"
                                 } ${nameCls(r)}`}
-                                title={r.muted ? "Account balance minus its bucket totals — the part not parked in a named bucket." : undefined}
                               >
                                 {r.hasChildren && r.id ? (
                                   <div className="flex items-center gap-1 px-4 py-2">
                                     {r.accountId ? (
                                       <GripHandle
-                                        title="Drag to reorder"
+                                        label="Drag to reorder"
                                         onMouseDown={() => startAccountDrag(g.section, r.accountId!)}
                                       />
                                     ) : null}
@@ -1138,7 +1168,7 @@ function BalanceGrid({
                                       type="button"
                                       onClick={() => toggleAccount(r.id!)}
                                       aria-expanded={accountOpen}
-                                      title={accountOpen ? "Collapse buckets" : "Show buckets"}
+                                      aria-label={accountOpen ? "Collapse buckets" : "Show buckets"}
                                       className="flex shrink-0 items-center rounded p-0.5 text-muted transition hover:bg-background/60"
                                     >
                                       <svg
@@ -1171,7 +1201,7 @@ function BalanceGrid({
                                 ) : r.accountId ? (
                                   <div className="flex min-w-0 items-center gap-1">
                                     <GripHandle
-                                      title="Drag to reorder"
+                                      label="Drag to reorder"
                                       onMouseDown={() => startAccountDrag(g.section, r.accountId!)}
                                     />
                                     <button
@@ -1186,7 +1216,7 @@ function BalanceGrid({
                                 ) : r.bucketId ? (
                                   <div className="flex min-w-0 items-center gap-1">
                                     <GripHandle
-                                      title="Drag to reorder"
+                                      label="Drag to reorder"
                                       onMouseDown={() => startBucketDrag(r.parentId!, r.bucketId!)}
                                     />
                                     <GridNameCell id={r.bucketId} name={r.name} rename={updateBucket} />
@@ -1235,7 +1265,6 @@ function BalanceGrid({
 function ExcludedChip() {
   return (
     <span
-      title="Tracked here, excluded from Net Worth totals"
       className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[9px] font-semibold uppercase text-muted dark:bg-white/10"
     >
       not counted
@@ -1385,7 +1414,7 @@ function SummaryBlock({
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="font-semibold">Net Worth Overtime</h2>
+          <h2 className="font-semibold">Net Worth Over Time</h2>
         </button>
         <YearPicker years={years} year={year} onYearChange={onYearChange} />
       </div>
@@ -1580,7 +1609,6 @@ function MonthlyAnalytics({
             <button
               type="button"
               onClick={() => downloadMonthlyNetWorthCsv(shown, currency)}
-              title="Download the visible rows as CSV"
               className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
             >
               Download CSV

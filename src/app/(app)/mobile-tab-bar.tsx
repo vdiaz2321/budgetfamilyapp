@@ -27,6 +27,13 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
       </>
     ),
   },
+];
+
+// Everything the five-slot bar can't fit. Without this these routes were
+// simply unreachable on a phone — the tab bar is the only navigation there,
+// since the sidebar is desktop-only and the header's 3-dot menu is account
+// settings, not navigation.
+const MORE_LINKS: { href: string; label: string; icon: React.ReactNode }[] = [
   {
     href: "/savings",
     label: "Savings",
@@ -39,13 +46,23 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
   },
   {
     href: "/snowball",
-    label: "Debt",
+    label: "Debt/Loans",
     icon: (
       <>
         <path d="M12 3v18M5 8l14 8M19 8L5 16" />
         <circle cx="12" cy="12" r="9" />
       </>
     ),
+  },
+  {
+    href: "/networth",
+    label: "Net Worth",
+    icon: <path d="M3 17l6-6 4 4 8-8M21 7v6M21 7h-6" />,
+  },
+  {
+    href: "/insights",
+    label: "Insights",
+    icon: <path d="M3 3v18h18M8 15v3M13 10v8M18 6v12" />,
   },
 ];
 
@@ -70,8 +87,36 @@ function Icon({ children }: { children: React.ReactNode }) {
 export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
   const pathname = usePathname();
   const [hidden, setHidden] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const lastY = useRef(0);
   const accumulated = useRef(0);
+  const moreRef = useRef<HTMLDivElement>(null);
+
+  // Close the sheet whenever the route changes — tapping a link inside it
+  // navigates (and so does the back button), and the sheet would otherwise
+  // stay open over the new page. Compared during render rather than in an
+  // effect, which would paint the stale open sheet for a frame first.
+  const [prevPathname, setPrevPathname] = useState(pathname);
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
+    setMoreOpen(false);
+  }
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (!moreRef.current?.contains(e.target as Node)) setMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
 
   useEffect(() => {
     lastY.current = window.scrollY;
@@ -88,10 +133,17 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  // The More button lights up when the current page lives inside its sheet,
+  // and carries the sum of any badges it hides (today: the Debt/Loans count).
+  const moreActive = MORE_LINKS.some(
+    (l) => pathname === l.href || pathname.startsWith(`${l.href}/`),
+  );
+  const moreBadge = MORE_LINKS.reduce((sum, l) => sum + (badges?.[l.href] ?? 0), 0);
+
   return (
     <nav
       className={`fixed bottom-0 left-0 right-0 z-40 flex border-t border-white/10 bg-sidebar transition-transform duration-300 md:hidden ${
-        hidden ? "translate-y-full" : "translate-y-0"
+        hidden && !moreOpen ? "translate-y-full" : "translate-y-0"
       }`}
     >
       {TABS.map((tab) => {
@@ -116,6 +168,67 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
           </Link>
         );
       })}
+
+      {/* More: the routes that don't fit as tabs. Anchored to the right end of
+          the bar and opening upward, so it sits over the page rather than
+          pushing the bar around. */}
+      <div ref={moreRef} className="relative flex flex-1">
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          aria-expanded={moreOpen}
+          aria-haspopup="menu"
+          aria-label="More pages"
+          className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition-colors ${
+            moreOpen || moreActive ? "text-[#8B80F9]" : "text-slate-400"
+          }`}
+        >
+          <Icon>
+            <>
+              <circle cx="5" cy="12" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="19" cy="12" r="1.6" />
+            </>
+          </Icon>
+          <span>More</span>
+          {moreBadge ? (
+            <span className="absolute right-4 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
+              {moreBadge}
+            </span>
+          ) : null}
+        </button>
+
+        {moreOpen ? (
+          <div
+            role="menu"
+            className="absolute bottom-full right-1 z-50 mb-2 w-52 overflow-hidden rounded-2xl border border-white/10 bg-sidebar shadow-xl"
+          >
+            {MORE_LINKS.map((link) => {
+              const active = pathname === link.href || pathname.startsWith(`${link.href}/`);
+              const badge = badges?.[link.href];
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  role="menuitem"
+                  onClick={() => setMoreOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors ${
+                    active ? "bg-white/10 text-[#8B80F9]" : "text-slate-300 hover:bg-white/5"
+                  }`}
+                >
+                  <Icon>{link.icon}</Icon>
+                  <span className="flex-1">{link.label}</span>
+                  {badge ? (
+                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
+                      {badge}
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
     </nav>
   );
 }

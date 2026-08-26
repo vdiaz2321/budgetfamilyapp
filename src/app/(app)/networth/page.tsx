@@ -26,6 +26,7 @@ export default async function NetworthPage() {
     { data: bucketRows },
     { data: subRows },
     { data: historyRows },
+    { data: debtRows },
   ] = await Promise.all([
     supabase
       .from("account_snapshots")
@@ -63,14 +64,16 @@ export default async function NetworthPage() {
       .select("month, savings_cents, bank_cents, stocks_cents, debt_cents")
       .eq("household_id", household.id)
       .order("month"),
+    // Debt rows share one Net Worth section so this view matches the sidebar
+    // and headline metric, regardless of whether the underlying debt is a card
+    // or loan. Batched with the rest — it only needs household.id, so awaiting
+    // it separately was a second serial trip to Supabase for nothing.
+    supabase
+      .from("debts")
+      .select("subcategory_id, debt_kind")
+      .eq("household_id", household.id),
   ]);
 
-  // Debt rows share one Net Worth section so this view matches the sidebar and
-  // headline metric, regardless of whether the underlying debt is a card or loan.
-  const { data: debtRows } = await supabase
-    .from("debts")
-    .select("subcategory_id, debt_kind")
-    .eq("household_id", household.id);
   const excludedDebtIds = new Set(
     (debtRows ?? [])
       .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind))

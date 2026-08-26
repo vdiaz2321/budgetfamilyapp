@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { centsToDisplay, formatMoney } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { addToPlan, copyPlansFromPreviousMonth, restorePlansSnapshot, setRollover, setRolloverOverride } from "./actions";
+import { addToPlan, copyPlansFromPreviousMonth, listPayees, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
 import { advanceSubscriptionRenewal } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
@@ -51,7 +51,6 @@ type Props = {
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
   bucketsByAccount?: BucketsByAccount;
-  payeeOptions: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   snowballExtraCents: number;
   snowballFocusSubId: string | null;
@@ -76,7 +75,6 @@ export function BudgetBoard({
   debtAccountOptions,
   bucketOptions,
   bucketsByAccount = {},
-  payeeOptions,
   payeeLineItems = [],
   snowballExtraCents,
   snowballFocusSubId,
@@ -165,26 +163,52 @@ export function BudgetBoard({
   // works with or without a selected budget row.
   const [showAddModal, setShowAddModal] = useState(false);
   const [duePayment, setDuePayment] = useState<DueItem | null>(null);
+  // The payee autocomplete list is ~28KB — a sixth of this page's payload —
+  // for a control most visits never open, so it's fetched the first time a
+  // surface that needs it appears rather than shipped with the page.
+  const [payeeOptions, setPayeeOptions] = useState<{ id: string; name: string }[]>([]);
+  const payeesRequested = useRef(false);
+  const loadPayees = () => {
+    if (payeesRequested.current) return;
+    payeesRequested.current = true;
+    void listPayees().then(setPayeeOptions);
+  };
+  // Expanded state for the toolbar's "Due this week" pill (the list renders
+  // directly under the toolbar row, above the category groups).
+  const [showDue, setShowDue] = useState(false);
+  const handlePayDue = (item: DueItem) => {
+    if (item.source === "subscription") {
+      const fd = new FormData();
+      fd.set("id", item.id);
+      void advanceSubscriptionRenewal(fd);
+    }
+    loadPayees();
+    setDuePayment(item);
+  };
 
   // Precompute account_id → name so the item panel's tx list can render each
   // row's account without re-scanning accountOptions on every entry.
   const accountNameById = new Map(accountOptions.map((a) => [a.id, a.name]));
   const paymentAccountOptions = accountOptions.filter((a) => a.group === "Banking" || a.group === "Credit Cards");
 
-  // The card is deliberately based on the real current week, not a future or
-  // historical month that happens to be open in the picker.
+  // On the current month the window is the real current week (plus anything
+  // already overdue this month). On any other month it widens to that whole
+  // month — browsing to September to plan ahead used to drop the pill with no
+  // explanation, when "what falls due in September" is exactly the question
+  // being asked. The label changes with it, so the two never get confused.
   const today = new Date();
   const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   const isCurrentMonth = month.key === currentMonthKey;
+  const viewedMonth = new Date(`${month.firstOfMonth}T00:00:00`);
   const dueThisWeek = (() => {
-    const start = new Date(today);
+    const start = isCurrentMonth ? new Date(today) : new Date(viewedMonth);
     start.setHours(0, 0, 0, 0);
-    if (!isCurrentMonth) return [] as DueItem[];
-    const startOfMonth = new Date(start.getFullYear(), start.getMonth(), 1);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
+    const startOfMonth = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth(), 1);
     // Show items from start of month (not just today) so overdue unpaid items
     // stay visible until Pay/Edit is clicked, not just until the date passes.
+    const end = isCurrentMonth
+      ? (() => { const e = new Date(start); e.setDate(e.getDate() + 7); return e; })()
+      : new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() + 1, 0);
     const inWindow = (value: Date) => value >= startOfMonth && value <= end;
     // Build a lookup of spentCents by subcategory id for subscription "paid" check.
     const spentBySubId = new Map<string, number>();
@@ -202,7 +226,9 @@ export function BudgetBoard({
       .flatMap(({ row, kind }) => {
         const dueDay = kind === "debt" ? (row.debt?.dueDay ?? row.dueDay) : row.dueDay;
         if (!dueDay) return [];
-        const due = new Date(start.getFullYear(), start.getMonth(), Math.min(dueDay, new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()));
+        const y = viewedMonth.getFullYear();
+        const m = viewedMonth.getMonth();
+        const due = new Date(y, m, Math.min(dueDay, new Date(y, m + 1, 0).getDate()));
         const amountCents = Math.max(0, row.plannedCents - row.spentCents);
         if (!inWindow(due) || amountCents <= 0) return [];
         const dueDate = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
@@ -303,8 +329,8 @@ export function BudgetBoard({
         transactions={transactions}
         accountNameById={accountNameById}
         onClose={() => setSelected(null)}
-        onAddTransaction={() => setQuickAdd(true)}
-        onEditTransaction={(tx) => setQuickAdd(tx)}
+        onAddTransaction={() => { loadPayees(); setQuickAdd(true); }}
+        onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
         onOverspentCovered={() => {
           setRowFilter("all");
           setSelected(null);
@@ -360,15 +386,6 @@ export function BudgetBoard({
           currency={currency}
           expanded={heroExpanded}
           onToggle={toggleHero}
-          dueThisWeek={dueThisWeek}
-          onPayDue={(item) => {
-            if (item.source === "subscription") {
-              const fd = new FormData();
-              fd.set("id", item.id);
-              void advanceSubscriptionRenewal(fd);
-            }
-            setDuePayment(item);
-          }}
         />
         </div>
 
@@ -380,7 +397,6 @@ export function BudgetBoard({
         <div className="relative space-y-4">
           {heroHidden && (
             <StickyFooterBar
-              actualLeft={actualLeft}
               actualSpent={actualSpent}
               displayLeft={displayLeft}
               outflowPlanned={outflowPlanned}
@@ -388,7 +404,7 @@ export function BudgetBoard({
             />
           )}
 
-          <div className="flex flex-nowrap items-center gap-1.5 rounded-xl px-0.5 py-1 sm:flex-wrap sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
+          <div className="flex flex-wrap items-center gap-y-1.5 gap-x-1.5 rounded-xl px-0.5 py-1 sm:bg-surface/90 sm:px-2.5 sm:py-2 sm:shadow-sm sm:ring-1 sm:ring-black/5 sm:dark:ring-white/10">
             <button
               type="button"
               onClick={() => showingOverspent ? setRowFilter("all") : showOverspent()}
@@ -401,30 +417,34 @@ export function BudgetBoard({
               </svg>
               Overspent ({overspentCount})
             </button>
-            {/* Mobile only: Cat Group + compact Add grouped and pushed right */}
-            <div className="ml-auto flex items-center gap-1.5 sm:hidden">
+            {/* Same order on both widths: [Due this week] [+ Cat Group]
+                [+ Transaction], pushed right on mobile where the toolbar has
+                no card chrome, left-aligned on desktop. */}
+            <div className="ml-auto flex items-center gap-1.5 sm:ml-0">
+              {dueThisWeek.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowDue((v) => !v)}
+                  aria-pressed={showDue}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
+                    showDue ? "bg-negative/30 text-foreground" : "bg-negative/20 text-foreground hover:bg-negative/30"
+                  }`}
+                >
+                  {isCurrentMonth ? "Due this week" : `Due in ${month.label.split(" ")[0]}`}
+                  <span className="font-bold text-foreground">{dueThisWeek.length}</span>
+                </button>
+              )}
               <AddCategoryGroupButton />
               <button
                 type="button"
-                onClick={() => setShowAddModal(true)}
-                className="h-7 shrink-0 rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
+                onClick={() => { loadPayees(); setShowAddModal(true); }}
+                className="h-7 shrink-0 cursor-pointer items-center rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:rounded-full sm:px-3 sm:text-[11px]"
               >
                 + Transaction
               </button>
             </div>
-            {/* Desktop only: + Transaction */}
-            <button
-              type="button"
-              onClick={() => setShowAddModal(true)}
-              className="hidden shrink-0 cursor-pointer items-center rounded-full bg-brand px-3 py-1 text-[11px] font-bold text-white shadow-sm transition hover:bg-brand-strong sm:flex sm:text-xs"
-            >
-              + Transaction
-            </button>
-            {/* Desktop only: +Cat Group + +Bulk add items inline after +Transaction */}
-            <div className="hidden sm:block">
-              <AddCategoryGroupButton />
-            </div>
-            <div className="hidden sm:block">
+            {/* Desktop only: + Bulk add items sits next to the progress switch */}
+            <div className="ml-auto hidden sm:block">
               <BulkAddSubcategories groups={groups} />
             </div>
             {/* One switch replaces the old separate on/off buttons. */}
@@ -433,9 +453,8 @@ export function BudgetBoard({
               role="switch"
               aria-checked={detailsExpanded}
               aria-label="Show progress bars"
-              title={detailsExpanded ? "Progress On" : "Progress Off"}
               onClick={() => setRowDetail((current) => ({ ...current, expanded: current.expanded !== true }))}
-              className={`ml-auto hidden h-7 items-center rounded-full p-1 transition sm:flex ${
+              className={`hidden h-7 items-center rounded-full p-1 transition sm:flex ${
                 detailsExpanded
                   ? "bg-brand-soft text-brand ring-1 ring-brand/20"
                   : "bg-[#ebe8e1] text-muted ring-1 ring-black/10 hover:text-foreground dark:bg-white/10 dark:ring-white/10"
@@ -454,6 +473,10 @@ export function BudgetBoard({
             </button>
           </div>
 
+          {showDue && dueThisWeek.length > 0 && (
+            <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} />
+          )}
+
           {/* Groups */}
           <div className="space-y-3">
             {displayedGroups.map((group) => (
@@ -470,6 +493,7 @@ export function BudgetBoard({
                 detailsExpanded={detailsExpanded}
                 onFilter={(kind) => {
                   toggleFilterKind(kind);
+                  loadPayees();
                   setRailTab("transactions");
                 }}
               />
@@ -486,7 +510,6 @@ export function BudgetBoard({
                 <SubscriptionsSummaryCard
                   currency={currency}
                   subscriptions={subscriptions}
-                  irregularBills={irregularBills}
                   creditCards={creditCards}
                   open={openGroups["subscriptions"] ?? false}
                   onToggle={() => toggleGroup("subscriptions")}
@@ -496,6 +519,7 @@ export function BudgetBoard({
                     const subId = subscriptions.find((s) => s.subcategoryId)?.subcategoryId;
                     if (subId) {
                       toggleFilterSub(subId, "Subscriptions");
+                      loadPayees();
                       setRailTab("transactions");
                     }
                   }}
@@ -512,6 +536,7 @@ export function BudgetBoard({
                     const subId = irregularBills.find((b) => b.subcategoryId)?.subcategoryId;
                     if (subId) {
                       toggleFilterSub(subId, "Irregular Bills");
+                      loadPayees();
                       setRailTab("transactions");
                     }
                   }}
@@ -545,7 +570,7 @@ export function BudgetBoard({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRailTab("transactions")}
+                  onClick={() => { loadPayees(); setRailTab("transactions"); }}
                   className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition ${
                     railTab === "transactions"
                       ? "bg-brand-soft text-brand"
@@ -646,31 +671,43 @@ const TONE_CLASSES: Record<BudgetTone, { text: string; badge: string; icon: stri
   },
 };
 
-// Give unassigned income a job. Adds to an item's Planned rather than moving
-// between two, since the money is coming from income that isn't allocated yet.
+// Reconcile planned outflow with income, in whichever direction the month is
+// out of balance. "assign" gives unassigned income a job (one-sided increase);
+// "trim" un-budgets money when planned outflow exceeds income (one-sided
+// decrease). Neither moves money between two items — that's `coverOverspend`,
+// which lives on the item panel.
 //
 // A modal rather than inline controls: the hero card is a dense grid of
 // figures, and dropping a select + input + two buttons into it pushed the
-// numbers around. The trigger stays a quiet text link; the form gets room.
+// numbers around. The trigger stays a small pill; the form gets room.
 function AssignLeftover({
+  mode = "assign",
   leftoverCents,
   monthKey,
   currency,
   options,
 }: {
+  mode?: "assign" | "trim";
   leftoverCents: number;
   monthKey: string;
   currency: string;
   options: SubOption[];
 }) {
+  const trimming = mode === "trim";
   const [open, setOpen] = useState(false);
   const [toId, setToId] = useState("");
-  const [amount, setAmount] = useState("0");
+  const [amount, setAmount] = useState("");
   const [filter, setFilter] = useState("");
   const [pending, start] = useTransition();
 
   // Outflow items only — assigning income to an income line is meaningless.
-  const targets = options.filter((o) => o.kind !== "income");
+  // Trimming additionally needs a real stored plan to cut into: auto-calculated
+  // rows (Subscriptions, Irregular Bills) show a remaining balance derived from
+  // their own totals with no budget_plans row behind it, so offering them here
+  // would be a dead end — the server has nothing to decrement.
+  const targets = options.filter(
+    (o) => o.kind !== "income" && (!trimming || (o.trimmableCents ?? 0) > 0),
+  );
   const KIND_LABEL: Partial<Record<CategoryKind, string>> = {
     savings: "Investments & Savings",
     bills: "Bills",
@@ -683,13 +720,21 @@ function AssignLeftover({
     .map((k) => ({ kind: k, items: shown.filter((o) => o.kind === k) }))
     .filter((g) => g.items.length > 0);
 
+  const amountValue = Number(amount.replace(/[^0-9.-]/g, ""));
+  const amountValid = amount.trim() !== "" && Number.isFinite(amountValue) && amountValue > 0;
+
+  const [error, setError] = useState<string | null>(null);
   const submit = () => {
     const fd = new FormData();
     fd.set("subcategoryId", toId);
     fd.set("month", monthKey);
-    fd.set("addAmount", amount);
+    fd.set(trimming ? "trimAmount" : "addAmount", amount);
     start(async () => {
-      await addToPlan(fd);
+      const res = trimming ? await trimFromPlan(fd) : await addToPlan(fd);
+      if (res?.error) {
+        setError(res.error);
+        return;
+      }
       setOpen(false);
       setToId("");
       setFilter("");
@@ -700,20 +745,25 @@ function AssignLeftover({
     <>
       <button
         type="button"
-        onClick={() => { setAmount("0"); setOpen(true); }}
-        className="mt-1 text-[11px] font-semibold text-brand underline-offset-2 hover:underline"
+        onClick={() => { setAmount(""); setError(null); setOpen(true); }}
+        className={`mt-1.5 inline-flex w-fit cursor-pointer items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
+          trimming
+            ? "bg-negative/10 text-negative ring-negative/20 hover:bg-negative/20"
+            : "bg-brand-soft text-brand ring-brand/20 hover:bg-brand/20"
+        }`}
       >
-        Give it a job
+        <span aria-hidden>{trimming ? "−" : "+"}</span>
+        {trimming ? "Trim an item" : "Assign to an item"}
       </button>
 
       {open ? (
-        <ModalShell title="Assign to a budget item" onClose={() => setOpen(false)} className="sm:max-w-md" mobileAlign="top">
+        <ModalShell title={trimming ? "Trim a budget item" : "Assign to a budget item"} onClose={() => setOpen(false)} className="sm:max-w-md" mobileAlign="top">
           <div className="space-y-4 px-5 py-4">
             <p className="text-sm text-muted">
-              <span className="font-semibold text-foreground tabular-nums">
-                {formatMoney(leftoverCents, currency)}
+              <span className={`font-semibold tabular-nums ${trimming ? "text-negative" : "text-foreground"}`}>
+                {formatMoney(Math.abs(leftoverCents), currency)}
               </span>{" "}
-              of planned income has no job yet.
+              {trimming ? "more is planned than there is income to cover." : "of planned income has no job yet."}
             </p>
 
             <label className="block">
@@ -727,14 +777,11 @@ function AssignLeftover({
                 autoFocus
                 className="w-full rounded-xl bg-background px-3 py-2.5 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
-              <p className="mt-1.5 text-xs leading-snug text-muted">
-                Enter how much of the unassigned income to assign. You can assign the rest later.
-              </p>
             </label>
 
             <div>
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                Assign to
+                {trimming ? "Take from" : "Assign to"}
               </span>
               {/* 70+ items is too many to scan, so the list filters as you type. */}
               <input
@@ -746,7 +793,11 @@ function AssignLeftover({
               />
               <div className="max-h-56 overflow-y-auto rounded-xl ring-1 ring-line">
                 {grouped.length === 0 ? (
-                  <p className="px-3 py-4 text-center text-xs text-muted">No items match.</p>
+                  <p className="px-3 py-4 text-center text-xs leading-relaxed text-muted">
+                    {trimming && filter.trim() === ""
+                      ? "Nothing here can be trimmed — this month's plan comes from auto-calculated Subscriptions and Irregular Bills. Edit those items to change it."
+                      : "No items match."}
+                  </p>
                 ) : (
                   grouped.map((g) => (
                     <div key={g.kind}>
@@ -760,14 +811,14 @@ function AssignLeftover({
                           onClick={() => setToId(o.id)}
                           className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition ${
                             toId === o.id
-                              ? "bg-brand-soft font-semibold"
+                              ? trimming ? "bg-negative/10 font-semibold" : "bg-brand-soft font-semibold"
                               : "hover:bg-black/5 dark:hover:bg-white/10"
                           }`}
                         >
                           <span className="min-w-0 truncate">{o.name}</span>
-                          {o.remainingCents != null ? (
+                          {(trimming ? o.trimmableCents : o.remainingCents) != null ? (
                             <span className="shrink-0 text-[11px] tabular-nums text-muted">
-                              {formatMoney(o.remainingCents, currency)} left
+                              {formatMoney((trimming ? o.trimmableCents : o.remainingCents) ?? 0, currency)} left
                             </span>
                           ) : null}
                         </button>
@@ -788,13 +839,14 @@ function AssignLeftover({
               </button>
               <button
                 type="button"
-                disabled={pending || !toId}
+                disabled={pending || !toId || !amountValid}
                 onClick={submit}
-                className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                className={`rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-50 ${trimming ? "bg-negative" : "bg-brand"}`}
               >
-                {pending ? "Assigning…" : "Assign"}
+                {pending ? (trimming ? "Trimming…" : "Assigning…") : trimming ? "Trim" : "Assign"}
               </button>
             </div>
+            {error ? <p className="text-xs text-negative">{error}</p> : null}
           </div>
         </ModalShell>
       ) : null}
@@ -819,6 +871,7 @@ function CategoryProgressCard({
   fillClass,
   currency,
   shareOfIncome,
+  shareColor,
 }: {
   label: string;
   actualLabel: string;
@@ -832,22 +885,28 @@ function CategoryProgressCard({
   // the savings rate — the headline number in any personal-finance review —
   // is visible without leaving Budget.
   shareOfIncome?: number | null;
+  // Token for the share figure, so each card's percentage reads in its own
+  // flow colour rather than every card borrowing the savings blue.
+  shareColor?: string;
 }) {
   const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
   return (
     <div className="rounded-xl bg-background/60 px-3 py-2 ring-1 ring-line">
-      <div className="flex items-center gap-2">
+      {/* Wraps rather than truncates: when the card is full-width on mobile the
+          amounts are long enough to squeeze a truncating label down to an
+          ellipsis, so they drop to their own line instead. */}
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
-        <span className="truncate text-xs text-muted">{label}</span>
+        <span className="whitespace-nowrap text-[11px] text-muted">{label}</span>
         {shareOfIncome != null ? (
           <span
-            className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
-            style={{ backgroundColor: "var(--viz-sel)", color: "var(--viz-savings)" }}
+            className="shrink-0 text-[10px] font-semibold tabular-nums"
+            style={{ color: shareColor ?? "var(--viz-savings)" }}
           >
             {shareOfIncome.toFixed(0)}% of income
           </span>
         ) : null}
-        <span className="ml-auto whitespace-nowrap text-xs tabular-nums">
+        <span className="ml-auto whitespace-nowrap text-[11px] tabular-nums sm:text-xs">
           <span className="font-semibold text-foreground">{formatMoney(planned, currency)}</span>
           <span className="text-muted"> / {actualLabel} </span>
           <span className={`font-semibold ${actualColorClass}`}>{formatMoney(actual, currency)}</span>
@@ -866,26 +925,6 @@ function CategoryProgressCard({
 // Top row above the hero: title + month picker on the left. The + Transaction
 // and Roll Planned actions are styled as a matched pair to sit above the
 // Summary / Transactions tab strip in the right rail.
-function RailActions({
-  onAddItem,
-}: {
-  onAddItem: () => void;
-}) {
-  return (
-    <div className="grid grid-cols-1 gap-2">
-      <button
-        type="button"
-        onClick={onAddItem}
-        className="flex items-center justify-center gap-1.5 rounded-xl bg-brand px-3.5 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        Transaction
-      </button>
-    </div>
-  );
-}
 
 // Small submit-only Undo button used inline next to the "+$X rollover" line
 // in the hero card. Same server action as the pill's Undo in RolloverFooter —
@@ -924,8 +963,6 @@ function SummaryHeroCard({
   currency,
   expanded,
   onToggle,
-  dueThisWeek = [],
-  onPayDue,
 }: {
   actualLeft: number;
   displayLeft: number;
@@ -943,8 +980,6 @@ function SummaryHeroCard({
   currency: string;
   expanded: boolean;
   onToggle: () => void;
-  dueThisWeek?: DueItem[];
-  onPayDue?: (item: DueItem) => void;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft);
   const toneClasses = TONE_CLASSES[tone];
@@ -1049,14 +1084,20 @@ function SummaryHeroCard({
         </span>
       </button>
       <div className="px-6 pb-5 pt-5">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+        {/* Desktop packs the four figures into a tight 2x2 on the left and
+            stacks the progress cards down the right, so the old dead gutter
+            between the left and right money columns disappears. Below md it
+            falls back to the previous stacked layout. */}
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)] md:gap-x-8">
+        <div className="flex min-w-0 flex-col">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:gap-x-8">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
           </div>
-          <div className="min-w-0 text-right">
+          <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
@@ -1069,9 +1110,11 @@ function SummaryHeroCard({
             </p>
             {/* Zero-based budgeting says every dollar gets a job. This figure
                 used to sit here as a read-only fact; now it's the entry point
-                for giving the money one. */}
-            {displayLeft > 0 ? (
+                for giving the money one — or, when the month is over-budgeted,
+                for taking a job away so the two sides balance again. */}
+            {displayLeft !== 0 ? (
               <AssignLeftover
+                mode={displayLeft < 0 ? "trim" : "assign"}
                 leftoverCents={displayLeft}
                 monthKey={monthFirstOfMonth}
                 currency={currency}
@@ -1095,9 +1138,9 @@ function SummaryHeroCard({
               </div>
             )}
           </div>
-          <div className="min-w-0 text-right">
+          <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
-            <div className="mt-0.5 flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
               <p className="whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
                 {formatMoney(actualSpent, currency)}
               </p>
@@ -1115,16 +1158,74 @@ function SummaryHeroCard({
           </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--cat-income)]" fillClass="bg-[color:var(--cat-income)]" currency={currency} />
-          <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--cat-bills)]" fillClass="bg-[color:var(--cat-bills)]" currency={currency} />
-          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--cat-savings)]" fillClass="bg-[color:var(--cat-savings)]" currency={currency} shareOfIncome={incomePlanned > 0 ? (savings.planned / incomePlanned) * 100 : null} />
-          <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--cat-debt)]" fillClass="bg-[color:var(--cat-debt)]" currency={currency} />
+        {/* Rollover + Roll-in used to sit in a full-width strip under the
+            card; pulled up under the figures so they fill the space the left
+            column was leaving empty. Spans the whole 2-col stat block rather
+            than living in one cell, so the pills don't wrap on mobile. */}
+        <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+        </div>
+
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:mt-0 md:grid-cols-1 md:content-start">
+          <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
+          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} shareOfIncome={incomePlanned > 0 ? (savings.planned / incomePlanned) * 100 : null} shareColor="var(--viz-savings)" />
+          <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--viz-bills)]" fillClass="bg-[color:var(--viz-bills)]" currency={currency} shareOfIncome={incomePlanned > 0 ? (billsExpenses.planned / incomePlanned) * 100 : null} shareColor="var(--viz-bills)" />
+          <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--viz-debt)]" fillClass="bg-[color:var(--viz-debt)]" currency={currency} />
+        </div>
         </div>
       </div>
-
-      <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} dueItems={dueThisWeek} onPayDue={onPayDue} />
     </div>
+  );
+}
+
+// The Due-this-week list, expanded by the toolbar pill above the group list.
+function DueItemsList({
+  dueItems,
+  currency,
+  onPayDue,
+}: {
+  dueItems: DueItem[];
+  currency: string;
+  onPayDue?: (item: DueItem) => void;
+}) {
+  return (
+    <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+      {dueItems.map((item) => {
+        const dueTarget = new Date(`${item.dueDate}T00:00:00`);
+        const todayMidnight = new Date();
+        todayMidnight.setHours(0, 0, 0, 0);
+        const isOverdue = dueTarget < todayMidnight;
+        return (
+          <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>{dueItemDateLabel(item.dueDate)}</span>
+                <span className="truncate text-sm font-semibold">{item.name}</span>
+                {isOverdue && (
+                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-negative">
+                    Overdue
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 truncate text-[11px] text-muted">
+                {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
+              </p>
+            </div>
+            <div className="shrink-0 text-right">
+              <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
+              {onPayDue && (
+                <button
+                  type="button"
+                  onClick={() => onPayDue(item)}
+                  className={`mt-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${isOverdue ? "bg-negative/15 text-negative hover:bg-negative/25" : "bg-brand-soft text-brand hover:bg-brand/20"}`}
+                >
+                  Pay / Edit
+                </button>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -1214,7 +1315,6 @@ function RolloverControl({
           <button
             type="submit"
             disabled={pending}
-            title={`Add ${prevMonthLabel}'s unspent income to this month`}
             className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive disabled:cursor-wait disabled:opacity-60"
             aria-label={`Rollover ${prevMonthName}: ${amount}`}
           >
@@ -1226,28 +1326,23 @@ function RolloverControl({
   );
 }
 
-// Footer row: [Due this week pill] ... [rollover amount] [Rollover/Remove btn]
-// Due pill expands an inline list above the row.
+// Footer row: [rollover amount] [Rollover/Remove btn]. The Due-this-week pill
+// lives in the board toolbar instead, next to + Cat Group.
 function RolloverFooter({
   rollover,
   monthFirstOfMonth,
   currency,
-  dueItems = [],
-  onPayDue,
 }: {
   rollover: Props["rollover"];
   monthFirstOfMonth: string;
   currency: string;
-  dueItems?: DueItem[];
-  onPayDue?: (item: DueItem) => void;
 }) {
   const [copyPending, startCopy] = useTransition();
   const [undoPending, startUndo] = useTransition();
-  const [showDue, setShowDue] = useState(false);
   const [snapshot, setSnapshot] = useState<
     Array<{ subcategory_id: string; planned_cents: number | null }> | null
   >(null);
-  const { enabled, prevMonthLabel } = rollover;
+  const { prevMonthLabel } = rollover;
 
   useEffect(() => {
     if (!snapshot) return;
@@ -1255,71 +1350,9 @@ function RolloverFooter({
     return () => window.clearTimeout(t);
   }, [snapshot]);
   return (
-    // Neutral tint on both enabled/disabled states — the hero card already
-    // signals when a rollover is active via the "+$X rollover" line, so the
-    // extra brand-soft wash here was noise on top of it.
-    <div className={`border-t border-line ${enabled ? "bg-black/[0.03] dark:bg-white/[0.05]" : "bg-background/40"}`}>
-      {/* Expandable due-this-week list */}
-      {showDue && dueItems.length > 0 && (
-        <ul className="divide-y divide-line border-b border-line">
-          {dueItems.map((item) => {
-            const dueTarget = new Date(`${item.dueDate}T00:00:00`);
-            const todayMidnight = new Date();
-            todayMidnight.setHours(0, 0, 0, 0);
-            const isOverdue = dueTarget < todayMidnight;
-            return (
-              <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>{dueItemDateLabel(item.dueDate)}</span>
-                    <span className="truncate text-sm font-semibold">{item.name}</span>
-                    {isOverdue && (
-                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-negative">
-                        Overdue
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 truncate text-[11px] text-muted">
-                    {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
-                  {onPayDue && (
-                    <button
-                      type="button"
-                      onClick={() => onPayDue(item)}
-                      className={`mt-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${isOverdue ? "bg-negative/15 text-negative hover:bg-negative/25" : "bg-brand-soft text-brand hover:bg-brand/20"}`}
-                    >
-                      Pay / Edit
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {/* Single row: Due-this-week pill on the left, rollover pill (only
-          when the user hasn't opted in yet) and Roll-in / Undo action on
-          the right. Merged from two rows so there's no dead space when
-          rollover is already in (hero card carries that state). */}
-      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
-        {dueItems.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowDue((v) => !v)}
-            className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
-              showDue ? "bg-negative/30 text-foreground" : "bg-negative/20 text-foreground hover:bg-negative/30"
-            }`}
-          >
-            Due this week
-            <span className="text-[10px] font-bold text-foreground">{dueItems.length}</span>
-          </button>
-        )}
-
-        <div className="ml-auto flex items-center gap-2">
+    // Renders inline inside the hero's left column, so no strip chrome — just
+    // the rollover pill and the Roll-in / Undo action on one wrapping row.
+    <div className="mt-3 flex flex-wrap items-center gap-2 md:mt-auto md:pt-4">
           <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
           {snapshot ? (
             <button
@@ -1355,8 +1388,6 @@ function RolloverFooter({
               </button>
             </form>
           )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1425,21 +1456,16 @@ function OverrideInput({
 // the viewport across that whole scroll region instead of unsticking after
 // only its own row height.
 function StickyFooterBar({
-  actualLeft,
   actualSpent,
   displayLeft,
   outflowPlanned,
   currency,
 }: {
-  actualLeft: number;
   actualSpent: number;
   displayLeft: number;
   outflowPlanned: number;
   currency: string;
 }) {
-  const { tone } = getBudgetStatus(actualLeft);
-  const toneClasses = TONE_CLASSES[tone];
-
   return (
     // No explicit z-index here on purpose: giving a `position: sticky`
     // element a z-index promotes it to its own stacking context, and in

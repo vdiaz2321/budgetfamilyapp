@@ -111,6 +111,13 @@ export type SubOption = {
   // Budget remaining for this item this month (planned − spent). Shown in
   // the multi-select picker so the user can see how much is left per item.
   remainingCents?: number;
+  // How much of this item's STORED plan can actually be given back:
+  // budget_plans.planned_cents − spent, floored at zero. Deliberately not the
+  // same as `remainingCents`: for auto-calculated rows (Subscriptions,
+  // Irregular Bills) the displayed plan comes from their own live totals, so a
+  // row can show money "left" while its stored plan is fully spent and cannot
+  // be trimmed at all.
+  trimmableCents?: number;
 };
 
 // An account option for the add-transaction form.

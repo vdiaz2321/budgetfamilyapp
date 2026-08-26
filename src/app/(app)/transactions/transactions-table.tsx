@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
-import { deleteTransaction, toggleCleared, updateTransactionAmount } from "../budget/actions";
+import { deleteTransaction, listPayees, toggleCleared, updateTransactionAmount } from "../budget/actions";
 import { TransactionModal } from "../budget/transaction-modal";
 import { MonthPicker } from "../budget/month-picker";
 import { ImportCsvModal } from "./import-csv-modal";
@@ -36,7 +36,6 @@ type Props = {
   accountOptions: AccountOption[];
   bucketsByAccount?: import("../budget/types").BucketsByAccount;
   transferBuckets?: { id: string; accountId: string; name: string }[];
-  payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   dateRange: { from: string | null; to: string | null };
 };
@@ -49,13 +48,24 @@ export function TransactionsTable({
   accountOptions,
   bucketsByAccount = {},
   transferBuckets = [],
-  payeeOptions = [],
   payeeLineItems = [],
   dateRange,
 }: Props) {
   const router = useRouter();
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);
+  // Same deal as the budget board: the payee autocomplete list is a large
+  // array serialised into every page load for a control most visits never
+  // open, so it's fetched the first time the transaction modal appears.
+  const [payeeOptions, setPayeeOptions] = useState<{ id: string; name: string }[]>([]);
+  const payeesRequested = useRef(false);
+  const openModal = (target: "new" | TxData) => {
+    if (!payeesRequested.current) {
+      payeesRequested.current = true;
+      void listPayees().then(setPayeeOptions);
+    }
+    setModal(target);
+  };
   const [transferEdit, setTransferEdit] = useState<TxData | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -369,7 +379,7 @@ export function TransactionsTable({
         </button>
         <button
           type="button"
-          onClick={() => setModal("new")}
+          onClick={() => openModal("new")}
           className="order-2 flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white hover:shadow-sm sm:px-3"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
@@ -542,7 +552,7 @@ export function TransactionsTable({
                     onSelect={() => toggleSelected(t.id)}
                     onEdit={() => {
                       if (t.isTransfer) setTransferEdit(t);
-                      else if (!t.isCardPayment && !t.isInvestmentTransfer) setModal(t);
+                      else if (!t.isCardPayment && !t.isInvestmentTransfer) openModal(t);
                     }}
                   />
                 ))}
@@ -575,7 +585,7 @@ export function TransactionsTable({
                 onTap={() => {
                   if (selectMode) toggleSelected(t.id);
                   else if (t.isTransfer) setTransferEdit(t);
-                  else if (!t.isCardPayment && !t.isInvestmentTransfer) setModal(t);
+                  else if (!t.isCardPayment && !t.isInvestmentTransfer) openModal(t);
                 }}
               />
             ))}

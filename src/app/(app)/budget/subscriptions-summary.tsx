@@ -3,9 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { DOT } from "./category-icons";
-import { SubscriptionsModal } from "../subscriptions/subscriptions-modal";
 import { reorderIrregularBills, reorderSubscriptions, updateIrregularBillTypical, updateSubscriptionDueDate } from "../subscriptions/actions";
-import { type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
+import { CYCLE_LABEL, SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 
 const DragHandle = (
@@ -17,7 +16,6 @@ const DragHandle = (
 export function SubscriptionsSummaryCard({
   currency,
   subscriptions,
-  irregularBills,
   creditCards,
   open,
   onToggle,
@@ -27,7 +25,6 @@ export function SubscriptionsSummaryCard({
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
-  irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
   onOpenSpent?: () => void;
   open: boolean;
@@ -88,7 +85,7 @@ export function SubscriptionsSummaryCard({
           )}
           <button
             type="button"
-            onClick={() => setEditorTarget("new")}
+            onClick={() => { if (!open) onToggle(); setEditorTarget("new"); }}
             className="inline-flex shrink-0 items-center justify-center rounded-lg border border-brand/30 px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
           >
             + Add
@@ -98,7 +95,7 @@ export function SubscriptionsSummaryCard({
 
       {open ? (
         <div className="border-t border-line">
-          {subscriptions.length === 0 ? (
+          {subscriptions.length === 0 && editorTarget !== "new" ? (
             <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
               <p className="text-sm text-muted">No subscriptions yet.</p>
               <button
@@ -109,6 +106,12 @@ export function SubscriptionsSummaryCard({
                 + Add one
               </button>
             </div>
+          ) : subscriptions.length === 0 ? (
+            <InlineSubscriptionEditor
+              row={null}
+              creditCards={creditCards}
+              onDone={() => setEditorTarget(null)}
+            />
           ) : (
             <>
               <div className="grid grid-cols-3 divide-x divide-line border-b border-line bg-background/40">
@@ -116,17 +119,37 @@ export function SubscriptionsSummaryCard({
                 <SummaryMetric label="Annual Total" value={formatMoney(annualBilledTotal, currency)} />
                 <SummaryMetric label="Total Combined Annual" value={formatMoney(annualizedTotal, currency)} />
               </div>
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)]">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid-cols-[auto_minmax(0,1.4fr)_6rem_5rem_6.5rem_minmax(0,1fr)]">
                 <span className="w-3" aria-hidden />
                 <span>Name</span>
                 <span className="text-right">Amount</span>
+                <span className="hidden text-center sm:inline">Cycle</span>
                 <span className="hidden text-center sm:inline">Due</span>
                 <span className="hidden sm:inline">Card</span>
               </div>
               <div className="divide-y divide-line">
+              {editorTarget === "new" ? (
+                <InlineSubscriptionEditor
+                  row={null}
+                  creditCards={creditCards}
+                  onDone={() => setEditorTarget(null)}
+                />
+              ) : null}
               {rows.map((s) => {
                 const cardName = s.accountId ? cardMap.get(s.accountId) : null;
                 const dragOver = dragOverId === s.id;
+                // The clicked row is replaced in place by the editor rather
+                // than opening a modal on top of the board.
+                if (editorTarget === s.id) {
+                  return (
+                    <InlineSubscriptionEditor
+                      key={s.id}
+                      row={s}
+                      creditCards={creditCards}
+                      onDone={() => setEditorTarget(null)}
+                    />
+                  );
+                }
                 return (
                   <div
                     key={s.id}
@@ -140,7 +163,7 @@ export function SubscriptionsSummaryCard({
                         setEditorTarget(s.id);
                       }
                     }}
-                    className={`group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm transition hover:bg-brand-soft/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_7rem_minmax(0,1.2fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
+                    className={`group grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm transition hover:bg-brand-soft/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:grid-cols-[auto_minmax(0,1.4fr)_6rem_5rem_6.5rem_minmax(0,1fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
                   >
                     <span
                       onClick={(event) => event.stopPropagation()}
@@ -159,6 +182,9 @@ export function SubscriptionsSummaryCard({
                       </span>
                     </div>
                     <span className="text-right font-medium tabular-nums">{formatMoney(s.amountCents, currency)}</span>
+                    <span className="hidden text-center text-xs text-muted sm:inline">
+                      {CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}
+                    </span>
                     <span className="hidden sm:flex sm:items-center sm:justify-center" onClick={(event) => event.stopPropagation()}>
                       <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
                     </span>
@@ -172,18 +198,25 @@ export function SubscriptionsSummaryCard({
         </div>
       ) : null}
 
-      {editorTarget ? (
-        <SubscriptionsModal
-          currency={currency}
-          subscriptions={subscriptions}
-          irregularBills={irregularBills}
-          creditCards={creditCards}
-          onClose={() => setEditorTarget(null)}
-          showOnly="subscriptions"
-          initialSubscriptionEdit={editorTarget}
-        />
-      ) : null}
     </section>
+  );
+}
+
+// Inline replacement for the old "Edit subscription" modal: the form renders
+// in the row's own place inside the list.
+function InlineSubscriptionEditor({
+  row,
+  creditCards,
+  onDone,
+}: {
+  row: SubscriptionRow | null;
+  creditCards?: CreditCardOption[];
+  onDone: () => void;
+}) {
+  return (
+    <div className="bg-brand-soft/20 px-4 py-3">
+      <SubscriptionForm row={row} creditCards={creditCards} onDone={onDone} />
+    </div>
   );
 }
 

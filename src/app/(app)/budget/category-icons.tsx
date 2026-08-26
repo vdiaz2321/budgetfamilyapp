@@ -17,12 +17,16 @@ export const ROW_CLASSES: Record<CategoryKind, { iconBg: string; iconText: strin
 // everywhere. (Deliberately not the same palette as ROW_CLASSES above: those
 // tints are semantic — good/warning/danger — while this is the category's
 // own identity color.)
+//
+// Drawn from the --viz-* palette, NOT --brand/--accent: a category dot is
+// data, and the Budget hero card's progress bars use these same tokens, so
+// Bills reads teal and Savings blue in both places instead of clashing.
 export const DOT: Record<CategoryKind, string> = {
-  income: "bg-positive",
-  savings: "bg-sky-500",
-  bills: "bg-brand",
-  expenses: "bg-accent",
-  debt: "bg-negative",
+  income: "bg-[color:var(--positive)]",
+  savings: "bg-[color:var(--viz-savings)]",
+  bills: "bg-[color:var(--viz-bills)]",
+  expenses: "bg-[color:var(--viz-expenses)]",
+  debt: "bg-[color:var(--viz-debt)]",
 };
 
 const SVG_PROPS = {

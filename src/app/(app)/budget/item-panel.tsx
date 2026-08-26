@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { centsToDisplay, formatMoney } from "@/lib/money";
+import { useMounted } from "@/lib/use-mounted";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import {
   coverOverspend,
@@ -288,13 +289,11 @@ export function ItemPanel({
               currency={currency}
               monthKey={monthKey}
               accountOptions={debtAccountOptions}
-              bucketOptions={bucketOptions}
               snowballExtraCents={snowballExtraCents}
               isSnowballFocus={isSnowballFocus}
-              onAddTransaction={onAddTransaction}
             />
           ) : kind === "savings" && row.savings ? (
-            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} onAddTransaction={onAddTransaction} />
+            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} />
           ) : (
             <PlannedForm
               subId={row.subId}
@@ -769,8 +768,7 @@ function ItemDetailsPopover({
   const [amount, setAmount] = useState<string>(centsToDisplay(Math.max(0, plannedCents - spentCents)));
   const available = plannedCents - spentCents;
   const monthLabel = new Date(`${monthKey}T00:00:00`).toLocaleString("en-US", { month: "short", year: "numeric" });
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useMounted();
   if (!mounted) return null;
 
   return createPortal(
@@ -903,21 +901,17 @@ function DebtForm({
   currency,
   monthKey,
   accountOptions,
-  bucketOptions,
   snowballExtraCents,
   isSnowballFocus,
-  onAddTransaction,
 }: {
   row: RowData;
   currency: string;
   monthKey: string;
   accountOptions: AccountOption[];
-  bucketOptions: BucketOption[];
   snowballExtraCents: number;
   isSnowballFocus: boolean;
-  onAddTransaction: () => void;
 }) {
-  const [pending, start] = useTransition();
+  const [, start] = useTransition();
   const router = useRouter();
   const plannedRef = useRef<HTMLInputElement>(null);
   const d = row.debt!;
@@ -1040,7 +1034,7 @@ function savingsPace(goalCents: number, startCents: number, monthlyCents: number
   return monthlyCents >= required ? "on_track" as const : "behind" as const;
 }
 
-function SavingsForm({ row, bucketOptions, monthKey, onAddTransaction }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; onAddTransaction: () => void }) {
+function SavingsForm({ row, bucketOptions, monthKey }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string }) {
   const [pending, start] = useTransition();
   const router = useRouter();
   const s = row.savings!;
@@ -1176,18 +1170,6 @@ function Labeled({
         className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </label>
-  );
-}
-
-function AddTxBtn({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="shrink-0 rounded-lg bg-brand-soft px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-soft/70"
-    >
-      +Transaction
-    </button>
   );
 }
 

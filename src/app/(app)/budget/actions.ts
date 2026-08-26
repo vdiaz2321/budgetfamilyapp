@@ -97,6 +97,19 @@ async function requireHousehold() {
 
 const CUSTOM_GROUP_KINDS = new Set(["bills", "expenses", "savings"]);
 
+// Payee autocomplete list, fetched on demand instead of shipped with every
+// budget page render — the full list is ~28KB of RSC payload for a control
+// most page loads never open. Read-only, so no revalidate.
+export async function listPayees(): Promise<{ id: string; name: string }[]> {
+  const { supabase, householdId } = await requireHousehold();
+  const { data } = await supabase
+    .from("payees")
+    .select("id, name")
+    .eq("household_id", householdId);
+  return data ?? [];
+}
+
+
 export async function addCategoryGroup(formData: FormData): Promise<{ error?: string }> {
   const { supabase, householdId } = await requireHousehold();
   const name = String(formData.get("name") ?? "").trim();
@@ -295,6 +308,61 @@ export async function addToPlan(formData: FormData) {
       month,
       subcategory_id: subcategoryId,
       planned_cents: (existing?.planned_cents ?? 0) + addCents,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+
+  revalidatePath("/budget");
+  return {};
+}
+
+/**
+ * Reduce an item's planned amount — the mirror of `addToPlan`.
+ *
+ * Used from the hero card when planned outflow exceeds income: the money isn't
+ * moving anywhere in particular, it's just being un-budgeted, so this is a
+ * one-sided decrease rather than the two-sided move `coverOverspend` performs.
+ * Refuses to cut below zero or below what the item has already spent, which
+ * would silently manufacture an overspent row.
+ */
+export async function trimFromPlan(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  const month = String(formData.get("month") ?? "");
+  const trimCents = moneyExpressionToCents(String(formData.get("trimAmount") ?? "0"));
+  if (!subcategoryId || !month || trimCents <= 0) return { error: "Missing details." };
+
+  const { data: existing } = await supabase
+    .from("budget_plans")
+    .select("planned_cents")
+    .eq("household_id", householdId)
+    .eq("month", month)
+    .eq("subcategory_id", subcategoryId)
+    .maybeSingle();
+
+  const planned = existing?.planned_cents ?? 0;
+  if (planned < trimCents) return { error: "That item doesn't have that much planned." };
+
+  const { data: actual } = await supabase
+    .from("v_monthly_actuals")
+    .select("actual_cents")
+    .eq("household_id", householdId)
+    .eq("month", month)
+    .eq("subcategory_id", subcategoryId)
+    .maybeSingle();
+
+  const spent = actual?.actual_cents ?? 0;
+  if (planned - trimCents < spent) {
+    return { error: "That would drop the plan below what's already spent." };
+  }
+
+  await supabase.from("budget_plans").upsert(
+    {
+      household_id: householdId,
+      month,
+      subcategory_id: subcategoryId,
+      planned_cents: planned - trimCents,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "household_id,month,subcategory_id" },

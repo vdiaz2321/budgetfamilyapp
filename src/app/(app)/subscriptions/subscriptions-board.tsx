@@ -12,7 +12,7 @@ import {
 } from "./actions";
 import type { IrregularBillRow, SubscriptionRow } from "./types";
 
-const CYCLE_LABEL: Record<string, string> = {
+export const CYCLE_LABEL: Record<string, string> = {
   monthly: "Monthly",
   quarterly: "Quarterly",
   annual: "Annual",
@@ -307,7 +307,7 @@ function SubscriptionsSection({
   );
 }
 
-function SubscriptionForm({
+export function SubscriptionForm({
   row,
   creditCards = [],
   onDone,

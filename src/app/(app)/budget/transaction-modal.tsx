@@ -7,14 +7,7 @@ import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
 
-// Header title (verbose) vs. button label (short), plus tab labels.
-const KIND_TITLE: Record<CategoryKind, string> = {
-  income: "Income",
-  savings: "Savings",
-  bills: "Bill",
-  expenses: "Expense",
-  debt: "Debt Payment",
-};
+// Button label (short), plus tab labels.
 const KIND_SHORT: Record<CategoryKind, string> = {
   income: "Income",
   savings: "Savings",
@@ -718,12 +711,16 @@ function AmountInput({
   const [raw, setRaw] = useState(defaultValue);
   const [focused, setFocused] = useState(false);
 
-  useEffect(() => {
+  // Adjust `raw` when the converter hands down a new amount. Done during
+  // render against the previous prop rather than in an effect: an effect here
+  // would paint the stale amount first and then immediately re-render.
+  const [prevForcedCents, setPrevForcedCents] = useState(forcedCents);
+  if (forcedCents !== prevForcedCents) {
+    setPrevForcedCents(forcedCents);
     if (forcedCents != null && forcedCents > 0) {
-      const display = (forcedCents / 100).toFixed(2);
-      setRaw(display);
+      setRaw((forcedCents / 100).toFixed(2));
     }
-  }, [forcedCents]);
+  }
 
   const commit = (value: string) => {
     const cents = moneyExpressionToCents(value);
@@ -900,6 +897,43 @@ function AccountPicker({
   );
 }
 
+// One selectable row of the picker. Split out of BudgetItemPicker so the
+// toggle handler is invoked from this component's own onClick rather than
+// closed over inside a render-time helper.
+function PickerRow({
+  option,
+  checked,
+  onToggle,
+}: {
+  option: SubOption;
+  checked: boolean;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(option.id)}
+      className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
+    >
+      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+        {checked && (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M2 6l3 3 5-5" />
+          </svg>
+        )}
+      </span>
+      <span className="flex-1 text-sm font-medium">{option.name}</span>
+      {option.remainingCents != null && (
+        <span className={`shrink-0 text-sm tabular-nums ${option.remainingCents < 0 ? "rounded-full bg-negative/25 px-2 py-0.5 font-medium text-foreground" : "text-muted"}`}>
+          {option.remainingCents < 0
+            ? "−$" + (Math.abs(option.remainingCents) / 100).toFixed(2)
+            : "$" + (option.remainingCents / 100).toFixed(2)}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // Full-screen budget item picker with search + checkboxes + remaining amounts.
 function BudgetItemPicker({
   options,
@@ -995,28 +1029,7 @@ function BudgetItemPicker({
               const multiKind = new Set(unselectedFiltered.map((o) => o.kind)).size > 1;
 
               const renderItem = (o: SubOption) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => toggle(o.id)}
-                  className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
-                >
-                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked.has(o.id) ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
-                    {checked.has(o.id) && (
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M2 6l3 3 5-5" />
-                      </svg>
-                    )}
-                  </span>
-                  <span className="flex-1 text-sm font-medium">{o.name}</span>
-                  {o.remainingCents != null && (
-                    <span className={`shrink-0 text-sm tabular-nums ${o.remainingCents < 0 ? "rounded-full bg-negative/25 px-2 py-0.5 font-medium text-foreground" : "text-muted"}`}>
-                      {o.remainingCents < 0
-                        ? "−$" + (Math.abs(o.remainingCents) / 100).toFixed(2)
-                        : "$" + (o.remainingCents / 100).toFixed(2)}
-                    </span>
-                  )}
-                </button>
+                <PickerRow key={o.id} option={o} checked={checked.has(o.id)} onToggle={toggle} />
               );
 
               return (
@@ -1244,10 +1257,13 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open || rates) return;
-    // Rates cached for the session are good enough — FX moves slowly at
-    // family-budget scale and one-tap "Use $X.XX" always shows the number.
+  // Fetching belongs in the handler for the interaction that needs it, not in
+  // an effect watching `open` — opening the panel IS the event. Rates cached
+  // for the session are good enough: FX moves slowly at family-budget scale
+  // and one-tap "Use $X.XX" always shows the number.
+  function openConverter() {
+    setOpen(true);
+    if (rates) return;
     setLoading(true);
     setError(null);
     fetch("https://open.er-api.com/v6/latest/USD")
@@ -1262,7 +1278,7 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
       })
       .catch(() => setError("Network error — check connection"))
       .finally(() => setLoading(false));
-  }, [open, rates]);
+  }
 
   const num = parseFloat(amount);
   const rate = rates?.[from];
@@ -1273,7 +1289,7 @@ function CurrencyConverter({ onUse }: { onUse: (usdCents: number) => void }) {
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={openConverter}
         className="inline-flex w-fit items-center gap-1 rounded-md py-1.5 text-sm font-semibold text-brand hover:text-brand-strong hover:underline sm:py-0"
       >
         ↗ Convert currency to USD

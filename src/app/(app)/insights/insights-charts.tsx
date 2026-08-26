@@ -206,7 +206,17 @@ export function Donut({
   const [active, setActive] = useState<number | null>(null);
   const R = 54;
   const C = 2 * Math.PI * R;
-  let acc = 0;
+
+  // Each slice starts where the previous one ended. Expressed as prefix sums
+  // rather than a running `let` accumulator: a mutable binding reassigned
+  // during the render map outlives the render pass (react-hooks/immutability).
+  const fractions = slices.map((s) => (total > 0 ? s.amount / total : 0));
+  const arcs = slices.map((s, i) => ({
+    kind: s.kind,
+    // Leave a hairline gap between slices so neighbours never blend.
+    len: Math.max(0, fractions[i] * C - 2),
+    dash: -fractions.slice(0, i).reduce((sum, f) => sum + f, 0) * C,
+  }));
 
   const centerAmount = active != null ? slices[active].amount : total;
   const centerLabel =
@@ -216,20 +226,15 @@ export function Donut({
     <div className="relative mx-auto aspect-square w-full max-w-[220px]">
       <svg viewBox="0 0 128 128" className="h-full w-full -rotate-90">
         <circle cx="64" cy="64" r={R} fill="none" stroke="var(--viz-grid)" strokeWidth="15" />
-        {slices.map((s, i) => {
-          const frac = total > 0 ? s.amount / total : 0;
-          // Leave a hairline gap between slices so neighbours never blend.
-          const len = Math.max(0, frac * C - 2);
-          const dash = -acc;
-          acc += frac * C;
+        {arcs.map(({ kind, len, dash }, i) => {
           return (
             <circle
-              key={s.kind}
+              key={kind}
               cx="64"
               cy="64"
               r={R}
               fill="none"
-              stroke={KIND_COLOR[s.kind]}
+              stroke={KIND_COLOR[kind]}
               strokeWidth={active === i ? 19 : 15}
               strokeDasharray={`${len} ${C - len}`}
               strokeDashoffset={dash}

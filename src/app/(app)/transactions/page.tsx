@@ -79,6 +79,8 @@ export default async function TransactionsPage({
         .order("sort_order"),
       transactionRowsPromise,
       supabase
+        // Names only — used server-side (payeeById) to label each row. The
+        // autocomplete list is fetched on demand by the client (listPayees).
         .from("payees")
         .select("id, name")
         .eq("household_id", household.id),
@@ -239,7 +241,6 @@ export default async function TransactionsPage({
       accountOptions={accountOptions}
       bucketsByAccount={bucketsByAccount}
       transferBuckets={(buckets ?? []).map((b) => ({ id: b.id, accountId: b.account_id, name: b.name }))}
-      payeeOptions={payees ?? []}
       payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}
     />

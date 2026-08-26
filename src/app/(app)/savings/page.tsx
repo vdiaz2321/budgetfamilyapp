@@ -84,6 +84,8 @@ export default async function SavingsPage() {
       : Promise.resolve({ data: [] }),
     supabase.from("buckets").select("id, account_id, name, balance_cents").eq("household_id", household.id),
     supabase.from("accounts").select("id, name, holder, kind, subtype, is_kids_account").eq("household_id", household.id),
+    // Names only — used server-side (payeeNameById) to label withdrawals. The
+    // autocomplete list is fetched on demand by the client (listPayees).
     supabase.from("payees").select("id, name").eq("household_id", household.id),
     incomeSubIds.length
       ? supabase
@@ -350,7 +352,6 @@ export default async function SavingsPage() {
       currentMonthLabel={now.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
       withdrawalSubOptions={withdrawalSubOptions}
       withdrawalAccountOptions={withdrawalAccountOptions}
-      withdrawalPayeeOptions={(payees ?? []).map((payee) => ({ id: payee.id, name: payee.name }))}
       firstOfMonth={monthKey}
     />
   );
