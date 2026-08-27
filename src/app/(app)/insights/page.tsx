@@ -1,5 +1,6 @@
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { InsightsBoard } from "./insights-board";
 import {
   bucketLabel,
@@ -77,21 +78,32 @@ export default async function InsightsPage({
     { data: subs },
     { data: payees },
     { data: accounts },
-    { data: txRows },
+    txRows,
     { data: annualRows },
   ] = await Promise.all([
     supabase.from("subcategories").select("id, name, category_id").eq("household_id", household.id),
     supabase.from("payees").select("id, name").eq("household_id", household.id),
     supabase.from("accounts").select("id, is_kids_account").eq("household_id", household.id),
-    supabase
-      .from("transactions")
-      .select(
-        "id, occurred_on, amount_cents, subcategory_id, payee_id, account_id, paid_to_account_id, is_withdrawal",
-      )
-      .eq("household_id", household.id)
-      .gte("occurred_on", fetchFrom)
-      .lte("occurred_on", fetchTo)
-      .order("amount_cents", { ascending: false }),
+    // The window here widens with the chosen range and granularity, so it can
+    // pass PostgREST's 1000-row cap. Paged on a stable key; the amount ordering
+    // the callers rely on is applied below, after every page is in.
+    fetchAllRows<{
+      id: string; occurred_on: string; amount_cents: number;
+      subcategory_id: string | null; payee_id: string | null;
+      account_id: string | null; paid_to_account_id: string | null;
+      is_withdrawal: boolean | null;
+    }>((from, to) =>
+      supabase
+        .from("transactions")
+        .select(
+          "id, occurred_on, amount_cents, subcategory_id, payee_id, account_id, paid_to_account_id, is_withdrawal",
+        )
+        .eq("household_id", household.id)
+        .gte("occurred_on", fetchFrom)
+        .lte("occurred_on", fetchTo)
+        .order("id")
+        .range(from, to),
+    ).then((rows) => rows.sort((a, b) => b.amount_cents - a.amount_cents)),
     // Imported multi-year annual totals (2018–2025). Yearly line items per kind.
     supabase
       .from("annual_breakdown_history")

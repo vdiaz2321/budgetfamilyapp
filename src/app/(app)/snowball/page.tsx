@@ -5,6 +5,7 @@ import type { AccountOption, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
 import { SnowballSettings } from "./snowball-settings";
 import { getSessionContext } from "@/lib/auth-context";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { accrueDebtInterest } from "@/lib/debt-interest";
 
 export const metadata = { title: "Debt/Loan Snowball · Capitall" };
@@ -24,7 +25,7 @@ export default async function SnowballPage() {
   // idempotent within a month — see lib/debt-interest.ts.
   await accrueDebtInterest(supabase, household.id);
 
-  const [{ data: debts }, { data: subs }, { data: plans }, { data: periodRows }, { data: debtSnapshotRows }] =
+  const [{ data: debts }, { data: subs }, plans, { data: periodRows }, { data: debtSnapshotRows }] =
     await Promise.all([
       supabase
         .from("debts")
@@ -40,12 +41,19 @@ export default async function SnowballPage() {
       // and reading only the current month made every payoff date jump years
       // into the future until planning was done. The most recent month that
       // actually has a figure is a far better estimate of the standing payment.
-      supabase
-        .from("budget_plans")
-        .select("subcategory_id, planned_cents, month")
-        .eq("household_id", household.id)
-        .lte("month", month)
-        .order("month", { ascending: true }),
+      // Every month ever planned, so it grows without bound and will pass
+      // PostgREST's 1000-row cap — paged so the payoff maths can't silently
+      // start reading a partial plan history.
+      fetchAllRows<{ subcategory_id: string; planned_cents: number; month: string }>((from, to) =>
+        supabase
+          .from("budget_plans")
+          .select("subcategory_id, planned_cents, month")
+          .eq("household_id", household.id)
+          .lte("month", month)
+          .order("month", { ascending: true })
+          .order("subcategory_id")
+          .range(from, to),
+      ),
       supabase
         .from("snowball_extra_periods")
         .select("id, start_month, end_month, amount_cents")

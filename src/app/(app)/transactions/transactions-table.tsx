@@ -709,12 +709,14 @@ function TxLine({
     startClear(() => toggleCleared(fd));
   };
 
+  // Clicking anywhere on the row opens the edit card. Date, category and payee
+  // were already wired individually, which left the Type and Account cells
+  // dead — clicking the account you were looking at did nothing. The controls
+  // that do something else (cleared, amount, delete) stop the click first.
   return (
     <li
-      onClick={selectMode ? onSelect : undefined}
-      onDoubleClick={!selectMode && canEdit ? onEdit : undefined}
-      title={selectMode ? "Click to toggle selection" : !canEdit ? "Card payment — delete and recreate it from the card" : undefined}
-      className={`group grid ${GRID} ${selectMode ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
+      onClick={selectMode ? onSelect : canEdit ? onEdit : undefined}
+      className={`group grid ${GRID} ${selectMode || canEdit ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
         tx.cleared && !selected ? "opacity-60" : ""
       } ${selected ? "bg-brand-soft/40" : ""}`}
     >
@@ -811,10 +813,10 @@ function TxLine({
       <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
         {tx.payee ?? "—"}
       </button>
-      <span title={accountName} className="truncate text-xs text-muted">{accountName}</span>
+      <span className="truncate text-xs text-muted">{accountName}</span>
       <form
         action={(fd) => startDel(() => deleteTransaction(fd))}
-        onDoubleClick={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
         className="justify-self-end"
       >
         <input type="hidden" name="id" value={tx.id} />

@@ -212,40 +212,28 @@ export default async function AccountsPage() {
   if (creditCardIds.length > 0) {
     const now = new Date();
     const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-    const nextMonth = now.getMonth() === 11
-      ? `${now.getFullYear() + 1}-01-01`
-      : `${now.getFullYear()}-${String(now.getMonth() + 2).padStart(2, "0")}-01`;
 
-    const [{ data: chargeRows }, { data: paymentRows }, { data: monthCharges }] = await Promise.all([
+    // Summed in Postgres by v_card_balances / v_card_month_spend (migration
+    // 20260826183000) rather than by adding up every charge here. The response
+    // is one row per card, so this costs the same at 900 transactions or
+    // 900,000 — and it can't be silently truncated by the 1000-row response
+    // cap the way the old client-side tally was.
+    const [{ data: balanceRows }, { data: monthRows }] = await Promise.all([
       supabase
-        .from("transactions")
-        .select("account_id, amount_cents, source")
-        .eq("household_id", household.id)
-        .in("account_id", creditCardIds)
-        .is("paid_to_account_id", null),
+        .from("v_card_balances")
+        .select("account_id, owed_cents")
+        .eq("household_id", household.id),
       supabase
-        .from("transactions")
-        .select("paid_to_account_id, amount_cents")
+        .from("v_card_month_spend")
+        .select("account_id, spend_cents")
         .eq("household_id", household.id)
-        .in("paid_to_account_id", creditCardIds),
-      supabase
-        .from("transactions")
-        .select("account_id, amount_cents, source")
-        .eq("household_id", household.id)
-        .in("account_id", creditCardIds)
-        .is("paid_to_account_id", null)
-        .gte("occurred_on", firstOfMonth)
-        .lt("occurred_on", nextMonth),
+        .eq("month", firstOfMonth),
     ]);
-    for (const t of (chargeRows ?? []).filter((row) => row.source !== "import")) {
-      cardOwed.set(t.account_id, (cardOwed.get(t.account_id) ?? 0) + (t.amount_cents ?? 0));
+    for (const r of balanceRows ?? []) {
+      cardOwed.set(r.account_id as string, (r.owed_cents as number) ?? 0);
     }
-    for (const t of paymentRows ?? []) {
-      const to = t.paid_to_account_id as string;
-      cardOwed.set(to, (cardOwed.get(to) ?? 0) - (t.amount_cents ?? 0));
-    }
-    for (const t of (monthCharges ?? []).filter((row) => row.source !== "import")) {
-      cardMonthSpend.set(t.account_id, (cardMonthSpend.get(t.account_id) ?? 0) + (t.amount_cents ?? 0));
+    for (const r of monthRows ?? []) {
+      cardMonthSpend.set(r.account_id as string, (r.spend_cents as number) ?? 0);
     }
   }
 

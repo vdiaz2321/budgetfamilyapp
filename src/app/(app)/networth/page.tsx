@@ -2,6 +2,7 @@ import { captureSnapshots } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
 
 export const metadata = { title: "Net Worth · Capitall" };
@@ -19,30 +20,47 @@ export default async function NetworthPage() {
   await captureSnapshots(supabase, household.id);
 
   const [
-    { data: accSnaps },
-    { data: debtSnaps },
-    { data: bucketSnaps },
+    accSnaps,
+    debtSnaps,
+    bucketSnaps,
     { data: accountRows },
     { data: bucketRows },
     { data: subRows },
-    { data: historyRows },
+    historyRows,
     { data: debtRows },
   ] = await Promise.all([
-    supabase
-      .from("account_snapshots")
-      .select("month, kind, balance_cents, account_id")
-      .eq("household_id", household.id)
-      .order("month"),
-    supabase
-      .from("debt_snapshots")
-      .select("month, balance_cents, subcategory_id")
-      .eq("household_id", household.id)
-      .order("month"),
-    supabase
-      .from("bucket_snapshots")
-      .select("month, balance_cents, bucket_id, account_id")
-      .eq("household_id", household.id)
-      .order("month"),
+    // Every snapshot ever taken — this page IS the history view, so none of
+    // these can be date-bounded. They grow by one row per account/bucket/debt
+    // per month (~50/month today), which reaches PostgREST's 1000-row cap in
+    // under three years; paged so the chart can't quietly lose its oldest
+    // months once it does.
+    fetchAllRows<{ month: string; kind: string; balance_cents: number; account_id: string }>((from, to) =>
+      supabase
+        .from("account_snapshots")
+        .select("month, kind, balance_cents, account_id")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("account_id")
+        .range(from, to),
+    ),
+    fetchAllRows<{ month: string; balance_cents: number; subcategory_id: string }>((from, to) =>
+      supabase
+        .from("debt_snapshots")
+        .select("month, balance_cents, subcategory_id")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("subcategory_id")
+        .range(from, to),
+    ),
+    fetchAllRows<{ month: string; balance_cents: number; bucket_id: string; account_id: string }>((from, to) =>
+      supabase
+        .from("bucket_snapshots")
+        .select("month, balance_cents, bucket_id, account_id")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("bucket_id")
+        .range(from, to),
+    ),
     supabase
       .from("accounts")
       .select("id, name, kind, is_kids_account, bank_group, sort_order")
@@ -59,11 +77,14 @@ export default async function NetworthPage() {
       .from("subcategories")
       .select("id, name")
       .eq("household_id", household.id),
-    supabase
-      .from("networth_history")
-      .select("month, savings_cents, bank_cents, stocks_cents, debt_cents")
-      .eq("household_id", household.id)
-      .order("month"),
+    fetchAllRows<{ month: string; savings_cents: number; bank_cents: number; stocks_cents: number; debt_cents: number }>((from, to) =>
+      supabase
+        .from("networth_history")
+        .select("month, savings_cents, bank_cents, stocks_cents, debt_cents")
+        .eq("household_id", household.id)
+        .order("month")
+        .range(from, to),
+    ),
     // Debt rows share one Net Worth section so this view matches the sidebar
     // and headline metric, regardless of whether the underlying debt is a card
     // or loan. Batched with the rest — it only needs household.id, so awaiting
@@ -329,16 +350,12 @@ export default async function NetworthPage() {
   }
   rows.push(...liabilityRows);
 
-  // Always show a 12-column strip: current month + the eleven preceding calendar
-  // months, even if no snapshots exist for the earlier months (they render "—").
-  const nowDate = new Date();
-  const displayMonths: string[] = [];
-  for (let back = 0; back <= 11; back++) {
-    const d = new Date(nowDate.getFullYear(), nowDate.getMonth() - back, 1);
-    displayMonths.push(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`,
-    );
-  }
+  // Every month that actually has snapshots, newest first — the grid filters
+  // these by year in the client. A rolling "current month + 11 back" window
+  // used to be built here instead, which spilled into the previous calendar
+  // year and rendered those months as columns of "—" before any snapshot
+  // existed for them.
+  const displayMonths = [...months].sort((a, b) => b.localeCompare(a));
   const displayRows = rows.map((r) => ({
     ...r,
     balances: displayMonths.map((m) => {

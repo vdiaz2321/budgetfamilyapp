@@ -10,6 +10,7 @@ import { currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } from "@/lib/buckets";
 import { adjustAccountLedger } from "@/lib/account-ledger";
 import { adjustDebtBalance } from "@/lib/debts";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
 // ordinary cards unless payoff tracking is explicitly enabled in Edit details.
@@ -435,16 +436,24 @@ export async function recalculateBalance(formData: FormData) {
     .eq("account_id", id);
   if (count) return; // bucketed accounts already re-sum from buckets
 
-  const { data: txs } = await supabase
-    .from("transactions")
-    .select("amount_cents, category_id")
-    .eq("household_id", householdId)
-    .eq("account_id", id);
+  // Paged: this sums an account's ENTIRE history and then writes the total
+  // back to current_balance_cents. PostgREST's 1000-row cap would silently
+  // truncate the sum on a heavily-used card and persist a wrong balance — a
+  // stored error rather than a display one.
+  const txs = await fetchAllRows<{ amount_cents: number; category_id: string }>((from, to) =>
+    supabase
+      .from("transactions")
+      .select("amount_cents, category_id")
+      .eq("household_id", householdId)
+      .eq("account_id", id)
+      .order("id")
+      .range(from, to),
+  );
 
   // Cache category → kind lookups since many txs share categories.
   const kindCache = new Map<string, string | null>();
   let sum = 0;
-  for (const t of txs ?? []) {
+  for (const t of txs) {
     let kind: string | null;
     if (kindCache.has(t.category_id)) {
       kind = kindCache.get(t.category_id) ?? null;

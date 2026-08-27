@@ -721,7 +721,7 @@ function GripHandle({ onMouseDown, label }: { onMouseDown: () => void; label: st
 // Accounts × months grid: your monthly checkup view. Cells are editable —
 // current-month edits also update the Accounts page; past months are history.
 function BalanceGrid({
-  months,
+  months: allMonths,
   rows,
   currency,
   selectedAccountIds,
@@ -869,9 +869,29 @@ function BalanceGrid({
     persistBucketOrder(parentId, reordered);
   };
 
+  // This grid used to render a rolling "current month + 11 back" strip, which
+  // reached into the previous calendar year and showed months that have no
+  // snapshots as columns of "—". It now shows one year at a time, like the
+  // Monthly Net Worth and Year by year tables below it, defaulting to the most
+  // recent year that actually has data.
+  const gridYears = [...new Set(allMonths.map((m) => m.slice(0, 4)))].sort((a, b) =>
+    b.localeCompare(a),
+  );
+  const [gridYear, setGridYear] = useState<string>(gridYears[0] ?? "all");
+  const visibleIdx = allMonths
+    .map((_, i) => i)
+    .filter((i) => gridYear === "all" || allMonths[i].startsWith(gridYear));
+  const months = visibleIdx.map((i) => allMonths[i]);
+  // Balances are positional against the full month list, so the same indices
+  // pick each row's values for the months on screen.
+  const sliceRow = (r: GridRow): GridRow => ({
+    ...r,
+    balances: visibleIdx.map((i) => r.balances[i] ?? null),
+  });
+
   const sections = SECTION_ORDER.map((section) => ({
     section,
-    rows: localRows.filter((r) => r.section === section),
+    rows: localRows.filter((r) => r.section === section).map(sliceRow),
   })).filter((g) => g.rows.length > 0);
 
   // Sections start collapsed on a fresh login, but stay as you left them
@@ -966,24 +986,27 @@ function BalanceGrid({
 
   return (
     <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <button
-        type="button"
-        onClick={toggleGrid}
-        aria-expanded={gridOpen}
-        className="flex w-full items-center gap-2.5 border-b border-line px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
-      >
-        <svg
-          width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`shrink-0 text-muted transition-transform ${gridOpen ? "" : "-rotate-90"}`}
-          aria-hidden
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+        <button
+          type="button"
+          onClick={toggleGrid}
+          aria-expanded={gridOpen}
+          className="flex flex-1 items-center gap-2.5 text-left"
         >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-        <div>
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 text-muted transition-transform ${gridOpen ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
           <h2 className="font-semibold">Monthly balances</h2>
-        </div>
-      </button>
+        </button>
+        {gridYears.length > 0 ? (
+          <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
+        ) : null}
+      </div>
       {gridOpen ? <>
       {reorderError ? (
         <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
@@ -1631,7 +1654,7 @@ function MonthlyAnalytics({
           <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
             {/* Grouped metric names, centered over their columns */}
             <tr className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-              <th className="sticky left-0 z-30 bg-brand-soft/40 px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
+              <th className="sticky left-0 z-30 bg-brand-soft px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
                 Month
               </th>
               {METRICS.map((m) => (
@@ -1661,7 +1684,7 @@ function MonthlyAnalytics({
           <tbody>
             {shown.map((r) => (
               <tr key={r.month} className="border-b border-line last:border-0">
-                <td className="sticky left-0 z-10 border-b border-line bg-brand-soft/40 px-2 py-1 text-center font-medium">
+                <td className="sticky left-0 z-20 border-b border-line bg-brand-soft px-2 py-1 text-center font-medium">
                   {monthLabel(r.month)}
                 </td>
                 {r.cells.map((c, ci) => (
@@ -1884,7 +1907,7 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
             </colgroup>
             <thead>
               <tr className="border-b border-line bg-brand-soft/25 text-[10px] font-semibold uppercase tracking-wide text-muted">
-                <th rowSpan={2} className="sticky left-0 z-10 border-r border-line bg-brand-soft/40 px-2 py-1 text-center align-middle">
+                <th rowSpan={2} className="sticky left-0 z-20 border-r border-line bg-brand-soft px-2 py-1 text-center align-middle">
                   Date
                 </th>
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">
@@ -1915,7 +1938,7 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
                 const actual = r.p.net;
                 return (
                   <tr key={r.year} className="border-b border-line last:border-0">
-                    <td className="sticky left-0 z-10 border-b border-r border-line bg-brand-soft/40 px-2 py-1 text-center text-xs font-semibold">
+                    <td className="sticky left-0 z-20 border-b border-r border-line bg-brand-soft px-2 py-1 text-center text-xs font-semibold">
                       {r.label}
                     </td>
                     <td className="px-1.5 py-1 text-center tabular-nums">{fmt(nwOut)}</td>

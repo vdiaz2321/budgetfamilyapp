@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { AnnualHero } from "./annual-hero";
 import { YearPicker } from "./year-picker";
 import {
@@ -76,7 +77,7 @@ export default async function AnnualOverviewPage({
     { data: plans },
     { data: actuals },
     { data: breakdownRows },
-    { data: liveTxRows },
+    liveTxRows,
     { data: investmentContributionRows },
     { data: investmentAccounts },
     { data: investmentBuckets },
@@ -106,13 +107,23 @@ export default async function AnnualOverviewPage({
       .eq("household_id", household.id)
       .order("group_sort")
       .order("line_sort"),
-    supabase
-      .from("transactions")
-      .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal, payee_id")
-      .eq("household_id", household.id)
-      .gte("occurred_on", liveRangeStart)
-      .lte("occurred_on", liveRangeEnd)
-      .not("subcategory_id", "is", null),
+    // A full year of transactions is already past PostgREST's 1000-row cap, so
+    // this has to be paged or the year's live figures silently lose rows.
+    fetchAllRows<{
+      subcategory_id: string; account_id: string | null; bucket_id: string | null;
+      amount_cents: number; occurred_on: string; is_withdrawal: boolean | null;
+      payee_id: string | null;
+    }>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal, payee_id")
+        .eq("household_id", household.id)
+        .gte("occurred_on", liveRangeStart)
+        .lte("occurred_on", liveRangeEnd)
+        .not("subcategory_id", "is", null)
+        .order("id")
+        .range(from, to),
+    ),
     supabase
       .from("v_investment_contributions")
       .select("account_id, bucket_id, year, net_contribution_cents")

@@ -1,5 +1,6 @@
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
 import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
@@ -41,7 +42,7 @@ export default async function BudgetPage({
     { data: irregularBills },
     categories,
     { data: rolloverRows },
-    { data: allActuals },
+    allActuals,
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -119,12 +120,20 @@ export default async function BudgetPage({
       .eq("household_id", household.id)
       .gte("month", ROLLOVER_ANCHOR)
       .lte("month", month.firstOfMonth),
-    supabase
-      .from("v_monthly_actuals")
-      .select("month, subcategory_id, actual_cents")
-      .eq("household_id", household.id)
-      .gte("month", ROLLOVER_ANCHOR)
-      .lt("month", month.firstOfMonth),
+    // The rollover walk reads every month since the anchor, so this set grows
+    // by roughly one row per budget item per month and will cross PostgREST's
+    // 1000-row cap. Paged, or the running carry silently loses months.
+    fetchAllRows<{ month: string; subcategory_id: string; actual_cents: number }>((from, to) =>
+      supabase
+        .from("v_monthly_actuals")
+        .select("month, subcategory_id, actual_cents")
+        .eq("household_id", household.id)
+        .gte("month", ROLLOVER_ANCHOR)
+        .lt("month", month.firstOfMonth)
+        .order("month")
+        .order("subcategory_id")
+        .range(from, to),
+    ),
   ]);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
