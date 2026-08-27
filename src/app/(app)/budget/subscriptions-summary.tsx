@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { DOT } from "./category-icons";
 import { reorderIrregularBills, reorderSubscriptions, updateIrregularBillTypical, updateSubscriptionDueDate } from "../subscriptions/actions";
@@ -85,7 +86,7 @@ export function SubscriptionsSummaryCard({
           )}
           <button
             type="button"
-            onClick={() => { if (!open) onToggle(); setEditorTarget("new"); }}
+            onClick={() => setEditorTarget("new")}
             className="inline-flex shrink-0 items-center justify-center rounded-lg border border-brand/30 px-2.5 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft"
           >
             + Add
@@ -106,12 +107,6 @@ export function SubscriptionsSummaryCard({
                 + Add one
               </button>
             </div>
-          ) : subscriptions.length === 0 ? (
-            <InlineSubscriptionEditor
-              row={null}
-              creditCards={creditCards}
-              onDone={() => setEditorTarget(null)}
-            />
           ) : (
             <>
               <div className="grid grid-cols-3 divide-x divide-line border-b border-line bg-background/40">
@@ -128,28 +123,9 @@ export function SubscriptionsSummaryCard({
                 <span className="hidden sm:inline">Card</span>
               </div>
               <div className="divide-y divide-line">
-              {editorTarget === "new" ? (
-                <InlineSubscriptionEditor
-                  row={null}
-                  creditCards={creditCards}
-                  onDone={() => setEditorTarget(null)}
-                />
-              ) : null}
               {rows.map((s) => {
                 const cardName = s.accountId ? cardMap.get(s.accountId) : null;
                 const dragOver = dragOverId === s.id;
-                // The clicked row is replaced in place by the editor rather
-                // than opening a modal on top of the board.
-                if (editorTarget === s.id) {
-                  return (
-                    <InlineSubscriptionEditor
-                      key={s.id}
-                      row={s}
-                      creditCards={creditCards}
-                      onDone={() => setEditorTarget(null)}
-                    />
-                  );
-                }
                 return (
                   <div
                     key={s.id}
@@ -198,25 +174,23 @@ export function SubscriptionsSummaryCard({
         </div>
       ) : null}
 
+      {editorTarget ? (
+        <ModalShell
+          title={editorTarget === "new" ? "Add subscription" : "Edit subscription"}
+          onClose={() => setEditorTarget(null)}
+          mobileAlign="top"
+          className="sm:max-w-2xl"
+        >
+          <div className="px-5 py-4">
+            <SubscriptionForm
+              row={editorTarget === "new" ? null : rows.find((r) => r.id === editorTarget) ?? null}
+              creditCards={creditCards}
+              onDone={() => setEditorTarget(null)}
+            />
+          </div>
+        </ModalShell>
+      ) : null}
     </section>
-  );
-}
-
-// Inline replacement for the old "Edit subscription" modal: the form renders
-// in the row's own place inside the list.
-function InlineSubscriptionEditor({
-  row,
-  creditCards,
-  onDone,
-}: {
-  row: SubscriptionRow | null;
-  creditCards?: CreditCardOption[];
-  onDone: () => void;
-}) {
-  return (
-    <div className="bg-brand-soft/20 px-4 py-3">
-      <SubscriptionForm row={row} creditCards={creditCards} onDone={onDone} />
-    </div>
   );
 }
 

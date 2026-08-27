@@ -20,7 +20,7 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[5rem_2rem_6rem_5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
+const GRID = "grid-cols-[5rem_2rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
 const CalendarIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -506,7 +506,7 @@ export function TransactionsTable({
 
       <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
         <div className="overflow-x-auto">
-          <div className="min-w-[52rem]">
+          <div className="min-w-[56.5rem]">
             {/* Header */}
             <div className={`grid ${GRID} items-center gap-2 border-t border-b border-line px-4 py-2.5`}>
               <button

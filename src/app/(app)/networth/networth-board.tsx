@@ -3,8 +3,8 @@
 import { Fragment, useRef, useState, useTransition, type CSSProperties } from "react";
 import { currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { setNetworthHistory, upsertNetworthYear } from "./actions";
-import { reorderAccounts, reorderBuckets, updateBucket } from "../accounts/actions";
+import { upsertNetworthYear } from "./actions";
+import { reorderAccounts, reorderBuckets } from "../accounts/actions";
 
 export type MonthPoint = {
   month: string; // YYYY-MM-01
@@ -24,7 +24,7 @@ export type MonthPoint = {
 // Same 10-column shape: Date | (Value|Diff)×3 metrics | Debt | Actual | Diff.
 const NW_TABLE_COL_WIDTHS = [
   "5.5rem",  // Date / Month
-  "6.5rem", "6rem", // NW w/out Invest & Savings: Value, Diff
+  "6.5rem", "6rem", // NW w/out Invest: Value, Diff
   "6.5rem", "6rem", // Stocks
   "6.5rem", "6rem", // Total NW w/out Debt
   "6rem",    // Debt Incurred
@@ -88,6 +88,12 @@ function setDocumentCursor(cursor: string) {
 }
 
 // One account (or Budget debt) row in the monthly balances grid.
+// A grid row's identity for chart selection — an account row is keyed by its
+// account, a bucket sub-row by its bucket, so both can be charted side by side.
+export function gridRowKey(r: GridRow): string {
+  return r.accountId ?? r.bucketId ?? "";
+}
+
 export type GridRow = {
   name: string;
   liability: boolean;
@@ -99,18 +105,16 @@ export type GridRow = {
   // Same grouping as the sidebar, so the two views read as one system.
   section: "Banking" | "Investments" | "Kids Funding" | "Debt";
   balances: (number | null)[]; // aligned to gridMonths
-  // A bucket / "Unallocated" sub-row indented under its parent account.
+  // A bucket sub-row indented under its parent account.
   indent?: boolean;
   // Parent account that has bucket sub-rows below it.
   hasChildren?: boolean;
   // How many buckets it has — shown next to the name, mirroring the
   // Accounts page's "N buckets" label.
   bucketCount?: number;
-  // The auto "Unallocated" remainder row — rendered subtly.
-  muted?: boolean;
   // Set on a hasChildren row so its bucket rows can be collapsed by id.
   id?: string;
-  // Set on a bucket / Unallocated row — the id of the account it belongs to.
+  // Set on a bucket row — the id of the account it belongs to.
   parentId?: string;
   // Editing: which snapshot this row writes, if any.
   accountId?: string;
@@ -158,9 +162,10 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
   const [compare, setCompare] = useState(false);
   const handleSelectAccount = (row: GridRow, ctrlKey: boolean) => {
     setSelectedRows((prev) => {
-      const already = prev.some((r) => r.accountId === row.accountId);
+      const key = gridRowKey(row);
+      const already = prev.some((r) => gridRowKey(r) === key);
       if (ctrlKey || compare) {
-        return already ? prev.filter((r) => r.accountId !== row.accountId) : [...prev, row];
+        return already ? prev.filter((r) => gridRowKey(r) !== key) : [...prev, row];
       }
       return already && prev.length === 1 ? [] : [row];
     });
@@ -170,7 +175,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <div>
-        <h1 className="text-xl font-bold">Net Worth</h1>
+        <h1 className="text-lg font-bold sm:text-xl">Net Worth</h1>
         <p className="text-sm text-muted">
           Assets minus debts, archived monthly from your Accounts and Budget debt balances.
         </p>
@@ -194,8 +199,17 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
         />
       </div>
 
-      {/* Over-time chart */}
-      <div>
+      {/* The chart pins to the top of the viewport while you scroll Monthly
+          balances, then releases as Net Worth Over Time arrives — sticky
+          positioning is scoped to its parent, so the wrapper's last child is
+          what un-pins it. The wrapper deliberately stops before Net Worth
+          Over Time: a pinned card can't help but have the following content
+          pass underneath it, so including that section left its header and
+          top rows hidden behind the chart the whole way down.
+          Desktop only: on a phone the chart is a third of the screen, so
+          pinning it would leave almost nothing to read the tables in. */}
+      <div className="space-y-4 md:relative">
+      <div className="md:sticky md:top-0 md:z-30">
         <ChartSection
           points={points}
           currency={currency}
@@ -206,7 +220,22 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
           onToggleCompare={() => setCompare((v) => !v)}
           gridMonths={gridMonths}
           onClearFilter={() => setSelectedRows([])}
+          onRemoveRow={(row) =>
+            setSelectedRows((prev) => prev.filter((r) => gridRowKey(r) !== gridRowKey(row)))
+          }
         />
+      </div>
+
+      {/* Monthly balances by account — the sheet's per-account grid */}
+      {gridRows.length > 0 ? (
+        <BalanceGrid
+          months={gridMonths}
+          rows={gridRows}
+          currency={currency}
+          selectedKeys={selectedRows.map(gridRowKey).filter(Boolean)}
+          onSelectAccount={handleSelectAccount}
+        />
+      ) : null}
       </div>
 
       {/* Transposed summary — the sheet's top block (Total Assets → NW w/out Invest) */}
@@ -220,24 +249,10 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
         />
       ) : null}
 
-      {/* Monthly balances by account — the sheet's per-account grid */}
-      {gridRows.length > 0 ? (
-        <BalanceGrid
-          months={gridMonths}
-          rows={gridRows}
-          currency={currency}
-          selectedAccountIds={selectedRows.map((r) => r.accountId!).filter(Boolean)}
-          onSelectAccount={handleSelectAccount}
-        />
-      ) : null}
-
       {/* Monthly Net Worth analytics — the sheet's YearlyNetWorth tab */}
       {points.length > 0 ? (
         <MonthlyAnalytics points={points} currency={currency} year={year} />
       ) : null}
-
-      {/* Backfill months from before you tracked individual accounts */}
-      <HistoricalEntry currency={currency} />
 
       {/* Year by year */}
       {points.length > 0 ? <YearTable points={points} currency={currency} /> : null}
@@ -258,8 +273,8 @@ function Stat({
 }) {
   return (
     <div className="flex flex-col items-center rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">{label}</p>
+      <p className={`mt-0.5 text-base font-bold tabular-nums sm:text-lg ${tone}`}>
         {formatMoney(value, currency)}
       </p>
     </div>
@@ -287,6 +302,7 @@ function ChartSection({
   selectedRows,
   gridMonths,
   onClearFilter,
+  onRemoveRow,
   compare,
   onToggleCompare,
 }: {
@@ -297,6 +313,7 @@ function ChartSection({
   selectedRows: GridRow[];
   gridMonths: string[];
   onClearFilter: () => void;
+  onRemoveRow: (row: GridRow) => void;
   compare: boolean;
   onToggleCompare: () => void;
 }) {
@@ -317,7 +334,7 @@ function ChartSection({
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
-          <h2 className="font-semibold">Net Worth Graph Breakdown</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Net Worth Graph Breakdown</h2>
         </button>
         <button
           type="button"
@@ -334,13 +351,19 @@ function ChartSection({
         {selectedRows.length > 0 ? (
           <div className="flex w-full flex-wrap items-center gap-1.5 px-4 pb-2 sm:w-auto sm:px-0 sm:pb-0 sm:pr-4">
             {selectedRows.map((r, i) => (
-              <span
-                key={r.accountId}
-                className="max-w-[9rem] truncate whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold text-white sm:max-w-[12rem]"
+              <button
+                key={gridRowKey(r)}
+                type="button"
+                onClick={() => onRemoveRow(r)}
+                aria-label={`Remove ${r.name} from the chart`}
+                className="flex max-w-[9rem] items-center gap-1 truncate whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold text-white transition hover:opacity-80 sm:max-w-[12rem]"
                 style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
               >
-                {r.name}
-              </span>
+                <span className="truncate">{r.name}</span>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden className="shrink-0">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
             ))}
             <button
               type="button"
@@ -508,7 +531,8 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
           <p className="text-sm font-bold tabular-nums">{formatMoney(hovered.net, currency)}</p>
           <p className="text-[11px] text-muted">{monthLabel(hovered.month)}</p>
           <p className="text-[10px] text-muted tabular-nums">
-            {formatMoney(hovered.assets, currency)} assets · {formatMoney(hovered.liabilities, currency)} debts
+            <span className="font-semibold text-positive">{formatMoney(hovered.assets, currency)}</span> assets ·{" "}
+            <span className="font-semibold text-negative">{formatMoney(hovered.liabilities, currency)}</span> debts
           </p>
         </div>
       ) : null}
@@ -650,49 +674,6 @@ function AccountChart({ rows, months, currency, colors }: { rows: GridRow[]; mon
   );
 }
 
-// Inline-editable account/bucket name — reads like text until clicked, saves
-// on blur. `rename` is renameAccount or updateBucket from the Accounts
-// actions, both of which take just {id, name} form fields.
-function GridNameCell({
-  id,
-  name,
-  rename,
-}: {
-  id: string;
-  name: string;
-  rename: (formData: FormData) => Promise<void | { error: string | null }>;
-}) {
-  const [pending, start] = useTransition();
-  const formRef = useRef<HTMLFormElement>(null);
-
-  return (
-    // No `flex-1` — that stretched this to fill the whole name column,
-    // shoving the "N buckets" label and chips that follow it all the way to
-    // the right instead of sitting close to the name (see feedback:
-    // "buckets are far off to the right"). `size` sizes it to the name's own
-    // length instead, same trick BucketNameInput/BalanceInput use elsewhere.
-    <form ref={formRef} action={(fd) => start(() => void rename(fd))} className="flex min-w-0 shrink">
-      <input type="hidden" name="id" value={id} />
-      <input
-        key={name}
-        name="name"
-        defaultValue={name}
-        size={Math.min(Math.max(name.length, 6), 28)}
-        onBlur={(e) => {
-          if (e.currentTarget.value.trim() && e.currentTarget.value !== name) {
-            formRef.current?.requestSubmit();
-          } else {
-            e.currentTarget.value = name;
-          }
-        }}
-        className={`min-w-0 rounded-md bg-transparent px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${
-          pending ? "ring-2 ring-brand" : "focus:ring-brand"
-        }`}
-      />
-    </form>
-  );
-}
-
 // Drag handle — press and drag a row onto another row in the same list to
 // reorder. Uses plain mouse events rather than the native HTML5 drag API or
 // Pointer Events: native drag-and-drop needs the browser to recognize an
@@ -724,13 +705,13 @@ function BalanceGrid({
   months: allMonths,
   rows,
   currency,
-  selectedAccountIds,
+  selectedKeys,
   onSelectAccount,
 }: {
   months: string[];
   rows: GridRow[];
   currency: string;
-  selectedAccountIds?: string[] | null;
+  selectedKeys?: string[] | null;
   onSelectAccount?: (row: GridRow, ctrlKey: boolean) => void;
 }) {
   // Reorder optimistically — a drag updates this local copy immediately;
@@ -793,7 +774,7 @@ function BalanceGrid({
   };
 
   // Group a section's rows into per-account blocks (account row + its
-  // buckets/Unallocated row, in order) — shared by the drag drop and the
+  // buckets, in order) — shared by the drag drop and the
   // click-to-reorder arrows below.
   const getAccountBlocks = (section: GridRow["section"]) => {
     const blocks: { accountId?: string; rows: GridRow[] }[] = [];
@@ -820,7 +801,7 @@ function BalanceGrid({
     });
   };
 
-  // Move an account (and its buckets/Unallocated row, as a block) to sit
+  // Move an account (and its buckets, as a block) to sit
   // where another account in the same section was dropped.
   const dropAccount = (section: GridRow["section"], targetAccountId: string) => {
     const dragged = dragAccount.current;
@@ -853,7 +834,7 @@ function BalanceGrid({
   };
 
   // Move a bucket to sit where another bucket under the same account was
-  // dropped — the account's Unallocated row stays put underneath.
+  // dropped — the rest of the account's buckets stay put underneath.
   const dropBucket = (parentId: string, targetBucketId: string) => {
     const dragged = dragBucket.current;
     dragBucket.current = null;
@@ -910,7 +891,7 @@ function BalanceGrid({
     setCollapsedAccounts((c) => ({ ...c, [id]: !c[id] }));
 
   // Per-section, per-month subtotal — top-level rows only, so bucket rows
-  // and the Unallocated remainder aren't double-counted.
+  // aren't double-counted.
   const sectionTotal = (g: (typeof sections)[number], i: number) => {
     let sum = 0;
     let any = false;
@@ -951,18 +932,13 @@ function BalanceGrid({
     const v = r.balances[i];
     if (v == null) return <span className="text-muted">—</span>;
     return (
-      <span className={r.liability && v > 0 ? "text-negative" : ""}>
+      <span className={(r.liability && v > 0) || v < 0 ? "text-negative" : ""}>
         {formatMoney(v, currency)}
       </span>
     );
   };
 
-  const nameCls = (r: GridRow) =>
-    r.muted
-      ? "italic font-normal text-muted"
-      : r.indent
-        ? "font-normal text-foreground"
-        : "font-medium";
+  const nameCls = (r: GridRow) => (r.indent ? "font-normal text-foreground" : "font-medium");
 
   // Applied to the whole <tr> AND to the sticky name cell — the sticky cell
   // needs its own opaque-enough background to mask month cells scrolling
@@ -1001,7 +977,7 @@ function BalanceGrid({
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
-          <h2 className="font-semibold">Monthly balances</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Monthly balances</h2>
         </button>
         {gridYears.length > 0 ? (
           <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
@@ -1013,10 +989,10 @@ function BalanceGrid({
       ) : null}
       <div className={wideLayout ? "" : "overflow-x-auto"}>
         <table
-          className={`table-fixed border-collapse text-sm ${
+          className={`table-fixed border-collapse text-xs sm:text-sm ${
             wideLayout
               ? "w-full"
-              : "w-[calc(10.5rem+var(--month-count)*7rem)] sm:w-[calc(14rem+var(--month-count)*7rem)]"
+              : "w-[calc(10rem+var(--month-count)*7rem)] sm:w-[calc(18rem+var(--month-count)*9rem)]"
           }`}
           style={wideLayout ? undefined : ({ "--month-count": months.length } as CSSProperties)}
         >
@@ -1030,20 +1006,20 @@ function BalanceGrid({
               </>
             ) : (
               <>
-                <col className="w-[10.5rem] sm:w-56" />
+                <col className="w-40 sm:w-72" />
                 {months.map((m) => (
-                  <col key={m} style={{ width: "7rem" }} />
+                  <col key={m} className="w-28 sm:w-36" />
                 ))}
               </>
             )}
           </colgroup>
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-line">
-              <th className={`${stickyCls} bg-surface px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted sm:px-4`}>
+              <th className={`${stickyCls} bg-surface px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-[11px]`}>
                 Account
               </th>
               {months.map((m) => (
-                <th key={m} className={`${wideLayout ? "" : "w-28"} bg-surface whitespace-nowrap px-3 py-2 text-center text-[11px] font-medium uppercase tracking-wide text-muted`}>
+                <th key={m} className={`${wideLayout ? "" : "w-28 sm:w-36"} bg-surface whitespace-nowrap px-2 py-2 text-center text-[10px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-[11px]`}>
                   {monthLabel(m)}
                 </th>
               ))}
@@ -1070,14 +1046,14 @@ function BalanceGrid({
               const totalRow = (
                 <tr className="border-y-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
                   <td className="sticky left-0 z-10 bg-surface px-3 py-2 pr-2 sm:px-4 sm:pr-3">
-                    <span className="whitespace-nowrap text-sm font-bold uppercase tracking-wider text-foreground">
+                    <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground sm:text-sm sm:tracking-wider">
                       Total Net Worth
                     </span>
                   </td>
                   {months.map((m, i) => {
                     const v = netTotals[i];
                     return (
-                      <td key={m} className="whitespace-nowrap px-3 py-2 text-center text-sm font-bold tabular-nums">
+                      <td key={m} className="whitespace-nowrap px-2 py-2 text-right text-xs font-bold tabular-nums sm:px-3 sm:text-sm">
                         {v == null ? (
                           <span className="text-muted">—</span>
                         ) : (
@@ -1111,12 +1087,12 @@ function BalanceGrid({
                           </>
                         ) : null}
                   <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
-                    <td className="sticky left-0 z-10 bg-surface p-0 pr-2 sm:pr-3">
+                    <td className="sticky left-0 z-10 overflow-hidden bg-surface p-0 pr-2 sm:pr-3">
                       <button
                         type="button"
                         onClick={() => toggle(g.section)}
                         aria-expanded={isOpen}
-                        className="flex w-full items-center gap-1.5 px-4 py-2 text-left transition hover:bg-brand-soft/70 dark:hover:bg-brand-soft/25"
+                        className="flex w-full min-w-0 items-center gap-1.5 px-4 py-2 text-left transition hover:bg-brand-soft/70 dark:hover:bg-brand-soft/25"
                       >
                         <svg
                           width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1126,10 +1102,10 @@ function BalanceGrid({
                         >
                           <path d="M9 6l6 6-6 6" />
                         </svg>
-                        <span className="whitespace-nowrap text-sm font-bold uppercase tracking-wider text-foreground">
+                        <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground sm:text-sm sm:tracking-wider">
                           {g.section}
                         </span>
-                        <span className="hidden whitespace-nowrap text-xs font-normal normal-case text-muted sm:inline">
+                        <span className="hidden min-w-0 truncate text-xs font-normal normal-case text-muted sm:block">
                           {accountCount} {accountCount === 1 ? "account" : "accounts"}
                         </span>
                       </button>
@@ -1138,11 +1114,11 @@ function BalanceGrid({
                       const total = sectionTotal(g, i);
                       const isLiabilitySection = g.rows[0]?.liability ?? false;
                       return (
-                        <td key={m} className="whitespace-nowrap px-3 py-2 text-center text-sm font-bold tabular-nums">
+                        <td key={m} className="whitespace-nowrap px-2 py-2 text-right text-xs font-bold tabular-nums sm:px-3 sm:text-sm">
                           {total == null ? (
                             <span className="text-muted">—</span>
                           ) : (
-                            <span className={isLiabilitySection && total > 0 ? "text-negative" : ""}>
+                            <span className={(isLiabilitySection && total > 0) || total < 0 ? "text-negative" : ""}>
                               {formatMoney(total, currency)}
                             </span>
                           )}
@@ -1175,7 +1151,7 @@ function BalanceGrid({
                                   r.hasChildren
                                     ? "p-0"
                                     : r.indent
-                                      ? "py-2 pl-9 text-[0.9375rem]"
+                                      ? "py-2 pl-9 text-[0.8125rem] sm:text-[0.9375rem]"
                                       : "px-4 py-2"
                                 } ${nameCls(r)}`}
                               >
@@ -1207,7 +1183,7 @@ function BalanceGrid({
                                       <button
                                         type="button"
                                         onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
-                                        className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:text-brand ${selectedAccountIds?.includes(r.accountId ?? "") ? "text-brand" : ""}`}
+                                        className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.8125rem] font-medium transition hover:text-brand sm:text-[0.9375rem] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                       >
                                         {r.name}
                                       </button>
@@ -1215,7 +1191,7 @@ function BalanceGrid({
                                       <span className="min-w-0 truncate">{r.name}</span>
                                     )}
                                     {r.bucketCount ? (
-                                      <span className="shrink-0 text-[11px] text-muted">
+                                      <span className="hidden shrink-0 text-[11px] text-muted sm:inline">
                                         {r.bucketCount} {r.bucketCount === 1 ? "bucket" : "buckets"}
                                       </span>
                                     ) : null}
@@ -1230,7 +1206,7 @@ function BalanceGrid({
                                     <button
                                       type="button"
                                       onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
-                                      className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.9375rem] font-medium transition hover:text-brand ${selectedAccountIds?.includes(r.accountId ?? "") ? "text-brand" : ""}`}
+                                      className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.8125rem] font-medium transition hover:text-brand sm:text-[0.9375rem] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                     >
                                       {r.name}
                                     </button>
@@ -1242,7 +1218,18 @@ function BalanceGrid({
                                       label="Drag to reorder"
                                       onMouseDown={() => startBucketDrag(r.parentId!, r.bucketId!)}
                                     />
-                                    <GridNameCell id={r.bucketId} name={r.name} rename={updateBucket} />
+                                    {/* Read-only here on purpose — renaming a bucket
+                                        belongs on the Accounts page; in this grid the
+                                        name is a chart filter, so an edit box next to
+                                        every balance was one stray keystroke from a
+                                        silent rename. */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
+                                      className={`min-w-0 truncate rounded px-1 py-0.5 text-left text-[0.8125rem] font-medium transition hover:text-brand sm:text-[0.9375rem] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
+                                    >
+                                      {r.name}
+                                    </button>
                                   </div>
                                 ) : (
                                   <>
@@ -1257,12 +1244,7 @@ function BalanceGrid({
                                 )}
                               </td>
                               {months.map((m, i) => (
-                                <td
-                                  key={m}
-                                  className={`whitespace-nowrap px-3 py-1 text-center tabular-nums ${
-                                    r.muted ? "italic text-muted" : ""
-                                  }`}
-                                >
+                                <td key={m} className="whitespace-nowrap px-2 py-1 text-right tabular-nums sm:px-3">
                                   {readCell(r, i)}
                                 </td>
                               ))}
@@ -1371,7 +1353,7 @@ function SummaryBlock({
   year: string;
   onYearChange: (y: string) => void;
 }) {
-  const [summaryState, setSummaryState] = useSessionCollapse("networth-summary-block", () => ({ v: true }));
+  const [summaryState, setSummaryState] = useSessionCollapse("networth-summary-block", () => ({ v: false }));
   const collapsed = !!summaryState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setSummaryState((s) => ({ v: fn(!!s.v) }));
   const idxByMonth = new Map(points.map((p, i) => [p.month, i]));
@@ -1411,7 +1393,7 @@ function SummaryBlock({
         return pn ? (p.net - pn) / pn : null;
       },
     },
-    { label: "NW w/out Invest & Savings", growth: true, cell: (p) => p.nwWithoutInvest },
+    { label: "NW w/out Invest", growth: true, cell: (p) => p.nwWithoutInvest },
   ];
 
   const growthOf = (r: Row): number | null => {
@@ -1437,16 +1419,16 @@ function SummaryBlock({
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="font-semibold">Net Worth Over Time</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Net Worth Over Time</h2>
         </button>
         <YearPicker years={years} year={year} onYearChange={onYearChange} />
       </div>
       {!collapsed && <div className="border-t border-line overflow-x-auto">
-        <table className="w-full border-collapse whitespace-nowrap text-xs">
+        <table className="w-full border-collapse whitespace-nowrap text-[11px] sm:text-xs">
           <thead>
             <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
               <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-left" />
-              <th className="sticky left-[8rem] z-10 border-r border-line bg-surface px-3 py-2 text-center">Growth</th>
+              <th className="border-r border-line bg-surface px-3 py-2 text-center">Growth</th>
               {displayCols.map((p) => (
                 <th key={p.month} className="px-3 py-2 text-center">
                   {monthLabel(p.month)}
@@ -1466,7 +1448,7 @@ function SummaryBlock({
                   >
                     {r.label}
                   </td>
-                  <td className={`sticky left-[8rem] z-10 border-r border-line bg-surface px-3 py-1.5 text-center tabular-nums ${r.bold ? "font-semibold" : ""} ${negCls(g)}`}>
+                  <td className={`border-r border-line bg-surface px-3 py-1.5 text-right tabular-nums ${r.bold ? "font-semibold" : ""} ${negCls(g)}`}>
                     {r.growth ? (g == null ? "—" : formatMoney(g, currency)) : ""}
                   </td>
                   {displayCols.map((p) => {
@@ -1474,7 +1456,7 @@ function SummaryBlock({
                     return (
                       <td
                         key={p.month}
-                        className={`px-3 py-1.5 text-center tabular-nums ${r.bold ? "font-semibold" : ""} ${
+                        className={`px-3 py-1.5 text-right tabular-nums ${r.bold ? "font-semibold" : ""} ${
                           r.redNeg ? negCls(v) : ""
                         }`}
                       >
@@ -1497,7 +1479,7 @@ function SummaryBlock({
 // year-to-date % (vs. the prior December). Shares the year with SummaryBlock.
 type Metric = { key: "savings" | "nwWithoutInvest" | "stocks" | "assets"; label: string };
 const METRICS: Metric[] = [
-  { key: "nwWithoutInvest", label: "NW w/out Invest & Savings" },
+  { key: "nwWithoutInvest", label: "NW w/out Invest" },
   { key: "stocks", label: "Stocks" },
   { key: "assets", label: "Total NW w/out Debt" },
 ];
@@ -1553,7 +1535,7 @@ function MonthlyAnalytics({
   currency: string;
   year: string;
 }) {
-  const [showChanges, setShowChanges] = useState(true);
+  const [showChanges, setShowChanges] = useState(false);
   const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: true }));
   const collapsed = !!monthlyState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setMonthlyState((s) => ({ v: fn(!!s.v) }));
@@ -1617,7 +1599,7 @@ function MonthlyAnalytics({
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="font-semibold">Monthly Net Worth</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Monthly Net Worth</h2>
         </button>
         {!collapsed && (
           <div className="flex items-center gap-2">
@@ -1627,12 +1609,12 @@ function MonthlyAnalytics({
               onClick={() => setShowChanges((v) => !v)}
               className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
             >
-              {showChanges ? "Hide changes" : "Show changes"}
+              {showChanges ? "Hide Details" : "Show Details"}
             </button>
             <button
               type="button"
               onClick={() => downloadMonthlyNetWorthCsv(shown, currency)}
-              className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+              className="hidden rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft sm:block dark:ring-white/15"
             >
               Download CSV
             </button>
@@ -1641,7 +1623,7 @@ function MonthlyAnalytics({
       </div>
       {!collapsed && <div className="border-t border-line max-h-[520px] overflow-auto">
         <table
-          className={`border-collapse whitespace-nowrap text-xs ${!showChanges ? "w-full table-fixed" : ""}`}
+          className={`border-collapse whitespace-nowrap text-[11px] sm:text-xs ${!showChanges ? "w-full table-fixed" : ""}`}
           style={!showChanges ? { minWidth: NW_TABLE_MIN_WIDTH } : undefined}
         >
           {!showChanges ? (
@@ -1725,112 +1707,6 @@ function MonthlyAnalytics({
   );
 }
 
-// Enter section-level totals for a month that predates per-account tracking —
-// e.g. history migrated from a spreadsheet. Used only for months with no
-// per-account snapshots (per-account data always wins). Works for any user, no
-// spreadsheet required.
-function HistoricalEntry({ currency }: { currency: string }) {
-  const [open, setOpen] = useState(false);
-  const [ym, setYm] = useState(""); // "YYYY-MM" from the month input
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const sym = currencySymbol(currency);
-
-  const field = (name: string, label: string) => (
-    <label className="flex flex-1 flex-col gap-1 text-xs text-muted">
-      {label}
-      <span className="flex items-center gap-1 rounded-md bg-background px-2 py-1.5 ring-1 ring-line focus-within:ring-2 focus-within:ring-brand">
-        <span className="pointer-events-none text-muted">{sym}</span>
-        <input
-          name={name}
-          type="text"
-          inputMode="decimal"
-          placeholder="0.00"
-          className="min-w-0 flex-1 bg-transparent text-right text-sm tabular-nums focus:outline-none"
-        />
-      </span>
-    </label>
-  );
-
-  return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {!open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-brand transition hover:bg-brand-soft/25"
-        >
-          <span className="text-base leading-none">+</span> Add historical data
-          <span className="font-normal text-muted">— totals for a month before you tracked accounts</span>
-        </button>
-      ) : (
-        <div className="p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-semibold">Add historical data</h2>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="text-sm text-muted hover:text-foreground"
-            >
-              Cancel
-            </button>
-          </div>
-          <p className="mb-3 text-xs text-muted">
-            Enter each section&apos;s total for a given month; leave a field at 0
-            if you don&apos;t have it. Values entered here <span className="font-semibold">override</span>
-            {" "}any per-account snapshots for that month — useful for fixing an
-            imported month whose per-account values are off. Remove the row later
-            to fall back to the per-account totals.
-          </p>
-          <form
-            action={(fd) =>
-              start(async () => {
-                const res = await setNetworthHistory(fd);
-                if (res?.error) setError(res.error);
-                else {
-                  setError(null);
-                  setOpen(false);
-                  setYm("");
-                }
-              })
-            }
-            className="space-y-3"
-          >
-            <input type="hidden" name="month" value={ym ? `${ym}-01` : ""} />
-            <label className="flex flex-col gap-1 text-xs text-muted">
-              Month
-              <input
-                type="month"
-                value={ym}
-                onChange={(e) => {
-                  setYm(e.target.value);
-                  setError(null);
-                }}
-                required
-                className="w-40 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-            </label>
-            <div className="flex flex-wrap gap-3">
-              {field("savings", "Savings")}
-              {field("bank", "Bank accounts")}
-              {field("stocks", "Stocks / investments")}
-              {field("debt", "Debt")}
-            </div>
-            {error ? <p className="text-xs font-medium text-negative">{error}</p> : null}
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-strong disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Save month"}
-            </button>
-          </form>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function YearTable({ points, currency }: { points: MonthPoint[]; currency: string }) {
   const [yearState, setYearState] = useSessionCollapse("networth-year-table", () => ({ v: true }));
   const collapsed = !!yearState.v;
@@ -1891,13 +1767,13 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="font-semibold">Year by year</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Year by year</h2>
         </button>
       </div>
       {!collapsed && (
         <div className="border-t border-line overflow-x-auto">
           <table
-            className="w-full border-collapse whitespace-nowrap text-xs table-fixed"
+            className="w-full border-collapse whitespace-nowrap text-[11px] table-fixed sm:text-xs"
             style={{ minWidth: NW_TABLE_MIN_WIDTH }}
           >
             <colgroup>
@@ -1911,7 +1787,7 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
                   Date
                 </th>
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">
-                  NW w/out Invest &amp; Savings
+                  NW w/out Invest
                 </th>
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">Stocks</th>
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">Total NW w/out Debt</th>

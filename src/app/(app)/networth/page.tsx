@@ -275,8 +275,8 @@ export default async function NetworthPage() {
     r.balances[i] = s.balance_cents;
   }
 
-  // Assemble: asset accounts first (each followed by its buckets + an auto
-  // "Unallocated" remainder), then Budget debts. accountGrid's own Map order
+  // Assemble: asset accounts first (each followed by its buckets), then
+  // Budget debts. accountGrid's own Map order
   // just reflects whichever account a snapshot scan happened to hit first —
   // meaningless for display — so order explicitly by the same sort_order the
   // Accounts page's reorder arrows write to, name as the tiebreaker. Sorting
@@ -326,27 +326,6 @@ export default async function NetworthPage() {
         balances: bucketBalances.get(b.id) ?? months.map(() => null),
       });
     }
-    // Unallocated = account balance − sum of its buckets, per month. This is
-    // a running check, not an error: it's whatever part of the account isn't
-    // parked in one of its named buckets, so it should read $0 once every
-    // dollar has a bucket, or the "spare" amount otherwise.
-    const unallocated = months.map((_, i) => {
-      const acct = a.balances[i];
-      if (acct == null) return null;
-      let allocated = 0;
-      for (const b of buckets) allocated += bucketBalances.get(b.id)?.[i] ?? 0;
-      return acct - allocated;
-    });
-    rows.push({
-      name: "Unallocated",
-      liability: false,
-      linked: false,
-      section,
-      indent: true,
-      parentId: a.id,
-      muted: true,
-      balances: unallocated,
-    });
   }
   rows.push(...liabilityRows);
 

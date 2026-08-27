@@ -341,14 +341,14 @@ export function SubscriptionForm({
     >
       {row ? <input type="hidden" name="id" value={row.id} /> : null}
       <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-end">
-        <label className="flex flex-col gap-1 text-xs text-muted">
+        <label className="flex flex-col gap-1 text-xs text-muted md:min-w-[10rem] md:flex-1">
         Name
         <input
           name="name"
           type="text"
           required
           defaultValue={row?.name ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
+          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:text-sm"
         />
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted">
@@ -403,14 +403,17 @@ export function SubscriptionForm({
         </label>
       </div>
       <div className="flex flex-col gap-2 md:flex-row md:items-end">
-        <label className="flex flex-col gap-1 text-xs text-muted">
+        {/* Fluid rather than a fixed 432px: the form also renders inside a
+            modal now, where a hard-coded width pushed the Save button past
+            the panel's edge. */}
+        <label className="flex flex-col gap-1 text-xs text-muted md:min-w-0 md:flex-1">
           Notes
           <input
             name="notes"
             type="text"
             defaultValue={row?.notes ?? ""}
             autoComplete="off"
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-[432px] md:text-sm"
+            className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:text-sm"
           />
         </label>
         <div className="flex items-center justify-end gap-2 pb-0.5 md:ml-auto md:mt-0">

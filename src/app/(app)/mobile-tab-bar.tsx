@@ -125,9 +125,22 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
       const delta = y - lastY.current;
       lastY.current = y;
       if (y < 60) { setHidden(false); accumulated.current = 0; return; }
+      // Any upward movement brings the bar straight back, and the accumulator
+      // only ever builds in the direction you're currently travelling. It used
+      // to keep a single running total across both directions, so a downward
+      // scroll that stopped just short of the hide threshold left a positive
+      // balance that a short flick upward couldn't undo — the bar stayed gone
+      // and the only way back was to scroll all the way to the top.
+      if (delta < 0) { accumulated.current = 0; setHidden(false); return; }
+      // At the very bottom there's no room left to scroll up, so never leave
+      // the bar hidden there.
+      if (y + window.innerHeight >= document.documentElement.scrollHeight - 8) {
+        accumulated.current = 0;
+        setHidden(false);
+        return;
+      }
       accumulated.current += delta;
       if (accumulated.current > 60) { setHidden(true); accumulated.current = 0; }
-      else if (accumulated.current < -30) { setHidden(false); accumulated.current = 0; }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);

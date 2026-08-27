@@ -77,9 +77,10 @@ export type BucketData = {
   // "Checking" bucket and a "Savings" bucket under one bank account) no
   // longer have to force the whole account into one type.
   bankGroup: "savings" | "spending" | null;
-  // Prior-month bucket_snapshots (null = never recorded yet for that month).
-  prevMonthCents: number | null;
-  prev2MonthCents: number | null;
+  // Every recorded month of bucket_snapshots, keyed "YYYY-MM-01" (a missing
+  // month = never recorded). Lets a bucket row follow the header's period
+  // picker instead of being pinned to the last three months.
+  balancesByMonth: Record<string, number>;
 };
 
 export type CardDetails = {
@@ -2853,6 +2854,7 @@ function AccountRow({
                 account={account}
                 currency={currency}
                 historyMonths={historyMonths}
+                isPastPeriod={isPastPeriod}
               />
       ) : null}
 
@@ -2869,10 +2871,12 @@ function BucketDrawer({
   account,
   currency,
   historyMonths,
+  isPastPeriod,
 }: {
   account: AccountData;
   currency: string;
   historyMonths: [string, string, string];
+  isPastPeriod: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -2919,6 +2923,7 @@ function BucketDrawer({
               bucket={b}
               currency={currency}
               historyMonths={historyMonths}
+              isPastPeriod={isPastPeriod}
               onDragStart={() => startDrag(b.id)}
               isDragOver={dragOverId === b.id}
             />
@@ -2945,16 +2950,23 @@ function BucketRow({
   bucket,
   currency,
   historyMonths,
+  isPastPeriod,
   onDragStart,
   isDragOver,
 }: {
   bucket: BucketData;
   currency: string;
   historyMonths: [string, string, string];
+  isPastPeriod: boolean;
   onDragStart: () => void;
   isDragOver: boolean;
 }) {
   const [delPending, startDel] = useTransition();
+  // All three columns read the month they're actually headed with. They used
+  // to use prevMonthCents/prev2MonthCents, which are fixed to the month before
+  // *today* — so selecting an earlier period moved the column headings but
+  // left the old months' figures underneath them.
+  const cellFor = (month: string): number | null => bucket.balancesByMonth[month] ?? null;
 
   return (
     <li
@@ -2965,18 +2977,31 @@ function BucketRow({
     >
       <GripHandle onMouseDown={onDragStart} size="sm" />
       <BucketNameInput id={bucket.id} name={bucket.name} />
-      <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
+      {isPastPeriod ? (
+        // Same rule as the account row above: the column is headed with a past
+        // month, so the edit has to land on that month's bucket_snapshot. The
+        // live input would show today's figure under an AUG heading and write
+        // today's balance when edited.
+        <HistoricBucketBalanceInput
+          bucketId={bucket.id}
+          month={historyMonths[0]}
+          balanceCents={cellFor(historyMonths[0])}
+          currency={currency}
+        />
+      ) : (
+        <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
+      )}
       <div className="hidden @[560px]:contents">
         <HistoricBucketBalanceInput
           bucketId={bucket.id}
           month={historyMonths[1]}
-          balanceCents={bucket.prevMonthCents}
+          balanceCents={cellFor(historyMonths[1])}
           currency={currency}
         />
         <HistoricBucketBalanceInput
           bucketId={bucket.id}
           month={historyMonths[2]}
-          balanceCents={bucket.prev2MonthCents}
+          balanceCents={cellFor(historyMonths[2])}
           currency={currency}
         />
       </div>

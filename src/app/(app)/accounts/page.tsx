@@ -23,7 +23,6 @@ export default async function AccountsPage() {
   const currentMonth = currentMonthFirst();
   const prevMonth = monthsBefore(currentMonth, 1);
   const prev2Month = monthsBefore(currentMonth, 2);
-  const historyMonths = [prevMonth, prev2Month];
 
   const [
     { data: rows },
@@ -69,9 +68,10 @@ export default async function AccountsPage() {
     // Pull ALL account_snapshots (not just historyMonths) so the period
     // picker on the header can resolve balances back to any historical
     // month/quarter/year. Small table — a household has one row per
-    // account per month, ~103 rows for 2026. Buckets + debt snapshots
-    // stay scoped to the 3-month history window since they only feed
-    // the per-row "Prior 3 months" display, not the picker filter.
+    // account per month, ~103 rows for 2026. Bucket snapshots are pulled in
+    // full for the same reason: the bucket rows' three balance columns are
+    // anchored on the selected period, so they have to resolve months
+    // outside the current 3-month window.
     supabase
       .from("account_snapshots")
       .select("account_id, month, balance_cents")
@@ -79,13 +79,10 @@ export default async function AccountsPage() {
     supabase
       .from("bucket_snapshots")
       .select("bucket_id, month, balance_cents")
-      .eq("household_id", household.id)
-      .in("month", historyMonths),
+      .eq("household_id", household.id),
     // Pull ALL debt_snapshots (matching account_snapshots above) so the header
     // period picker can compute a real "% vs last period" delta on the Debts
-    // and Net Worth cards. Bucket snapshots stay scoped to the 3-month
-    // history window since those only feed the row-level "Prior months"
-    // columns, not the picker.
+    // and Net Worth cards.
     supabase
       .from("debt_snapshots")
       .select("subcategory_id, month, balance_cents")
@@ -105,14 +102,10 @@ export default async function AccountsPage() {
   // Migration 0037 adds the rewards ledger. Keep the rest of Accounts usable
   // until it has been applied in Supabase.
   const rewardActivityRows = rewardActivitiesError ? [] : rewardActivityRowsInitial ?? [];
-  // (accountId, month) -> cents; buckets keyed by (bucketId, month) -> cents.
+  // (accountId, month) -> cents.
   const acctHistory = new Map<string, number>();
   for (const s of acctSnapshotRows ?? []) {
     acctHistory.set(`${s.account_id}:${s.month}`, s.balance_cents ?? 0);
-  }
-  const bktHistory = new Map<string, number>();
-  for (const s of bktSnapshotRows ?? []) {
-    bktHistory.set(`${s.bucket_id}:${s.month}`, s.balance_cents ?? 0);
   }
 
   const subName = new Map((subRows ?? []).map((s) => [s.id, s.name]));
@@ -279,8 +272,15 @@ export default async function AccountsPage() {
         name: b.name,
         balanceCents: b.balance_cents ?? 0,
         bankGroup: (b.bank_group as "savings" | "spending" | null) ?? null,
-        prevMonthCents: bktHistory.get(`${b.id}:${prevMonth}`) ?? null,
-        prev2MonthCents: bktHistory.get(`${b.id}:${prev2Month}`) ?? null,
+        // Keyed "YYYY-MM-01", so a bucket row can show (and write) the month
+        // the period picker is pointing at rather than only the last three.
+        balancesByMonth: (() => {
+          const map: Record<string, number> = {};
+          for (const s of bktSnapshotRows ?? []) {
+            if (s.bucket_id === b.id) map[s.month] = s.balance_cents ?? 0;
+          }
+          return map;
+        })(),
       })),
   }));
 
