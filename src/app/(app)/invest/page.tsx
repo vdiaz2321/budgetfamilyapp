@@ -159,6 +159,11 @@ export default async function InvestPage() {
       contributedCents: contributed,
       accruedCents: accrued,
       stored: !!stored,
+      // True when `contributed` was summed from the transaction ledger rather
+      // than read from investment_years. Typing over such a cell writes a row
+      // that resolveContributedCents then ignores for the year in progress, so
+      // the table renders these read-only instead of pretending they take.
+      contribFromLedger: year === nowYear && contribBy.has(key),
     };
   }
 

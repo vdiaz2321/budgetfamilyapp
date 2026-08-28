@@ -186,6 +186,8 @@ export default async function BudgetPage({
   // bills show a derived planned amount and are not directly editable.
   const currentMonthNum = month.key.slice(5); // "MM" from "YYYY-MM"
   const autoPlannedBySub = new Map<string, number>();
+  // Same rule, kept per subscription so the card can show a row's own Plan.
+  const subMonthPlannedById = new Map<string, number>();
   for (const sub of subscriptions ?? []) {
     if (!sub.subcategory_id || !sub.is_active || !sub.next_renewal_date) continue;
     let includeThisMonth = false;
@@ -200,7 +202,27 @@ export default async function BudgetPage({
       includeThisMonth = sub.next_renewal_date.slice(0, 7) === month.key;
     }
     if (!includeThisMonth) continue;
+    subMonthPlannedById.set(sub.id, sub.amount_cents);
     autoPlannedBySub.set(sub.subcategory_id, (autoPlannedBySub.get(sub.subcategory_id) ?? 0) + sub.amount_cents);
+  }
+
+  // Per-subscription spend for the month. Subscriptions share one subcategory,
+  // so the row's own figure has to come from matching the payee — the same
+  // token match the irregular bills above use, for the same reason (a "Claude"
+  // charge may be logged as "Anthropic Claude").
+  const subMonthSpentById = new Map<string, number>();
+  for (const sub of subscriptions ?? []) {
+    const tokens = billTokens(sub.name);
+    const spent = (txRows ?? [])
+      .filter((tx) => {
+        if (tx.subcategory_id !== sub.subcategory_id) return false;
+        const payee = (payeeById.get(tx.payee_id ?? "") ?? "").toLowerCase();
+        if (!payee) return false;
+        if (payee === sub.name.trim().toLowerCase()) return true;
+        return tokens.length > 0 && tokens.every((t) => payee.includes(t));
+      })
+      .reduce((total, tx) => total + tx.amount_cents, 0);
+    subMonthSpentById.set(sub.id, spent);
   }
   const irregularAutoPlannedBySub = new Map<string, number>();
   for (const bill of irregularBills ?? []) {
@@ -526,6 +548,8 @@ export default async function BudgetPage({
     accountId: s.account_id ?? null,
     notes: s.notes,
     sortOrder: (s as { sort_order?: number }).sort_order ?? 0,
+    monthPlannedCents: subMonthPlannedById.get(s.id) ?? 0,
+    monthSpentCents: subMonthSpentById.get(s.id) ?? 0,
   }));
 
   const irregularBillRows: IrregularBillRow[] = (irregularBills ?? []).map((b) => ({

@@ -15,7 +15,12 @@ export function centsToGroupedDisplay(cents: number | null | undefined): string 
 
 export function displayToCents(value: string | number | null | undefined): number {
   if (value == null || value === "") return 0;
-  const n = typeof value === "number" ? value : parseFloat(String(value).replace(/,/g, ""));
+  // Strip anything that isn't part of a number — thousands separators, and
+  // the currency symbol that inline money inputs keep in the field. "$120.00"
+  // used to parse as NaN and save as 0, which silently zeroed the Irregular
+  // Bills planned amounts the moment one was edited.
+  const n =
+    typeof value === "number" ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ""));
   if (Number.isNaN(n)) return 0;
   return Math.round(n * 100);
 }
@@ -105,4 +110,18 @@ export function formatMoney(cents: number, currency = "$"): string {
   const withCommas = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const sign = cents < 0 ? "-" : "";
   return `${sign}${symbol}${withCommas}.${frac}`;
+}
+
+/**
+ * Money with the cents dropped, rounded to the nearest dollar — "$42,360".
+ *
+ * For places that are about proportion rather than reconciliation (the
+ * Investments holdings card), where a column of ".00" is noise. Anything a
+ * figure has to tie out against keeps formatMoney.
+ */
+export function formatMoneyWhole(cents: number, currency = "$"): string {
+  const symbol = currencySymbol(currency);
+  const dollars = Math.round(Math.abs(cents) / 100);
+  const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${cents < 0 ? "-" : ""}${symbol}${withCommas}`;
 }

@@ -25,9 +25,13 @@ export async function captureSnapshots(
   const now = new Date().toISOString();
 
   // Fast path: skip the seven queries + three upserts if a fresh snapshot for
-  // this month already exists. Mutations (transactions, account edits) all
-  // trigger their own snapshot writes, so a recent updated_at means live
-  // balances are already reflected. Page visits after that just re-render
+  // this month already exists. Only PAGE LOADS may take it — every mutation
+  // passes { force: true }, because a second edit inside the 5-minute window
+  // would otherwise be skipped and leave the month's snapshot showing the
+  // balance from before it. That is exactly what happened when TSP's two
+  // buckets were re-typed back to back: the buckets and the account's live
+  // balance moved to $61,742 while the AUG snapshot stayed at $59,346, which
+  // is the figure the Accounts column reads. Page visits after that just re-render
   // whatever's in the snapshot rows — no need to rewrite them on every load.
   // A 5-minute window is long enough to collapse rapid navigation and short
   // enough that month-rollover always captures on the first visit.

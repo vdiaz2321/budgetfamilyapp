@@ -74,7 +74,6 @@ type Props = {
   currency: string;
   monthKey: string; // YYYY-MM-01
   selected: boolean;
-  isEven: boolean;
   isDragOver?: boolean;
   compact?: boolean;
   detailsExpanded?: boolean;
@@ -91,7 +90,7 @@ function DueAccountIndicator({ dueDay, compact = false }: { dueDay: number; comp
   );
 }
 
-export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isDragOver, compact, detailsExpanded, onSelect, onDragStart, autoPlanned }: Props) {
+export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver, compact, detailsExpanded, onSelect, onDragStart, autoPlanned }: Props) {
   const remaining = row.plannedCents - row.spentCents;
   const elapsedPct = monthElapsedPct(monthKey);
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
@@ -116,13 +115,14 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
     : pct;
   const redBarPct = overBudget ? 100 - greenBarPct : 0;
 
+  // No zebra striping: the rows are separated by a divider and each carries a
+  // progress bar, so the alternating wash was a third separator doing the same
+  // job — it only muddied the column of amounts.
   const baseClass = selected
     ? "bg-brand-soft/50"
     : isDragOver
       ? "bg-brand-soft/40 ring-1 ring-inset ring-brand/40"
-      : isEven
-        ? "bg-black/[0.018] dark:bg-white/[0.03] hover:bg-brand-soft/20"
-        : "hover:bg-brand-soft/25";
+      : "hover:bg-brand-soft/25";
 
   const pctClass = overBudget
     ? "font-bold text-negative"

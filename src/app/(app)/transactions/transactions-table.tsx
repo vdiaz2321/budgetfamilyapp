@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useHideOnScroll } from "@/lib/use-hide-on-scroll";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction, listPayees, toggleCleared, updateTransactionAmount } from "../budget/actions";
@@ -239,9 +240,20 @@ export function TransactionsTable({
     .reduce((sum, t) => sum + t.amountCents, 0);
   const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
 
+  const headerHidden = useHideOnScroll();
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-2">
-      <div className="sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm md:mx-0 md:px-0">
+      {/* Phone-only auto-hide: scrolling further down slides the month picker
+          and the toolbar away so the list gets the screen; scrolling back up
+          brings them straight back. Desktop pins it (md:translate-y-0) — there
+          is room for both there, and a header that moves under a mouse wheel
+          is just twitchy. */}
+      <div
+        className={`sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm transition-transform duration-200 ease-out md:mx-0 md:translate-y-0 md:px-0 ${
+          headerHidden ? "-translate-y-full" : "translate-y-0"
+        }`}
+      >
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">

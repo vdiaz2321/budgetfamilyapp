@@ -203,6 +203,28 @@ export async function updateSubscriptionDueDate(formData: FormData) {
   revalidate();
 }
 
+/**
+ * Set a subscription's charge amount from the Budget card's Plan column.
+ *
+ * The Plan cell shows this month's charge, which for a row billed this month
+ * IS the subscription's amount — so editing it in place edits the amount, and
+ * the Bills group's planned total (derived from these rows) follows on the
+ * revalidate.
+ */
+export async function updateSubscriptionAmount(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  if (!id) return;
+  const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
+  if (amountCents < 0) return;
+  await supabase
+    .from("subscriptions")
+    .update({ amount_cents: amountCents, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+  revalidate();
+}
+
 export async function upsertIrregularBill(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "").trim() || null;

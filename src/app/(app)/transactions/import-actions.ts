@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { payeeKey, resolvePayeeIds } from "@/lib/payees";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -307,15 +308,9 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
   // Upsert every unique payee once.
   const uniquePayees = new Set<string>();
   for (const r of rows) if (r.payee) uniquePayees.add(r.payee);
-  const payeeByName = new Map<string, string>();
-  if (uniquePayees.size > 0) {
-    const payeeRows = [...uniquePayees].map((name) => ({ household_id: householdId, name }));
-    const { data: upserted } = await supabase
-      .from("payees")
-      .upsert(payeeRows, { onConflict: "household_id,name" })
-      .select("id, name");
-    for (const p of upserted ?? []) payeeByName.set(p.name as string, p.id as string);
-  }
+  // Keyed by lower-cased name: an import spelling "kaufland" has to land on the
+  // existing "Kaufland" instead of forking the payee.
+  const payeeByName = await resolvePayeeIds(supabase, householdId, [...uniquePayees]);
 
   const toInsert: Record<string, unknown>[] = [];
   const seenHashes = new Set<string>();
@@ -338,7 +333,7 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
       continue;
     }
     const accountId = r.card ? matchAccount(r.card, acctByName) : null;
-    const payeeId = r.payee ? payeeByName.get(r.payee) ?? null : null;
+    const payeeId = r.payee ? payeeByName.get(payeeKey(r.payee)) ?? null : null;
 
     const hash = hashRow(householdId, occurredOn, r.amountCents, subcategoryId, r.payee, r.memo, r.card);
     if (seenHashes.has(hash)) continue; // duplicate within CSV

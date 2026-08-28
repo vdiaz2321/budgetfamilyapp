@@ -143,6 +143,10 @@ export function BudgetBoard({
           rows: group.rows.filter((row) => isOverspentRow(group.kind, row)),
         }))
         .filter((group) => group.rows.length > 0);
+  // Subscriptions whose own charge beat their own plan this month.
+  const overspentSubscriptions = subscriptions.filter(
+    (s) => (s.monthSpentCents ?? 0) > (s.monthPlannedCents ?? 0),
+  );
   const showOverspent = () => {
     setRowFilter("overspent");
     setOpenGroups((current) => ({
@@ -504,6 +508,22 @@ export function BudgetBoard({
                 }}
               />
             ))}
+
+            {/* The Bills group can only say "Subscriptions" is over — all
+                subscriptions share one subcategory — so the overspent view
+                also lists the individual subscriptions that went over. */}
+            {showingOverspent && overspentSubscriptions.length > 0 ? (
+              <SubscriptionsSummaryCard
+                currency={currency}
+                subscriptions={subscriptions}
+                creditCards={creditCards}
+                open
+                onToggle={() => {}}
+                monthPlannedCents={subscriptionMonthPlanned}
+                monthSpentCents={subscriptionMonthSpent}
+                overspentOnly
+              />
+            ) : null}
 
             {showingOverspent && displayedGroups.length === 0 ? (
               <div className="rounded-xl bg-surface px-4 py-8 text-center text-sm text-muted shadow-sm ring-1 ring-black/5 dark:ring-white/10">

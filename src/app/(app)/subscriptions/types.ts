@@ -10,6 +10,11 @@ export type SubscriptionRow = {
   accountId: string | null;
   notes: string | null;
   sortOrder: number;
+  // Derived on the Budget page for this month only, so the card can show
+  // Plan / Spent / Left per row. `monthPlannedCents` is cycle-aware: a monthly
+  // sub plans every month, an annual one only in its renewal month.
+  monthPlannedCents?: number;
+  monthSpentCents?: number;
 };
 
 export type IrregularBillRow = {

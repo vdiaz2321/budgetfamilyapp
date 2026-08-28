@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents, moneyExpressionToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
+import { resolvePayeeId } from "@/lib/payees";
 import { adjustBucketBalance } from "@/lib/buckets";
 import { adjustDebtBalance } from "@/lib/debts";
 import { saveDebt } from "@/lib/save-debt";
@@ -812,7 +813,7 @@ export async function upsertDebt(formData: FormData) {
     .eq("id", subcategoryId)
     .eq("household_id", householdId);
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidatePath("/budget");
 }
 
@@ -866,18 +867,9 @@ export async function addTransaction(formData: FormData) {
     }>();
   if (!sub) return;
 
-  let payeeId: string | null = null;
-  if (payeeName) {
-    const { data: payee } = await supabase
-      .from("payees")
-      .upsert(
-        { household_id: householdId, name: payeeName },
-        { onConflict: "household_id,name" },
-      )
-      .select("id")
-      .single();
-    payeeId = payee?.id ?? null;
-  }
+  // Case-insensitive: "aldi" reuses the existing "Aldi" rather than creating a
+  // second payee that then splits the shop's totals on the Annual Overview.
+  const payeeId = payeeName ? await resolvePayeeId(supabase, householdId, payeeName) : null;
 
   // Only attach the account if it belongs to this household.
   let accountId: string | null = null;
@@ -962,21 +954,21 @@ export async function addTransaction(formData: FormData) {
   const bucketId = sub.linked_bucket_id;
   if (!isRefund && bucketId) {
     await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
-    await captureSnapshots(supabase, householdId);
+    await captureSnapshots(supabase, householdId, { force: true });
   }
 
   // Direct-bucket attribution (investment sub-account). adjustBucketBalance
   // also rolls the parent account total via syncAccountFromBuckets.
   if (!isRefund && directBucketId && directBucketId !== bucketId) {
     await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
-    await captureSnapshots(supabase, householdId);
+    await captureSnapshots(supabase, householdId, { force: true });
   }
 
   // Bare investment account link (TSP, M1, …) — contribution posts straight
   // to the account balance. Only fires when there's no linked bucket.
   if (!isRefund && !bucketId && sub.linked_account_id) {
     await adjustLinkedAccountBalance(supabase, householdId, sub.linked_account_id, isWithdrawal ? -amountCents : amountCents);
-    await captureSnapshots(supabase, householdId);
+    await captureSnapshots(supabase, householdId, { force: true });
   }
 
   // A payment logged against a debt lowers its outstanding balance.
@@ -984,7 +976,7 @@ export async function addTransaction(formData: FormData) {
     ? await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)
     : false;
   if (touchedDebt) {
-    await captureSnapshots(supabase, householdId);
+    await captureSnapshots(supabase, householdId, { force: true });
     revalidatePath("/snowball");
   }
 
@@ -993,7 +985,7 @@ export async function addTransaction(formData: FormData) {
   // manual. Kind comes from the sub's joined category, no extra query.
   if (accountId) {
     if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(sub.categories?.kind ?? null, amountCents))) {
-      await captureSnapshots(supabase, householdId);
+      await captureSnapshots(supabase, householdId, { force: true });
     }
   }
 
@@ -1069,18 +1061,9 @@ export async function updateTransaction(formData: FormData) {
   // were never debited.
   const wasRefund = (prevTx?.amount_cents ?? 0) < 0;
 
-  let payeeId: string | null = null;
-  if (payeeName) {
-    const { data: payee } = await supabase
-      .from("payees")
-      .upsert(
-        { household_id: householdId, name: payeeName },
-        { onConflict: "household_id,name" },
-      )
-      .select("id")
-      .single();
-    payeeId = payee?.id ?? null;
-  }
+  // Case-insensitive: "aldi" reuses the existing "Aldi" rather than creating a
+  // second payee that then splits the shop's totals on the Annual Overview.
+  const payeeId = payeeName ? await resolvePayeeId(supabase, householdId, payeeName) : null;
 
   let accountId: string | null = null;
   if (accountIdRaw) {
@@ -1161,7 +1144,7 @@ export async function updateTransaction(formData: FormData) {
     await adjustLinkedAccountBalance(supabase, householdId, sub.linked_account_id, isWithdrawal ? -amountCents : amountCents);
     touchedBucket = true;
   }
-  if (touchedBucket) await captureSnapshots(supabase, householdId);
+  if (touchedBucket) await captureSnapshots(supabase, householdId, { force: true });
 
   // Undo the old payment's effect on its debt balance, then apply the new one's
   // — the edit may have changed the amount or moved it off/onto a debt entirely.
@@ -1175,7 +1158,7 @@ export async function updateTransaction(formData: FormData) {
     if (await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)) touchedDebt = true;
   }
   if (touchedDebt) {
-    await captureSnapshots(supabase, householdId);
+    await captureSnapshots(supabase, householdId, { force: true });
     revalidatePath("/snowball");
   }
 
@@ -1193,7 +1176,7 @@ export async function updateTransaction(formData: FormData) {
       touchedAccount = true;
     }
   }
-  if (touchedAccount) await captureSnapshots(supabase, householdId);
+  if (touchedAccount) await captureSnapshots(supabase, householdId, { force: true });
 
   revalidatePath("/budget");
   revalidatePath("/transactions");
@@ -1231,7 +1214,7 @@ export async function updateTransactionAmount(formData: FormData) {
       p_to_bucket_id: tx.paid_to_bucket_id,
       p_memo: tx.memo,
     });
-    if (!error) await captureSnapshots(supabase, householdId);
+    if (!error) await captureSnapshots(supabase, householdId, { force: true });
     revalidatePath("/budget");
     revalidatePath("/transactions");
     revalidatePath("/accounts");
@@ -1276,7 +1259,7 @@ export async function updateTransactionAmount(formData: FormData) {
       touchedSnapshot = true;
     }
   }
-  if (touchedSnapshot) await captureSnapshots(supabase, householdId);
+  if (touchedSnapshot) await captureSnapshots(supabase, householdId, { force: true });
 
   revalidatePath("/budget");
   revalidatePath("/transactions");
@@ -1309,7 +1292,7 @@ export async function deleteTransaction(formData: FormData) {
       p_to_bucket_id: null,
       p_memo: null,
     });
-    if (!error) await captureSnapshots(supabase, householdId);
+    if (!error) await captureSnapshots(supabase, householdId, { force: true });
     revalidatePath("/budget");
     revalidatePath("/transactions");
     revalidatePath("/accounts");
@@ -1331,20 +1314,20 @@ export async function deleteTransaction(formData: FormData) {
     if (linkedBucketId) {
       const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
       await adjustBucketBalance(supabase, householdId, linkedBucketId, undoDelta);
-      await captureSnapshots(supabase, householdId);
+      await captureSnapshots(supabase, householdId, { force: true });
     } else {
       // No bucket, but maybe a bare-account link — undo that too.
       const linkedAccountId = await getLinkedAccountId(supabase, householdId, tx.subcategory_id);
       if (linkedAccountId) {
         const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
         await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, undoDelta);
-        await captureSnapshots(supabase, householdId);
+        await captureSnapshots(supabase, householdId, { force: true });
       }
     }
 
     // Deleting a debt payment adds its amount back to the outstanding balance.
     if (await adjustDebtBalance(supabase, householdId, tx.subcategory_id, tx.amount_cents)) {
-      await captureSnapshots(supabase, householdId);
+      await captureSnapshots(supabase, householdId, { force: true });
       revalidatePath("/snowball");
     }
   }
@@ -1354,13 +1337,13 @@ export async function deleteTransaction(formData: FormData) {
   if (tx?.bucket_id && tx.bucket_id !== linkedBucketId) {
     const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
     await adjustBucketBalance(supabase, householdId, tx.bucket_id, undoDelta);
-    await captureSnapshots(supabase, householdId);
+    await captureSnapshots(supabase, householdId, { force: true });
   }
 
   if (tx?.account_id) {
     const kind = tx.category_id ? await categoryKindOf(supabase, tx.category_id) : null;
     if (await adjustAccountLedger(supabase, householdId, tx.account_id, -ledgerDelta(kind, tx.amount_cents))) {
-      await captureSnapshots(supabase, householdId);
+      await captureSnapshots(supabase, householdId, { force: true });
     }
   }
 

@@ -311,9 +311,9 @@ export function BudgetGroup({
                   );
                 };
 
-                const renderRows = (rows: RowData[], offset: number) => (
+                const renderRows = (rows: RowData[]) => (
                   <ul className="divide-y divide-line/40">
-                    {rows.map((row, i) => (
+                    {rows.map((row) => (
                       <BudgetRow
                         key={row.subId}
                         row={row}
@@ -321,7 +321,6 @@ export function BudgetGroup({
                         currency={currency}
                         monthKey={monthKey}
                         selected={row.subId === selectedSubId}
-                        isEven={(offset + i) % 2 === 1}
                         isDragOver={dragOverId === row.subId}
                         compact={compact}
                         detailsExpanded={detailsExpanded}
@@ -332,13 +331,13 @@ export function BudgetGroup({
                   </ul>
                 );
 
-                if (!splitSavings) return renderRows(visibleRows, 0);
+                if (!splitSavings) return renderRows(visibleRows);
                 return (
                   <>
                     {subtotalRow("My Savings/Investments", mineRows)}
-                    {renderRows(mineRows, 0)}
+                    {renderRows(mineRows)}
                     {subtotalRow("Kids Funding", kidsRows)}
-                    {renderRows(kidsRows, mineRows.length)}
+                    {renderRows(kidsRows)}
                   </>
                 );
               })()}

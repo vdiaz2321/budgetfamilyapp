@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { centsToGroupedDisplay, currencySymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
   TAX_COLOR,
   TAX_LABEL,
@@ -21,6 +21,8 @@ export type YearCell = {
   contributedCents: number;
   accruedCents: number;
   stored: boolean;
+  /** Contributed came from the transaction ledger, so it can't be typed over. */
+  contribFromLedger?: boolean;
 };
 
 export type BucketRow = {
@@ -253,6 +255,7 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
     rows.sort((a, b) => b.cents - a.cents);
     return { rows, total, top: rows[0] ?? null };
   }, [mine]);
+  const showAllocation = allocation.rows.length > 1 && allocation.total > 0;
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-7">
@@ -477,49 +480,35 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
             </section>
           ) : null}
 
-          {allocation.rows.length > 1 && allocation.total > 0 ? (
+          {/* "Where it sits" and the performance chart share a row on wide
+              screens — each was leaving half its width empty. They stack below
+              lg, and the chart spans the full width when the allocation card
+              isn't rendered (a single-holding portfolio). */}
+          <div className={showAllocation ? "grid items-start gap-6 lg:grid-cols-2" : ""}>
+          {showAllocation ? (
             <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <h2 className="text-sm font-bold">Where it sits</h2>
-                {allocation.top ? (
-                  <span className="text-[11px] text-muted">
-                    largest holding{" "}
-                    <span
-                      className="font-semibold tabular-nums"
-                      style={{
-                        color:
-                          (allocation.top.cents / allocation.total) > 0.4
-                            ? "var(--negative)"
-                            : "var(--viz-savings)",
-                      }}
-                    >
-                      {((allocation.top.cents / allocation.total) * 100).toFixed(0)}%
-                    </span>
-                  </span>
-                ) : null}
-              </div>
+              <h2 className="text-sm font-bold">Total Investment Holdings</h2>
+              <p className="mt-0.5 text-[11px] text-muted">
+                Total: {formatMoney(allocation.total, currency)} — current balances, not the selected year.
+              </p>
               <ul className="mt-2.5 space-y-1.5">
                 {allocation.rows.slice(0, 8).map((r) => {
                   const pct = (r.cents / allocation.total) * 100;
                   return (
-                    <li key={r.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
-                      <div className="min-w-0">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="truncate text-xs">{r.label}</span>
-                          <span className="shrink-0 text-xs font-semibold tabular-nums">
-                            {formatMoney(r.cents, currency)}
-                          </span>
-                        </div>
-                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
-                          <div
-                            className="h-full rounded-full"
-                            style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }}
-                          />
-                        </div>
+                    <li key={r.label} className="min-w-0">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-xs">{r.label}</span>
+                        <span className="shrink-0 text-xs font-semibold tabular-nums">
+                          {formatMoneyWhole(r.cents, currency)}{" "}
+                          <span className="font-normal text-muted">({pct.toFixed(0)}%)</span>
+                        </span>
                       </div>
-                      <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-muted">
-                        {pct.toFixed(0)}%
-                      </span>
+                      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }}
+                        />
+                      </div>
                     </li>
                   );
                 })}
@@ -527,6 +516,8 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
             </section>
           ) : null}
 
+          <PerformanceChart accounts={chartAccounts} years={years} currency={currency} selectedName={selectedAccount?.name ?? null} onClear={() => setSelectedId(null)} />
+          </div>
           {showTransfer && (
             <TransferModal
               accounts={accounts}
@@ -538,7 +529,6 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
           {showImport && (
             <ImportInvestmentModal accounts={accounts} onClose={() => setShowImport(false)} />
           )}
-          <PerformanceChart accounts={chartAccounts} years={years} currency={currency} selectedName={selectedAccount?.name ?? null} onClear={() => setSelectedId(null)} />
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
             <div className="border-t border-foreground/10" />
@@ -672,11 +662,11 @@ function ImportedPositionsTable({ rows, currency }: { rows: InvestmentPositionIm
         <tbody className="divide-y divide-line">
           {rows.map((row, index) => <tr key={`${row.symbol ?? row.securityName}-${index}`}>
             <td className="px-3 py-2 font-medium">{row.symbol ?? row.securityName}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{row.quantity ?? "—"}</td>
+            <td className="px-3 py-2 text-center tabular-nums">{row.quantity ?? "—"}</td>
             <td className="px-3 py-2 text-right font-medium tabular-nums">{formatMoney(row.marketValueCents, currency)}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{row.costBasisCents == null ? "—" : formatMoney(row.costBasisCents, currency)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.unrealizedGainCents ?? 0)}`}>{row.unrealizedGainCents == null ? "—" : formatMoney(row.unrealizedGainCents, currency)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.unrealizedGainPercent ?? 0)}`}>{row.unrealizedGainPercent == null ? "—" : `${row.unrealizedGainPercent.toFixed(2)}%`}</td>
+            <td className="px-3 py-2 text-center tabular-nums">{row.costBasisCents == null ? "—" : formatMoney(row.costBasisCents, currency)}</td>
+            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.unrealizedGainCents ?? 0)}`}>{row.unrealizedGainCents == null ? "—" : formatMoney(row.unrealizedGainCents, currency)}</td>
+            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.unrealizedGainPercent ?? 0)}`}>{row.unrealizedGainPercent == null ? "—" : `${row.unrealizedGainPercent.toFixed(2)}%`}</td>
           </tr>)}
         </tbody>
       </table>
@@ -694,10 +684,10 @@ function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerforma
         <tbody className="divide-y divide-line">
           {rows.map((row) => <tr key={row.asOfDate}>
             <td className="px-3 py-2">{row.asOfDate}</td>
-            <td className="px-3 py-2 text-right tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${gainTone(-(row.withdrawalsCents ?? 0))}`}>{row.withdrawalsCents == null ? "—" : formatMoney(row.withdrawalsCents, currency)}</td>
+            <td className="px-3 py-2 text-center tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
+            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
+            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
+            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(-(row.withdrawalsCents ?? 0))}`}>{row.withdrawalsCents == null ? "—" : formatMoney(row.withdrawalsCents, currency)}</td>
             <td className="px-3 py-2 text-right font-medium tabular-nums">{formatMoney(row.endingBalanceCents, currency)}</td>
           </tr>)}
         </tbody>
@@ -1150,6 +1140,11 @@ function PerfTable({
 
   // Hide "Start" column when every account has a null/zero start for the year — reduces noise.
   const showStart = startAny && startSum > 0;
+  // Whether any Contrib cell in this year is summed from transactions. Drives
+  // the note under the table that explains why those cells don't accept typing.
+  const anyLedgerContrib = accounts.some(
+    (a) => a.cells[year]?.contribFromLedger || a.buckets.some((b) => b.cells[year]?.contribFromLedger),
+  );
   const zeroCls = "text-muted/50";
 
   if (accounts.length === 0) return null;
@@ -1264,7 +1259,7 @@ function PerfTable({
                     {showStart ? (
                       <td className="px-1 py-1">
                         {hasBuckets ? (
-                          <span className={`block text-left text-sm tabular-nums ${(eff.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
+                          <span className={`block text-center text-sm tabular-nums ${(eff.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
                             {eff.startBalanceCents == null ? "—" : formatMoney(eff.startBalanceCents, currency)}
                           </span>
                         ) : (
@@ -1274,16 +1269,16 @@ function PerfTable({
                     ) : null}
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-left text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.contributedCents === 0 ? zeroCls : ""}`}>
                           {formatMoney(eff.contributedCents, currency)}
                         </span>
                       ) : (
-                        <EditCell accountId={a.id} year={year} field="contributed" cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                        <LedgerCell cents={parentCell?.contributedCents ?? 0} currency={currency} live={parentCell?.contribFromLedger} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                       )}
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-left text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
                         </span>
                       ) : (
@@ -1292,14 +1287,14 @@ function PerfTable({
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-left text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
                         </span>
                       ) : (
                         <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
                       )}
                     </td>
-                    <td className={`px-4 py-2 text-left tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
+                    <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
                       {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
                     </td>
                   </tr>
@@ -1317,7 +1312,7 @@ function PerfTable({
                             </td>
                           ) : null}
                           <td className="px-1 py-1">
-                            <EditCell accountId={a.id} year={year} field="contributed" cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                            <LedgerCell cents={parentCell?.contributedCents ?? 0} currency={currency} live={parentCell?.contribFromLedger} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
                           <td className="px-1 py-1">
                             <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
@@ -1325,7 +1320,7 @@ function PerfTable({
                           <td className="px-1 py-1">
                             <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
-                          <td className="px-4 py-1 text-left tabular-nums text-muted">—</td>
+                          <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
                         </tr>
                       ) : null}
                       {a.buckets.map((b) => {
@@ -1341,17 +1336,17 @@ function PerfTable({
                               </td>
                             ) : null}
                             <td className="px-1 py-1">
-                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="contributed" cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                              <LedgerCell cents={bc?.contributedCents ?? 0} currency={currency} live={bc?.contribFromLedger} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
                             <td className="px-1 py-1">
                               <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
                             </td>
                             <td className="px-1 py-1">
-                              <span className={`block text-left text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                              <span className={`block text-center text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents == null ? "—" : formatMoney(bc.endBalanceCents, currency)}
                               </span>
                             </td>
-                            <td className="px-4 py-1 text-left tabular-nums text-muted">—</td>
+                            <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
                           </tr>
                         );
                       })}
@@ -1365,28 +1360,72 @@ function PerfTable({
             <tr className="border-t-2 border-line bg-background/40 font-semibold">
               <td className="px-4 py-2">Total</td>
               {showStart ? (
-                <td className={`px-3 py-2 text-left tabular-nums ${startAny ? "text-muted" : zeroCls}`}>
+                <td className={`px-3 py-2 text-center tabular-nums ${startAny ? "text-muted" : zeroCls}`}>
                   {startAny ? formatMoney(startSum, currency) : "—"}
                 </td>
               ) : null}
-              <td className={`px-3 py-2 text-left tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
+              <td className={`px-3 py-2 text-center tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
               <td
-                className={`px-3 py-2 text-left tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
+                className={`px-3 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
                 style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
               >
                 {formatMoney(accruedSum, currency)}
               </td>
-              <td className={`px-3 py-2 text-left tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
+              <td className={`px-3 py-2 text-center tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
                 {endAny ? formatMoney(endSum, currency) : "—"}
               </td>
-              <td className={`px-4 py-2 text-left tabular-nums ${totalReturn == null ? zeroCls : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : zeroCls}`}>
+              <td className={`px-4 py-2 text-center tabular-nums ${totalReturn == null ? zeroCls : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : zeroCls}`}>
                 {totalReturn == null ? "—" : `${totalReturn > 0 ? "+" : ""}${formatMoney(totalReturn, currency)}`}
               </td>
             </tr>
           </tfoot>
         </table>
+        <p className="border-t border-line/60 px-4 py-2 text-[11px] text-muted">
+          Contrib is read-only — contributions come from transactions. Add or edit a transaction against the fund (or
+          the fund its goal points at on Budget) and this column follows.
+          {anyLedgerContrib ? (
+            <>
+              {" "}A <span className="rounded bg-black/5 px-1 font-medium dark:bg-white/10">ledger</span> tag means
+              {` that figure is being summed from ${year} transactions right now; untagged figures are stored values from a closed year or a CSV import.`}
+            </>
+          ) : null}
+        </p>
       </div>}
     </section>
+  );
+}
+
+/**
+ * A read-only Contrib figure.
+ *
+ * The whole Contrib column is read-only at Victor's request: contributions are
+ * entered as transactions, and the table reports them. That also removes the
+ * trap this cell was built for — for the year in progress
+ * `resolveContributedCents` returns the ledger sum and ignores whatever
+ * investment_years holds, so an input here would accept a value, save it, and
+ * show the old number back, reading as a dropped edit.
+ *
+ * `live` marks the figures that have transactions behind them right now; the
+ * rest are stored values from a closed year or a CSV import.
+ */
+function LedgerCell({
+  cents,
+  currency,
+  live,
+  tone,
+}: {
+  cents: number;
+  currency: string;
+  live?: boolean;
+  tone?: string;
+}) {
+  return (
+    <span className={`flex items-center justify-center gap-1 px-1 text-center text-sm tabular-nums ${tone ?? ""}`}>
+      {live ? (
+        <span className="rounded bg-black/5 px-1 text-[10px] font-medium text-muted dark:bg-white/10">ledger</span>
+      ) : null}
+      {formatMoney(cents, currency)}
+    </span>
   );
 }
 
@@ -1414,13 +1453,17 @@ function EditCell({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = showDash ? "" : centsToDisplay(cents);
+  const initial = showDash ? "" : centsToGroupedDisplay(cents);
 
+  // The "$" sits directly against the digits and the pair is centered as one
+  // unit. Pinning the symbol to the cell's left edge (accounting style) left it
+  // stranded beside short values, while the read-only cells — which use
+  // formatMoney — kept theirs attached, so one column read two different ways.
   return (
     <form
       ref={formRef}
       action={(fd) => start(() => setInvestmentYear(fd))}
-      className="flex items-center justify-start"
+      className="flex w-full items-center justify-center gap-px"
     >
       <span className="pointer-events-none select-none text-sm text-muted">{currencySymbol(currency)}</span>
       <input type="hidden" name="accountId" value={accountId} />
@@ -1434,12 +1477,19 @@ function EditCell({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="0.00"
-        size={Math.max(initial.length, 4)}
+        // Sized from the digits (tabular-nums makes 1ch one digit) rather than
+        // the `size` attribute, whose per-character estimate runs wide and left
+        // a gap between the "$" and the number.
+        style={{
+          width: `calc(${(initial || "0.00").replace(/[^0-9]/g, "").length}ch + ${
+            (initial || "0.00").length - (initial || "0.00").replace(/[^0-9]/g, "").length
+          } * 0.42ch)`,
+        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent pl-0 pr-1 py-0.5 text-left text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
+        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-center text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1617,7 +1667,7 @@ function YByAccountRows({
             {hasBuckets ? (
               formatMoney(effectiveCell(account, y).contributedCents, currency)
             ) : (
-              <EditCell accountId={account.id} year={y} field="contributed" cents={account.cells[y]?.contributedCents ?? 0} currency={currency} tone="" />
+              formatMoney(account.cells[y]?.contributedCents ?? 0, currency)
             )}
           </td>
         ))}
@@ -1646,7 +1696,7 @@ function YByAccountRows({
                 <td className="px-3 py-1 text-sm text-muted">Contributed</td>
                 {desc.map((y) => (
                   <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
-                    <EditCell accountId={account.id} bucketId={b.id} year={y} field="contributed" cents={b.cells[y]?.contributedCents ?? 0} currency={currency} tone="text-muted" />
+                    {formatMoney(b.cells[y]?.contributedCents ?? 0, currency)}
                   </td>
                 ))}
               </tr>

@@ -194,7 +194,7 @@ export async function transferFromInvestment(formData: FormData) {
     .eq("household_id", householdId);
 
   // 4. Snapshot & revalidate.
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidatePath("/invest");
   revalidatePath("/accounts");
   revalidatePath("/networth");

@@ -22,7 +22,6 @@ import {
   updateAccount,
   updateBalance,
   updateBucket,
-  updateBucketTaxTreatment,
   updateBucketBalance,
   upsertCardDetails,
 } from "./actions";
@@ -334,6 +333,87 @@ function TaxTreatmentSelect({
   );
 }
 
+// The Type field's vocabulary. It used to be free text, which let the same
+// thing in as "401k", "401 K" and "Roth ira" — three spellings that then
+// classify (and group) differently downstream. Anything missing goes in
+// through "Add type…", and once one account uses a custom value it shows up
+// in every other account's list via SubtypeOptionsContext.
+const ACCOUNT_SUBTYPES = [
+  "Checking",
+  "Savings",
+  "Taxable",
+  "401K",
+  "Roth IRA",
+  "Trad IRA",
+  "TSP Roth",
+  "TSP Traditional",
+  "REIT",
+];
+
+/** Custom types already in use, so "Mortgage" only has to be typed once. */
+const SubtypeOptionsContext = React.createContext<string[]>([]);
+
+/** Sections whose Type field is an account type. Debts keep DEBT_KINDS and
+ *  credit cards keep the free-text bank name. */
+const usesSubtypeList = (sectionKey: string) => sectionKey === "investments" || sectionKey === "kids";
+
+function SubtypeSelect({
+  name,
+  value,
+  className,
+}: {
+  name: string;
+  value: string | null;
+  className?: string;
+}) {
+  const known = React.useContext(SubtypeOptionsContext);
+  const current = (value ?? "").trim();
+  const options = Array.from(new Set([...ACCOUNT_SUBTYPES, ...known, ...(current ? [current] : [])]));
+  const [custom, setCustom] = useState(false);
+  const base = "rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+
+  if (custom) {
+    return (
+      <span className={`flex min-w-0 items-center gap-1 ${className ?? ""}`}>
+        <input
+          name={name}
+          defaultValue=""
+          autoFocus
+          placeholder="New type (e.g. Mortgage)"
+          className={`min-w-0 flex-1 ${base}`}
+        />
+        <button
+          type="button"
+          onClick={() => setCustom(false)}
+          className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-muted hover:bg-black/5 dark:hover:bg-white/10"
+        >
+          Use list
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <select
+      name={name}
+      defaultValue={current}
+      aria-label="Account type"
+      onChange={(e) => {
+        if (e.target.value === "__add") setCustom(true);
+      }}
+      className={`${base} ${className ?? ""}`}
+    >
+      <option value="">Type…</option>
+      {options.map((t) => (
+        <option key={t} value={t}>
+          {t}
+        </option>
+      ))}
+      <option value="__add">+ Add type…</option>
+    </select>
+  );
+}
+
 export function AccountsBoard({
   accounts,
   budgetDebts,
@@ -584,7 +664,19 @@ export function AccountsBoard({
     );
   };
 
+  // Custom Types already saved on fund accounts, offered alongside the fixed
+  // list so a one-off ("Mortgage") only has to be typed once.
+  const knownSubtypes = Array.from(
+    new Set(
+      accounts
+        .filter((a) => a.kind === "investment" || a.isKidsAccount)
+        .map((a) => (a.subtype ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+
   return (
+    <SubtypeOptionsContext.Provider value={knownSubtypes}>
     <div className="mx-auto w-full max-w-5xl space-y-4">
       {/* Title + period picker in one row, right-aligned like Insights.
           Subtitle removed at Victor's request. */}
@@ -763,6 +855,7 @@ export function AccountsBoard({
         />
       ) : null}
       </div>
+    </SubtypeOptionsContext.Provider>
   );
 }
 
@@ -2856,7 +2949,7 @@ function AccountRow({
           {section.key === "banking" && account.bankGroup ? (
             <EditPill
               onClick={onToggleEdit}
-              className={`uppercase ${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-black/5 text-muted hover:ring-muted dark:bg-white/10"}`}
+              className={`${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-black/5 text-muted hover:ring-muted dark:bg-white/10"}`}
             >
               {account.bankGroup === "savings" ? "Savings" : "Checking"}
             </EditPill>
@@ -3011,7 +3104,6 @@ function BucketDrawer({
               isPastPeriod={isPastPeriod}
               onDragStart={() => startDrag(b.id)}
               isDragOver={dragOverId === b.id}
-              showTax={account.kind === "investment" || account.isKidsAccount}
             />
           ))}
         </ul>
@@ -3039,7 +3131,6 @@ function BucketRow({
   isPastPeriod,
   onDragStart,
   isDragOver,
-  showTax,
 }: {
   bucket: BucketData;
   currency: string;
@@ -3047,12 +3138,8 @@ function BucketRow({
   isPastPeriod: boolean;
   onDragStart: () => void;
   isDragOver: boolean;
-  // Only investment and kids buckets appear in "How it's taxed"; a banking
-  // sinking fund has no tax treatment to set.
-  showTax: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [taxPending, startTax] = useTransition();
   // All three columns read the month they're actually headed with. They used
   // to use prevMonthCents/prev2MonthCents, which are fixed to the month before
   // *today* — so selecting an earlier period moved the column headings but
@@ -3067,21 +3154,14 @@ function BucketRow({
       }`}
     >
       <div
-        className={`grid items-center gap-1.5 ${
-          // One line wherever there's room. At phone width the name column is
-          // only ~119px, which truncates real bucket names, so those rows get
-          // a second line instead. Rows without a select never change height.
-          showTax ? "min-h-7 py-1 sm:h-7 sm:py-0" : "h-7"
-        } grid-cols-[1.5rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
+        className={`grid h-7 items-center gap-1.5 grid-cols-[1.5rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
       >
       <GripHandle onMouseDown={onDragStart} size="sm" />
-      {/* The select shares the name cell rather than taking its own grid
-          column: the row's column template is fixed, and a seventh child would
-          shift every balance column out from under its heading. Beside the
-          name, not under it — a stacked row ran 84px tall, three times the
-          height of the single line it replaced. The indent removal above buys
-          the 44px that makes one line fit. */}
-      <div className="flex min-w-0 flex-col items-start gap-0.5 sm:flex-row sm:items-center sm:gap-1.5">
+      {/* No per-bucket tax select: the treatment is set once on the account
+          (its Type pill in the row header shows it), and resolveTaxTreatment
+          reads the bucket's NAME, so a bucket called "Roth" still bands
+          correctly on /invest without a control on every row. */}
+      <div className="flex min-w-0 items-center gap-1.5">
         <button
           type="button"
           onClick={() => setEditing((v) => !v)}
@@ -3090,27 +3170,6 @@ function BucketRow({
         >
           {bucket.name}
         </button>
-        {showTax ? (
-          <form
-            id={`bucket-tax-${bucket.id}`}
-            action={(fd) => startTax(() => void updateBucketTaxTreatment(fd))}
-            className={`shrink-0 ${taxPending ? "opacity-60" : ""}`}
-          >
-            <input type="hidden" name="id" value={bucket.id} />
-            <TaxTreatmentSelect
-              name="taxTreatment"
-              value={bucket.taxTreatment}
-              onChanged={() => {
-                // Submit on change — the row has no save button, matching the
-                // name and balance inputs beside it.
-                queueMicrotask(() => {
-                  const form = document.getElementById(`bucket-tax-${bucket.id}`) as HTMLFormElement | null;
-                  form?.requestSubmit();
-                });
-              }}
-            />
-          </form>
-        ) : null}
       </div>
       {isPastPeriod ? (
         // Same rule as the account row above: the column is headed with a past
@@ -3703,7 +3762,14 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           </label>
         ) : (
           <>
-            <LabeledInput label="Investment type" name="subtype" placeholder="e.g. Roth IRA, brokerage, 529" />
+            {usesSubtypeList(section.key) ? (
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Type
+                <SubtypeSelect name="subtype" value={null} className="mt-1 w-full font-normal normal-case tracking-normal text-foreground" />
+              </label>
+            ) : (
+              <LabeledInput label="Type" name="subtype" placeholder="e.g. AMEX, Chase" />
+            )}
             {/* Set at creation rather than guessed from the name later — this
                 is the value "How it's taxed" on /invest bands the account by. */}
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -3899,18 +3965,22 @@ function EditAccountForm({
           />
         </div>
         {/* Row 2: ownership, kind/subtype, active, save */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select name="ownership" defaultValue={account.ownership} className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
             <option value="sole">Sole</option>
             <option value="joint">Joint</option>
           </select>
           {section.offerSubtype ? (
-            <input
-              name="subtype"
-              defaultValue={account.subtype ?? ""}
-              placeholder="Type… (e.g. Roth IRA, 529)"
-              className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            />
+            usesSubtypeList(section.key) ? (
+              <SubtypeSelect name="subtype" value={account.subtype} className="min-w-[8rem] flex-1" />
+            ) : (
+              <input
+                name="subtype"
+                defaultValue={account.subtype ?? ""}
+                placeholder="Type… (e.g. Roth IRA, 529)"
+                className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            )
           ) : null}
           {(section.key === "investments" || section.key === "kids") ? (
             <TaxTreatmentSelect

@@ -192,7 +192,10 @@ export async function addAccount(formData: FormData) {
   const institution = String(formData.get("institution") ?? "").trim() || null;
   const accountNumber = String(formData.get("accountNumber") ?? "").trim() || null;
   const ownership = formData.get("ownership") === "joint" ? "joint" : "sole";
-  const subtype = String(formData.get("subtype") ?? "").trim() || null;
+  // "__add" is the Type select's "+ Add type…" sentinel; it must never be
+  // stored as an actual type.
+  const subtypeRaw = String(formData.get("subtype") ?? "").trim();
+  const subtype = subtypeRaw && subtypeRaw !== "__add" ? subtypeRaw : null;
   const isKidsAccount = formData.get("kidsAccount") === "on";
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
   if (!name) return { error: "Account name is required." };
@@ -307,7 +310,7 @@ export async function addAccount(formData: FormData) {
     }
   }
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   return { error: null, id: inserted?.id ?? null };
 }
@@ -340,7 +343,10 @@ export async function updateAccount(formData: FormData) {
   const institution = String(formData.get("institution") ?? "").trim() || null;
   const accountNumber = String(formData.get("accountNumber") ?? "").trim() || null;
   const ownership = formData.get("ownership") === "joint" ? "joint" : "sole";
-  const subtype = String(formData.get("subtype") ?? "").trim() || null;
+  // "__add" is the Type select's "+ Add type…" sentinel; it must never be
+  // stored as an actual type.
+  const subtypeRaw = String(formData.get("subtype") ?? "").trim();
+  const subtype = subtypeRaw && subtypeRaw !== "__add" ? subtypeRaw : null;
   const isKidsAccount = formData.get("kidsAccount") === "on";
   const active = formData.get("active") === "on";
   if (!id || !name) return;
@@ -386,7 +392,7 @@ export async function updateAccount(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId);
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
 }
 
@@ -421,7 +427,7 @@ export async function updateBalance(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId);
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
 }
 
@@ -489,7 +495,7 @@ export async function recalculateBalance(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId);
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
 }
 
@@ -988,7 +994,7 @@ export async function payCard(formData: FormData) {
     await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, -amountCents);
   }
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   revalidatePath("/transactions");
   return { error: null };
@@ -1033,7 +1039,7 @@ export async function addBucket(formData: FormData) {
   }
 
   await syncAccountFromBuckets(supabase, householdId, accountId);
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   return { error: null };
 }
@@ -1123,7 +1129,7 @@ export async function updateBucketBalance(formData: FormData) {
     .single();
 
   if (bucket) await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
 }
 
@@ -1147,7 +1153,7 @@ export async function deleteBucket(formData: FormData) {
     .eq("household_id", householdId);
 
   if (bucket) await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
 }
 
@@ -1195,7 +1201,7 @@ async function saveAccountTransfer(formData: FormData, action: "create" | "updat
   });
   if (error) return { error: error.message || "Couldn't save the transfer — please try again." };
 
-  await captureSnapshots(supabase, householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   revalidatePath("/transactions");
   revalidatePath("/networth");
