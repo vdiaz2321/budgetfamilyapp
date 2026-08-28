@@ -520,6 +520,13 @@ export function AccountsBoard({
   // session instead of resetting to its default every time this board
   // remounts. See feedback: "Amex Savings keeps staying expanded... when I
   // collapse it when moving to a different page."
+  // Overview section (net-worth tiles + the four group cards) collapses on its
+  // own key so it survives a page change like every other section here.
+  const [overviewCollapsed, setOverviewCollapsed] = useSessionCollapse("accounts-overview-open", () => ({
+    overview: false,
+  }));
+  const overviewOpen = !overviewCollapsed.overview;
+
   const [bucketsOpen, setBucketsOpen] = useSessionCollapse("accounts-buckets-open", () =>
     Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, false])),
   );
@@ -541,22 +548,76 @@ export function AccountsBoard({
           Subtitle removed at Victor's request. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold">Accounts</h1>
-        <PeriodPicker
-          granularity={periodGranularity}
-          periodKey={periodKey}
-          label={periodLabel(periodGranularity, periodKey)}
-          minYear={new Date().getFullYear() - 5}
-          // Weekly account balances don't exist as snapshots — drop it.
-          granularities={["monthly", "quarterly", "yearly"]}
-          onSelect={(g, k) => {
-            setPeriodGranularity(g);
-            setPeriodKey(k);
-          }}
-        />
+        {/* Actions sit immediately left of the period picker so the header
+            carries every page-level control in one row. */}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setTransferOpen(true)}
+            className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
+          >
+            Transfer Funds
+          </button>
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
+          >
+            Add account
+          </button>
+          <button
+            type="button"
+            onClick={toggleAll}
+            className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-sm ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+          >
+            {allOpen ? "Collapse all" : "Expand all"}
+          </button>
+          <PeriodPicker
+            granularity={periodGranularity}
+            periodKey={periodKey}
+            label={periodLabel(periodGranularity, periodKey)}
+            minYear={new Date().getFullYear() - 5}
+            // Weekly account balances don't exist as snapshots — drop it.
+            granularities={["monthly", "quarterly", "yearly"]}
+            onSelect={(g, k) => {
+              setPeriodGranularity(g);
+              setPeriodKey(k);
+            }}
+          />
+        </div>
       </div>
 
-      {/* Net worth summary */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+      {/* Net worth + account groups live in one card. Collapsing hides the
+          group cards and keeps the Assets / Debts / Net worth tiles, the same
+          way Travel & Credit Card Rewards keeps its stat row when closed. */}
+      <section className="space-y-3 rounded-xl bg-surface py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:p-4">
+      <div className="flex items-center gap-2 px-3 sm:px-0">
+        <button
+          type="button"
+          onClick={() => setOverviewCollapsed((c) => ({ ...c, overview: !c.overview }))}
+          className="min-w-0 flex-1 text-left"
+          aria-expanded={overviewOpen}
+        >
+          <span className="text-base font-bold sm:text-lg">Net Worth & Accounts</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setOverviewCollapsed((c) => ({ ...c, overview: !c.overview }))}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800"
+          aria-label={overviewOpen ? "Collapse account groups" : "Expand account groups"}
+        >
+          <svg
+            width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`transition-transform ${overviewOpen ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 px-3 sm:gap-3 sm:px-0">
         <SummaryStat
           label="Assets"
           value={assets}
@@ -590,33 +651,10 @@ export function AccountsBoard({
         />
       </div>
 
-      <div className="flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={() => setTransferOpen(true)}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
-        >
-          Transfer Funds
-        </button>
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
-        >
-          Add account
-        </button>
-        <button
-          type="button"
-          onClick={toggleAll}
-          className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-sm ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
-        >
-          {allOpen ? "Collapse all" : "Expand all"}
-        </button>
-      </div>
-
       {/* 2×2: Banking + Debts on the left, Investments + Kids Funding on the right.
-          Two independent flex columns so opening one card doesn't leave dead space next to it. */}
-      {(() => {
+          Two independent flex columns so opening one card doesn't leave dead space next to it.
+          Collapsing the section hides these; the summary tiles above stay. */}
+      {overviewOpen ? (() => {
         const items = [
           ...assetSections.map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
           ...debtSectionsToRender.map((s) => ({
@@ -652,7 +690,8 @@ export function AccountsBoard({
             <div className="flex flex-1 flex-col gap-3">{right.map(renderCard)}</div>
           </div>
         );
-      })()}
+      })() : null}
+      </section>
 
       <div className="space-y-3 pt-2">
         {creditSections.map((section) => {
@@ -992,6 +1031,9 @@ function CreditCardSection({
                 />
               ) : null}
             </div>
+            {/* Fees, holder filter and card counts belong to the open section —
+                collapsing leaves only the headline stat tiles. */}
+            {open ? (
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
               {feesPaid > 0 ? (
                 <button
@@ -1065,6 +1107,7 @@ function CreditCardSection({
                 );
               })()}
             </div>
+            ) : null}
             </>
           ) : null}
         </div>
@@ -1439,6 +1482,11 @@ function CreditCardPanel({
             </span>
               {(d?.freeNightExpiresOn || d?.benefitUsedOn || d?.charging) ? (
                 <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {d?.charging ? (
+                    <span className="whitespace-nowrap text-[11px] text-muted">
+                      <span className="font-semibold text-foreground">Charging:</span> {d.charging}
+                    </span>
+                  ) : null}
                   {d?.freeNightExpiresOn ? (
                     <span
                       className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] ${fnExpiresColor}`}
@@ -1448,11 +1496,6 @@ function CreditCardPanel({
                         <path d="M12 7v5l3 2" />
                       </svg>
                       {fnExpired ? "Expired" : "Expires"} {d.freeNightExpiresOn.replace(/-/g, "‑")}
-                    </span>
-                  ) : null}
-                  {d?.charging ? (
-                    <span className="whitespace-nowrap text-[11px] text-muted">
-                      <span className="font-semibold text-foreground">Charging:</span> {d.charging}
                     </span>
                   ) : null}
                   {d?.benefitUsedOn ? (

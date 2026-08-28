@@ -152,18 +152,18 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
           {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} compact /> : null}
         </button>
 
-        <div className="text-[11px] tabular-nums text-muted">
+        <div className="text-[15px] tabular-nums text-muted">
           {autoPlanned ?? row.autoPlanned ? (
             <span>{formatMoney(row.plannedCents, currency)}</span>
           ) : (
-            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} currency={currency} />
+            <MobilePlannedInput subId={row.subId} monthKey={monthKey} plannedCents={row.plannedCents} spentCents={row.spentCents} currency={currency} />
           )}
         </div>
 
         <button
           type="button"
           onClick={onSelect}
-          className={`text-[11px] font-semibold tabular-nums ${
+          className={`text-[15px] font-semibold tabular-nums ${
             remaining < 0 ? "text-negative" : actualColorClass(kind, row.spentCents)
           }`}
         >
@@ -176,7 +176,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
         <button
           type="button"
           onClick={onSelect}
-          className="text-xs font-bold tabular-nums"
+          className="text-[15px] font-bold tabular-nums"
         >
           {overBudget ? (
             <span className="inline-flex rounded-full bg-negative/15 px-1.5 py-0.5 text-foreground ring-1 ring-negative/15">
@@ -261,6 +261,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isEven, isD
             subId={row.subId}
             monthKey={monthKey}
             plannedCents={row.plannedCents}
+            spentCents={row.spentCents}
             currency={currency}
             inputRef={plannedInputRef}
           />
@@ -341,17 +342,21 @@ function MobilePlannedInput({
   subId,
   monthKey,
   plannedCents,
+  spentCents,
   currency,
 }: {
   subId: string;
   monthKey: string;
   plannedCents: number;
+  spentCents: number;
   currency: string;
 }) {
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const initial = centsToDisplay(plannedCents);
+  const canMatch = spentCents > 0 && spentCents !== plannedCents;
 
   // Display mode is a plain 12px span (matches "spent" size on the same row);
   // tap swaps in a real input at 16px so iOS won't auto-zoom on focus.
@@ -360,7 +365,7 @@ function MobilePlannedInput({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-        className={`text-xs tabular-nums text-muted ${pending ? "ring-1 ring-brand rounded" : ""}`}
+        className={`text-[15px] tabular-nums text-muted ${pending ? "ring-1 ring-brand rounded" : ""}`}
       >
         {formatMoney(plannedCents, currency)}
       </button>
@@ -368,11 +373,28 @@ function MobilePlannedInput({
   }
 
   return (
-    <form ref={formRef} action={(fd) => start(() => upsertPlan(fd))} className="inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+    <form ref={formRef} action={(fd) => start(() => upsertPlan(fd))} className="relative inline-flex items-center" onClick={(e) => e.stopPropagation()}>
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
+      {canMatch ? (
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const el = inputRef.current;
+            if (!el) return;
+            el.value = `${currencySymbol(currency)}${centsToDisplay(spentCents)}`;
+            formRef.current?.requestSubmit();
+            setEditing(false);
+          }}
+          className={MATCH_BTN_CLASS}
+        >
+          Match spent ({formatMoney(spentCents, currency)})
+        </button>
+      ) : null}
       <input
         autoFocus
+        ref={inputRef}
         key={initial}
         name="planned"
         type="text"
@@ -385,28 +407,39 @@ function MobilePlannedInput({
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
         style={{ fontSize: '16px' }}
-        className="w-20 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
+        className="w-24 rounded bg-transparent px-0.5 text-right text-muted tabular-nums hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-1 focus:ring-brand"
       />
     </form>
   );
 }
 
+// The Match-spent affordance is a real button sitting over a data row, so it
+// has to read as pressable at a glance — solid fill, not a bordered tooltip.
+const MATCH_BTN_CLASS =
+  "absolute bottom-full right-0 z-20 mb-1 whitespace-nowrap rounded-full bg-muted px-2.5 py-1 text-[12px] font-bold text-white shadow-md ring-1 ring-black/10 transition hover:bg-foreground/75 active:scale-95";
+
 function PlannedInput({
   subId,
   monthKey,
   plannedCents,
+  spentCents,
   currency,
   inputRef,
 }: {
   subId: string;
   monthKey: string;
   plannedCents: number;
+  spentCents: number;
   currency: string;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const [pending, start] = useTransition();
+  const [focused, setFocused] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const initial = centsToDisplay(plannedCents);
+  // Nothing to match to on an untouched row, and no point offering it when
+  // Planned already equals Actual.
+  const canMatch = spentCents > 0 && spentCents !== plannedCents;
 
   return (
     <form
@@ -416,6 +449,24 @@ function PlannedInput({
     >
       <input type="hidden" name="subcategoryId" value={subId} />
       <input type="hidden" name="month" value={monthKey} />
+      {focused && canMatch ? (
+        <button
+          type="button"
+          // pointerdown lands before the input's blur; preventing its default
+          // keeps focus (and therefore this button) alive long enough for the
+          // tap/click to register — on iOS a mousedown handler would be too late.
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const el = inputRef.current;
+            if (!el) return;
+            el.value = `${currencySymbol(currency)}${centsToDisplay(spentCents)}`;
+            formRef.current?.requestSubmit();
+          }}
+          className={MATCH_BTN_CLASS}
+        >
+          Match spent ({formatMoney(spentCents, currency)})
+        </button>
+      ) : null}
       <input
         key={initial}
         ref={inputRef}
@@ -424,8 +475,9 @@ function PlannedInput({
         inputMode="decimal"
         autoComplete="off"
         defaultValue={`${currencySymbol(currency)}${initial}`}
-        onFocus={(e) => e.currentTarget.select()}
+        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
         onBlur={(e) => {
+          setFocused(false);
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
         title="Type a value or calculation, for example $1200 + 75 - 30"
