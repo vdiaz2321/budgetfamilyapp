@@ -27,22 +27,22 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    href: "/savings",
-    label: "Savings",
-    icon: (
-      <>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7v5l3 3" />
-      </>
-    ),
-  },
-  {
     href: "/snowball",
     label: "Debt/Loans",
     icon: (
       <>
         <path d="M12 3v18M5 8l14 8M19 8L5 16" />
         <circle cx="12" cy="12" r="9" />
+      </>
+    ),
+  },
+  {
+    href: "/savings",
+    label: "Savings",
+    icon: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 3" />
       </>
     ),
   },

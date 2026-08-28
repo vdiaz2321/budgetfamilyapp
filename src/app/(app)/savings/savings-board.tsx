@@ -784,7 +784,7 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
 
   return (
     <div>
-      <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="grid w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-brand-soft/20 md:grid-cols-[minmax(210px,1.2fr)_130px_minmax(220px,1fr)_100px_18px]">
+      <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="grid w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-brand-soft/20 md:grid-cols-[minmax(200px,1.2fr)_150px_minmax(230px,1fr)_118px_18px]">
         <span className="flex min-w-0 items-center gap-2">
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="block min-w-0 flex-1 truncate text-sm font-semibold">{card.name}</span>
@@ -793,14 +793,14 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
           <StatusBadge pace={card.pace} hasGoal={hasGoal} />
         </span>
         <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-          <span className="text-[10px] text-muted">This month</span>
+          <span className="text-xs text-muted">This month</span>
           <span className={`text-sm font-semibold tabular-nums ${card.monthNetCents >= 0 ? "text-positive" : "text-negative"}`}>{card.monthNetCents < 0 ? "−" : ""}{formatSavingsMoney(Math.abs(card.monthNetCents), currency)}</span>
         </span>
         <span className="min-w-0">
-          <span className="flex items-center justify-between gap-2 text-[10px] text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
+          <span className="flex items-center justify-between gap-2 text-xs text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
           <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60"><span className={`block h-full rounded-full ${card.pace === "reached" ? "bg-positive" : ""}`} style={{ width: `${progress}%`, ...(card.pace === "reached" ? {} : { backgroundColor: "var(--viz-savings)" }) }} /></span>
         </span>
-        <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-[10px] text-muted">Of income</span><span className="text-sm font-semibold tabular-nums">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
+        <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-xs text-muted">Of income</span><span className="text-sm font-semibold tabular-nums">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`hidden text-muted transition-transform md:block ${expanded ? "rotate-90" : ""}`} aria-hidden><path d="M9 18l6-6-6-6" /></svg>
       </button>
 
@@ -950,11 +950,11 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
 }
 
 function Detail({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return <div className="rounded-lg bg-surface px-3 py-2 ring-1 ring-black/5 dark:ring-white/10"><p className="text-[10px] text-muted">{label}</p><p className="mt-0.5 truncate text-xs font-semibold tabular-nums">{value}</p>{sub ? <p className="mt-0.5 truncate text-[10px] text-muted">{sub}</p> : null}</div>;
+  return <div className="flex flex-col items-center justify-center rounded-lg bg-surface px-2 py-2 text-center ring-1 ring-black/5 dark:ring-white/10"><p className="text-[11px] leading-tight text-muted">{label}</p><p className="mt-0.5 w-full truncate text-base font-semibold leading-tight tabular-nums">{value}</p>{sub ? <p className="mt-0.5 w-full truncate text-[11px] leading-tight text-muted">{sub}</p> : null}</div>;
 }
 
 function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal: boolean }) {
-  if (!hasGoal) return <span className="text-[10px] font-medium text-muted">No goal</span>;
+  if (!hasGoal) return <span className="text-xs font-medium text-muted">No goal</span>;
   const badges: Record<SavingsCardData["pace"], { label: string; className: string } | null> = {
     none: null,
     reached: { label: "✓ Reached", className: "text-positive" },
@@ -963,5 +963,5 @@ function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal
     overdue: { label: "Overdue", className: "text-negative" },
   };
   const badge = badges[pace];
-  return badge ? <span className={`text-[10px] font-medium ${badge.className}`}>{badge.label}</span> : <span />;
+  return badge ? <span className={`whitespace-nowrap text-xs font-medium ${badge.className}`}>{badge.label}</span> : <span />;
 }

@@ -3,6 +3,7 @@ import { SavingsBoard, type SavingsCardData } from "./savings-board";
 import type { AccountOption, SubOption } from "../budget/types";
 import { getSessionContext } from "@/lib/auth-context";
 import { capsForYear, latestCapYear, pendingCapYear } from "@/lib/contribution-limits";
+import { fundSlotFor, periodStartFor, signedContributionCents } from "@/lib/fund-contributions";
 
 export const metadata = { title: "Savings · Capitall" };
 
@@ -173,10 +174,13 @@ export default async function SavingsPage() {
   }
 
   // Contributions-to-date per goal, summed from transactions inside the goal's
-  // own period. Goals here are annual targets (every target_date is a Dec 31,
-  // and each 529's goal is exactly 12x its monthly), so the period is the
-  // calendar year the target falls in; goals with no target date fall back to
-  // the current year.
+  // own period.
+  //
+  // The period and the netting rule come from @/lib/fund-contributions, which
+  // /invest reads too — same window (calendar year), same treatment of
+  // withdrawals. That shared definition is what keeps this page's figure equal
+  // to the Investments page's for the same fund; they drifted apart once
+  // already when each owned a private copy.
   //
   // This replaces the old `start_cents + this month only` formula, which
   // required `start_cents` to be re-baselined by hand every month — the moment
@@ -185,14 +189,14 @@ export default async function SavingsPage() {
   // no transactions in the period yet, so nothing regresses on a fresh goal.
   const periodNetBySub = new Map<string, number>();
   const periodTxCountBySub = new Map<string, number>();
-  const periodStartFor = (targetDate: string | null): string =>
-    `${targetDate ? targetDate.slice(0, 4) : String(now.getFullYear())}-01-01`;
   for (const t of savingsTx ?? []) {
     const goal = goalBySub.get(t.subcategory_id);
-    const from = periodStartFor((goal?.target_date as string | null) ?? null);
+    const from = periodStartFor((goal?.target_date as string | null) ?? null, now);
     if (t.occurred_on < from) continue;
-    const delta = t.is_withdrawal ? -t.amount_cents : t.amount_cents;
-    periodNetBySub.set(t.subcategory_id, (periodNetBySub.get(t.subcategory_id) ?? 0) + delta);
+    periodNetBySub.set(
+      t.subcategory_id,
+      (periodNetBySub.get(t.subcategory_id) ?? 0) + signedContributionCents(t),
+    );
     periodTxCountBySub.set(t.subcategory_id, (periodTxCountBySub.get(t.subcategory_id) ?? 0) + 1);
   }
 
@@ -273,10 +277,17 @@ export default async function SavingsPage() {
   }
 
   const cards: SavingsCardData[] = savingsSubs.map((s) => {
-    const linkedAccountId = (s as { linked_account_id?: string | null }).linked_account_id ?? null;
-    const bucketAccountId = s.linked_bucket_id ? accountIdByBucket.get(s.linked_bucket_id) : null;
-    const resolvedAccountId = bucketAccountId ?? linkedAccountId ?? null;
-    const isKids = resolvedAccountId ? (isKidsAccountById.get(resolvedAccountId) ?? false) : false;
+    // Which account this goal's money actually lands in. Bucket link wins over
+    // account link — same precedence /invest resolves contributions with, so a
+    // goal can't be filed under one account here and another one there.
+    const slot = fundSlotFor(
+      {
+        linkedBucketId: s.linked_bucket_id ?? null,
+        linkedAccountId: (s as { linked_account_id?: string | null }).linked_account_id ?? null,
+      },
+      accountIdByBucket,
+    );
+    const isKids = slot ? (isKidsAccountById.get(slot.accountId) ?? false) : false;
 
     const g = goalBySub.get(s.id);
     const goalCents = g?.goal_cents ?? 0;

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useEffect, useRef, useState, useTransition } from "react";
+import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { centsToDisplay, centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
@@ -21,6 +22,7 @@ import {
   updateAccount,
   updateBalance,
   updateBucket,
+  updateBucketTaxTreatment,
   updateBucketBalance,
   upsertCardDetails,
 } from "./actions";
@@ -77,6 +79,7 @@ export type BucketData = {
   // "Checking" bucket and a "Savings" bucket under one bank account) no
   // longer have to force the whole account into one type.
   bankGroup: "savings" | "spending" | null;
+  taxTreatment: string | null;
   // Every recorded month of bucket_snapshots, keyed "YYYY-MM-01" (a missing
   // month = never recorded). Lets a bucket row follow the header's period
   // picker instead of being pinned to the last three months.
@@ -139,6 +142,7 @@ export type AccountData = {
   active: boolean;
   isKidsAccount: boolean;
   bankGroup: "savings" | "spending" | null;
+  taxTreatment: string | null;
   balanceCents: number;
   annualFeeCents: number | null;
   feeWaived: boolean;
@@ -291,6 +295,44 @@ type Props = {
   // [current, prev, prev2] as YYYY-MM-01 — powers the three balance columns.
   historyMonths: [string, string, string];
 };
+
+/** Shared tax <select>. Kept in one place so the account and bucket controls
+ *  can't drift apart in labelling or option order. */
+function TaxTreatmentSelect({
+  name,
+  value,
+  onChanged,
+  className,
+}: {
+  name: string;
+  value: string | null;
+  onChanged?: () => void;
+  className?: string;
+}) {
+  return (
+    <select
+      name={name}
+      defaultValue={value ?? ""}
+      onChange={onChanged ? () => onChanged() : undefined}
+      aria-label="Tax treatment"
+      // Fixed width, and the NAME yields instead: a squeezed select renders
+      // its own value as "Deferre"/"Tax-fre", which reads as broken. A
+      // truncated bucket name is an editable input that shows the rest on
+      // focus, so it degrades far more gracefully.
+      className={`w-[5.25rem] shrink-0 rounded-md bg-surface px-1.5 py-0.5 text-[11px] text-muted ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${className ?? ""}`}
+    >
+      {/* No "Auto" option: Victor sets the treatment himself. The blank entry
+          exists only so an account created before this field can still render
+          — it disappears from the list the moment a real value is chosen. */}
+      {value ? null : <option value="">Not set</option>}
+      {TAX_TREATMENTS.map((t) => (
+        <option key={t} value={t}>
+          {TAX_LABEL_SHORT[t]}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export function AccountsBoard({
   accounts,
@@ -720,7 +762,7 @@ export function AccountsBoard({
           onClose={() => setTransferOpen(false)}
         />
       ) : null}
-    </div>
+      </div>
   );
 }
 
@@ -2951,7 +2993,7 @@ function BucketDrawer({
   const { dragOverId, startDrag } = usePointerReorder("bucket", reorder);
 
   return (
-    <div className="border-t border-line bg-background/40 px-4 py-1 sm:pl-11 sm:pr-4">
+    <div className="border-t border-line bg-background/40 px-4 py-1">
       {reorderError ? <p className="pb-1.5 text-xs font-medium text-negative">{reorderError}</p> : null}
       {localBuckets.length === 0 ? (
         <p className="py-1 text-xs text-muted">
@@ -2969,6 +3011,7 @@ function BucketDrawer({
               isPastPeriod={isPastPeriod}
               onDragStart={() => startDrag(b.id)}
               isDragOver={dragOverId === b.id}
+              showTax={account.kind === "investment" || account.isKidsAccount}
             />
           ))}
         </ul>
@@ -2996,6 +3039,7 @@ function BucketRow({
   isPastPeriod,
   onDragStart,
   isDragOver,
+  showTax,
 }: {
   bucket: BucketData;
   currency: string;
@@ -3003,8 +3047,12 @@ function BucketRow({
   isPastPeriod: boolean;
   onDragStart: () => void;
   isDragOver: boolean;
+  // Only investment and kids buckets appear in "How it's taxed"; a banking
+  // sinking fund has no tax treatment to set.
+  showTax: boolean;
 }) {
-  const [delPending, startDel] = useTransition();
+  const [editing, setEditing] = useState(false);
+  const [taxPending, startTax] = useTransition();
   // All three columns read the month they're actually headed with. They used
   // to use prevMonthCents/prev2MonthCents, which are fixed to the month before
   // *today* — so selecting an earlier period moved the column headings but
@@ -3014,12 +3062,56 @@ function BucketRow({
   return (
     <li
       data-drop-key={`bucket:${bucket.id}`}
-      className={`group relative grid h-7 items-center gap-1.5 ${
+      className={`group relative ${
         isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""
-      } grid-cols-[1.5rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
+      }`}
     >
+      <div
+        className={`grid items-center gap-1.5 ${
+          // One line wherever there's room. At phone width the name column is
+          // only ~119px, which truncates real bucket names, so those rows get
+          // a second line instead. Rows without a select never change height.
+          showTax ? "min-h-7 py-1 sm:h-7 sm:py-0" : "h-7"
+        } grid-cols-[1.5rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
+      >
       <GripHandle onMouseDown={onDragStart} size="sm" />
-      <BucketNameInput id={bucket.id} name={bucket.name} />
+      {/* The select shares the name cell rather than taking its own grid
+          column: the row's column template is fixed, and a seventh child would
+          shift every balance column out from under its heading. Beside the
+          name, not under it — a stacked row ran 84px tall, three times the
+          height of the single line it replaced. The indent removal above buys
+          the 44px that makes one line fit. */}
+      <div className="flex min-w-0 flex-col items-start gap-0.5 sm:flex-row sm:items-center sm:gap-1.5">
+        <button
+          type="button"
+          onClick={() => setEditing((v) => !v)}
+          aria-expanded={editing}
+          className="min-w-0 truncate rounded-md px-1 py-0 text-left text-sm transition hover:bg-brand-soft/40"
+        >
+          {bucket.name}
+        </button>
+        {showTax ? (
+          <form
+            id={`bucket-tax-${bucket.id}`}
+            action={(fd) => startTax(() => void updateBucketTaxTreatment(fd))}
+            className={`shrink-0 ${taxPending ? "opacity-60" : ""}`}
+          >
+            <input type="hidden" name="id" value={bucket.id} />
+            <TaxTreatmentSelect
+              name="taxTreatment"
+              value={bucket.taxTreatment}
+              onChanged={() => {
+                // Submit on change — the row has no save button, matching the
+                // name and balance inputs beside it.
+                queueMicrotask(() => {
+                  const form = document.getElementById(`bucket-tax-${bucket.id}`) as HTMLFormElement | null;
+                  form?.requestSubmit();
+                });
+              }}
+            />
+          </form>
+        ) : null}
+      </div>
       {isPastPeriod ? (
         // Same rule as the account row above: the column is headed with a past
         // month, so the edit has to land on that month's bucket_snapshot. The
@@ -3048,48 +3140,99 @@ function BucketRow({
           currency={currency}
         />
       </div>
-      <form
-        action={(fd) => startDel(() => deleteBucket(fd))}
-        className="absolute right-1 top-1/2 -translate-y-1/2 sm:static sm:justify-self-end sm:translate-y-0"
-      >
-        <input type="hidden" name="id" value={bucket.id} />
-        <button
-          type="submit"
-          disabled={delPending}
-          title="Delete bucket"
-          aria-label="Delete bucket"
-          className="flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 transition hover:bg-negative/10 hover:text-negative group-hover:opacity-100 disabled:opacity-40"
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </form>
+      </div>
+      {editing ? (
+        <BucketEditPanel
+          bucket={bucket}
+          onDone={() => setEditing(false)}
+        />
+      ) : null}
     </li>
   );
 }
 
-function BucketNameInput({ id, name }: { id: string; name: string }) {
-  const [pending, start] = useTransition();
-  const formRef = useRef<HTMLFormElement>(null);
+// Rename / delete for one bucket, opened by clicking the bucket's name.
+//
+// This replaces a blur-to-save name input plus a hover-only ✕. Both were
+// problems: the ✕ was absolutely positioned and collided with the row once
+// bucket rows could wrap to two lines, it never appeared on touch at all
+// (there is no hover on a phone), and a one-click delete sat permanently
+// beside an editable field. An explicit panel gives rename, Cancel and a
+// confirmed Delete the same shape the account rows already use.
+function BucketEditPanel({ bucket, onDone }: { bucket: BucketData; onDone: () => void }) {
+  const [savePending, startSave] = useTransition();
+  const [delPending, startDel] = useTransition();
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <form ref={formRef} action={(fd) => start(() => void updateBucket(fd))}>
-      <input type="hidden" name="id" value={id} />
-      <input
-        key={name}
-        name="name"
-        defaultValue={name}
-        onBlur={(e) => {
-          if (e.currentTarget.value.trim() && e.currentTarget.value !== name) {
-            formRef.current?.requestSubmit();
-          }
-        }}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0 text-sm transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
-          pending ? "ring-2 ring-brand" : "focus:ring-brand"
-        }`}
-      />
-    </form>
+    <div className="border-t border-line/60 bg-background/60 px-1 py-2">
+      <form
+        action={(fd) =>
+          startSave(async () => {
+            await updateBucket(fd);
+            onDone();
+          })
+        }
+        className="flex flex-wrap items-center gap-2"
+      >
+        <input type="hidden" name="id" value={bucket.id} />
+        <input
+          name="name"
+          defaultValue={bucket.name}
+          autoFocus
+          aria-label="Bucket name"
+          className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <button
+          type="submit"
+          disabled={savePending}
+          className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+        >
+          {savePending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-md px-3 py-1.5 text-xs font-medium text-muted transition hover:text-foreground"
+        >
+          Cancel
+        </button>
+      </form>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {confirmDelete ? (
+          <>
+            <span className="text-xs text-muted">
+              Delete &ldquo;{bucket.name}&rdquo;? Its balance leaves this account&rsquo;s total.
+            </span>
+            <form action={(fd) => startDel(() => deleteBucket(fd))}>
+              <input type="hidden" name="id" value={bucket.id} />
+              <button
+                type="submit"
+                disabled={delPending}
+                className="rounded-md bg-negative px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+              >
+                {delPending ? "Deleting…" : "Yes, delete"}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              className="rounded-md px-2 py-1.5 text-xs font-medium text-muted transition hover:text-foreground"
+            >
+              Keep
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="rounded-md px-2 py-1.5 text-xs font-medium text-negative transition hover:bg-negative/10"
+          >
+            Delete bucket
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -3559,7 +3702,25 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">Used to label and filter this debt in Budget and Debt/Loans.</span>
           </label>
         ) : (
-          <LabeledInput label="Investment type" name="subtype" placeholder="e.g. Roth IRA, brokerage, 529" />
+          <>
+            <LabeledInput label="Investment type" name="subtype" placeholder="e.g. Roth IRA, brokerage, 529" />
+            {/* Set at creation rather than guessed from the name later — this
+                is the value "How it's taxed" on /invest bands the account by. */}
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Tax treatment
+              <select
+                name="taxTreatment"
+                defaultValue="taxable"
+                className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                {TAX_TREATMENTS.map((t) => (
+                  <option key={t} value={t}>
+                    {TAX_LABEL_SHORT[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         ) : null}
         <LabeledInput label="Account name" name="name" placeholder={section.key === "loans" ? "e.g. Home Mortgage" : "e.g. Fidelity Roth IRA"} required autoFocus onChange={() => setError(null)} />
         <LabeledInput label="Account holder(s)" name="holder" placeholder="e.g. Victor, Johana, or Joint" />
@@ -3749,6 +3910,13 @@ function EditAccountForm({
               defaultValue={account.subtype ?? ""}
               placeholder="Type… (e.g. Roth IRA, 529)"
               className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          ) : null}
+          {(section.key === "investments" || section.key === "kids") ? (
+            <TaxTreatmentSelect
+              name="taxTreatment"
+              value={account.taxTreatment}
+              className="!w-auto !py-1.5 !text-sm !text-foreground"
             />
           ) : null}
           {section.key === "banking" ? (

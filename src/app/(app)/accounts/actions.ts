@@ -236,6 +236,13 @@ export async function addAccount(formData: FormData) {
     bank_group: bankGroup,
   };
 
+  // Investment/kids accounts pick their tax treatment at creation rather than
+  // having it guessed from the account name afterwards.
+  if (formData.has("taxTreatment")) {
+    const raw = String(formData.get("taxTreatment") ?? "");
+    if (["taxable", "deferred", "free", "education"].includes(raw)) row.tax_treatment = raw;
+  }
+
   if (isCreditCard) {
     row.annual_fee_cents = displayToCents(String(formData.get("annualFee") ?? "0"));
     row.fee_waived = formData.get("feeWaived") === "on";
@@ -352,6 +359,13 @@ export async function updateAccount(formData: FormData) {
     active,
     updated_at: new Date().toISOString(),
   };
+  // Only the Investments/Kids edit forms submit taxTreatment; leave it
+  // untouched otherwise. "" means Auto, stored as NULL so the value keeps
+  // falling back to the inference rather than freezing today's guess.
+  if (formData.has("taxTreatment")) {
+    const raw = String(formData.get("taxTreatment") ?? "");
+    update.tax_treatment = ["taxable", "deferred", "free", "education"].includes(raw) ? raw : null;
+  }
   // Only the Banking edit form submits bankGroup; leave it untouched otherwise.
   if (formData.has("bankGroup")) {
     const bankGroup = String(formData.get("bankGroup") ?? "");
@@ -1194,4 +1208,33 @@ export async function transferBetweenAccounts(formData: FormData) {
 
 export async function updateAccountTransfer(formData: FormData) {
   return saveAccountTransfer(formData, "update");
+}
+
+/**
+ * Set (or clear) a bucket's tax treatment override.
+ *
+ * An empty string means "Auto" — stored as NULL so the value falls back to the
+ * inference in @/lib/tax-treatment rather than freezing today's guess as a
+ * fact.
+ */
+export async function updateBucketTaxTreatment(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const raw = String(formData.get("taxTreatment") ?? "");
+  if (!id) return { error: "Missing bucket." };
+
+  const allowed = ["taxable", "deferred", "free", "education"];
+  const value = allowed.includes(raw) ? raw : null;
+
+  const { error } = await supabase
+    .from("buckets")
+    .update({ tax_treatment: value, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("household_id", householdId);
+
+  if (error) return { error: "Couldn't save that tax treatment — please try again." };
+
+  revalidate();
+  revalidatePath("/invest");
+  return { error: null };
 }

@@ -1,7 +1,13 @@
 "use client";
-
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import {
+  TAX_COLOR,
+  TAX_LABEL,
+  TAX_MEANING,
+  resolveTaxTreatment,
+  type TaxTreatment,
+} from "@/lib/tax-treatment";
 import { setInvestmentYear, transferFromInvestment } from "./actions";
 import { ImportInvestmentModal } from "./import-modal";
 import { moveInvestmentImport } from "./import-actions";
@@ -21,6 +27,8 @@ export type BucketRow = {
   id: string;
   name: string;
   balanceCents: number;
+  /** Stored tax override; null = infer from the name. */
+  taxTreatment: string | null;
   cells: Record<number, YearCell>;
 };
 
@@ -29,6 +37,8 @@ export type InvestAccount = {
   name: string;
   holder: string | null;
   subtype: string | null;
+  /** Stored tax override; null = infer from the subtype. */
+  taxTreatment: string | null;
   balanceCents: number;
   isKids: boolean;
   sortOrder: number;
@@ -114,42 +124,22 @@ type Props = {
 
 // ---- Tax treatment ------------------------------------------------------
 //
-// How a dollar is taxed decides where the next one should go, and it's the
-// first slice of any portfolio review. There's no dedicated column for it, so
-// it's inferred from the bucket name first and the account subtype second —
-// bucket first because it's the more specific label. Fidelity is exactly why:
-// its subtype is "Brokerage", but it holds a taxable bucket alongside two Roth
-// buckets, so classifying by account alone would file all three as taxable.
-type TaxTreatment = "taxable" | "deferred" | "free" | "education";
-
-const TAX_LABEL: Record<TaxTreatment, string> = {
-  taxable: "Taxable",
-  deferred: "Tax-deferred",
-  free: "Tax-free",
-  education: "Education",
-};
-
-// Cool tokens only, per the project's no-purple/no-orange rule for data.
-const TAX_COLOR: Record<TaxTreatment, string> = {
-  taxable: "var(--viz-expenses)",
-  deferred: "var(--viz-income)",
-  free: "var(--viz-bills)",
-  education: "var(--viz-savings)",
-};
-
-function classifyTax(label: string | null | undefined): TaxTreatment | null {
-  if (!label) return null;
-  const s = label.toLowerCase();
-  if (/\b529\b|utma|ugma|coverdell/.test(s)) return "education";
-  if (/roth/.test(s)) return "free";
-  if (/401|403b|tsp|traditional|sep|simple|\bira\b|pension/.test(s)) return "deferred";
-  if (/taxable|brokerage|reit|crypto|individual/.test(s)) return "taxable";
-  return null;
-}
-
-// Account-level fallback so an unlabelled bucket still lands somewhere sane.
-function taxFor(accountSubtype: string | null, bucketName?: string | null): TaxTreatment {
-  return classifyTax(bucketName) ?? classifyTax(accountSubtype) ?? "taxable";
+// The rules (labels, colours, meanings, inference, override precedence) live
+// in @/lib/tax-treatment so /accounts can show the same answer next to its
+// editor. Only the local convenience wrapper stays here.
+//
+// A holding's treatment now comes from a stored override first and its name
+// second — bucket before account, because bucket is the more specific label.
+// Fidelity is exactly why: its subtype is "Brokerage", but it holds a taxable
+// bucket alongside two Roth buckets, so classifying by account alone would
+// file all three as taxable.
+function taxFor(
+  accountSubtype: string | null,
+  bucketName?: string | null,
+  accountOverride?: string | null,
+  bucketOverride?: string | null,
+): TaxTreatment {
+  return resolveTaxTreatment({ bucketOverride, bucketName, accountOverride, accountSubtype }).treatment;
 }
 
 const gainTone = (cents: number) =>
@@ -179,6 +169,7 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
   const [showGuide, setShowGuide] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [openTax, setOpenTax] = useState<TaxTreatment | null>(null);
 
   const mine = accounts.filter((a) => !a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
@@ -208,22 +199,35 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
   // about today, not about a historical contribution year.
   const taxSplit = useMemo(() => {
     const totals = new Map<TaxTreatment, number>();
+    // Which holdings landed in each band. The treatment is inferred from a
+    // name, so the inference has to be inspectable — otherwise a
+    // misclassified account is invisible until it costs real tax money.
+    const holdings = new Map<TaxTreatment, { name: string; cents: number }[]>();
     let total = 0;
+    const add = (t: TaxTreatment, name: string, cents: number) => {
+      totals.set(t, (totals.get(t) ?? 0) + cents);
+      holdings.set(t, [...(holdings.get(t) ?? []), { name, cents }]);
+      total += cents;
+    };
     for (const a of mine) {
       if (a.buckets.length > 0) {
         for (const b of a.buckets) {
-          const t = taxFor(a.subtype, b.name);
-          totals.set(t, (totals.get(t) ?? 0) + b.balanceCents);
-          total += b.balanceCents;
+          add(
+            taxFor(a.subtype, b.name, a.taxTreatment, b.taxTreatment),
+            `${a.name} · ${b.name}`,
+            b.balanceCents,
+          );
         }
       } else {
-        const t = taxFor(a.subtype, null);
-        totals.set(t, (totals.get(t) ?? 0) + a.balanceCents);
-        total += a.balanceCents;
+        add(taxFor(a.subtype, null, a.taxTreatment, null), a.name, a.balanceCents);
       }
     }
     const rows = (["taxable", "deferred", "free", "education"] as TaxTreatment[])
-      .map((t) => ({ treatment: t, cents: totals.get(t) ?? 0 }))
+      .map((t) => ({
+        treatment: t,
+        cents: totals.get(t) ?? 0,
+        holdings: (holdings.get(t) ?? []).sort((x, y) => y.cents - x.cents),
+      }))
       .filter((r) => r.cents > 0)
       .sort((a, b) => b.cents - a.cents);
     return { rows, total };
@@ -376,11 +380,14 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
 
           {taxSplit.rows.length > 1 ? (
             <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <div className="flex items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                 <h2 className="text-sm font-bold">How it&rsquo;s taxed</h2>
-                <span className="text-[11px] tabular-nums text-muted">
+                <span className="text-sm font-semibold tabular-nums text-muted">
                   {formatMoney(taxSplit.total, currency)} total
                 </span>
+                <p className="w-full text-xs text-muted">
+                  Select a band to see what&rsquo;s in it and what it means.
+                </p>
               </div>
               <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-line/60">
                 {taxSplit.rows.map((r) => (
@@ -393,24 +400,80 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
                   />
                 ))}
               </div>
-              <ul className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5">
-                {taxSplit.rows.map((r) => (
-                  <li key={r.treatment} className="flex items-center gap-1.5 text-xs">
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: TAX_COLOR[r.treatment] }}
-                      aria-hidden
-                    />
-                    <span className="text-muted">{TAX_LABEL[r.treatment]}</span>
-                    <span className="font-semibold tabular-nums">
-                      {formatMoney(r.cents, currency)}
-                    </span>
-                    <span className="tabular-nums text-muted">
-                      {((r.cents / taxSplit.total) * 100).toFixed(0)}%
-                    </span>
-                  </li>
-                ))}
+              <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                {taxSplit.rows.map((r) => {
+                  const open = openTax === r.treatment;
+                  return (
+                    <li key={r.treatment}>
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        onClick={() => setOpenTax(open ? null : r.treatment)}
+                        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition ${
+                          open
+                            ? "bg-black/10 ring-1 ring-black/15 dark:bg-white/15 dark:ring-white/20"
+                            : "bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+                        }`}
+                      >
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: TAX_COLOR[r.treatment] }}
+                          aria-hidden
+                        />
+                        <span className="text-muted">{TAX_LABEL[r.treatment]}</span>
+                        <span className="font-semibold tabular-nums">
+                          {formatMoney(r.cents, currency)}
+                        </span>
+                        <span className="tabular-nums text-muted">
+                          {((r.cents / taxSplit.total) * 100).toFixed(0)}%
+                        </span>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
+                          aria-hidden
+                        >
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
+              {taxSplit.rows
+                .filter((r) => r.treatment === openTax)
+                .map((r) => (
+                  <div key={r.treatment} className="mt-2.5 rounded-xl bg-canvas/60 px-3 py-2.5">
+                    <p className="text-xs text-muted">{TAX_MEANING[r.treatment]}</p>
+                    {/* Columns, not one tall list: a band can hold eight
+                        holdings, and a single column strands every amount at
+                        the far right edge of a wide card, miles from its own
+                        label. Narrower columns keep the two together. */}
+                    <ul className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+                      {r.holdings.map((h) => (
+                        <li
+                          key={h.name}
+                          className="flex items-baseline justify-between gap-2 border-b border-line/40 py-0.5 text-xs last:border-0"
+                        >
+                          <span className="min-w-0 truncate">{h.name}</span>
+                          <span className="shrink-0 font-semibold tabular-nums">
+                            {formatMoney(h.cents, currency)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-[11px] text-muted">
+                      Set each holding&rsquo;s tax treatment on Accounts. Anything left on Auto
+                      is read from its name.
+                    </p>
+                  </div>
+                ))}
             </section>
           ) : null}
 

@@ -1,6 +1,7 @@
 import { captureSnapshots } from "@/lib/snapshots";
 import { InvestBoard, type InvestAccount, type BucketRow, type InvestmentImportView, type YearCell } from "./invest-board";
 import { getSessionContext } from "@/lib/auth-context";
+import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
 
 export const metadata = { title: "Investments · Capitall" };
 
@@ -24,14 +25,14 @@ export default async function InvestPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, holder, subtype, is_kids_account, sort_order, current_balance_cents")
+      .select("id, name, holder, subtype, is_kids_account, sort_order, current_balance_cents, tax_treatment")
       .eq("household_id", household.id)
       .or("kind.eq.investment,is_kids_account.eq.true")
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, sort_order")
+      .select("id, account_id, name, balance_cents, sort_order, tax_treatment")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -62,11 +63,19 @@ export default async function InvestPage() {
   const investIds = new Set(accounts.map((a) => a.id));
 
   // Buckets that live under investment accounts.
-  const bucketsByAccount = new Map<string, { id: string; name: string; balanceCents: number }[]>();
+  const bucketsByAccount = new Map<
+    string,
+    { id: string; name: string; balanceCents: number; taxTreatment: string | null }[]
+  >();
   for (const b of bucketRows ?? []) {
     if (!investIds.has(b.account_id)) continue;
     const arr = bucketsByAccount.get(b.account_id) ?? [];
-    arr.push({ id: b.id, name: b.name, balanceCents: b.balance_cents ?? 0 });
+    arr.push({
+      id: b.id,
+      name: b.name,
+      balanceCents: b.balance_cents ?? 0,
+      taxTreatment: (b as { tax_treatment?: string | null }).tax_treatment ?? null,
+    });
     bucketsByAccount.set(b.account_id, arr);
   }
 
@@ -84,14 +93,13 @@ export default async function InvestPage() {
   // Live-derived net contributions per (account, bucket, year).
   const contribBy = new Map<string, number>();
   for (const c of contribRows ?? []) {
-    const key = `${c.account_id}:${c.bucket_id ?? "_"}:${c.year}`;
-    contribBy.set(key, c.net_contribution_cents ?? 0);
+    contribBy.set(investSlotKey(c.account_id, c.bucket_id ?? null, c.year), c.net_contribution_cents ?? 0);
   }
 
   // Stored/reviewed rows.
   const storedBy = new Map<string, { contributed: number; accrued: number; start: number | null; end: number | null }>();
   for (const r of yearRows ?? []) {
-    const key = `${r.account_id}:${r.bucket_id ?? "_"}:${r.year}`;
+    const key = investSlotKey(r.account_id, r.bucket_id ?? null, r.year);
     storedBy.set(key, {
       contributed: r.contributed_cents ?? 0,
       accrued: r.accrued_cents ?? 0,
@@ -120,20 +128,19 @@ export default async function InvestPage() {
     year: number,
     fallbackEnd: number | null,
   ): YearCell {
-    const key = `${accountId}:${bucketKey}:${year}`;
+    const key = investSlotKey(accountId, bucketKey === "_" ? null : bucketKey, year);
     const stored = storedBy.get(key);
-    const liveContrib = contribBy.get(key) ?? 0;
-    const isCurrentYear = year === nowYear;
 
-    // Additive rule: current year = seed + live transactions; historical years
-    // stay frozen at the reviewed/seeded value. This preserves the CSV totals
-    // while letting new transactions flow through going forward.
-    let contributed: number;
-    if (stored) {
-      contributed = isCurrentYear ? stored.contributed + liveContrib : stored.contributed;
-    } else {
-      contributed = liveContrib;
-    }
+    // Ledger for the year in progress, reviewed row for years already closed.
+    // The rule lives in @/lib/fund-contributions so /savings resolves the same
+    // money the same way — this slot used to read `seed + live`, which counted
+    // every 2026 contribution twice.
+    const contributed = resolveContributedCents({
+      storedCents: stored ? stored.contributed : null,
+      liveCents: contribBy.get(key) ?? 0,
+      hasLive: contribBy.has(key),
+      isCurrentYear: year === nowYear,
+    });
 
     const start = stored?.start ?? null;
     const end = stored?.end ?? fallbackEnd;
@@ -167,16 +174,31 @@ export default async function InvestPage() {
         const fallbackEnd = year === nowYear ? b.balanceCents : null;
         cells[year] = buildCell(a.id, b.id, year, fallbackEnd);
       }
-      return { id: b.id, name: b.name, balanceCents: b.balanceCents, cells };
+      return {
+        id: b.id,
+        name: b.name,
+        balanceCents: b.balanceCents,
+        taxTreatment: b.taxTreatment,
+        cells,
+      };
     });
 
     // Account-level cells. When the account has buckets we still keep an
     // account-level slot (bucket_id NULL) because seeded CSV rows live there.
     // Rendering rolls up bucket rows plus this slot's stored contribution so
     // the seed floor is preserved.
+    //
+    // The snapshot fallback is deliberately skipped once an account has
+    // buckets. An account snapshot records the WHOLE account, and the buckets
+    // already add up to that same whole, so letting the slot fall back to it
+    // counts the account's value twice — `effectiveCell` sums the slot and
+    // every bucket. Fidelity and Crypto only escaped this because their slots
+    // were hand-set to 0; TSP, the moment it was split into Traditional and
+    // Roth, inflated Current Value by a whole extra copy of a bucket. Buckets
+    // own the balance when they exist, so the slot contributes nothing.
     const cells: Record<number, YearCell> = {};
     for (const year of years) {
-      const fallbackEnd = endBalance.get(`${a.id}:${year}`) ?? null;
+      const fallbackEnd = acctBuckets.length > 0 ? null : endBalance.get(`${a.id}:${year}`) ?? null;
       cells[year] = buildCell(a.id, "_", year, fallbackEnd);
     }
 
@@ -185,6 +207,7 @@ export default async function InvestPage() {
       name: a.name,
       holder: a.holder ?? null,
       subtype: a.subtype ?? null,
+      taxTreatment: (a as { tax_treatment?: string | null }).tax_treatment ?? null,
       isKids: !!a.is_kids_account,
       balanceCents: a.current_balance_cents ?? 0,
       sortOrder: a.sort_order ?? 0,
