@@ -325,7 +325,27 @@ export function TransactionModal({
             </div>
           )}
 
-          <form id="tx-form" ref={formRef} action={handleFormAction} className="mt-4 space-y-4">
+          {/* Enter inside a text field used to trigger the browser's implicit
+              submission, and the form's first submit button in tree order is
+              the footer's "Clear" — so a stray Enter in Merchant saved the
+              transaction, marked it cleared and closed the modal. Saving is a
+              deliberate click on the footer button only. Fields that give
+              Enter its own meaning (the amount inputs, the merchant
+              autocomplete picking a highlighted row) call preventDefault in
+              their own handler, which runs first and is left untouched here. */}
+          <form
+            id="tx-form"
+            ref={formRef}
+            action={handleFormAction}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              const el = e.target as HTMLElement;
+              // Textareas need Enter for newlines; buttons need it to activate.
+              if (el.tagName === "TEXTAREA" || el.tagName === "BUTTON") return;
+              e.preventDefault();
+            }}
+            className="mt-4 space-y-4"
+          >
             {isEdit ? <input type="hidden" name="id" value={editTx.id} /> : null}
             {!isEdit && initialIsWithdrawal ? <input type="hidden" name="isWithdrawal" value="on" /> : null}
             {/* Signals to the server action to negate the amount (refund) and

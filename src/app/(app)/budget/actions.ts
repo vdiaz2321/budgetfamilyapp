@@ -459,6 +459,7 @@ export async function addSubcategory(formData: FormData) {
 
   const rawDue = String(formData.get("dueDay") ?? "").trim();
   const dueDay = rawDue ? Math.min(31, Math.max(1, parseInt(rawDue, 10))) : null;
+  const isRecurring = formData.get("isRecurring") === "on";
 
   const { data: siblings } = await supabase
     .from("subcategories")
@@ -476,7 +477,26 @@ export async function addSubcategory(formData: FormData) {
     name,
     due_day: dueDay,
     sort_order: nextSort,
+    is_recurring: isRecurring,
   });
+
+  revalidatePath("/budget");
+}
+
+// Flip an existing item's recurring flag. Items created before this feature
+// (Internet, Mobile, the paycheck deductions) all start false, so this is the
+// only way to opt them in without re-creating them.
+export async function setSubcategoryRecurring(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  if (!subcategoryId) return;
+  const isRecurring = formData.get("isRecurring") === "on";
+
+  await supabase
+    .from("subcategories")
+    .update({ is_recurring: isRecurring })
+    .eq("id", subcategoryId)
+    .eq("household_id", householdId);
 
   revalidatePath("/budget");
 }
@@ -1268,6 +1288,103 @@ export async function updateTransactionAmount(formData: FormData) {
   revalidatePath("/savings");
 }
 
+/**
+ * Undo the balance side effects of a movement row (a transaction with a
+ * `paid_to_account_id`: card payment or investment transfer), then delete it.
+ *
+ * Account transfers are NOT handled here — they have their own RPC that moves
+ * both legs inside one database transaction.
+ *
+ * This exists because the generic delete path below only knows about
+ * `account_id`; it never touches `paid_to_account_id`. Deleting a card payment
+ * or an investment transfer through it left the destination leg untouched —
+ * the money came back to the source account and *also* stayed on the card /
+ * in the destination bank, quietly inventing cash. Worse, for a bucketed
+ * source it re-applied the debit instead of reversing it, because
+ * `is_withdrawal` is false on a card payment.
+ */
+async function reverseMovementTransaction(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  tx: {
+    id: string;
+    amount_cents: number;
+    account_id: string | null;
+    bucket_id: string | null;
+    paid_to_account_id: string | null;
+    movement_type: string | null;
+  },
+) {
+  const amount = tx.amount_cents;
+
+  if (tx.movement_type === "card_payment") {
+    // payCard debited the source (bucket when the source has buckets, else the
+    // account ledger) — give it back.
+    if (tx.bucket_id) {
+      await adjustBucketBalance(supabase, householdId, tx.bucket_id, amount);
+    } else if (tx.account_id) {
+      await adjustAccountLedger(supabase, householdId, tx.account_id, amount);
+    }
+    // payCard also paid down any debt tracked against the card. Deleting the
+    // payment puts that balance back on the debt.
+    if (tx.paid_to_account_id) {
+      const { data: linkedDebt } = await supabase
+        .from("debts")
+        .select("subcategory_id")
+        .eq("household_id", householdId)
+        .eq("account_id", tx.paid_to_account_id)
+        .maybeSingle();
+      if (linkedDebt?.subcategory_id) {
+        await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, amount);
+      }
+    }
+    // The card's "owed" tally is derived from the payment rows themselves, so
+    // deleting the row below is all the card side needs.
+  } else if (tx.movement_type === "investment_transfer") {
+    // Investment side was decremented on create. adjustAccountLedger refuses
+    // investment accounts by design (their balances are hand-reconciled), so
+    // a bare investment account is written directly here.
+    if (tx.bucket_id) {
+      await adjustBucketBalance(supabase, householdId, tx.bucket_id, amount);
+    } else if (tx.account_id) {
+      const { data: source } = await supabase
+        .from("accounts")
+        .select("current_balance_cents")
+        .eq("id", tx.account_id)
+        .eq("household_id", householdId)
+        .maybeSingle();
+      await supabase
+        .from("accounts")
+        .update({
+          current_balance_cents: (source?.current_balance_cents ?? 0) + amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", tx.account_id)
+        .eq("household_id", householdId);
+    }
+    // Destination banking account was incremented on create — take it back.
+    if (tx.paid_to_account_id) {
+      const { data: dest } = await supabase
+        .from("accounts")
+        .select("current_balance_cents")
+        .eq("id", tx.paid_to_account_id)
+        .eq("household_id", householdId)
+        .maybeSingle();
+      await supabase
+        .from("accounts")
+        .update({
+          current_balance_cents: (dest?.current_balance_cents ?? 0) - amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", tx.paid_to_account_id)
+        .eq("household_id", householdId);
+    }
+  }
+
+  await supabase.from("transactions").delete().eq("id", tx.id).eq("household_id", householdId);
+  await captureSnapshots(supabase, householdId, { force: true });
+}
+
 export async function deleteTransaction(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");
@@ -1275,7 +1392,7 @@ export async function deleteTransaction(formData: FormData) {
 
   const { data: tx } = await supabase
     .from("transactions")
-    .select("subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal, movement_type")
+    .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type")
     .eq("id", id)
     .eq("household_id", householdId)
     .maybeSingle();
@@ -1292,13 +1409,34 @@ export async function deleteTransaction(formData: FormData) {
       p_to_bucket_id: null,
       p_memo: null,
     });
-    if (!error) await captureSnapshots(supabase, householdId, { force: true });
+    // A failed reversal must not look like a success: the RPC leaves the row
+    // in place when it throws, so silently returning here showed the user a
+    // transfer that "wouldn't delete" with no reason given.
+    if (error) return { error: error.message || "Couldn't delete that transfer — please try again." };
+    await captureSnapshots(supabase, householdId, { force: true });
     revalidatePath("/budget");
     revalidatePath("/transactions");
     revalidatePath("/accounts");
     revalidatePath("/networth");
     revalidatePath("/annual");
     revalidatePath("/savings");
+    return;
+  }
+
+  // Card payments and investment transfers also carry a destination leg. They
+  // must not fall through to the generic path below, which only reverses
+  // `account_id` and would leave the destination holding money that no longer
+  // has a transaction behind it.
+  if (tx?.paid_to_account_id) {
+    await reverseMovementTransaction(supabase, householdId, { ...tx, id });
+    revalidatePath("/budget");
+    revalidatePath("/transactions");
+    revalidatePath("/accounts");
+    revalidatePath("/networth");
+    revalidatePath("/annual");
+    revalidatePath("/savings");
+    revalidatePath("/invest");
+    revalidatePath("/snowball");
     return;
   }
 

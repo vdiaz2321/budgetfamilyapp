@@ -404,6 +404,7 @@ export function BudgetGroup({
             <AddItemForm
               categoryId={group.categoryId}
               hasDue={hasDue}
+              allowRecurring={group.kind !== "expenses"}
               onDone={() => setAdding(false)}
             />
           ) : null}
@@ -503,13 +504,21 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
 function AddItemForm({
   categoryId,
   hasDue,
+  allowRecurring,
   onDone,
 }: {
   categoryId: string;
   hasDue: boolean;
+  // Expenses are variable month to month, so they don't get the recurring
+  // prefill — see the matching gate in item-panel.tsx.
+  allowRecurring: boolean;
   onDone: () => void;
 }) {
   const [pending, start] = useTransition();
+  // Same-amount-every-month items (utilities, paycheck deductions) opt in
+  // here; that's what unlocks the "Prev Mo Spent" one-click prefill in the
+  // item panel. Off by default — most items aren't recurring.
+  const [isRecurring, setIsRecurring] = useState(false);
 
   return (
     <form
@@ -519,7 +528,7 @@ function AddItemForm({
           onDone();
         })
       }
-      className="flex items-center gap-2 border-t border-line px-4 py-2"
+      className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-2"
     >
       <input type="hidden" name="categoryId" value={categoryId} />
       <input
@@ -538,6 +547,21 @@ function AddItemForm({
           placeholder="Due"
           className="w-16 rounded-md bg-background px-2 py-1.5 text-right text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
+      ) : null}
+      {allowRecurring && isRecurring ? <input type="hidden" name="isRecurring" value="on" /> : null}
+      {allowRecurring ? (
+      <button
+        type="button"
+        onClick={() => setIsRecurring((on) => !on)}
+        aria-pressed={isRecurring}
+        className={`shrink-0 rounded-md px-2.5 py-1.5 text-sm font-medium ring-1 transition ${
+          isRecurring
+            ? "bg-positive/15 text-positive ring-positive/40"
+            : "bg-background text-muted ring-line hover:text-foreground"
+        }`}
+      >
+        {isRecurring ? "✓ Recurring" : "Recurring"}
+      </button>
       ) : null}
       <button
         type="submit"

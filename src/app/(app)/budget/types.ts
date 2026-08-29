@@ -66,6 +66,12 @@ export type RowData = {
   paymentAccountId: string | null;
   plannedCents: number;
   spentCents: number;
+  // What this item actually cost last month. Drives the "Prev Mo Spent"
+  // prefill; 0 when the item had no activity (the chip stays hidden).
+  prevSpentCents: number;
+  // Marked as a same-amount-every-month item (utilities, paycheck
+  // deductions). Only these get the prefill chip — groceries shouldn't.
+  isRecurring: boolean;
   // When true the planned amount is derived from subscriptions/irregular-bills
   // data and cannot be edited directly from the budget row.
   autoPlanned?: boolean;

@@ -11,6 +11,7 @@ import {
   deleteSubcategory,
   deleteTransaction,
   moveSubcategoryToGroup,
+  setSubcategoryRecurring,
   reassignPlanned,
   updateSubcategory,
   upsertDebtAndPlan,
@@ -49,7 +50,7 @@ type Props = {
   transactions: TxData[];
   accountNameById: Map<string, string>;
   onClose: () => void;
-  onAddTransaction: () => void;
+  onAddTransaction: (prefillCents?: number) => void;
   onEditTransaction: (tx: TxData) => void;
   onOverspentCovered: () => void;
 };
@@ -282,6 +283,14 @@ export function ItemPanel({
         onDetails={isPlainForm ? () => setShowItemDetails(true) : undefined}
       />
 
+      {/* Expenses are the variable side of the budget — groceries, fuel,
+          clothing all differ month to month, so repeating last month's figure
+          there would be a guess dressed up as a number. The prefill is for
+          fixed charges: bills, paycheck deductions, savings, debt. */}
+      {kind !== "expenses" ? (
+        <RecurringStrip row={row} currency={currency} onAddTransaction={onAddTransaction} />
+      ) : null}
+
       <ItemGroupSelect row={row} kind={kind} groupOptions={groupOptions} />
 
       {(() => {
@@ -443,6 +452,67 @@ function SaveButton({ saveFormId }: { saveFormId: string }) {
   );
 }
 
+// Utilities and paycheck deductions bill the same amount every month, so
+// retyping them is pure busywork. Marking an item Recurring surfaces last
+// month's actual as a one-click prefill: it opens the transaction form with
+// the amount filled in, and the user still picks Clear or Add — nothing is
+// saved behind their back.
+function RecurringStrip({
+  row,
+  currency,
+  onAddTransaction,
+}: {
+  row: RowData;
+  currency: string;
+  onAddTransaction: (prefillCents?: number) => void;
+}) {
+  const [pending, start] = useTransition();
+  const router = useRouter();
+
+  const toggle = () => {
+    const fd = new FormData();
+    fd.set("subcategoryId", row.subId);
+    if (!row.isRecurring) fd.set("isRecurring", "on");
+    start(async () => {
+      await setSubcategoryRecurring(fd);
+      router.refresh();
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-line/70 px-5 py-2">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={pending}
+        aria-pressed={row.isRecurring}
+        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition disabled:opacity-60 ${
+          row.isRecurring
+            ? "bg-positive/15 text-positive ring-positive/40 hover:bg-positive/25"
+            : "bg-transparent text-muted ring-line hover:text-foreground"
+        }`}
+      >
+        {row.isRecurring ? "✓ Recurring" : "Recurring"}
+      </button>
+      {/* Only on recurring items, and only when last month actually had
+          activity — a dead "$0.00" button would be noise on a brand-new item
+          or the first month an item exists. */}
+      {row.isRecurring && row.prevSpentCents > 0 ? (
+        <button
+          type="button"
+          onClick={() => onAddTransaction(row.prevSpentCents)}
+          className="min-w-0 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-bold text-brand ring-1 ring-brand/20 transition hover:bg-brand/20"
+        >
+          <span aria-hidden="true">↺</span> Prev Mo Spent {formatMoney(row.prevSpentCents, currency)}
+        </button>
+      ) : null}
+      {row.isRecurring && row.prevSpentCents === 0 ? (
+        <span className="min-w-0 text-[11px] text-muted">No spend last month to copy</span>
+      ) : null}
+    </div>
+  );
+}
+
 function DeleteFooter({
   subId,
   onDeleted,
@@ -452,7 +522,7 @@ function DeleteFooter({
 }: {
   subId: string;
   onDeleted: () => void;
-  onAddTransaction: () => void;
+  onAddTransaction: (prefillCents?: number) => void;
   saveFormId?: string;
   onDetails?: () => void;
 }) {
@@ -470,7 +540,9 @@ function DeleteFooter({
       ) : null}
       <button
         type="button"
-        onClick={onAddTransaction}
+        // Wrapped, not passed directly: the callback takes an optional prefill
+        // amount, and a bare handler would hand it the click event instead.
+        onClick={() => onAddTransaction()}
         className="flex-1 rounded bg-positive/15 py-1.5 text-xs font-semibold text-positive transition hover:bg-positive/25"
       >
         +Transaction
@@ -581,7 +653,7 @@ function TxRow({
         onClick={() => {
           const fd = new FormData();
           fd.append("id", t.id);
-          startDel(() => deleteTransaction(fd));
+          startDel(async () => { await deleteTransaction(fd); });
         }}
         className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-sm font-bold text-negative opacity-0 transition group-hover:opacity-100 hover:bg-negative/10 disabled:opacity-40"
       >
@@ -622,7 +694,7 @@ function PlannedForm({
   autoPlanned?: boolean;
   showDetails: boolean;
   onCloseDetails: () => void;
-  onAddTransaction: () => void;
+  onAddTransaction: (prefillCents?: number) => void;
   formId: string;
 }) {
   const [, startDue] = useTransition();

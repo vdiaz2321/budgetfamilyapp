@@ -112,12 +112,9 @@ export function BudgetBoard({
   // Each group's open/collapsed state, persisted per-session (survives
   // navigating away and back, resets on a fresh login) — same pattern as
   // Net Worth / Accounts. Groups default open.
-  // Hero card starts collapsed on a fresh browser session (calmer landing for
-  // new users / less numbers overwhelm) but remembers your last state while
-  // you're navigating around within the session.
-  const [heroState, setHeroState] = useSessionCollapse("budget-hero", () => ({ open: false }));
-  const heroExpanded = heroState.open === true;
-  const toggleHero = () => setHeroState((s) => ({ ...s, open: !s.open }));
+  // The hero card is always expanded — desktop and mobile alike. It used to
+  // collapse to a one-line strip; Victor asked for the full summary on every
+  // load, so there's no collapse state to persist any more.
 
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
     Object.fromEntries([...groups.map((g) => [g.categoryId, false]), ["subscriptions", false], ["irregularBills", false]]),
@@ -162,6 +159,10 @@ export function BudgetBoard({
   // require switching to the Log tab first. `true` = new; a TxData = edit
   // (opened by clicking a row in the panel's "This month" list).
   const [quickAdd, setQuickAdd] = useState<boolean | TxData>(false);
+  // Amount to seed a quick-add transaction with — set by the item panel's
+  // "Prev Mo Spent" chip so last month's figure lands in the form ready to
+  // review. undefined = a normal blank quick-add.
+  const [quickAddCents, setQuickAddCents] = useState<number | undefined>(undefined);
   // Fresh transaction modal opened from the top header's "+ Transaction"
   // button — no preselected item/kind, renders as a centered overlay so it
   // works with or without a selected budget row.
@@ -333,7 +334,7 @@ export function BudgetBoard({
         transactions={transactions}
         accountNameById={accountNameById}
         onClose={() => setSelected(null)}
-        onAddTransaction={() => { loadPayees(); setQuickAdd(true); }}
+        onAddTransaction={(prefillCents) => { loadPayees(); setQuickAddCents(prefillCents); setQuickAdd(true); }}
         onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
         onOverspentCovered={() => {
           setRowFilter("all");
@@ -388,8 +389,6 @@ export function BudgetBoard({
           rollover={rollover}
           monthFirstOfMonth={month.firstOfMonth}
           currency={currency}
-          expanded={heroExpanded}
-          onToggle={toggleHero}
         />
         </div>
 
@@ -668,10 +667,10 @@ export function BudgetBoard({
               initialKind={duePayment?.kind ?? (quickAdd && selected ? selected.kind : undefined)}
               initialSubId={duePayment?.subId ?? (quickAdd && selected ? selected.subId : undefined)}
               initialAccountId={duePayment?.accountId ?? undefined}
-              initialAmountCents={duePayment?.amountCents}
+              initialAmountCents={duePayment?.amountCents ?? quickAddCents}
               initialPayee={duePayment?.name}
               initialDate={duePayment?.dueDate}
-              onClose={() => { setShowAddModal(false); setQuickAdd(false); setDuePayment(null); }}
+              onClose={() => { setShowAddModal(false); setQuickAdd(false); setQuickAddCents(undefined); setDuePayment(null); }}
             />
           </div>
         </div>
@@ -896,8 +895,6 @@ function CategoryProgressCard({
   dotClass,
   fillClass,
   currency,
-  shareOfIncome,
-  shareColor,
 }: {
   label: string;
   actualLabel: string;
@@ -907,13 +904,6 @@ function CategoryProgressCard({
   dotClass: string;
   fillClass: string;
   currency: string;
-  // Planned amount as a share of planned income. Set on the Savings card so
-  // the savings rate — the headline number in any personal-finance review —
-  // is visible without leaving Budget.
-  shareOfIncome?: number | null;
-  // Token for the share figure, so each card's percentage reads in its own
-  // flow colour rather than every card borrowing the savings blue.
-  shareColor?: string;
 }) {
   const pct = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
   return (
@@ -924,14 +914,6 @@ function CategoryProgressCard({
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
         <span className="whitespace-nowrap text-[11px] text-muted">{label}</span>
-        {shareOfIncome != null ? (
-          <span
-            className="shrink-0 text-[10px] font-semibold tabular-nums"
-            style={{ color: shareColor ?? "var(--viz-savings)" }}
-          >
-            {shareOfIncome.toFixed(0)}% of income
-          </span>
-        ) : null}
         <span className="ml-auto whitespace-nowrap text-[11px] tabular-nums sm:text-xs">
           <span className="font-semibold text-foreground">{formatMoney(planned, currency)}</span>
           <span className="text-muted"> / {actualLabel} </span>
@@ -987,8 +969,6 @@ function SummaryHeroCard({
   monthFirstOfMonth,
   heroSubOptions,
   currency,
-  expanded,
-  onToggle,
 }: {
   actualLeft: number;
   displayLeft: number;
@@ -1004,111 +984,12 @@ function SummaryHeroCard({
   monthFirstOfMonth: string;
   heroSubOptions: SubOption[];
   currency: string;
-  expanded: boolean;
-  onToggle: () => void;
 }) {
   const { tone, badgeText } = getBudgetStatus(actualLeft);
   const toneClasses = TONE_CLASSES[tone];
 
-  if (!expanded) {
-    return (
-      <div className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
-        <div className="relative bg-brand-soft">
-          <div
-            onClick={onToggle}
-            className="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left transition hover:bg-brand/20"
-          >
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggle();
-              }}
-              aria-expanded={false}
-              aria-label="Expand summary"
-              className="shrink-0 cursor-pointer rounded-full p-1.5 text-brand transition hover:bg-brand/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-            >
-              <svg
-                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                className="-rotate-90"
-                aria-hidden
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            <div className="min-w-0 flex-1">
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 tabular-nums">
-                <span>
-                  <span className="block text-[11px] font-semibold text-foreground">Planned Budget:</span>
-                  <span className="block text-[15px] font-semibold text-foreground">{formatMoney(outflowPlanned, currency)}</span>
-                </span>
-                <span className="text-right">
-                  <span className="block text-[11px] font-semibold text-foreground">Income Planned:</span>
-                  <span className="block text-[15px] font-semibold text-positive">{formatMoney(incomePlanned, currency)}</span>
-                </span>
-                <span>
-                  <span className="block text-[11px] font-semibold text-foreground">Actual Spent:</span>
-                  <span className="block text-[15px] font-semibold text-negative">{formatMoney(actualSpent, currency)}</span>
-                </span>
-                <span className="text-right">
-                  <span className="block text-[11px] font-semibold text-foreground">Left to Budget:</span>
-                  <span className={`block text-[15px] font-semibold ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
-                    {formatMoney(displayLeft, currency)}
-                  </span>
-                </span>
-              </div>
-            </div>
-          </div>
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="flex justify-end px-4 pb-2.5 sm:absolute sm:left-1/2 sm:top-1/2 sm:z-10 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:justify-center sm:p-0"
-          >
-            {rolloverCents > 0 ? (
-              // Active state: sits in the SAME centered pill slot as the
-              // "Rollover July: $1,974.86" opt-in pill, just with the added
-              // amount + inline Undo so the user sees at a glance that it's
-              // already in for this month. No plus sign; "Added" instead of
-              // "rollover" per Victor's copy.
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive">
-                <span className="size-1.5 rounded-full bg-positive" aria-hidden />
-                <span className="text-[11px] font-bold tabular-nums">
-                  {formatMoney(rolloverCents, currency)}
-                </span>
-                <span className="text-[11px] font-semibold opacity-80">Added</span>
-                <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
-              </span>
-            ) : (
-              <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} centered />
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={true}
-        aria-label="Collapse summary"
-        title="Collapse summary"
-        className="flex w-full items-center gap-2 bg-brand-soft px-4 py-2 text-left transition hover:bg-brand/20"
-      >
-        <svg
-          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className="shrink-0 text-brand"
-          aria-hidden
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-brand">
-          Summary — click to collapse
-        </span>
-      </button>
       <div className="px-6 pb-5 pt-5">
         {/* Desktop packs the four figures into a tight 2x2 on the left and
             stacks the progress cards down the right, so the old dead gutter
@@ -1118,15 +999,33 @@ function SummaryHeroCard({
         <div className="flex min-w-0 flex-col">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:gap-x-8">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>
-            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
-              {formatMoney(outflowPlanned, currency)}
-            </p>
-          </div>
-          <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
+            </p>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <p className="whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
+                {formatMoney(actualSpent, currency)}
+              </p>
+              {tone !== "good" && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d={toneClasses.icon} />
+                  </svg>
+                  {badgeText}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>
+            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
+              {formatMoney(outflowPlanned, currency)}
             </p>
           </div>
           <div className="min-w-0">
@@ -1164,24 +1063,6 @@ function SummaryHeroCard({
               </div>
             )}
           </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <p className="whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
-                {formatMoney(actualSpent, currency)}
-              </p>
-              {tone !== "good" && (
-                <span
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d={toneClasses.icon} />
-                  </svg>
-                  {badgeText}
-                </span>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Rollover + Roll-in used to sit in a full-width strip under the
@@ -1193,8 +1074,8 @@ function SummaryHeroCard({
 
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:mt-0 md:grid-cols-1 md:content-start">
           <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
-          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} shareOfIncome={incomePlanned > 0 ? (savings.planned / incomePlanned) * 100 : null} shareColor="var(--viz-savings)" />
-          <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--viz-bills)]" fillClass="bg-[color:var(--viz-bills)]" currency={currency} shareOfIncome={incomePlanned > 0 ? (billsExpenses.planned / incomePlanned) * 100 : null} shareColor="var(--viz-bills)" />
+          <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} />
+          <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--viz-bills)]" fillClass="bg-[color:var(--viz-bills)]" currency={currency} />
           <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--viz-debt)]" fillClass="bg-[color:var(--viz-debt)]" currency={currency} />
         </div>
         </div>

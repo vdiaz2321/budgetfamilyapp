@@ -827,7 +827,7 @@ function TxLine({
       </button>
       <span className="truncate text-xs text-muted">{accountName}</span>
       <form
-        action={(fd) => startDel(() => deleteTransaction(fd))}
+        action={(fd) => startDel(async () => { await deleteTransaction(fd); })}
         onClick={(e) => e.stopPropagation()}
         className="justify-self-end"
       >

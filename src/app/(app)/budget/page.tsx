@@ -46,7 +46,7 @@ export default async function BudgetPage({
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id")
+      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id, is_recurring")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -137,6 +137,17 @@ export default async function BudgetPage({
   ]);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
+  // Last month's actual per item, for the "Prev Mo Spent" one-click prefill on
+  // recurring items. Free: allActuals is already fetched above for the
+  // rollover walk and spans every month back to the anchor, so this is a
+  // filter over data in hand rather than another round-trip.
+  const prevFirstOfMonth = `${month.prevKey}-01`;
+  const prevSpentBySub = new Map<string, number>();
+  for (const row of allActuals) {
+    if (row.month === prevFirstOfMonth) {
+      prevSpentBySub.set(row.subcategory_id, (prevSpentBySub.get(row.subcategory_id) ?? 0) + row.actual_cents);
+    }
+  }
   const spentBySub = new Map((actuals ?? []).map((a) => [a.subcategory_id, a.actual_cents]));
   const goalBySub = new Map((goals ?? []).map((g) => [g.subcategory_id, g]));
   const debtBySub = new Map((debts ?? []).map((d) => [d.subcategory_id, d]));
@@ -273,6 +284,8 @@ export default async function BudgetPage({
           paymentAccountId: (s as { payment_account_id?: string | null }).payment_account_id ?? null,
           plannedCents,
           spentCents,
+          prevSpentCents: prevSpentBySub.get(s.id) ?? 0,
+          isRecurring: (s as { is_recurring?: boolean }).is_recurring ?? false,
           // Irregular bills contribute a *suggested* planned sum, but stay
           // editable so ad-hoc spending (rare bike repair, one-off dental)
           // can still get a manual planned amount without first setting a
