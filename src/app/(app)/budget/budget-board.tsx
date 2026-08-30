@@ -182,14 +182,17 @@ export function BudgetBoard({
   // Expanded state for the toolbar's "Due this week" pill (the list renders
   // directly under the toolbar row, above the category groups).
   const [showDue, setShowDue] = useState(false);
-  const handlePayDue = (item: DueItem) => {
+  // `amountOverride` comes from the "Prev Mo Spent" chip on a recurring
+  // subscription — the modal opens at last month's actual charge instead of
+  // the planned amount. Everything else about the payment is identical.
+  const handlePayDue = (item: DueItem, amountOverride?: number) => {
     if (item.source === "subscription") {
       const fd = new FormData();
       fd.set("id", item.id);
       void advanceSubscriptionRenewal(fd);
     }
     loadPayees();
-    setDuePayment(item);
+    setDuePayment(amountOverride != null ? { ...item, amountCents: amountOverride } : item);
   };
 
   // Precompute account_id → name so the item panel's tx list can render each
@@ -216,13 +219,6 @@ export function BudgetBoard({
       ? (() => { const e = new Date(start); e.setDate(e.getDate() + 7); return e; })()
       : new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() + 1, 0);
     const inWindow = (value: Date) => value >= startOfMonth && value <= end;
-    // Build a lookup of spentCents by subcategory id for subscription "paid" check.
-    const spentBySubId = new Map<string, number>();
-    for (const group of groups) {
-      for (const row of group.rows) {
-        spentBySubId.set(row.subId, row.spentCents);
-      }
-    }
     // Every kind that can carry a due day (bills, expenses, debt) contributes
     // to Due this week — not just the Bills group. Debt rows show what's still
     // outstanding this month against the planned payment.
@@ -254,9 +250,16 @@ export function BudgetBoard({
       if (!subscription.isActive || !subscription.nextRenewalDate || !subscription.subcategoryId) return [];
       const due = new Date(`${subscription.nextRenewalDate}T00:00:00`);
       if (!inWindow(due)) return [];
-      // Considered paid this month if spend in the matching budget row covers the amount.
-      const spentCents = spentBySubId.get(subscription.subcategoryId) ?? 0;
-      if (spentCents >= subscription.amountCents) return [];
+      // Paid when THIS subscription's own charge has been logged. Every
+      // subscription shares one "Subscriptions" budget row, so checking that
+      // row's total instead meant the first payment of the month covered every
+      // other subscription's amount and emptied the list — monthSpentCents is
+      // the per-row figure, matched by payee on the Budget page.
+      // A subscription whose amount is 0 (price varies, or it isn't known yet)
+      // would otherwise satisfy `spent >= amount` with nothing logged at all
+      // and never appear — those are precisely the ones needing the prefill.
+      const paidCents = subscription.monthSpentCents ?? 0;
+      if (paidCents > 0 && paidCents >= subscription.amountCents) return [];
       return [{
         id: subscription.id,
         name: subscription.name,
@@ -267,6 +270,7 @@ export function BudgetBoard({
         accountId: subscription.accountId,
         accountName: subscription.accountId ? accountNameById.get(subscription.accountId) ?? null : null,
         source: "subscription" as const,
+        prevSpentCents: subscription.isRecurring ? subscription.prevSpentCents ?? 0 : 0,
       }];
     });
     return [...budgetItems, ...subscriptionItems].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.name.localeCompare(b.name));
@@ -1093,7 +1097,7 @@ function DueItemsList({
 }: {
   dueItems: DueItem[];
   currency: string;
-  onPayDue?: (item: DueItem) => void;
+  onPayDue?: (item: DueItem, amountOverride?: number) => void;
 }) {
   return (
     <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
@@ -1121,13 +1125,28 @@ function DueItemsList({
             <div className="shrink-0 text-right">
               <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
               {onPayDue && (
-                <button
-                  type="button"
-                  onClick={() => onPayDue(item)}
-                  className={`mt-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${isOverdue ? "bg-negative/15 text-negative hover:bg-negative/25" : "bg-brand-soft text-brand hover:bg-brand/20"}`}
-                >
-                  Pay / Edit
-                </button>
+                <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
+                  {/* Only when last month actually had a charge to copy, and
+                      only when it differs from the planned amount — otherwise
+                      the chip is a second button that does exactly what
+                      Pay / Edit already does. */}
+                  {item.prevSpentCents && item.prevSpentCents > 0 && item.prevSpentCents !== item.amountCents ? (
+                    <button
+                      type="button"
+                      onClick={() => onPayDue(item, item.prevSpentCents)}
+                      className="rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/[0.08] dark:hover:bg-white/15"
+                    >
+                      <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => onPayDue(item)}
+                    className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${isOverdue ? "bg-negative/15 text-negative hover:bg-negative/25" : "bg-brand-soft text-brand hover:bg-brand/20"}`}
+                  >
+                    Pay / Edit
+                  </button>
+                </div>
               )}
             </div>
           </li>

@@ -981,7 +981,12 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
         className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       {focused ? (
-        <div className="flex w-24 gap-1 sm:hidden">
+        /* Wider than the input it belongs to — the negative margin keeps its
+           right edge aligned, so the row's layout doesn't shift when the strip
+           appears. At the input's own 96px these three keys were ~30px wide
+           with 4px between them: small enough to hit the wrong one with a
+           thumb. */
+        <div className="-ml-20 flex w-44 gap-2.5 sm:hidden">
           {[
             { label: "+", ch: "+" },
             { label: "−", ch: "-" },
@@ -996,7 +1001,7 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
                 if (k.ch === "=") { commit(raw); return; }
                 insertAtCaret(k.ch);
               }}
-              className="flex-1 rounded-lg bg-black/[0.06] px-1 py-1.5 text-sm font-semibold tabular-nums text-foreground active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
+              className="flex-1 rounded-lg bg-black/[0.06] px-1 py-2.5 text-base font-semibold tabular-nums text-foreground active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
             >
               {k.label}
             </button>

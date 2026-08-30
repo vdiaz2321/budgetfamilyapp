@@ -126,11 +126,29 @@ export function BudgetGroup({
     return true;
   });
 
+  // "Left" in the desktop header doubles as a filter: clicking it narrows the
+  // list to the items that actually have something left (or are overspent),
+  // which is the only way to find the one item behind a group's -$1.14 without
+  // reading two dozen rows. Clicking again clears it. The header totals
+  // deliberately stay whole-group — a filter that also changed the number it
+  // was filtering by would be unreadable. Desktop only, on purpose: the phone
+  // header has no room for the control and it isn't a phone-sized task.
+  const [leftOnly, setLeftOnly] = useState(false);
+
   // Totals mirror what's rendered — paid-off debts are hidden from the list,
   // so their planned/spent must not bulk up the subtotal either.
   const visiblePlannedTotal = visibleRows.reduce((s, r) => s + r.plannedCents, 0);
   const visibleSpentTotal = visibleRows.reduce((s, r) => s + r.spentCents, 0);
   const remainingTotal = visiblePlannedTotal - visibleSpentTotal;
+  const listedRows = leftOnly
+    ? visibleRows.filter((r) => r.plannedCents - r.spentCents !== 0)
+    : visibleRows;
+  const toggleLeftOnly = () => {
+    const next = !leftOnly;
+    setLeftOnly(next);
+    if (next && !open) onToggle();
+  };
+  const countLabel = leftOnly ? `${listedRows.length} of ${visibleRows.length}` : `${visibleRows.length}`;
   const subtotalOverspent = (group.kind === "bills" || group.kind === "expenses") && remainingTotal < 0;
 
   return (
@@ -160,7 +178,7 @@ export function BudgetGroup({
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
           <span className="font-semibold">{group.name}</span>
           <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-            {visibleRows.length}
+            {countLabel}
             <span className="hidden sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
@@ -172,6 +190,7 @@ export function BudgetGroup({
               {formatMoney(visibleSpentTotal, currency)}
             </span>
           </span>
+
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
@@ -208,7 +227,7 @@ export function BudgetGroup({
             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
             <span className="font-semibold">{group.name}</span>
             <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
-              {visibleRows.length}
+              {countLabel}
               <span className="sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
             </span>
           </button>
@@ -225,35 +244,51 @@ export function BudgetGroup({
           </button>
           {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
         </div>
-        <button
-          type="button"
-          onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
-          title={`Show ${group.name} transactions`}
-          disabled={!onFilter}
-          className="col-span-7 grid grid-cols-3 items-start gap-2 rounded-md px-2 py-1 text-[11px] tabular-nums text-muted enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
-        >
-          <span className="min-w-0 text-center leading-tight">
+        {/* Three tiles, two behaviours: Plan and the actual open the group and
+            filter the transaction log by kind (as the whole block always did);
+            Left filters the item list down to what still has a balance. */}
+        <div className="col-span-7 grid grid-cols-3 items-start gap-2 text-[11px] tabular-nums text-muted">
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
+            disabled={!onFilter}
+            className="min-w-0 rounded-md px-2 py-1 text-center leading-tight enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+          >
             <span className="block text-xs font-semibold text-muted">Plan</span>
             <span className="block text-sm font-semibold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
-          </span>
-          <span className="min-w-0 text-center leading-tight">
+          </button>
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
+            disabled={!onFilter}
+            className="min-w-0 rounded-md px-2 py-1 text-center leading-tight enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+          >
             <span className="block text-xs font-semibold text-muted">{headerActualLabel}</span>
             <span className={`block text-sm font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
-          </span>
-          <span className="min-w-0 text-center leading-tight">
+          </button>
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); toggleLeftOnly(); }}
+            aria-pressed={leftOnly}
+            className={`min-w-0 cursor-pointer rounded-md px-2 py-1 text-center leading-tight ring-1 transition ${
+              leftOnly
+                ? "bg-black/[0.06] ring-black/15 dark:bg-white/10 dark:ring-white/20"
+                : "ring-transparent hover:bg-black/5 dark:hover:bg-white/10"
+            }`}
+          >
             <span className="block text-xs font-semibold text-muted">Left</span>
             <span className={`block text-sm font-semibold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
               {formatMoney(remainingTotal, currency)}
             </span>
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
 
       {open ? (
         <div className="border-t border-line">
-          {visibleRows.length === 0 && !adding ? (
+          {listedRows.length === 0 && !adding ? (
             <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
               <svg
                 width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -283,8 +318,8 @@ export function BudgetGroup({
               </div>
 
               {(() => {
-                const kidsRows = group.kind === "savings" ? visibleRows.filter((r) => r.isKids) : [];
-                const mineRows = group.kind === "savings" ? visibleRows.filter((r) => !r.isKids) : visibleRows;
+                const kidsRows = group.kind === "savings" ? listedRows.filter((r) => r.isKids) : [];
+                const mineRows = group.kind === "savings" ? listedRows.filter((r) => !r.isKids) : listedRows;
                 const splitSavings = group.kind === "savings" && kidsRows.length > 0 && mineRows.length > 0;
 
                 const subtotalRow = (label: string, rows: RowData[]) => {
@@ -331,7 +366,7 @@ export function BudgetGroup({
                   </ul>
                 );
 
-                if (!splitSavings) return renderRows(visibleRows);
+                if (!splitSavings) return renderRows(listedRows);
                 return (
                   <>
                     {subtotalRow("My Savings/Investments", mineRows)}

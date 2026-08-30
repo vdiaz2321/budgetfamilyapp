@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setAccountSnapshot, setBucketSnapshot, upsertNetworthYear } from "./actions";
@@ -137,11 +137,12 @@ type Props = {
   gridMonths: string[];
   gridRows: GridRow[];
   currency: string;
+  // First day of the current month, computed on the server. Cells from this
+  // month forward are read-only in the grid — they're fed by the Accounts page.
+  lockedFromMonth: string;
 };
 
-export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props) {
-  const latest = points[points.length - 1] ?? null;
-
+export function NetworthBoard({ points, gridMonths, gridRows, currency, lockedFromMonth }: Props) {
   // One year selection shared by both the summary block and the monthly table.
   const years = [...new Set(points.map((p) => p.month.slice(0, 4)))].sort((a, b) =>
     b.localeCompare(a),
@@ -181,24 +182,6 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
         </p>
       </div>
 
-      {/* Current position */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat
-          label="Banking"
-          value={(latest?.savings ?? 0) + (latest?.bank ?? 0)}
-          currency={currency}
-          tone="text-positive"
-        />
-        <Stat label="Investments" value={latest?.stocks ?? 0} currency={currency} tone="text-positive" />
-        <Stat label="Debts" value={latest?.liabilities ?? 0} currency={currency} tone="text-negative" />
-        <Stat
-          label="Net worth"
-          value={latest?.net ?? 0}
-          currency={currency}
-          tone={(latest?.net ?? 0) >= 0 ? "text-foreground" : "text-negative"}
-        />
-      </div>
-
       {/* The chart pins to the top of the viewport while you scroll Monthly
           balances, then releases as Net Worth Over Time arrives — sticky
           positioning is scoped to its parent, so the wrapper's last child is
@@ -209,7 +192,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
           Desktop only: on a phone the chart is a third of the screen, so
           pinning it would leave almost nothing to read the tables in. */}
       <div className="space-y-4 md:relative">
-      <div className="md:sticky md:top-0 md:z-30">
+      <div data-nw-pinned-chart className="md:sticky md:top-0 md:z-30">
         <ChartSection
           points={points}
           currency={currency}
@@ -232,6 +215,7 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
           months={gridMonths}
           rows={gridRows}
           currency={currency}
+          lockedFromMonth={lockedFromMonth}
           selectedKeys={selectedRows.map(gridRowKey).filter(Boolean)}
           onSelectAccount={handleSelectAccount}
         />
@@ -256,27 +240,6 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency }: Props)
 
       {/* Year by year */}
       {points.length > 0 ? <YearTable points={points} currency={currency} /> : null}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  currency,
-  tone,
-}: {
-  label: string;
-  value: number;
-  currency: string;
-  tone: string;
-}) {
-  return (
-    <div className="flex flex-col items-center rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">{label}</p>
-      <p className={`mt-0.5 text-base font-bold tabular-nums sm:text-lg ${tone}`}>
-        {formatMoney(value, currency)}
-      </p>
     </div>
   );
 }
@@ -699,8 +662,8 @@ function GripHandle({ onMouseDown, label }: { onMouseDown: () => void; label: st
   );
 }
 
-// Accounts × months grid: your monthly checkup view. Cells are editable —
-// current-month edits also update the Accounts page; past months are history.
+// Accounts × months grid: your monthly checkup view. Past months are editable
+// history; the current month onward is read-only and comes from the Accounts page.
 // One month's balance for one account or bucket, typed in place in the grid.
 // Blank stays blank — a cell that was never recorded shows "—" and submits
 // nothing until something is actually typed, so tabbing across a row can't
@@ -791,12 +754,14 @@ function BalanceGrid({
   months: allMonths,
   rows,
   currency,
+  lockedFromMonth,
   selectedKeys,
   onSelectAccount,
 }: {
   months: string[];
   rows: GridRow[];
   currency: string;
+  lockedFromMonth: string;
   selectedKeys?: string[] | null;
   onSelectAccount?: (row: GridRow, ctrlKey: boolean) => void;
 }) {
@@ -1021,7 +986,11 @@ function BalanceGrid({
     // read-only: its figure is re-derived from its buckets on every save, so an
     // edit here would be overwritten. Debt rows come from debt_snapshots and
     // have no setter yet, so they stay read-only too.
-    if (r.editable && (r.bucketId || r.accountId)) {
+    // The current month and anything after it is owned by the Accounts page —
+    // those balances flow from there, so typing over them here would only be
+    // undone on the next save. Past months stay typeable: that's where
+    // corrections to history are made.
+    if (r.editable && (r.bucketId || r.accountId) && months[i] < lockedFromMonth) {
       return (
         <EditableBalanceCell
           key={`${r.bucketId ?? r.accountId}:${months[i]}`}
@@ -1063,6 +1032,46 @@ function BalanceGrid({
   const gridOpen = gridOpenState.open;
   const toggleGrid = () => setGridOpenState((s) => ({ ...s, open: !s.open }));
 
+  // The header row is `sticky top-0`, but "top" there means the top of the
+  // scroll box — so it only froze while scrolling *inside* the grid; scrolling
+  // the page carried the whole box (header included) off screen. There is no
+  // pure-CSS fix: a box that scrolls horizontally is a scroll container on
+  // both axes, so the header can never anchor to the viewport instead.
+  // Instead we push the sticky offset down by however far the box's top has
+  // gone above the viewport, which lands the header back at the viewport's
+  // top edge. Sticky still clamps it to the table, so it releases on its own
+  // once the grid has scrolled past.
+  const scrollBoxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const box = scrollBoxRef.current;
+    if (!box) return;
+    let frame = 0;
+    const sync = () => {
+      frame = 0;
+      // On desktop the chart card pins to the top of the viewport, so "the top
+      // of the viewport" is really the chart's bottom edge — parking the
+      // header at 0 would hide it underneath. On mobile the chart isn't
+      // pinned, so its bottom is above the viewport and this falls back to 0.
+      const chart = document.querySelector("[data-nw-pinned-chart]");
+      const chartBottom = chart ? chart.getBoundingClientRect().bottom : 0;
+      const anchor = Math.max(0, chartBottom);
+      const top = box.getBoundingClientRect().top;
+      box.style.setProperty("--grid-sticky-top", `${Math.max(0, anchor - top)}px`);
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(sync);
+    };
+    sync();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [gridOpen]);
+
   return (
     <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
@@ -1090,7 +1099,7 @@ function BalanceGrid({
       {reorderError ? (
         <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
-      <div className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
+      <div ref={scrollBoxRef} className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
         <table
           className={`table-fixed border-collapse text-xs sm:text-sm ${
             wideLayout
@@ -1116,7 +1125,10 @@ function BalanceGrid({
               </>
             )}
           </colgroup>
-          <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
+          <thead
+            className="sticky z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]"
+            style={{ top: "var(--grid-sticky-top, 0px)" }}
+          >
             <tr className="border-b border-line">
               <th className={`${stickyCls} bg-surface px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-[11px]`}>
                 Account

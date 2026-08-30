@@ -165,6 +165,10 @@ export type DueItem = {
   accountId: string | null;
   accountName: string | null;
   source: "budget" | "subscription";
+  // Recurring subscriptions carry what they actually cost last month, so the
+  // row can offer a one-click prefill at that figure rather than the planned
+  // amount. 0 (or absent) means there was nothing to copy and no chip shows.
+  prevSpentCents?: number;
 };
 
 // A transaction shown in the right-rail Log and the Transactions page.

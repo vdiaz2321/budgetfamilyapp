@@ -112,25 +112,6 @@ export function TransactionsTable({
     0,
   );
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
-  const batchDelete = () => {
-    // Card payments and investment transfers used to be filtered out here, and
-    // their row delete was disabled too, which left them impossible to remove
-    // from anywhere in the app — they carry no subcategory, so the budget item
-    // panels never list them either. deleteTransaction already reverses both
-    // legs of a movement transaction (see reverseMovementTransaction); it just
-    // had no way to be called. Editing them stays blocked — only delete is
-    // allowed, which is what the original "delete and recreate it from the
-    // card" affordance did.
-    const ids = selectedTxs().map((tx) => tx.id);
-    startBatch(async () => {
-      for (const id of ids) {
-        const fd = new FormData();
-        fd.append("id", id);
-        await deleteTransaction(fd);
-      }
-      exitSelectMode();
-    });
-  };
   const batchClear = (cleared: boolean) => {
     const ids = [...selectedIds];
     startBatch(async () => {
@@ -143,37 +124,6 @@ export function TransactionsTable({
       exitSelectMode();
     });
   };
-  const batchExportCsv = () => {
-    const rows = selectedTxs();
-    if (rows.length === 0) return;
-    const qf = (v: string | number | null | undefined) => {
-      const s = String(v ?? "");
-      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const lines = [
-      ["Date", "Cleared", "Amount", "Type", "Category", "Payee", "Account", "Remarks"].join(","),
-      ...rows.map((t) =>
-        [
-          t.date,
-          t.cleared ? "yes" : "no",
-          (t.amountCents / 100).toFixed(2),
-          t.isTransfer ? "Transfer" : t.isInvestmentTransfer ? "Investment Transfer" : t.isCardPayment ? "Card Payment" : t.kind ? KIND_LABEL[t.kind] : "",
-          t.subName,
-          t.payee ?? "",
-          t.accountId ? accountName.get(t.accountId) ?? "" : "",
-          t.memo ?? "",
-        ].map(qf).join(","),
-      ),
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `transactions-selected-${rows.length}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   function applyRange(nextFrom: string, nextTo: string) {
     const params = new URLSearchParams();
     if (nextFrom) params.set("from", nextFrom);
@@ -252,38 +202,17 @@ export function TransactionsTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const headerHidden = useHideOnScroll({ inner: tableScrollRef });
 
-  // Collapsing the toolbar has to give its height back to the table, so the
-  // table grows into the gap instead of leaving one. Measured rather than
-  // guessed: the filter row wraps at narrow widths and the summary card grows
-  // with the range, so a hard-coded offset would be wrong half the time.
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const [toolbarH, setToolbarH] = useState(0);
-  useEffect(() => {
-    const el = toolbarRef.current;
-    if (!el) return;
-    // offsetHeight, not contentRect — the toolbar has vertical padding, and a
-    // content-box measurement collapses it a few pixels short of its own box.
-    const ro = new ResizeObserver(() => setToolbarH(el.offsetHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   return (
-    <div
-      className="mx-auto w-full max-w-7xl space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden"
-      style={{ "--tx-toolbar": `${toolbarH}px` } as React.CSSProperties}
-    >
+    <div className="mx-auto w-full max-w-7xl space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden">
       {/* Phone-only auto-hide: scrolling further down slides the month picker
           and the toolbar away so the list gets the screen; scrolling back up
-          brings them straight back. Desktop pins it (md:translate-y-0) — there
-          is room for both there, and a header that moves under a mouse wheel
-          is just twitchy. */}
+          brings them straight back. Desktop keeps it in view the whole time
+          (md:translate-y-0, and no collapsing margin) — the filters, the range
+          and the totals line are all read while scrolling the register, and
+          giving their height back to the table is not worth losing them. */}
       <div
-        ref={toolbarRef}
         className={`sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm transition-[transform,margin-top] duration-200 ease-out md:static md:mx-0 md:translate-y-0 md:px-0 ${
-          headerHidden
-            ? "-translate-y-full md:mt-[calc(var(--tx-toolbar)*-1)]"
-            : "translate-y-0 md:mt-0"
+          headerHidden ? "-translate-y-full" : "translate-y-0"
         }`}
       >
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
@@ -495,12 +424,7 @@ export function TransactionsTable({
               </span>
             </div>
             <span className="text-base font-bold leading-none text-muted">/</span>
-            <BatchActionButtons
-              onClear={() => batchClear(true)}
-              onUncheck={() => batchClear(false)}
-              onExport={batchExportCsv}
-              onDelete={batchDelete}
-            />
+            <BatchActionButtons onClear={() => batchClear(true)} />
           </div>
         ) : (
           <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
@@ -530,13 +454,7 @@ export function TransactionsTable({
             <span className="font-semibold text-foreground">{selectedIds.size} selected</span>
             <span className="text-muted">Total <span className={`font-bold tabular-nums ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(selectedNetCents(), currency)}</span></span>
           </div>
-          <BatchActionButtons
-            onClear={() => batchClear(true)}
-            onUncheck={() => batchClear(false)}
-            onExport={batchExportCsv}
-            onDelete={batchDelete}
-            mobile
-          />
+          <BatchActionButtons onClear={() => batchClear(true)} mobile />
         </div>
       ) : (
         <div className="-mx-4 flex items-center justify-between gap-2 bg-positive/5 px-4 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
@@ -684,17 +602,14 @@ export function TransactionsTable({
   );
 }
 
+// Clear is the only batch action. Uncheck / Export / Delete were removed at
+// Victor's request: per-row delete still exists, and the toolbar's Export CSV
+// covers exporting.
 function BatchActionButtons({
   onClear,
-  onUncheck,
-  onExport,
-  onDelete,
   mobile = false,
 }: {
   onClear: () => void;
-  onUncheck: () => void;
-  onExport: () => void;
-  onDelete: () => void;
   mobile?: boolean;
 }) {
   const buttonClass = mobile
@@ -704,9 +619,6 @@ function BatchActionButtons({
   return (
     <div className={`flex items-center gap-1.5 ${mobile ? "w-full" : "shrink-0"}`}>
       <button type="button" onClick={onClear} className={`${buttonClass} bg-positive/10 text-positive hover:bg-positive/20`}>Clear</button>
-      <button type="button" onClick={onUncheck} className={`${buttonClass} bg-line/60 text-foreground hover:bg-line`}>Uncheck</button>
-      <button type="button" onClick={onExport} className={`${buttonClass} bg-line/60 text-foreground hover:bg-line`}>Export</button>
-      <button type="button" onClick={onDelete} className={`${buttonClass} bg-negative/10 text-negative hover:bg-negative/20`}>Delete</button>
     </div>
   );
 }

@@ -6,7 +6,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
-import { syncAccountFromBuckets } from "@/lib/buckets";
 import { unwrap } from "@/lib/supabase-result";
 
 const MONTH_RE = /^\d{4}-\d{2}-01$/;
@@ -93,6 +92,10 @@ export async function setAccountSnapshot(formData: FormData) {
   const accountId = String(formData.get("accountId") ?? "");
   const month = String(formData.get("month") ?? "");
   if (!accountId || !MONTH_RE.test(month)) return;
+  // The grid only edits history. The current month (and anything later) is the
+  // Accounts page's balance, re-derived on every save — a write here would be
+  // silently undone, so it's refused rather than accepted and lost.
+  if (month >= currentMonthFirst()) return;
 
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
 
@@ -119,14 +122,6 @@ export async function setAccountSnapshot(formData: FormData) {
     { onConflict: "household_id,month,account_id" },
   );
 
-  if (month === currentMonthFirst()) {
-    await supabase
-      .from("accounts")
-      .update({ current_balance_cents: balanceCents, updated_at: new Date().toISOString() })
-      .eq("id", accountId)
-      .eq("household_id", householdId);
-  }
-
   revalidate();
 }
 
@@ -138,6 +133,8 @@ export async function setBucketSnapshot(formData: FormData) {
   const bucketId = String(formData.get("bucketId") ?? "");
   const month = String(formData.get("month") ?? "");
   if (!bucketId || !MONTH_RE.test(month)) return;
+  // Same rule as setAccountSnapshot: history only.
+  if (month >= currentMonthFirst()) return;
 
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
 
@@ -165,15 +162,6 @@ export async function setBucketSnapshot(formData: FormData) {
   );
 
   await syncAccountSnapshotFromBuckets(supabase, householdId, bucket.account_id, month);
-
-  if (month === currentMonthFirst()) {
-    await supabase
-      .from("buckets")
-      .update({ balance_cents: balanceCents, updated_at: new Date().toISOString() })
-      .eq("id", bucketId)
-      .eq("household_id", householdId);
-    await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
-  }
 
   revalidate();
 }

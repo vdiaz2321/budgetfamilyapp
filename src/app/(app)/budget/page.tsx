@@ -106,7 +106,7 @@ export default async function BudgetPage({
     // auto-fill AND the Subscriptions & Irregular Bills section below Debt.
     supabase
       .from("subscriptions")
-      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, updated_at, subcategory_id, account_id, notes, sort_order")
+      .select("id, name, amount_cents, billing_cycle, next_renewal_date, is_active, is_recurring, updated_at, subcategory_id, account_id, notes, sort_order")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -145,7 +145,7 @@ export default async function BudgetPage({
     // the one to copy forward.
     supabase
       .from("transactions")
-      .select("subcategory_id, account_id, payee_id")
+      .select("subcategory_id, account_id, payee_id, amount_cents")
       .eq("household_id", household.id)
       .gte("occurred_on", prevFirstOfMonth)
       .lt("occurred_on", month.firstOfMonth)
@@ -252,18 +252,24 @@ export default async function BudgetPage({
   // token match the irregular bills above use, for the same reason (a "Claude"
   // charge may be logged as "Anthropic Claude").
   const subMonthSpentById = new Map<string, number>();
+  // The same figure for last month, feeding the "Prev Mo Spent" one-click
+  // prefill on a subscription flagged Recurring. Same matcher, different rows:
+  // prevTxRows is last month's transactions, already fetched for the budget
+  // items' version of this prefill.
+  const subPrevSpentById = new Map<string, number>();
   for (const sub of subscriptions ?? []) {
     const tokens = billTokens(sub.name);
-    const spent = (txRows ?? [])
-      .filter((tx) => {
-        if (tx.subcategory_id !== sub.subcategory_id) return false;
-        const payee = (payeeById.get(tx.payee_id ?? "") ?? "").toLowerCase();
-        if (!payee) return false;
-        if (payee === sub.name.trim().toLowerCase()) return true;
-        return tokens.length > 0 && tokens.every((t) => payee.includes(t));
-      })
-      .reduce((total, tx) => total + tx.amount_cents, 0);
-    subMonthSpentById.set(sub.id, spent);
+    const isThisSub = (tx: { subcategory_id: string | null; payee_id: string | null }) => {
+      if (tx.subcategory_id !== sub.subcategory_id) return false;
+      const payee = (payeeById.get(tx.payee_id ?? "") ?? "").toLowerCase();
+      if (!payee) return false;
+      if (payee === sub.name.trim().toLowerCase()) return true;
+      return tokens.length > 0 && tokens.every((t) => payee.includes(t));
+    };
+    const total = (rows: { amount_cents: number }[]) =>
+      rows.reduce((sum, tx) => sum + tx.amount_cents, 0);
+    subMonthSpentById.set(sub.id, total((txRows ?? []).filter(isThisSub)));
+    subPrevSpentById.set(sub.id, total((prevTxRows ?? []).filter(isThisSub)));
   }
   const irregularAutoPlannedBySub = new Map<string, number>();
   for (const bill of irregularBills ?? []) {
@@ -593,8 +599,10 @@ export default async function BudgetPage({
     accountId: s.account_id ?? null,
     notes: s.notes,
     sortOrder: (s as { sort_order?: number }).sort_order ?? 0,
+    isRecurring: (s as { is_recurring?: boolean }).is_recurring ?? false,
     monthPlannedCents: subMonthPlannedById.get(s.id) ?? 0,
     monthSpentCents: subMonthSpentById.get(s.id) ?? 0,
+    prevSpentCents: subPrevSpentById.get(s.id) ?? 0,
   }));
 
   const irregularBillRows: IrregularBillRow[] = (irregularBills ?? []).map((b) => ({

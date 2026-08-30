@@ -401,6 +401,18 @@ export function SubscriptionForm({
         />
         Active
         </label>
+        {/* Same charge, same card, every cycle — Due this week then offers a
+            one-click prefill from last month's actual instead of making the
+            amount be retyped. */}
+        <label className="flex items-center gap-1.5 pb-1.5 text-xs text-muted">
+        <input
+          type="checkbox"
+          name="isRecurring"
+          defaultChecked={row?.isRecurring ?? false}
+          className="h-4 w-4 rounded accent-[var(--brand)]"
+        />
+        Recurring
+        </label>
       </div>
       <div className="flex flex-col gap-2 md:flex-row md:items-end">
         {/* Fluid rather than a fixed 432px: the form also renders inside a

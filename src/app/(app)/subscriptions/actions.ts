@@ -129,6 +129,7 @@ export async function upsertSubscription(formData: FormData) {
   const nextRenewalDate = String(formData.get("nextRenewalDate") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const isActive = formData.get("isActive") === "on";
+  const isRecurring = formData.get("isRecurring") === "on";
   const accountId = String(formData.get("accountId") ?? "").trim() || null;
   if (!name) return { error: "Name is required." };
 
@@ -144,6 +145,7 @@ export async function upsertSubscription(formData: FormData) {
     account_id: accountId,
     notes,
     is_active: isActive,
+    is_recurring: isRecurring,
     updated_at: new Date().toISOString(),
   };
 

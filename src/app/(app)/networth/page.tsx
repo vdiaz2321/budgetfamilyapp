@@ -1,4 +1,4 @@
-import { captureSnapshots } from "@/lib/snapshots";
+import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
@@ -351,6 +351,7 @@ export default async function NetworthPage() {
       gridMonths={displayMonths}
       gridRows={displayRows}
       currency={household.currency}
+      lockedFromMonth={currentMonthFirst()}
     />
   );
 }

@@ -10,11 +10,17 @@ export type SubscriptionRow = {
   accountId: string | null;
   notes: string | null;
   sortOrder: number;
+  // Charges the same amount on the same card every cycle. Turns on the one-click
+  // "Prev Mo Spent" prefill on this subscription's Due-this-week entry.
+  isRecurring: boolean;
   // Derived on the Budget page for this month only, so the card can show
   // Plan / Spent / Left per row. `monthPlannedCents` is cycle-aware: a monthly
   // sub plans every month, an annual one only in its renewal month.
   monthPlannedCents?: number;
   monthSpentCents?: number;
+  // What this subscription actually cost last month, matched by payee the same
+  // way monthSpentCents is. Feeds the Prev Mo Spent prefill on recurring rows.
+  prevSpentCents?: number;
 };
 
 export type IrregularBillRow = {
