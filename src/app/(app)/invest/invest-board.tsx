@@ -10,7 +10,8 @@ import {
 } from "@/lib/tax-treatment";
 import { setInvestmentYear, transferFromInvestment } from "./actions";
 import { ImportInvestmentModal } from "./import-modal";
-import { moveInvestmentImport } from "./import-actions";
+import { AddMonthForm, AddHoldingsForm } from "./manual-entry";
+import { AllHoldingsTable } from "./holdings-rollup";
 import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 
@@ -49,6 +50,8 @@ export type InvestAccount = {
 };
 
 export type InvestmentPositionImportRow = {
+  id: string;
+  asOfDate: string;
   symbol: string | null;
   securityName: string;
   quantity: number | null;
@@ -57,10 +60,12 @@ export type InvestmentPositionImportRow = {
   costBasisCents: number | null;
   unrealizedGainCents: number | null;
   unrealizedGainPercent: number | null;
+  url: string | null;
 };
 
 export type InvestmentPerformanceImportRow = {
   asOfDate: string;
+  entrySource: "csv" | "manual";
   beginningBalanceCents: number | null;
   contributionsCents: number | null;
   withdrawalsCents: number | null;
@@ -69,6 +74,9 @@ export type InvestmentPerformanceImportRow = {
   marketChangeCents: number | null;
   endingBalanceCents: number;
 };
+
+/** A bucket already names its brokerage, so it stands alone; otherwise the account does. */
+export const ledgerLabel = (accountName: string, bucketName: string | null) => bucketName ?? accountName;
 
 export type InvestmentImportView = {
   id: string;
@@ -541,136 +549,124 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
   );
 }
 
+type View = "holdings" | "performance";
+
+/**
+ * Everything recorded per investment account: what each brokerage holds, and
+ * how each balance moved month to month.
+ *
+ * Holdings are one flat editable list across every brokerage — adding a
+ * brokerage adds rows, not another panel. Monthly history stays its own view
+ * because it is a different shape of data (one row per month, not per fund),
+ * picked with the account dropdown beside the toggle.
+ */
 function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports: InvestmentImportView[]; accounts: InvestAccount[]; currency: string; onImport: () => void }) {
-  const groups = new Map<string, InvestmentImportView[]>();
-  for (const item of imports) {
-    const key = `${item.accountId}:${item.bucketId ?? "_"}`;
-    groups.set(key, [...(groups.get(key) ?? []), item]);
-  }
-  const [groupOpen, setGroupOpen] = useSessionCollapse("invest-import-groups", () => ({}));
+  const [view, setView] = useState<View>("holdings");
+  const [addingHoldings, setAddingHoldings] = useState(false);
+  const [addingMonth, setAddingMonth] = useState(false);
+
+  const performanceLedgers = imports.filter((item) => item.importKind === "performance");
+  const [ledgerId, setLedgerId] = useState(performanceLedgers[0]?.id ?? "");
+  const ledger = performanceLedgers.find((item) => item.id === ledgerId) ?? performanceLedgers[0] ?? null;
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 border-b border-line bg-brand-soft/35 px-4 py-3">
+      <div className="flex flex-col items-start gap-3 border-b border-line bg-brand-soft/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Imported investment data</h2>
-          <p className="mt-0.5 text-xs text-muted">Saved CSV snapshots remain separate from your live account balance and can be reviewed here.</p>
+          <h2 className="text-sm font-semibold">Holdings &amp; history</h2>
+          <p className="mt-0.5 text-xs text-muted">What each brokerage holds and how its balance moved, kept separate from your live account balance.</p>
         </div>
-        <button type="button" onClick={onImport} className="shrink-0 rounded-lg bg-brand-soft px-3 py-2 text-xs font-semibold text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80">Import CSV</button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { setAddingHoldings((current) => !current); setAddingMonth(false); }}
+            className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand/90"
+          >
+            {addingHoldings ? "Close" : "Add holdings"}
+          </button>
+          <button type="button" onClick={onImport} className="rounded-lg bg-black/5 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20">Import CSV</button>
+        </div>
       </div>
-      <div className="divide-y divide-line">
-        {groups.size === 0 ? <p className="px-4 py-5 text-sm text-muted">No imported investment data yet.</p> : [...groups.entries()].map(([groupKey, items]) => {
-          const first = items[0];
-          const latestPositions = items.filter((item) => item.importKind === "positions").sort((a, b) => b.asOfDate.localeCompare(a.asOfDate))[0];
-          const latestPerformance = items.filter((item) => item.importKind === "performance").sort((a, b) => b.asOfDate.localeCompare(a.asOfDate))[0];
-          const currentValue = latestPositions
-            ? latestPositions.positions.reduce((sum, row) => sum + row.marketValueCents, 0)
-            : latestPerformance?.performance[0]?.endingBalanceCents ?? 0;
-          const kinds = [...new Set(items.map((item) => item.importKind === "positions" ? "Portfolio positions" : "Monthly performance"))].join(" · ");
-          return (
-            <details key={groupKey} open={!!groupOpen[groupKey]} className="group">
-              <summary
-                onClick={(event) => {
-                  event.preventDefault();
-                  setGroupOpen((state) => ({ ...state, [groupKey]: !state[groupKey] }));
-                }}
-                className="flex cursor-pointer list-none items-center gap-3 bg-brand-soft/25 px-4 py-3 marker:hidden transition hover:bg-brand-soft/45"
+
+      {addingHoldings ? (
+        <div className="border-b border-line bg-background/40 px-4 py-3">
+          <AddHoldingsForm accounts={accounts} currency={currency} onDone={() => setAddingHoldings(false)} />
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
+        <div className="flex flex-wrap items-center gap-1">
+          {(["holdings", "performance"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setView(option)}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                view === option ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-black/5 dark:hover:bg-white/10"
+              }`}
+            >
+              {option === "holdings" ? "Holdings" : "Monthly performance"}
+            </button>
+          ))}
+        </div>
+
+        {view === "performance" ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {performanceLedgers.length > 1 ? (
+              <select
+                value={ledger?.id ?? ""}
+                onChange={(event) => setLedgerId(event.target.value)}
+                className="rounded-md bg-background px-2 py-1.5 text-xs text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
-                <span className="text-muted transition-transform group-open:rotate-90">›</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{first.provider !== "Other" ? `${first.provider} · ` : ""}{first.accountName}{first.bucketName ? ` · ${first.bucketName}` : ""}</span>
-                  <span className="block text-xs text-muted">{kinds} · {items.length} import{items.length === 1 ? "" : "s"}</span>
-                </span>
-                <span className="shrink-0 text-sm font-semibold tabular-nums">{formatMoney(currentValue, currency)}</span>
-              </summary>
-              <div className="divide-y divide-line border-t border-line bg-background/30">
-                {items.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate)).map((item) => (
-                  <details key={item.id} className="group/item">
-                    <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 pl-9 marker:hidden transition hover:bg-brand-soft/25">
-                      <span className="text-muted transition-transform group-open/item:rotate-90">›</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-semibold">{item.importKind === "positions" ? "Portfolio positions" : "Monthly performance"}</span>
-                        <span className="block text-[11px] text-muted">{item.sourceFilename ?? "Imported CSV"} · as of {item.asOfDate} · {item.rowCount} rows</span>
-                      </span>
-                    </summary>
-                    <div className="border-t border-line bg-background/40 px-4 py-3">
-                      <MoveImportForm item={item} accounts={accounts} />
-                      {item.importKind === "positions" ? <ImportedPositionsTable rows={item.positions} currency={currency} /> : <ImportedPerformanceTable rows={item.performance} currency={currency} />}
-                    </div>
-                  </details>
+                {performanceLedgers.map((item) => (
+                  <option key={item.id} value={item.id}>{ledgerLabel(item.accountName, item.bucketName)}</option>
                 ))}
+              </select>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setAddingMonth((current) => !current)}
+              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand/90"
+            >
+              {addingMonth ? "Close" : "Add month"}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {view === "holdings" ? (
+        <AllHoldingsTable imports={imports} accounts={accounts} currency={currency} />
+      ) : (
+        <>
+          {addingMonth ? (
+            <div className="border-b border-line bg-background/40 px-4 py-3">
+              <AddMonthForm
+                accounts={accounts}
+                imports={imports}
+                currency={currency}
+                defaultAccountId={ledger?.accountId}
+                defaultBucketId={ledger?.bucketId ?? ""}
+                onDone={() => setAddingMonth(false)}
+              />
+            </div>
+          ) : null}
+          {ledger ? (
+            <>
+              <div className="px-4 py-2.5">
+                <span className="text-xs text-muted">
+                  {ledgerLabel(ledger.accountName, ledger.bucketName)} · {ledger.performance.length} month{ledger.performance.length === 1 ? "" : "s"}
+                </span>
               </div>
-            </details>
-          );
-        })}
-      </div>
+              <ImportedPerformanceTable rows={ledger.performance} currency={currency} />
+            </>
+          ) : (
+            <p className="px-4 py-5 text-sm text-muted">
+              No monthly history yet. Use <span className="font-medium text-foreground">Add month</span> to record an account&apos;s month-end balance.
+            </p>
+          )}
+        </>
+      )}
     </section>
-  );
-}
-
-function MoveImportForm({ item, accounts }: { item: InvestmentImportView; accounts: InvestAccount[] }) {
-  const [pending, start] = useTransition();
-  const [message, setMessage] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [accountId, setAccountId] = useState(item.accountId);
-  const [bucketId, setBucketId] = useState(item.bucketId ?? "");
-  const selected = accounts.find((account) => account.id === accountId);
-
-  if (!editing) {
-    return (
-      <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
-        <span className="min-w-0 truncate text-[11px] text-muted">Imported to {selected?.name ?? item.accountName}{bucketId ? ` · ${selected?.buckets.find((bucket) => bucket.id === bucketId)?.name ?? item.bucketName ?? "Bucket"}` : " · Account total"}</span>
-        <button type="button" onClick={() => setEditing(true)} className="shrink-0 rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/80">Edit destination</button>
-      </div>
-    );
-  }
-
-  return (
-    <form action={(formData) => start(async () => {
-      const result = await moveInvestmentImport(formData);
-      if (result?.error) setMessage(result.error);
-      else setEditing(false);
-    })} className="mb-3 flex flex-wrap items-end gap-2 rounded-lg bg-surface px-3 py-2 ring-1 ring-line">
-      <input type="hidden" name="batchId" value={item.id} />
-      <label className="block min-w-48 flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
-        Imported to
-        <select name="accountId" value={accountId} onChange={(event) => { setAccountId(event.target.value); setBucketId(""); }} className="mt-1 w-full rounded-md bg-background px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-          {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.isKids ? " · Kids Funding" : ""}</option>)}
-        </select>
-      </label>
-      <label className="block min-w-40 flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
-        Bucket
-        <select name="bucketId" value={bucketId} onChange={(event) => setBucketId(event.target.value)} className="mt-1 w-full rounded-md bg-background px-2 py-1.5 text-xs font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-          <option value="">Account total</option>
-          {(selected?.buckets ?? []).map((bucket) => <option key={bucket.id} value={bucket.id}>{bucket.name}</option>)}
-        </select>
-      </label>
-      <button type="submit" disabled={pending || (accountId === item.accountId && bucketId === (item.bucketId ?? ""))} className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:bg-brand-soft/80 disabled:opacity-50">{pending ? "Updating…" : "Update destination"}</button>
-      <button type="button" onClick={() => { setEditing(false); setMessage(null); }} className="rounded-md px-2 py-1.5 text-xs font-medium text-muted hover:bg-background">Cancel</button>
-      {message ? <span className={`w-full text-[11px] ${message === "Destination updated." ? "text-positive" : "text-negative"}`}>{message}</span> : null}
-    </form>
-  );
-}
-
-function ImportedPositionsTable({ rows, currency }: { rows: InvestmentPositionImportRow[]; currency: string }) {
-  return (
-    <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
-      <table className="min-w-full text-xs">
-        <thead className="sticky top-0 bg-surface text-left text-[10px] uppercase tracking-wide text-muted">
-          <tr><th className="px-3 py-2">Symbol</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Current value</th><th className="px-3 py-2 text-right">Cost basis</th><th className="px-3 py-2 text-right">Gain/loss</th><th className="px-3 py-2 text-right">Gain/loss %</th></tr>
-        </thead>
-        <tbody className="divide-y divide-line">
-          {rows.map((row, index) => <tr key={`${row.symbol ?? row.securityName}-${index}`}>
-            <td className="px-3 py-2 font-medium">{row.symbol ?? row.securityName}</td>
-            <td className="px-3 py-2 text-center tabular-nums">{row.quantity ?? "—"}</td>
-            <td className="px-3 py-2 text-right font-medium tabular-nums">{formatMoney(row.marketValueCents, currency)}</td>
-            <td className="px-3 py-2 text-center tabular-nums">{row.costBasisCents == null ? "—" : formatMoney(row.costBasisCents, currency)}</td>
-            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.unrealizedGainCents ?? 0)}`}>{row.unrealizedGainCents == null ? "—" : formatMoney(row.unrealizedGainCents, currency)}</td>
-            <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.unrealizedGainPercent ?? 0)}`}>{row.unrealizedGainPercent == null ? "—" : `${row.unrealizedGainPercent.toFixed(2)}%`}</td>
-          </tr>)}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
@@ -679,16 +675,16 @@ function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerforma
     <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
       <table className="min-w-full text-xs">
         <thead className="sticky top-0 bg-surface text-left text-[10px] uppercase tracking-wide text-muted">
-          <tr><th className="px-3 py-2">Month</th><th className="px-3 py-2 text-right">Beginning balance</th><th className="px-3 py-2 text-right">Market change</th><th className="px-3 py-2 text-right">Dividends</th><th className="px-3 py-2 text-right">Withdrawal</th><th className="px-3 py-2 text-right">Ending balance</th></tr>
+          <tr><th className="px-3 py-2 text-center">Month</th><th className="px-3 py-2 text-center">Beginning balance</th><th className="px-3 py-2 text-center">Market change</th><th className="px-3 py-2 text-center">Dividends</th><th className="px-3 py-2 text-center">Withdrawal</th><th className="px-3 py-2 text-center">Ending balance</th></tr>
         </thead>
         <tbody className="divide-y divide-line">
           {rows.map((row) => <tr key={row.asOfDate}>
-            <td className="px-3 py-2">{row.asOfDate}</td>
+            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-medium text-muted dark:bg-white/10">Manual</span> : null}</td>
             <td className="px-3 py-2 text-center tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(-(row.withdrawalsCents ?? 0))}`}>{row.withdrawalsCents == null ? "—" : formatMoney(row.withdrawalsCents, currency)}</td>
-            <td className="px-3 py-2 text-right font-medium tabular-nums">{formatMoney(row.endingBalanceCents, currency)}</td>
+            <td className="px-3 py-2 text-center font-medium tabular-nums">{formatMoney(row.endingBalanceCents, currency)}</td>
           </tr>)}
         </tbody>
       </table>

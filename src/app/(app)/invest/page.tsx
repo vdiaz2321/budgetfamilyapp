@@ -238,14 +238,14 @@ export default async function InvestPage() {
     ? await Promise.all([
       supabase
         .from("investment_position_snapshots")
-        .select("import_batch_id, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent")
+        .select("id, import_batch_id, as_of_date, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent, url")
         .eq("household_id", household.id)
         .in("import_batch_id", batchIds)
         .order("market_value_cents", { ascending: false })
         .limit(2000),
       supabase
         .from("investment_performance_snapshots")
-        .select("import_batch_id, as_of_date, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents")
+        .select("import_batch_id, as_of_date, entry_source, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents")
         .eq("household_id", household.id)
         .in("import_batch_id", batchIds)
         .order("as_of_date", { ascending: false })
@@ -260,6 +260,8 @@ export default async function InvestPage() {
   for (const row of positionRows ?? []) {
     const values = positionsByBatch.get(row.import_batch_id) ?? [];
     values.push({
+      id: row.id,
+      asOfDate: row.as_of_date,
       symbol: row.symbol ?? null,
       securityName: row.security_name,
       quantity: row.quantity ?? null,
@@ -268,6 +270,7 @@ export default async function InvestPage() {
       costBasisCents: row.cost_basis_cents ?? null,
       unrealizedGainCents: row.unrealized_gain_cents ?? null,
       unrealizedGainPercent: row.unrealized_gain_percent ?? null,
+      url: row.url ?? null,
     });
     positionsByBatch.set(row.import_batch_id, values);
   }
@@ -276,6 +279,7 @@ export default async function InvestPage() {
     const values = performanceByBatch.get(row.import_batch_id) ?? [];
     values.push({
       asOfDate: row.as_of_date,
+      entrySource: row.entry_source === "manual" ? "manual" : "csv",
       beginningBalanceCents: row.beginning_balance_cents ?? null,
       contributionsCents: row.contributions_cents ?? null,
       withdrawalsCents: row.withdrawals_cents ?? null,

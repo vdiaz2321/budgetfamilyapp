@@ -22,7 +22,7 @@ type Props = {
 };
 
 const POSITION_LABELS: Record<keyof PositionMapping, string> = {
-  symbol: "Symbol / ticker",
+  symbol: "Ticker",
   securityName: "Security name",
   quantity: "Quantity / shares",
   price: "Price",

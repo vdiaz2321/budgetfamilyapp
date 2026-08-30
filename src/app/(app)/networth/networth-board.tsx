@@ -762,6 +762,11 @@ function EditableBalanceCell({
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
+        // Every cell shares the name "balance", so the browser offers the
+        // history of every other cell the moment one is focused.
+        autoComplete="off"
+        data-lpignore="true"
+        data-1p-ignore
         aria-label={`Balance for ${monthLabel(month)}`}
         onFocus={(e) => e.currentTarget.select()}
         onKeyDown={(e) => {
@@ -1085,7 +1090,7 @@ function BalanceGrid({
       {reorderError ? (
         <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
-      <div className={wideLayout ? "" : "overflow-x-auto"}>
+      <div className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
         <table
           className={`table-fixed border-collapse text-xs sm:text-sm ${
             wideLayout
@@ -1111,7 +1116,7 @@ function BalanceGrid({
               </>
             )}
           </colgroup>
-          <thead className="sticky top-0 z-20">
+          <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
             <tr className="border-b border-line">
               <th className={`${stickyCls} bg-surface px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-[11px]`}>
                 Account
@@ -1293,7 +1298,6 @@ function BalanceGrid({
                                         {r.bucketCount} {r.bucketCount === 1 ? "bucket" : "buckets"}
                                       </span>
                                     ) : null}
-                                    {r.excluded ? <ExcludedChip /> : null}
                                   </div>
                                 ) : r.accountId ? (
                                   <div className="flex min-w-0 items-center gap-1">
@@ -1308,7 +1312,6 @@ function BalanceGrid({
                                     >
                                       {r.name}
                                     </button>
-                                    {r.excluded ? <ExcludedChip /> : null}
                                   </div>
                                 ) : r.bucketId ? (
                                   <div className="flex min-w-0 items-center gap-1">
@@ -1337,7 +1340,6 @@ function BalanceGrid({
                                         linked
                                       </span>
                                     ) : null}
-                                    {r.excluded ? <ExcludedChip /> : null}
                                   </>
                                 )}
                               </td>
@@ -1365,15 +1367,6 @@ function BalanceGrid({
   );
 }
 
-function ExcludedChip() {
-  return (
-    <span
-      className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[9px] font-semibold uppercase text-muted dark:bg-white/10"
-    >
-      not counted
-    </span>
-  );
-}
 
 // Negative → light-red font; positive/zero → plain. No cell fills.
 function negCls(v: number | null): string {
