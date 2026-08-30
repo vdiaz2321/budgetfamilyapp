@@ -908,6 +908,7 @@ function AmountInput({
           name="amount"
           type="text"
           inputMode="decimal"
+          autoComplete="off"
           required
           placeholder="0.00"
           value={raw}
