@@ -24,6 +24,7 @@ import {
   type OutflowKind,
   type PurchaseRow,
 } from "./types";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Insights · Capitall" };
 
@@ -75,11 +76,11 @@ export default async function InsightsPage({
   const fetchTo = maxStr(maxStr(selRange.to, priRange.to), periodRange(granularity, seedSeries[seedSeries.length - 1]).to);
 
   const [
-    { data: subs },
-    { data: payees },
-    { data: accounts },
+    { data: subs, error: subsError },
+    { data: payees, error: payeesError },
+    { data: accounts, error: accountsError },
     txRows,
-    { data: annualRows },
+    { data: annualRows, error: annualRowsError },
   ] = await Promise.all([
     supabase.from("subcategories").select("id, name, category_id").eq("household_id", household.id),
     supabase.from("payees").select("id, name").eq("household_id", household.id),
@@ -110,6 +111,7 @@ export default async function InsightsPage({
       .select("year, kind, line_label, amount_cents")
       .eq("household_id", household.id),
   ]);
+  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, annualRows: annualRowsError });
 
   const subName = new Map((subs ?? []).map((s) => [s.id, s.name]));
   const subCat = new Map((subs ?? []).map((s) => [s.id, s.category_id]));

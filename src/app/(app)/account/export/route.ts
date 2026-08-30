@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { unwrap } from "@/lib/supabase-result";
 
 // Full household dump as JSON — one download that captures everything so the
 // user can leave the app without losing their data.
@@ -38,11 +39,14 @@ export async function GET() {
     return NextResponse.json({ error: "not authenticated" }, { status: 401 });
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const profile = unwrap(
+    await supabase
+      .from("profiles")
+      .select("household_id")
+      .eq("user_id", user.id)
+      .maybeSingle(),
+    "profiles",
+  );
   if (!profile) {
     return NextResponse.json({ error: "no household" }, { status: 404 });
   }

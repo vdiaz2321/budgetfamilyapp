@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets } from "@/lib/buckets";
+import { unwrap } from "@/lib/supabase-result";
 
 const MONTH_RE = /^\d{4}-\d{2}-01$/;
 
@@ -17,11 +18,14 @@ async function requireHousehold() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
 
   return { supabase, householdId: profile.household_id };
@@ -45,20 +49,26 @@ async function syncAccountSnapshotFromBuckets(
   accountId: string,
   month: string,
 ) {
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("kind")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const account = unwrap(
+    await supabase
+      .from("accounts")
+      .select("kind")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!account) return;
 
-  const { data: snaps } = await supabase
+  // Summed and stored as that month's account snapshot — a failed read would
+  // record $0 for the month rather than leaving it alone.
+  const { data: snaps, error: snapsError } = await supabase
     .from("bucket_snapshots")
     .select("balance_cents")
     .eq("household_id", householdId)
     .eq("account_id", accountId)
     .eq("month", month);
+  if (snapsError) throw new Error(`Could not read bucket snapshots: ${snapsError.message}`);
   const sum = (snaps ?? []).reduce((s, b) => s + (b.balance_cents ?? 0), 0);
 
   await supabase.from("account_snapshots").upsert(
@@ -86,12 +96,15 @@ export async function setAccountSnapshot(formData: FormData) {
 
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
 
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("kind")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const account = unwrap(
+    await supabase
+      .from("accounts")
+      .select("kind")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!account) return;
 
   await supabase.from("account_snapshots").upsert(
@@ -128,12 +141,15 @@ export async function setBucketSnapshot(formData: FormData) {
 
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
 
-  const { data: bucket } = await supabase
-    .from("buckets")
-    .select("account_id")
-    .eq("id", bucketId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const bucket = unwrap(
+    await supabase
+      .from("buckets")
+      .select("account_id")
+      .eq("id", bucketId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "buckets",
+  );
   if (!bucket) return;
 
   await supabase.from("bucket_snapshots").upsert(

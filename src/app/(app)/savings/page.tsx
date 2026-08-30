@@ -4,6 +4,7 @@ import type { AccountOption, SubOption } from "../budget/types";
 import { getSessionContext } from "@/lib/auth-context";
 import { capsForYear, latestCapYear, pendingCapYear } from "@/lib/contribution-limits";
 import { fundSlotFor, periodStartFor, signedContributionCents } from "@/lib/fund-contributions";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Savings · Capitall" };
 
@@ -23,11 +24,12 @@ export default async function SavingsPage() {
   const savingsCategoryIds = categories.filter((c) => c.kind === "savings").map((c) => c.id);
   const incomeCategoryIds = categories.filter((c) => c.kind === "income").map((c) => c.id);
 
-  const { data: subs } = await supabase
+  const { data: subs, error: subsError } = await supabase
     .from("subcategories")
     .select("id, category_id, name, sort_order, linked_bucket_id, linked_account_id")
     .eq("household_id", household.id)
     .order("sort_order");
+  throwIfAny({ subs: subsError });
 
   const savingsSubs = (subs ?? []).filter((s) => savingsCategoryIds.includes(s.category_id));
   const savingsSubIds = savingsSubs.map((s) => s.id);
@@ -53,28 +55,28 @@ export default async function SavingsPage() {
   })();
 
   const [
-    { data: savingsGoals },
-    { data: savingsTx },
-    { data: plans },
-    { data: buckets },
-    { data: accounts },
-    { data: payees },
-    { data: incomeActuals },
-    { data: essentialActuals },
+    { data: savingsGoals, error: savingsGoalsError },
+    { data: savingsTx, error: savingsTxError },
+    { data: plans, error: plansError },
+    { data: buckets, error: bucketsError },
+    { data: accounts, error: accountsError },
+    { data: payees, error: payeesError },
+    { data: incomeActuals, error: incomeActualsError },
+    { data: essentialActuals, error: essentialActualsError },
   ] = await Promise.all([
     savingsSubIds.length
       ? supabase
           .from("savings_goals")
           .select("subcategory_id, goal_cents, start_cents, monthly_contribution_cents, target_date")
           .eq("household_id", household.id)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     savingsSubIds.length
       ? supabase
           .from("transactions")
           .select("id, subcategory_id, amount_cents, is_withdrawal, payee_id, occurred_on, account_id")
           .eq("household_id", household.id)
           .in("subcategory_id", savingsSubIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     savingsSubIds.length
       ? supabase
           .from("budget_plans")
@@ -82,7 +84,7 @@ export default async function SavingsPage() {
           .eq("household_id", household.id)
           .eq("month", monthKey)
           .in("subcategory_id", savingsSubIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     supabase.from("buckets").select("id, account_id, name, balance_cents").eq("household_id", household.id),
     supabase.from("accounts").select("id, name, holder, kind, subtype, is_kids_account").eq("household_id", household.id),
     // Names only — used server-side (payeeNameById) to label withdrawals. The
@@ -95,7 +97,7 @@ export default async function SavingsPage() {
           .eq("household_id", household.id)
           .eq("month", monthKey)
           .in("subcategory_id", incomeSubIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
     // Trailing essential spend, for emergency-fund months-of-cover.
     essentialSubIds.length
       ? supabase
@@ -105,8 +107,9 @@ export default async function SavingsPage() {
           .gte("month", essentialFromMonth)
           .lt("month", monthKey)
           .in("subcategory_id", essentialSubIds)
-      : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
   ]);
+  throwIfAny({ savingsGoals: savingsGoalsError, savingsTx: savingsTxError, plans: plansError, buckets: bucketsError, accounts: accountsError, payees: payeesError, incomeActuals: incomeActualsError, essentialActuals: essentialActualsError });
 
   const isKidsAccountById = new Map((accounts ?? []).map((a) => [a.id, a.is_kids_account ?? false]));
   const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
@@ -216,10 +219,11 @@ export default async function SavingsPage() {
   // (contribution_caps) wins over the built-in table; a year in neither yields
   // null and the card says so rather than showing a stale cap.
   const capYear = now.getFullYear();
-  const { data: storedCapRows } = await supabase
+  const { data: storedCapRows, error: storedCapRowsError } = await supabase
     .from("contribution_caps")
     .select("tax_year, elective_deferral_cents, ira_cents")
     .eq("household_id", household.id);
+  throwIfAny({ storedCapRows: storedCapRowsError });
   const storedCaps: Record<number, { electiveDeferralCents: number; iraCents: number }> =
     Object.fromEntries(
       (storedCapRows ?? []).map((r) => [

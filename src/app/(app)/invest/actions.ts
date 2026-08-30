@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { adjustBucketBalance } from "@/lib/buckets";
 import { captureSnapshots } from "@/lib/snapshots";
+import { unwrap } from "@/lib/supabase-result";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -14,11 +15,14 @@ async function requireHousehold() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
 
   return { supabase, householdId: profile.household_id };
@@ -43,23 +47,29 @@ export async function setInvestmentYear(formData: FormData) {
   const valueCents = displayToCents(String(formData.get("value") ?? "0"));
 
   // Confirm the account belongs to this household before writing.
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const account = unwrap(
+    await supabase
+      .from("accounts")
+      .select("id")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!account) return;
 
   // If a bucket was passed, confirm it belongs to this account.
   if (bucketId) {
-    const { data: bucket } = await supabase
-      .from("buckets")
-      .select("id")
-      .eq("id", bucketId)
-      .eq("account_id", accountId)
-      .eq("household_id", householdId)
-      .maybeSingle();
+    const bucket = unwrap(
+      await supabase
+        .from("buckets")
+        .select("id")
+        .eq("id", bucketId)
+        .eq("account_id", accountId)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "buckets",
+    );
     if (!bucket) return;
   }
 
@@ -76,7 +86,11 @@ export async function setInvestmentYear(formData: FormData) {
   existingQuery = bucketId
     ? existingQuery.eq("bucket_id", bucketId)
     : existingQuery.is("bucket_id", null);
-  const { data: existing } = await existingQuery.maybeSingle();
+  // `patch` carries every sibling column forward from this read, so losing it
+  // would blank contributed/accrued/est/start/end for that year instead of
+  // editing the one field the user changed.
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+  if (existingError) throw new Error(`Could not read the existing year: ${existingError.message}`);
 
   const patch = {
     contributed_cents:
@@ -118,33 +132,42 @@ export async function transferFromInvestment(formData: FormData) {
   if (!sourceAccountId || !destAccountId || !occurredOn || amountCents <= 0) return;
 
   // Validate source is an investment account in this household.
-  const { data: srcAcct } = await supabase
-    .from("accounts")
-    .select("id, kind")
-    .eq("id", sourceAccountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const srcAcct = unwrap(
+    await supabase
+      .from("accounts")
+      .select("id, kind")
+      .eq("id", sourceAccountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!srcAcct || srcAcct.kind !== "investment") return;
 
   // Validate destination is a non-investment account in this household.
-  const { data: destAcct } = await supabase
-    .from("accounts")
-    .select("id, kind, current_balance_cents")
-    .eq("id", destAccountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const destAcct = unwrap(
+    await supabase
+      .from("accounts")
+      .select("id, kind, current_balance_cents")
+      .eq("id", destAccountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!destAcct || destAcct.kind === "investment") return;
 
   // Validate bucket belongs to the source account (when provided).
   let validBucketId: string | null = null;
   if (sourceBucketId) {
-    const { data: bucket } = await supabase
+    const { data: bucket, error: bucketError } = await supabase
       .from("buckets")
       .select("id")
       .eq("id", sourceBucketId)
       .eq("account_id", sourceAccountId)
       .eq("household_id", householdId)
       .maybeSingle();
+    // null here doesn't just drop the attribution — it routes the withdrawal
+    // down the direct account-balance path instead of the bucket path.
+    if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
     validBucketId = bucket?.id ?? null;
   }
 
@@ -168,11 +191,14 @@ export async function transferFromInvestment(formData: FormData) {
     await adjustBucketBalance(supabase, householdId, validBucketId, -amountCents);
   } else {
     // No bucket — adjust the account balance directly.
-    const { data: acctBal } = await supabase
+    // Read-modify-write: a lost read would persist `0 - amountCents` over the
+    // investment account's real balance.
+    const { data: acctBal, error: acctBalError } = await supabase
       .from("accounts")
       .select("current_balance_cents")
       .eq("id", sourceAccountId)
       .single();
+    if (acctBalError) throw new Error(`Could not read the account balance: ${acctBalError.message}`);
     await supabase
       .from("accounts")
       .update({

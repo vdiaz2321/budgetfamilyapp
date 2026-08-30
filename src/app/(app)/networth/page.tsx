@@ -4,6 +4,7 @@ import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
@@ -23,11 +24,11 @@ export default async function NetworthPage() {
     accSnaps,
     debtSnaps,
     bucketSnaps,
-    { data: accountRows },
-    { data: bucketRows },
-    { data: subRows },
+    { data: accountRows, error: accountRowsError },
+    { data: bucketRows, error: bucketRowsError },
+    { data: subRows, error: subRowsError },
     historyRows,
-    { data: debtRows },
+    { data: debtRows, error: debtRowsError },
   ] = await Promise.all([
     // Every snapshot ever taken — this page IS the history view, so none of
     // these can be date-bounded. They grow by one row per account/bucket/debt
@@ -94,6 +95,7 @@ export default async function NetworthPage() {
       .select("subcategory_id, debt_kind")
       .eq("household_id", household.id),
   ]);
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError });
 
   const excludedDebtIds = new Set(
     (debtRows ?? [])

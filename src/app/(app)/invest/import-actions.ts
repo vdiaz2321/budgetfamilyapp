@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { unwrap } from "@/lib/supabase-result";
 import {
   getCell,
   parseCsv,
@@ -22,11 +23,14 @@ async function requireHousehold() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
   return { supabase, householdId: profile.household_id };
 }
@@ -59,24 +63,30 @@ export async function commitInvestmentImport(formData: FormData) {
     return { error: "Choose an investment account, import type, and valid as-of date before saving." };
   }
 
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id, kind, is_kids_account")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const account = unwrap(
+    await supabase
+      .from("accounts")
+      .select("id, kind, is_kids_account")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!account || (account.kind !== "investment" && !account.is_kids_account)) {
     return { error: "That destination is not an investment or Kids Funding account." };
   }
 
   if (bucketId) {
-    const { data: bucket } = await supabase
-      .from("buckets")
-      .select("id")
-      .eq("id", bucketId)
-      .eq("account_id", accountId)
-      .eq("household_id", householdId)
-      .maybeSingle();
+    const bucket = unwrap(
+      await supabase
+        .from("buckets")
+        .select("id")
+        .eq("id", bucketId)
+        .eq("account_id", accountId)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "buckets",
+    );
     if (!bucket) return { error: "The selected bucket does not belong to that account." };
   }
 
@@ -159,7 +169,10 @@ export async function commitInvestmentImport(formData: FormData) {
     .eq("account_id", accountId)
     .eq("import_kind", kindRaw);
   existingQuery = bucketId ? existingQuery.eq("bucket_id", bucketId) : existingQuery.is("bucket_id", null);
-  const { data: existing } = await existingQuery.order("created_at", { ascending: true }).limit(1).maybeSingle();
+  const existing = unwrap(
+    await existingQuery.order("created_at", { ascending: true }).limit(1).maybeSingle(),
+    "existing",
+  );
 
   if (existing) {
     const { data: existingRows, error: existingRowsError } = await supabase
@@ -234,32 +247,41 @@ export async function moveInvestmentImport(formData: FormData) {
   const bucketId = String(formData.get("bucketId") ?? "").trim() || null;
   if (!batchId || !accountId) return { error: "Choose an investment account." };
 
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id, kind, is_kids_account")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const account = unwrap(
+    await supabase
+      .from("accounts")
+      .select("id, kind, is_kids_account")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!account || (account.kind !== "investment" && !account.is_kids_account)) {
     return { error: "That destination is not an investment or Kids Funding account." };
   }
   if (bucketId) {
-    const { data: bucket } = await supabase
-      .from("buckets")
-      .select("id")
-      .eq("id", bucketId)
-      .eq("account_id", accountId)
-      .eq("household_id", householdId)
-      .maybeSingle();
+    const bucket = unwrap(
+      await supabase
+        .from("buckets")
+        .select("id")
+        .eq("id", bucketId)
+        .eq("account_id", accountId)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "buckets",
+    );
     if (!bucket) return { error: "The selected bucket does not belong to that account." };
   }
 
-  const { data: batch } = await supabase
-    .from("investment_import_batches")
-    .select("id")
-    .eq("id", batchId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const batch = unwrap(
+    await supabase
+      .from("investment_import_batches")
+      .select("id")
+      .eq("id", batchId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "investment_import_batches",
+  );
   if (!batch) return { error: "That import could not be found." };
 
   const { error: batchError } = await supabase

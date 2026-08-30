@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { displayToCents } from "@/lib/money";
 import { getSessionContext } from "@/lib/auth-context";
+import { unwrap } from "@/lib/supabase-result";
 
 // Uses the shared, request-cached session context rather than re-running the
 // getUser → profile → household chain by hand (see AGENTS.md). The chain was
@@ -22,12 +23,15 @@ export async function recordDebtInterest(formData: FormData) {
   const memo = String(formData.get("memo") ?? "").trim() || null;
   if (!debtId || amountCents <= 0) return { error: "Enter an interest amount greater than zero." };
 
-  const { data: debt } = await supabase
-    .from("debts")
-    .select("id, current_balance_cents, interest_paid_cents")
-    .eq("id", debtId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const debt = unwrap(
+    await supabase
+      .from("debts")
+      .select("id, current_balance_cents, interest_paid_cents")
+      .eq("id", debtId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "debts",
+  );
   if (!debt) return { error: "Debt not found." };
 
   const { data: entry, error: entryError } = await supabase
@@ -85,12 +89,15 @@ export async function applyPayoffPlan(formData: FormData) {
 
   // A payment below the minimum isn't a plan the lender will accept, and
   // silently storing one would make every downstream projection optimistic.
-  const { data: debt } = await supabase
+  const { data: debt, error: debtError } = await supabase
     .from("debts")
     .select("min_payment_cents")
     .eq("household_id", householdId)
     .eq("subcategory_id", subcategoryId)
     .maybeSingle();
+  // A swallowed error gives minCents = 0, which disables the very guard this
+  // read exists for and stores the below-minimum payment anyway.
+  if (debtError) return { error: "Couldn't check the minimum payment. Try again." };
   const minCents = debt?.min_payment_cents ?? 0;
   if (paymentCents < minCents) {
     return { error: "That's below this debt's minimum payment." };

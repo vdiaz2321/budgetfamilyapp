@@ -23,11 +23,11 @@ const KIND_TAB: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 const PAYEE_PLACEHOLDER: Record<CategoryKind, string> = {
-  income: "Merchant",
-  savings: "Merchant",
-  bills: "Merchant",
-  expenses: "Merchant",
-  debt: "Merchant",
+  income: "Payee",
+  savings: "Payee",
+  bills: "Payee",
+  expenses: "Payee",
+  debt: "Payee",
 };
 
 const HEADER_TINT: Record<CategoryKind, string> = {
@@ -128,6 +128,18 @@ export function TransactionModal({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  // Why the save button wouldn't fire. The footer button used to be silently
+  // disabled until a budget item was picked, which read as a broken button.
+  // It now stays clickable and submitting with something missing lists the
+  // reason(s) here, right above the button, and rings the offending field.
+  const [errors, setErrors] = useState<string[]>([]);
+  const [errorFields, setErrorFields] = useState<Set<string>>(new Set());
+  const [errorSplitIds, setErrorSplitIds] = useState<Set<string>>(new Set());
+  function clearErrors() {
+    setErrors([]);
+    setErrorFields(new Set());
+    setErrorSplitIds(new Set());
+  }
 
   const splitTotal = splits.reduce((s, sp) => s + sp.amountCents, 0);
   const leftToSplit = totalCents - splitTotal;
@@ -170,6 +182,7 @@ export function TransactionModal({
 
   function handlePickerConfirm(selectedIds: string[]) {
     setPickerOpen(false);
+    clearErrors();
     setSplits((prev) => {
       const kept = prev.filter((sp) => selectedIds.includes(sp.subId));
       const keptIds = new Set(kept.map((sp) => sp.subId));
@@ -210,8 +223,85 @@ export function TransactionModal({
     return 0;
   });
 
+  // Client-side gate mirroring what the server action silently drops
+  // (no subcategory / no date / amount <= 0) plus the split-allocation rules.
+  // Every message names the field (or the split item) that's missing, so the
+  // user never has to guess which one blocked the save.
+  function validate(fd: FormData): { messages: string[]; fields: Set<string>; splitIds: Set<string> } {
+    const messages: string[] = [];
+    const fields = new Set<string>();
+    const splitIds = new Set<string>();
+    const usesSplits = !isEdit || splittingMode;
+
+    if (usesSplits ? splits.length === 0 : !String(fd.get("subcategoryId") ?? "").trim()) {
+      messages.push("Budget Items — pick at least one item.");
+      fields.add("subcategory");
+    }
+
+    if (totalCents <= 0) {
+      messages.push("Amount — enter a value greater than $0.");
+      fields.add("amount");
+    }
+
+    if (!String(fd.get("date") ?? "").trim()) {
+      messages.push("Date — pick a date.");
+      fields.add("date");
+    }
+
+    // Account and Payee aren't enforced by the server action (it attaches
+    // an account only when one is passed), but a transaction with no account
+    // never reaches an account ledger — actuals move and balances don't. Both
+    // are blocked here so nothing saves half-filled. Bucket and Note stay
+    // optional; they're labelled as such.
+    if (!selectedAccountId.trim()) {
+      messages.push("Account — pick an account.");
+      fields.add("account");
+    }
+
+    if (!String(fd.get("payee") ?? "").trim()) {
+      messages.push("Payee — enter a name.");
+      fields.add("payee");
+    }
+
+    if (usesSplits && splits.length > 1) {
+      const blank = splits.filter((sp) => sp.amountCents <= 0);
+      for (const sp of blank) {
+        splitIds.add(sp.subId);
+        messages.push(
+          `${options.find((o) => o.id === sp.subId)?.name ?? "Split item"} — enter an amount.`,
+        );
+      }
+      if (blank.length === 0 && leftToSplit !== 0) {
+        messages.push(
+          leftToSplit > 0
+            ? `Splits are $${centsToDisplay(leftToSplit)} short of the $${centsToDisplay(totalCents)} total.`
+            : `Splits are $${centsToDisplay(-leftToSplit)} over the $${centsToDisplay(totalCents)} total.`,
+        );
+      }
+    }
+    return { messages, fields, splitIds };
+  }
+
+  const missingBudgetItem = errorFields.has("subcategory");
+  const missingAmount = errorFields.has("amount");
+  const missingAccount = errorFields.has("account");
+  const missingPayee = errorFields.has("payee");
+  const missingDate = errorFields.has("date");
+
   function handleFormAction(fd: FormData) {
+    const problems = validate(fd);
+    setErrors(problems.messages);
+    setErrorFields(problems.fields);
+    setErrorSplitIds(problems.splitIds);
+    if (problems.messages.length > 0) return;
     start(async () => {
+      // A split writes one transaction per item, each its own server round
+      // trip. If one throws — the payee or account lookup failing on a weak
+      // connection is the realistic case — stop and say so, naming how many
+      // already landed, instead of letting the rejection vanish and leaving
+      // the user staring at a modal that did half the work.
+      let saved = 0;
+      try {
       if (isEdit) {
         // Splits-on-edit: replace the original transaction with N new ones
         // that all share the same date/account/payee/memo but each get their
@@ -230,6 +320,7 @@ export function TransactionModal({
             sfd.set("subcategoryId", sp.subId);
             sfd.set("amount", (sp.amountCents / 100).toFixed(2));
             await addTransaction(sfd);
+            saved++;
           }
         } else if (splittingMode && splits.length === 1) {
           // Split flow settled back to a single item — update the existing
@@ -249,6 +340,7 @@ export function TransactionModal({
           sfd.set("subcategoryId", sp.subId);
           sfd.set("amount", (sp.amountCents / 100).toFixed(2));
           await addTransaction(sfd);
+          saved++;
         }
         if (fd.get("createAnother") === "on") {
           formRef.current?.reset();
@@ -257,6 +349,17 @@ export function TransactionModal({
         } else {
           onClose();
         }
+      }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        setErrors([
+          saved > 0
+            ? `Saved ${saved} of ${splits.length} items, then failed — ${detail}`
+            : `Couldn't save — ${detail}`,
+          "Nothing else was written. Check your connection and try again.",
+        ]);
+        setErrorFields(new Set());
+        setErrorSplitIds(new Set());
       }
     });
   }
@@ -281,6 +384,7 @@ export function TransactionModal({
             setSelectedAccountId(accountId);
             setSelectedBucketId("");
             setAccountPickerOpen(false);
+            clearErrors();
           }}
           onClose={() => setAccountPickerOpen(false)}
         />
@@ -327,7 +431,7 @@ export function TransactionModal({
 
           {/* Enter inside a text field used to trigger the browser's implicit
               submission, and the form's first submit button in tree order is
-              the footer's "Clear" — so a stray Enter in Merchant saved the
+              the footer's "Clear" — so a stray Enter in Payee saved the
               transaction, marked it cleared and closed the modal. Saving is a
               deliberate click on the footer button only. Fields that give
               Enter its own meaning (the amount inputs, the merchant
@@ -337,6 +441,12 @@ export function TransactionModal({
             id="tx-form"
             ref={formRef}
             action={handleFormAction}
+            // Native bubbles ("Please fill out this field") fire on the amount
+            // and date inputs before our own check runs, so half the missing
+            // fields were reported one way and half another. Turning the
+            // browser's validation off routes every reason through the single
+            // banner above the footer, which names the field.
+            noValidate
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
               const el = e.target as HTMLElement;
@@ -374,8 +484,12 @@ export function TransactionModal({
                     ? centsToDisplay(initialAmountCents)
                     : ""
                 }
-                onChangeCents={setTotalCents}
+                onChangeCents={(cents) => {
+                  setTotalCents(cents);
+                  clearErrors();
+                }}
                 forcedCents={convertedCents}
+                invalid={missingAmount}
               />
 
               {/* Budget item: single select for edit (unless the user opts
@@ -418,7 +532,10 @@ export function TransactionModal({
                   <button
                     type="button"
                     onClick={() => setPickerOpen(true)}
-                    className="w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className={
+                      "w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+                      (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
+                    }
                   >
                     {splits.length === 0
                       ? <span className="text-muted">Budget Items</span>
@@ -440,14 +557,17 @@ export function TransactionModal({
               )}
             </div>
 
-            {/* Account — full width, sits above Merchant/Date so the name has
+            {/* Account — full width, sits above Payee/Date so the name has
                 the whole row and isn't cut off on mobile. */}
             <div>
               <input type="hidden" name="accountId" value={selectedAccountId} className="sm:hidden" />
               <button
                 type="button"
                 onClick={() => setAccountPickerOpen(true)}
-                className="flex w-full items-center justify-between gap-2 rounded-xl bg-background px-3 py-2.5 text-left text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
+                className={
+                  "flex w-full items-center justify-between gap-2 rounded-xl bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand sm:hidden " +
+                  (missingAccount ? "ring-2 ring-negative" : "ring-1 ring-line")
+                }
               >
                 <span className={`min-w-0 flex-1 truncate ${selectedAccountId ? "text-foreground" : "text-muted"}`}>
                   {selectedAccountId
@@ -464,8 +584,12 @@ export function TransactionModal({
                 onChange={(e) => {
                   setSelectedAccountId(e.target.value);
                   setSelectedBucketId("");
+                  clearErrors();
                 }}
-                className="hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3"
+                className={
+                  "hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3 " +
+                  (missingAccount ? "ring-2 ring-negative" : "ring-1 ring-line")
+                }
               >
                 <option value="">Accounts</option>
                 {accountGroups.map((g) => (
@@ -483,9 +607,11 @@ export function TransactionModal({
               ) : null}
             </div>
 
-            {/* Merchant | Date */}
+            {/* Payee | Date */}
             <div className="grid grid-cols-[1fr_auto] items-start gap-2">
               <PayeeField
+                invalid={missingPayee}
+                onDirty={clearErrors}
                 placeholder={PAYEE_PLACEHOLDER[txType]}
                 defaultValue={editTx?.payee ?? initialPayee ?? ""}
                 payeeOptions={payeeOptions}
@@ -497,7 +623,11 @@ export function TransactionModal({
                 type="date"
                 required
                 defaultValue={defaultDate}
-                className="w-[9.5rem] rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm"
+                onChange={clearErrors}
+                className={
+                  "w-[9.5rem] rounded-xl bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm " +
+                  (missingDate ? "ring-2 ring-negative" : "ring-1 ring-line")
+                }
               />
             </div>
 
@@ -508,8 +638,10 @@ export function TransactionModal({
                 options={options}
                 leftToSplit={leftToSplit}
                 onRemove={(subId) => setSplits((prev) => prev.filter((sp) => sp.subId !== subId))}
+                invalidSubIds={errorSplitIds}
                 onAmountChange={(subId, cents) => {
                   setSplits((prev) => prev.map((sp) => sp.subId === subId ? { ...sp, amountCents: cents } : sp));
+                  clearErrors();
                 }}
                 onAddSplit={() => setPickerOpen(true)}
               />
@@ -546,6 +678,17 @@ export function TransactionModal({
         {/* Bottom action bar — flex-wrap so the right-side controls fall
             under the left group on narrow (mobile) widths instead of running
             off the edge, and everything shrinks a step tighter on mobile. */}
+        {errors.length > 0 ? (
+          <div
+            role="alert"
+            className="border-t border-negative/30 bg-negative/10 px-3 py-2 text-xs font-semibold text-negative"
+          >
+            {errors.map((msg) => (
+              <p key={msg}>{msg}</p>
+            ))}
+          </div>
+        ) : null}
+
         <div className={"flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 border-t border-line px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]  " + HEADER_TINT[txType]}>
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
@@ -584,7 +727,7 @@ export function TransactionModal({
                 form="tx-form"
                 name="cleared"
                 value="on"
-                disabled={pending || splits.length === 0}
+                disabled={pending}
                 className="whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
               >
                 Clear
@@ -633,7 +776,7 @@ export function TransactionModal({
             <button
               type="submit"
               form="tx-form"
-              disabled={pending || ((!isEdit || splittingMode) && splits.length === 0)}
+              disabled={pending}
               className={"rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
               {pending
@@ -660,6 +803,7 @@ function SplitRows({
   splits,
   options,
   leftToSplit,
+  invalidSubIds,
   onRemove,
   onAmountChange,
   onAddSplit,
@@ -667,6 +811,7 @@ function SplitRows({
   splits: SplitEntry[];
   options: SubOption[];
   leftToSplit: number;
+  invalidSubIds: Set<string>;
   onRemove: (subId: string) => void;
   onAmountChange: (subId: string, cents: number) => void;
   onAddSplit: () => void;
@@ -686,7 +831,7 @@ function SplitRows({
               −
             </button>
             <span className="flex-1 truncate text-sm font-medium">{opt?.name ?? sp.subId}</span>
-            <div className="shrink-0">
+            <div className={"shrink-0 rounded-lg " + (invalidSubIds.has(sp.subId) ? "ring-2 ring-negative" : "")}>
               <SplitAmountInput
                 amountCents={sp.amountCents}
                 onChange={(cents) => onAmountChange(sp.subId, cents)}
@@ -722,11 +867,13 @@ function AmountInput({
   defaultValue,
   onChangeCents,
   forcedCents,
+  invalid = false,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   defaultValue: string;
   onChangeCents: (cents: number) => void;
   forcedCents?: number | null;
+  invalid?: boolean;
 }) {
   const [raw, setRaw] = useState(defaultValue);
   const [focused, setFocused] = useState(false);
@@ -774,7 +921,7 @@ function AmountInput({
             const v = parseFloat(e.target.value);
             onChangeCents(isNaN(v) ? 0 : Math.round(v * 100));
           }}
-          className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${focused ? "pl-3" : "pl-7"}`}
+          className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-brand ${invalid ? "ring-2 ring-negative" : "ring-1 ring-line"} ${focused ? "pl-3" : "pl-7"}`}
         />
       </div>
     </div>
@@ -1095,12 +1242,16 @@ function PayeeField({
   payeeOptions,
   payeeLineItems = [],
   onMatch,
+  invalid = false,
+  onDirty,
 }: {
   placeholder: string;
   defaultValue: string;
   payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   onMatch?: (item: PayeeLineItem) => void;
+  invalid?: boolean;
+  onDirty?: () => void;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [open, setOpen] = useState(false);
@@ -1126,6 +1277,7 @@ function PayeeField({
 
   function select(name: string) {
     setValue(name);
+    onDirty?.();
     setOpen(false);
     setHighlighted(-1);
     const item = payeeLineItems.find((i) => i.name.toLowerCase() === name.toLowerCase());
@@ -1157,11 +1309,14 @@ function PayeeField({
         autoComplete="off"
         placeholder={placeholder}
         value={value}
-        onChange={(e) => { setValue(e.target.value); setOpen(e.target.value.trim().length > 0); setHighlighted(-1); }}
+        onChange={(e) => { setValue(e.target.value); onDirty?.(); setOpen(e.target.value.trim().length > 0); setHighlighted(-1); }}
         onFocus={() => { if (value.trim().length > 0) setOpen(true); }}
         onBlur={() => { setOpen(false); setHighlighted(-1); }}
         onKeyDown={handleKeyDown}
-        className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+        className={
+          "w-full rounded-xl bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+          (invalid ? "ring-2 ring-negative" : "ring-1 ring-line")
+        }
       />
       {open && value.trim().length > 0 && matches.length > 0 ? (
         <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">

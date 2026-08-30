@@ -688,14 +688,14 @@ export function AccountsBoard({
           <button
             type="button"
             onClick={() => setTransferOpen(true)}
-            className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
+            className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
           >
             Transfer Funds
           </button>
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="shrink-0 whitespace-nowrap rounded-lg bg-[color:var(--viz-income)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:brightness-110"
+            className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
           >
             Add account
           </button>
@@ -1174,10 +1174,10 @@ function CreditCardSection({
                 <button
                   type="button"
                   onClick={() => setShowOnlyFeeCards((v) => !v)}
-                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"}`}
                   title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
                 >
-                  Active fees <span className="tabular-nums text-amber-700 dark:text-amber-300">{formatMoney(feesPaid, currency)}/yr</span>
+                  Active fees <span className="tabular-nums text-negative">{formatMoney(feesPaid, currency)}/yr</span>
                 </button>
               ) : null}
               {feesAll > 0 ? (
@@ -1290,14 +1290,14 @@ function CreditCardSection({
               <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
                 {showOnlyHotelRedeem ? <section aria-hidden /> : (
                 <section>
-                  <div className="flex items-center gap-2.5 border-b border-line bg-background/60 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
                       </svg>
                     </span>
-                    <span className="text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
-                    <span className="rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
@@ -1309,15 +1309,15 @@ function CreditCardSection({
                 )}
                 {showOnlyTravelRedeem ? <section aria-hidden /> : (
                 <section>
-                  <div className="flex items-center gap-2.5 border-b border-line bg-background/60 px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 21V7l7-4v4h11v14" />
                         <path d="M7 10h.01M11 10h.01M15 14h.01M11 14h.01M7 14h.01M15 18h.01M11 18h.01M7 18h.01" />
                       </svg>
                     </span>
-                    <span className="text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
-                    <span className="rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
@@ -1337,8 +1337,8 @@ function CreditCardSection({
                         <path d="M2 10h20" />
                       </svg>
                     </span>
-                    <span className="text-sm font-bold text-foreground sm:text-base">Other Cards</span>
-                    <span className="rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Other Cards</span>
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
                       {otherCards.length} card{otherCards.length !== 1 ? "s" : ""}
                     </span>
                     <span className="ml-auto text-xs text-muted">Choose Travel or Hotel when editing a card.</span>
@@ -1584,14 +1584,18 @@ function CreditCardPanel({
               </span>
             ) : null}
             {card.annualFeeCents && !card.feeWaived ? (
-              <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-negative dark:bg-white/10">
                 ${Math.round(card.annualFeeCents / 100)}/yr
               </span>
             ) : null}
           </span>
           {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || d?.charging || (d && d.currentPoints > 0)) ? (
             <span className="mt-1 block space-y-1">
-            <span className="flex flex-wrap items-center gap-1.5 sm:flex-nowrap">
+            {/* Wraps at every width. `sm:flex-nowrap` used to force these onto
+                one line, and since each badge is whitespace-nowrap the row
+                overflowed its card — the right-hand column clipped
+                "35,000 pts Night Credit" mid-word. */}
+            <span className="flex flex-wrap items-center gap-1.5">
               {d && d.currentPoints > 0 ? (
                 <>
                   <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
@@ -1605,7 +1609,10 @@ function CreditCardPanel({
                 </>
               ) : null}
               {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
-                <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-indigo-500/15 px-1.5 py-0.5 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-500/30 dark:text-indigo-300">
+                <span
+                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-black/5 px-1.5 py-0.5 text-[11px] font-bold ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15"
+                  style={{ color: "var(--viz-savings)" }}
+                >
                   <span className="tabular-nums">
                     {d?.freeNightCreditCents
                       ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
@@ -1862,7 +1869,9 @@ function RewardActivityForm({
   );
 }
 
-type StatTone = "emerald" | "sky" | "teal" | "amber" | "orange" | "rose" | "slate";
+// No amber/orange: stat tiles are a data surface, and those two are
+// off-limits there (see AGENTS.md).
+type StatTone = "emerald" | "sky" | "teal" | "rose" | "slate";
 const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; value: string; activeBg: string }> = {
   slate: {
     bg: "bg-slate-500/10",
@@ -1891,20 +1900,6 @@ const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; va
     label: "text-teal-700 dark:text-teal-400",
     value: "text-teal-700 dark:text-teal-300",
     activeBg: "bg-teal-500/25",
-  },
-  amber: {
-    bg: "bg-amber-500/10",
-    ring: "ring-amber-500/30",
-    label: "text-amber-700 dark:text-amber-400",
-    value: "text-amber-700 dark:text-amber-300",
-    activeBg: "bg-amber-500/25",
-  },
-  orange: {
-    bg: "bg-orange-500/10",
-    ring: "ring-orange-500/30",
-    label: "text-orange-700 dark:text-orange-400",
-    value: "text-orange-700 dark:text-orange-300",
-    activeBg: "bg-orange-500/25",
   },
   rose: {
     bg: "bg-rose-500/10",

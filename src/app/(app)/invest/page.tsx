@@ -2,6 +2,7 @@ import { captureSnapshots } from "@/lib/snapshots";
 import { InvestBoard, type InvestAccount, type BucketRow, type InvestmentImportView, type YearCell } from "./invest-board";
 import { getSessionContext } from "@/lib/auth-context";
 import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Investments · Capitall" };
 
@@ -16,12 +17,12 @@ export default async function InvestPage() {
   await captureSnapshots(supabase, household.id);
 
   const [
-    { data: accountRows },
-    { data: bucketRows },
-    { data: accSnaps },
-    { data: contribRows },
-    { data: yearRows },
-    { data: bankingRows },
+    { data: accountRows, error: accountRowsError },
+    { data: bucketRows, error: bucketRowsError },
+    { data: accSnaps, error: accSnapsError },
+    { data: contribRows, error: contribRowsError },
+    { data: yearRows, error: yearRowsError },
+    { data: bankingRows, error: bankingRowsError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -58,6 +59,7 @@ export default async function InvestPage() {
       .order("sort_order")
       .order("name"),
   ]);
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, accSnaps: accSnapsError, contribRows: contribRowsError, yearRows: yearRowsError, bankingRows: bankingRowsError });
 
   const accounts = accountRows ?? [];
   const investIds = new Set(accounts.map((a) => a.id));
@@ -223,15 +225,16 @@ export default async function InvestPage() {
 
   const destAccounts = (bankingRows ?? []).map((a) => ({ id: a.id, name: a.name }));
 
-  const { data: importBatches } = await supabase
+  const { data: importBatches, error: importBatchesError } = await supabase
     .from("investment_import_batches")
     .select("id, account_id, bucket_id, provider, import_kind, as_of_date, source_filename, row_count, created_at")
     .eq("household_id", household.id)
     .order("created_at", { ascending: false })
     .limit(12);
+  throwIfAny({ importBatches: importBatchesError });
 
   const batchIds = (importBatches ?? []).map((batch) => batch.id);
-  const [{ data: positionRows }, { data: performanceRows }] = batchIds.length > 0
+  const [{ data: positionRows, error: positionRowsError }, { data: performanceRows, error: performanceRowsError }] = batchIds.length > 0
     ? await Promise.all([
       supabase
         .from("investment_position_snapshots")
@@ -249,6 +252,7 @@ export default async function InvestPage() {
         .limit(2000),
     ])
     : [{ data: [] }, { data: [] }];
+  throwIfAny({ positionRows: positionRowsError, performanceRows: performanceRowsError });
 
   const accountNameById = new Map(accounts.map((account) => [account.id, account.name]));
   const bucketNameById = new Map((bucketRows ?? []).map((bucket) => [bucket.id, bucket.name]));

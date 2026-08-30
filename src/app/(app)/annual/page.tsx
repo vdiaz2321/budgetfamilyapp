@@ -14,6 +14,7 @@ import {
   type BreakdownKind,
 } from "./annual-breakdown-history";
 import { ScrollToTop } from "@/components/scroll-to-top";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Annual Overview · Capitall" };
 
@@ -73,15 +74,15 @@ export default async function AnnualOverviewPage({
   const liveRangeEnd = `${currentYear}-12-31`;
 
   const [
-    { data: subs },
-    { data: plans },
-    { data: actuals },
-    { data: breakdownRows },
+    { data: subs, error: subsError },
+    { data: plans, error: plansError },
+    { data: actuals, error: actualsError },
+    { data: breakdownRows, error: breakdownRowsError },
     liveTxRows,
-    { data: investmentContributionRows },
-    { data: investmentAccounts },
-    { data: investmentBuckets },
-    { data: payees },
+    { data: investmentContributionRows, error: investmentContributionRowsError },
+    { data: investmentAccounts, error: investmentAccountsError },
+    { data: investmentBuckets, error: investmentBucketsError },
+    { data: payees, error: payeesError },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -143,6 +144,7 @@ export default async function AnnualOverviewPage({
       .select("id, name")
       .eq("household_id", household.id),
   ]);
+  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, breakdownRows: breakdownRowsError, investmentContributionRows: investmentContributionRowsError, investmentAccounts: investmentAccountsError, investmentBuckets: investmentBucketsError, payees: payeesError });
 
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),

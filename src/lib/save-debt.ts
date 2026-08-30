@@ -68,12 +68,16 @@ export async function saveDebt(
     account_id: string | null;
   };
 
-  const { data } = await supabase
+  // `existing` is the whole preservation rule below (see `keep`): every field
+  // the caller omits is carried forward from this row. A swallowed error would
+  // reset all of them — term, APR, escrow, notes — to their fallbacks at once.
+  const { data, error: existingError } = await supabase
     .from("debts")
     .select("paid_off_at, original_balance_cents, target_payment_cents, escrow_cents, term_months, loan_start_date, interest_method, tracking_enabled, due_day, debt_kind, notes, promo_apr_ends_on, post_promo_apr, account_id")
     .eq("subcategory_id", input.subcategoryId)
     .eq("household_id", householdId)
     .maybeSingle();
+  if (existingError) throw new Error(`Could not read the existing debt: ${existingError.message}`);
   const existing = (data ?? null) as StoredDebt | null;
 
   const balanceCents = Math.max(0, Math.round(input.balanceCents));

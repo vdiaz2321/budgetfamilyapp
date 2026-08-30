@@ -3,6 +3,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { resolveMonth } from "@/lib/month";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { TransactionsTable } from "./transactions-table";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Transactions · Capitall" };
 
@@ -70,7 +71,7 @@ export default async function TransactionsPage({
   };
   const transactionRowsPromise = loadTransactions();
 
-  const [{ data: subs }, txRows, { data: payees }, { data: accounts }, { data: buckets }, { data: subscriptions }, { data: irregularBills }, { data: planRows }, { data: actualRows }] =
+  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, { data: planRows, error: planRowsError }, { data: actualRows, error: actualRowsError }] =
     await Promise.all([
       supabase
         .from("subcategories")
@@ -120,6 +121,7 @@ export default async function TransactionsPage({
         .eq("household_id", household.id)
         .eq("month", month.firstOfMonth),
     ]);
+  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, planRows: planRowsError, actualRows: actualRowsError });
 
   const plannedBySub = new Map<string, number>(
     (planRows ?? []).map((p) => [p.subcategory_id as string, p.planned_cents ?? 0]),

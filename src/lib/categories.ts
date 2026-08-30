@@ -33,10 +33,13 @@ export const ensureCategories = cache(async (
   supabase: SupabaseClient,
   householdId: string,
 ): Promise<CategoryRow[]> => {
-  const { data: existing } = await supabase
+  // A failed read makes every system category look missing, and the block
+  // below then re-inserts all five.
+  const { data: existing, error: existingError } = await supabase
     .from("categories")
     .select("id, name, kind, sort_order, is_system")
     .eq("household_id", householdId);
+  if (existingError) throw new Error(`Could not read categories: ${existingError.message}`);
 
   const byKind = new Map((existing ?? []).filter((c) => c.is_system).map((c) => [c.kind, c]));
   const missing = CATEGORY_KINDS.filter((c) => !byKind.has(c.kind));
@@ -50,7 +53,7 @@ export const ensureCategories = cache(async (
   }
 
   if (missing.length) {
-    await supabase.from("categories").insert(
+    const { error: insertError } = await supabase.from("categories").insert(
       missing.map((c) => ({
         household_id: householdId,
         name: c.name,
@@ -59,13 +62,16 @@ export const ensureCategories = cache(async (
         is_system: true,
       })),
     );
+    if (insertError) throw new Error(`Could not create categories: ${insertError.message}`);
   }
 
-  const { data: fresh } = await supabase
+  const { data: fresh, error: freshError } = await supabase
     .from("categories")
     .select("id, name, kind, sort_order, is_system")
     .eq("household_id", householdId)
     .order("sort_order");
+  // Returning [] here renders a budget with no categories at all.
+  if (freshError) throw new Error(`Could not read categories: ${freshError.message}`);
 
   return (fresh ?? []) as CategoryRow[];
 });

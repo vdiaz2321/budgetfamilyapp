@@ -5,6 +5,7 @@ import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
 import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -29,19 +30,19 @@ export default async function BudgetPage({
   // batch. See the ROLLOVER comment further down for what the last two feed.
   const ROLLOVER_ANCHOR = "2026-01-01";
   const [
-    { data: subs },
-    { data: plans },
-    { data: actuals },
-    { data: goals },
-    { data: debts },
-    { data: txRows },
-    { data: payees },
-    { data: accounts },
-    { data: buckets },
-    { data: subscriptions },
-    { data: irregularBills },
+    { data: subs, error: subsError },
+    { data: plans, error: plansError },
+    { data: actuals, error: actualsError },
+    { data: goals, error: goalsError },
+    { data: debts, error: debtsError },
+    { data: txRows, error: txRowsError },
+    { data: payees, error: payeesError },
+    { data: accounts, error: accountsError },
+    { data: buckets, error: bucketsError },
+    { data: subscriptions, error: subscriptionsError },
+    { data: irregularBills, error: irregularBillsError },
     categories,
-    { data: rolloverRows },
+    { data: rolloverRows, error: rolloverRowsError },
     allActuals,
   ] = await Promise.all([
     supabase
@@ -135,6 +136,7 @@ export default async function BudgetPage({
         .range(from, to),
     ),
   ]);
+  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, rolloverRows: rolloverRowsError });
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
   // Last month's actual per item, for the "Prev Mo Spent" one-click prefill on

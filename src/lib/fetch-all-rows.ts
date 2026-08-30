@@ -17,11 +17,16 @@
 const PAGE_SIZE = 1000;
 
 export async function fetchAllRows<T>(
-  page: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error?: { message: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data } = await page(from, from + PAGE_SIZE - 1);
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    // A failed page used to read as `data: null` -> an empty page -> "shorter
+    // than PAGE_SIZE, so that was the last one", and the partial result was
+    // returned as if complete. Callers sum it and persist the total, which is
+    // the same silently-wrong balance this helper exists to prevent.
+    if (error) throw new Error(`Could not read all rows: ${error.message}`);
     const rows = data ?? [];
     all.push(...rows);
     if (rows.length < PAGE_SIZE) return all;

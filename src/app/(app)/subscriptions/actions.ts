@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
+import { unwrap } from "@/lib/supabase-result";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -12,11 +13,14 @@ async function requireHousehold() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
 
   return { supabase, householdId: profile.household_id };
@@ -38,11 +42,14 @@ async function syncSubscriptionsPlanned(
   householdId: string,
   subcategoryId: string,
 ) {
-  const { data: subs } = await supabase
+  // The total computed here is written straight to planned_cents, so a failed
+  // read would plan $0 for Subscriptions and show the row as fully overspent.
+  const { data: subs, error: subsError } = await supabase
     .from("subscriptions")
     .select("amount_cents, billing_cycle, is_active")
     .eq("household_id", householdId)
     .eq("is_active", true);
+  if (subsError) throw new Error(`Could not read subscriptions: ${subsError.message}`);
 
   const monthlyTotal = (subs ?? []).reduce((sum, s) => {
     let mo = s.amount_cents;
@@ -66,37 +73,49 @@ async function findOrCreateBillsSubcategory(
   householdId: string,
   name: "Subscriptions" | "Irregular Bills",
 ): Promise<string> {
-  const { data: billsCat } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("household_id", householdId)
-    .eq("kind", "bills")
-    .single();
+  const billsCat = unwrap(
+    await supabase
+      .from("categories")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("kind", "bills")
+      .single(),
+    "categories",
+  );
   if (!billsCat) throw new Error("Bills category not found");
 
-  const { data: existing } = await supabase
-    .from("subcategories")
-    .select("id")
-    .eq("household_id", householdId)
-    .eq("category_id", billsCat.id)
-    .ilike("name", name)
-    .maybeSingle();
+  const existing = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("category_id", billsCat.id)
+      .ilike("name", name)
+      .maybeSingle(),
+    "subcategories",
+  );
   if (existing) return existing.id;
 
-  const { data: maxRow } = await supabase
-    .from("subcategories")
-    .select("sort_order")
-    .eq("category_id", billsCat.id)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const maxRow = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("sort_order")
+      .eq("category_id", billsCat.id)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "subcategories",
+  );
   const nextSort = (maxRow?.sort_order ?? 0) + 1;
 
-  const { data: created } = await supabase
-    .from("subcategories")
-    .insert({ household_id: householdId, category_id: billsCat.id, name, sort_order: nextSort })
-    .select("id")
-    .single();
+  const created = unwrap(
+    await supabase
+      .from("subcategories")
+      .insert({ household_id: householdId, category_id: billsCat.id, name, sort_order: nextSort })
+      .select("id")
+      .single(),
+    "subcategories",
+  );
   if (!created) throw new Error(`Failed to create "${name}" subcategory`);
   return created.id;
 }
@@ -131,13 +150,16 @@ export async function upsertSubscription(formData: FormData) {
   if (id) {
     await supabase.from("subscriptions").update(row).eq("id", id).eq("household_id", householdId);
   } else {
-    const { data: maxRow } = await supabase
-      .from("subscriptions")
-      .select("sort_order")
-      .eq("household_id", householdId)
-      .order("sort_order", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const maxRow = unwrap(
+      await supabase
+        .from("subscriptions")
+        .select("sort_order")
+        .eq("household_id", householdId)
+        .order("sort_order", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      "subscriptions",
+    );
     await supabase.from("subscriptions").insert({ ...row, sort_order: (maxRow?.sort_order ?? 0) + 1 });
   }
   await syncSubscriptionsPlanned(supabase, householdId, subcategoryId);
@@ -161,12 +183,15 @@ export async function advanceSubscriptionRenewal(formData: FormData) {
   const id = String(formData.get("id") ?? "").trim();
   if (!id) return;
 
-  const { data: row } = await supabase
-    .from("subscriptions")
-    .select("next_renewal_date, billing_cycle")
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const row = unwrap(
+    await supabase
+      .from("subscriptions")
+      .select("next_renewal_date, billing_cycle")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "subscriptions",
+  );
   if (!row?.next_renewal_date) return;
 
   const [y, m, d] = row.next_renewal_date.split("-").map(Number);
@@ -279,12 +304,15 @@ export async function deleteIrregularBill(formData: FormData) {
 // user moves an item across multiple rows.
 export async function reorderSubscriptions(orderedIds: string[]) {
   const { supabase, householdId } = await requireHousehold();
-  const { data: rows } = await supabase
-    .from("subscriptions")
-    .select("id, sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order")
-    .order("name");
+  const rows = unwrap(
+    await supabase
+      .from("subscriptions")
+      .select("id, sort_order")
+      .eq("household_id", householdId)
+      .order("sort_order")
+      .order("name"),
+    "subscriptions",
+  );
   if (!rows) return;
 
   const knownIds = new Set(rows.map((row) => row.id));
@@ -306,12 +334,15 @@ export async function reorderSubscriptions(orderedIds: string[]) {
 
 export async function reorderIrregularBills(orderedIds: string[]) {
   const { supabase, householdId } = await requireHousehold();
-  const { data: rows } = await supabase
-    .from("irregular_bills")
-    .select("id, sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order")
-    .order("name");
+  const rows = unwrap(
+    await supabase
+      .from("irregular_bills")
+      .select("id, sort_order")
+      .eq("household_id", householdId)
+      .order("sort_order")
+      .order("name"),
+    "irregular_bills",
+  );
   if (!rows) return;
 
   const knownIds = new Set(rows.map((row) => row.id));
@@ -328,85 +359,5 @@ export async function reorderIrregularBills(orderedIds: string[]) {
         .eq("household_id", householdId),
     ),
   );
-  revalidate();
-}
-
-export async function reorderSubscription(id: string, direction: "up" | "down") {
-  const { supabase, householdId } = await requireHousehold();
-  const { data: rows } = await supabase
-    .from("subscriptions")
-    .select("id, sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order")
-    .order("name");
-  if (!rows) return;
-
-  // Normalize sort_orders (fix NULLs OR duplicates) so swaps always exchange
-  // distinct integers.
-  const seen = new Set<number>();
-  const hasDupOrNull = rows.some((r) => {
-    if (r.sort_order == null) return true;
-    if (seen.has(r.sort_order)) return true;
-    seen.add(r.sort_order);
-    return false;
-  });
-  if (hasDupOrNull) {
-    await Promise.all(
-      rows.map((r, i) =>
-        supabase.from("subscriptions").update({ sort_order: i + 1 }).eq("id", r.id),
-      ),
-    );
-    rows.forEach((r, i) => { r.sort_order = i + 1; });
-  }
-
-  const idx = rows.findIndex((r) => r.id === id);
-  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-  if (idx === -1 || swapIdx < 0 || swapIdx >= rows.length) return;
-
-  const a = rows[idx];
-  const b = rows[swapIdx];
-  await Promise.all([
-    supabase.from("subscriptions").update({ sort_order: b.sort_order }).eq("id", a.id),
-    supabase.from("subscriptions").update({ sort_order: a.sort_order }).eq("id", b.id),
-  ]);
-  revalidate();
-}
-
-export async function reorderIrregularBill(id: string, direction: "up" | "down") {
-  const { supabase, householdId } = await requireHousehold();
-  const { data: rows } = await supabase
-    .from("irregular_bills")
-    .select("id, sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order")
-    .order("name");
-  if (!rows) return;
-
-  const seenIB = new Set<number>();
-  const hasDupOrNullIB = rows.some((r) => {
-    if (r.sort_order == null) return true;
-    if (seenIB.has(r.sort_order)) return true;
-    seenIB.add(r.sort_order);
-    return false;
-  });
-  if (hasDupOrNullIB) {
-    await Promise.all(
-      rows.map((r, i) =>
-        supabase.from("irregular_bills").update({ sort_order: i + 1 }).eq("id", r.id),
-      ),
-    );
-    rows.forEach((r, i) => { r.sort_order = i + 1; });
-  }
-
-  const idx = rows.findIndex((r) => r.id === id);
-  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-  if (idx === -1 || swapIdx < 0 || swapIdx >= rows.length) return;
-
-  const a = rows[idx];
-  const b = rows[swapIdx];
-  await Promise.all([
-    supabase.from("irregular_bills").update({ sort_order: b.sort_order }).eq("id", a.id),
-    supabase.from("irregular_bills").update({ sort_order: a.sort_order }).eq("id", b.id),
-  ]);
   revalidate();
 }

@@ -10,6 +10,7 @@ import { adjustBucketBalance } from "@/lib/buckets";
 import { adjustDebtBalance } from "@/lib/debts";
 import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
+import { unwrap } from "@/lib/supabase-result";
 
 // The bucket a Savings subcategory contributes to, if any linked — null when
 // not a savings item or not linked, so callers can skip the bucket math.
@@ -18,12 +19,15 @@ async function getLinkedBucketId(
   householdId: string,
   subcategoryId: string,
 ): Promise<string | null> {
-  const { data } = await supabase
-    .from("subcategories")
-    .select("linked_bucket_id")
-    .eq("id", subcategoryId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const data = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("linked_bucket_id")
+      .eq("id", subcategoryId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "subcategories",
+  );
   return data?.linked_bucket_id ?? null;
 }
 
@@ -34,12 +38,15 @@ async function getLinkedAccountId(
   householdId: string,
   subcategoryId: string,
 ): Promise<string | null> {
-  const { data } = await supabase
-    .from("subcategories")
-    .select("linked_account_id")
-    .eq("id", subcategoryId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const data = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("linked_account_id")
+      .eq("id", subcategoryId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "subcategories",
+  );
   return (data as { linked_account_id?: string | null } | null)?.linked_account_id ?? null;
 }
 
@@ -54,18 +61,22 @@ async function adjustLinkedAccountBalance(
   accountId: string,
   deltaCents: number,
 ): Promise<boolean> {
-  const { data: account } = await supabase
+  const { data: account, error: accountError } = await supabase
     .from("accounts")
     .select("id, current_balance_cents")
     .eq("id", accountId)
     .eq("household_id", householdId)
     .maybeSingle();
+  if (accountError) throw new Error(`Could not read the linked account: ${accountError.message}`);
   if (!account) return false;
 
-  const { count } = await supabase
+  // A failed count is falsy, which would let a bucketed account fall through
+  // to the direct balance write below — same trap as adjustAccountLedger.
+  const { count, error: countError } = await supabase
     .from("buckets")
     .select("id", { count: "exact", head: true })
     .eq("account_id", accountId);
+  if (countError) throw new Error(`Could not check the account's buckets: ${countError.message}`);
   if (count) return false;
 
   await supabase
@@ -86,11 +97,14 @@ async function requireHousehold() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
 
   return { supabase, householdId: profile.household_id };
@@ -103,10 +117,13 @@ const CUSTOM_GROUP_KINDS = new Set(["bills", "expenses", "savings"]);
 // most page loads never open. Read-only, so no revalidate.
 export async function listPayees(): Promise<{ id: string; name: string }[]> {
   const { supabase, householdId } = await requireHousehold();
-  const { data } = await supabase
-    .from("payees")
-    .select("id, name")
-    .eq("household_id", householdId);
+  const data = unwrap(
+    await supabase
+      .from("payees")
+      .select("id, name")
+      .eq("household_id", householdId),
+    "payees",
+  );
   return data ?? [];
 }
 
@@ -118,13 +135,16 @@ export async function addCategoryGroup(formData: FormData): Promise<{ error?: st
   if (!name) return { error: "Enter a group name." };
   if (!CUSTOM_GROUP_KINDS.has(kind)) return { error: "Choose Bills, Expenses, or Savings." };
 
-  const { data: last } = await supabase
-    .from("categories")
-    .select("sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const last = unwrap(
+    await supabase
+      .from("categories")
+      .select("sort_order")
+      .eq("household_id", householdId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "categories",
+  );
 
   const { error } = await supabase.from("categories").insert({
     household_id: householdId,
@@ -169,20 +189,26 @@ export async function moveCategoryGroup(formData: FormData) {
   const direction = String(formData.get("direction") ?? "");
   if (!id || !["up", "down"].includes(direction)) return;
 
-  const { data: target } = await supabase
-    .from("categories")
-    .select("id, is_system")
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const target = unwrap(
+    await supabase
+      .from("categories")
+      .select("id, is_system")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "categories",
+  );
   if (!target || target.is_system) return;
 
-  const { data: categories } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("household_id", householdId)
-    .order("sort_order")
-    .order("name");
+  const categories = unwrap(
+    await supabase
+      .from("categories")
+      .select("id")
+      .eq("household_id", householdId)
+      .order("sort_order")
+      .order("name"),
+    "categories",
+  );
   const orderedIds = (categories ?? []).map((category) => category.id);
   const index = orderedIds.indexOf(id);
   const nextIndex = direction === "up" ? index - 1 : index + 1;
@@ -253,12 +279,15 @@ export async function coverOverspend(formData: FormData) {
   if (fromSubId === toSubId) return { error: "Pick a different category to move from." };
   if (amountCents <= 0) return { error: "Enter an amount above zero." };
 
-  const { data: plans } = await supabase
-    .from("budget_plans")
-    .select("subcategory_id, planned_cents")
-    .eq("household_id", householdId)
-    .eq("month", month)
-    .in("subcategory_id", [fromSubId, toSubId]);
+  const plans = unwrap(
+    await supabase
+      .from("budget_plans")
+      .select("subcategory_id, planned_cents")
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .in("subcategory_id", [fromSubId, toSubId]),
+    "budget_plans",
+  );
 
   const plannedOf = (id: string) =>
     (plans ?? []).find((p) => p.subcategory_id === id)?.planned_cents ?? 0;
@@ -295,13 +324,16 @@ export async function addToPlan(formData: FormData) {
   const addCents = moneyExpressionToCents(String(formData.get("addAmount") ?? "0"));
   if (!subcategoryId || !month || addCents <= 0) return { error: "Missing details." };
 
-  const { data: existing } = await supabase
+  // This read is the base of the number written back, so a swallowed error
+  // wouldn't add to the plan — it would REPLACE it with just `addCents`.
+  const { data: existing, error: existingError } = await supabase
     .from("budget_plans")
     .select("planned_cents")
     .eq("household_id", householdId)
     .eq("month", month)
     .eq("subcategory_id", subcategoryId)
     .maybeSingle();
+  if (existingError) return { error: "Couldn't read the current plan. Try again." };
 
   await supabase.from("budget_plans").upsert(
     {
@@ -334,24 +366,30 @@ export async function trimFromPlan(formData: FormData) {
   const trimCents = moneyExpressionToCents(String(formData.get("trimAmount") ?? "0"));
   if (!subcategoryId || !month || trimCents <= 0) return { error: "Missing details." };
 
-  const { data: existing } = await supabase
-    .from("budget_plans")
-    .select("planned_cents")
-    .eq("household_id", householdId)
-    .eq("month", month)
-    .eq("subcategory_id", subcategoryId)
-    .maybeSingle();
+  const existing = unwrap(
+    await supabase
+      .from("budget_plans")
+      .select("planned_cents")
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .eq("subcategory_id", subcategoryId)
+      .maybeSingle(),
+    "budget_plans",
+  );
 
   const planned = existing?.planned_cents ?? 0;
   if (planned < trimCents) return { error: "That item doesn't have that much planned." };
 
-  const { data: actual } = await supabase
-    .from("v_monthly_actuals")
-    .select("actual_cents")
-    .eq("household_id", householdId)
-    .eq("month", month)
-    .eq("subcategory_id", subcategoryId)
-    .maybeSingle();
+  const actual = unwrap(
+    await supabase
+      .from("v_monthly_actuals")
+      .select("actual_cents")
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .eq("subcategory_id", subcategoryId)
+      .maybeSingle(),
+    "v_monthly_actuals",
+  );
 
   const spent = actual?.actual_cents ?? 0;
   if (planned - trimCents < spent) {
@@ -410,12 +448,15 @@ export async function reassignPlanned(formData: FormData) {
     return { error: "Missing or invalid inputs" };
   }
 
-  const { data: existing } = await supabase
+  // Both plans are rewritten from this one read; losing it would zero the
+  // source item and overwrite the destination with just the moved amount.
+  const { data: existing, error: existingError } = await supabase
     .from("budget_plans")
     .select("subcategory_id, planned_cents")
     .eq("household_id", householdId)
     .eq("month", month)
     .in("subcategory_id", [fromSubId, toSubId]);
+  if (existingError) return { error: "Couldn't read the current plans. Try again." };
 
   const fromPlan = existing?.find((r) => r.subcategory_id === fromSubId)?.planned_cents ?? 0;
   const toPlan = existing?.find((r) => r.subcategory_id === toSubId)?.planned_cents ?? 0;
@@ -461,13 +502,16 @@ export async function addSubcategory(formData: FormData) {
   const dueDay = rawDue ? Math.min(31, Math.max(1, parseInt(rawDue, 10))) : null;
   const isRecurring = formData.get("isRecurring") === "on";
 
-  const { data: siblings } = await supabase
-    .from("subcategories")
-    .select("sort_order")
-    .eq("household_id", householdId)
-    .eq("category_id", categoryId)
-    .order("sort_order", { ascending: false })
-    .limit(1);
+  const siblings = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("sort_order")
+      .eq("household_id", householdId)
+      .eq("category_id", categoryId)
+      .order("sort_order", { ascending: false })
+      .limit(1),
+    "subcategories",
+  );
 
   const nextSort = (siblings?.[0]?.sort_order ?? -1) + 1;
 
@@ -507,32 +551,41 @@ export async function moveSubcategoryToGroup(formData: FormData): Promise<{ erro
   const targetCategoryId = String(formData.get("categoryId") ?? "");
   if (!subcategoryId || !targetCategoryId) return { error: "Choose a category group." };
 
-  const { data: subcategory } = await supabase
-    .from("subcategories")
-    .select("category_id")
-    .eq("id", subcategoryId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const subcategory = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("category_id")
+      .eq("id", subcategoryId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "subcategories",
+  );
   if (!subcategory || subcategory.category_id === targetCategoryId) return {};
 
-  const { data: categories } = await supabase
-    .from("categories")
-    .select("id, kind")
-    .eq("household_id", householdId)
-    .in("id", [subcategory.category_id, targetCategoryId]);
+  const categories = unwrap(
+    await supabase
+      .from("categories")
+      .select("id, kind")
+      .eq("household_id", householdId)
+      .in("id", [subcategory.category_id, targetCategoryId]),
+    "categories",
+  );
   const kindById = new Map((categories ?? []).map((category) => [category.id, category.kind]));
   if (!kindById.has(targetCategoryId) || kindById.get(subcategory.category_id) !== kindById.get(targetCategoryId)) {
     return { error: "Items can move only between groups of the same type." };
   }
 
-  const { data: last } = await supabase
-    .from("subcategories")
-    .select("sort_order")
-    .eq("household_id", householdId)
-    .eq("category_id", targetCategoryId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const last = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("sort_order")
+      .eq("household_id", householdId)
+      .eq("category_id", targetCategoryId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "subcategories",
+  );
 
   const { error } = await supabase
     .from("subcategories")
@@ -562,12 +615,15 @@ export async function addSubcategoriesBulk(
     .filter(Boolean);
   if (!categoryId || names.length === 0) return { added: 0, skipped: 0 };
 
-  const { data: existing } = await supabase
+  // This read is the duplicate check. Losing it makes every existing name look
+  // new, and the bulk add then inserts a second copy of each one.
+  const { data: existing, error: existingError } = await supabase
     .from("subcategories")
     .select("name, sort_order")
     .eq("household_id", householdId)
     .eq("category_id", categoryId)
     .order("sort_order", { ascending: false });
+  if (existingError) throw new Error(`Could not read existing items: ${existingError.message}`);
 
   const existingLower = new Set((existing ?? []).map((s) => s.name.toLowerCase()));
   let nextSort = (existing?.[0]?.sort_order ?? -1) + 1;
@@ -613,13 +669,16 @@ export async function updateSubcategory(formData: FormData) {
     if (!rawPaymentAccountId) {
       update.payment_account_id = null;
     } else {
-      const { data: account } = await supabase
+      const { data: account, error: accountError } = await supabase
         .from("accounts")
         .select("id")
         .eq("id", rawPaymentAccountId)
         .eq("household_id", householdId)
         .in("kind", ["checking", "savings_bucket", "cash", "credit_card"])
         .maybeSingle();
+      // Falling back to null here would silently unlink the payment account
+      // the user just picked, on what they think is a rename.
+      if (accountError) throw new Error(`Could not verify the payment account: ${accountError.message}`);
       update.payment_account_id = account?.id ?? null;
     }
   }
@@ -635,11 +694,14 @@ export async function updateSubcategory(formData: FormData) {
   // sync, the "Due this week" strip and the Subscriptions page keep showing
   // the old due date because they read next_renewal_date, not due_day.
   if (dueDay != null) {
-    const { data: subs } = await supabase
-      .from("subscriptions")
-      .select("id, next_renewal_date")
-      .eq("household_id", householdId)
-      .eq("subcategory_id", id);
+    const subs = unwrap(
+      await supabase
+        .from("subscriptions")
+        .select("id, next_renewal_date")
+        .eq("household_id", householdId)
+        .eq("subcategory_id", id),
+      "subscriptions",
+    );
     for (const sub of subs ?? []) {
       if (!sub.next_renewal_date) continue;
       const [y, m] = sub.next_renewal_date.split("-").map(Number);
@@ -720,20 +782,25 @@ export async function updateSavingsLink(formData: FormData) {
 
   if (raw.startsWith("account:")) {
     const candidate = raw.slice("account:".length);
-    const { data: account } = await supabase
+    // Both branches feed the update below, which writes BOTH columns — so a
+    // swallowed error unlinks the savings goal from its bucket/account and the
+    // item just stops tracking, with no sign anything went wrong.
+    const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("id")
       .eq("id", candidate)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (accountError) throw new Error(`Could not verify the account: ${accountError.message}`);
     accountId = account?.id ?? null;
   } else if (raw) {
-    const { data: bucket } = await supabase
+    const { data: bucket, error: bucketError } = await supabase
       .from("buckets")
       .select("id")
       .eq("id", raw)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
     bucketId = bucket?.id ?? null;
   }
 
@@ -778,24 +845,31 @@ export async function upsertDebt(formData: FormData) {
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   let accountId: string | null = null;
   if (accountIdRaw) {
-    const { data: account } = await supabase
+    // Same reasoning as resolvePayeeId: a failed lookup used to collapse to
+    // `null` and write an account-less row. Only a genuine "not in this
+    // household" answer is allowed to null it out.
+    const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("id")
       .eq("id", accountIdRaw)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (accountError) throw new Error(`Could not verify the account: ${accountError.message}`);
     accountId = account?.id ?? null;
   }
 
   // `paid_off_at` is stamped/cleared inside saveDebt, so a debt zeroed out here
   // still drops off the Snowball page next year without this action repeating
   // the rule.
-  const { data: existing } = await supabase
-    .from("debts")
-    .select("original_balance_cents")
-    .eq("subcategory_id", subcategoryId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const existing = unwrap(
+    await supabase
+      .from("debts")
+      .select("original_balance_cents")
+      .eq("subcategory_id", subcategoryId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "debts",
+  );
   // Seed the opening balance when the debt is first created here. Debts made
   // from Budget used to leave `original_balance_cents` at 0 forever — only the
   // Accounts editor set it — so Snowball's "principal paid" percentage was
@@ -873,18 +947,21 @@ export async function addTransaction(formData: FormData) {
   // — the linked bucket/account ids and the category's kind (via FK join),
   // so the follow-up helpers below can read them from memory instead of
   // firing three more sequential lookups (each ~150ms from Frankfurt/EU).
-  const { data: sub } = await supabase
-    .from("subcategories")
-    .select("category_id, name, linked_bucket_id, linked_account_id, categories(kind)")
-    .eq("id", subcategoryId)
-    .eq("household_id", householdId)
-    .maybeSingle<{
-      category_id: string;
-      name: string;
-      linked_bucket_id: string | null;
-      linked_account_id: string | null;
-      categories: { kind: string } | null;
-    }>();
+  const sub = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("category_id, name, linked_bucket_id, linked_account_id, categories(kind)")
+      .eq("id", subcategoryId)
+      .eq("household_id", householdId)
+      .maybeSingle<{
+        category_id: string;
+        name: string;
+        linked_bucket_id: string | null;
+        linked_account_id: string | null;
+        categories: { kind: string } | null;
+      }>(),
+    "subcategories",
+  );
   if (!sub) return;
 
   // Case-insensitive: "aldi" reuses the existing "Aldi" rather than creating a
@@ -894,12 +971,16 @@ export async function addTransaction(formData: FormData) {
   // Only attach the account if it belongs to this household.
   let accountId: string | null = null;
   if (accountIdRaw) {
-    const { data: account } = await supabase
+    // Same reasoning as resolvePayeeId: a failed lookup used to collapse to
+    // `null` and write an account-less row. Only a genuine "not in this
+    // household" answer is allowed to null it out.
+    const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("id")
       .eq("id", accountIdRaw)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (accountError) throw new Error(`Could not verify the account: ${accountError.message}`);
     accountId = account?.id ?? null;
   }
 
@@ -908,21 +989,27 @@ export async function addTransaction(formData: FormData) {
   // row automatically, while its transaction still posts to the single Bills
   // subcategory that Budget and Annual Overview already use.
   if (sub.name.toLowerCase() === "irregular bills" && payeeName) {
-    const { data: existingBill } = await supabase
-      .from("irregular_bills")
-      .select("id")
-      .eq("household_id", householdId)
-      .eq("subcategory_id", subcategoryId)
-      .ilike("name", payeeName)
-      .maybeSingle();
-    if (!existingBill) {
-      const { data: lastBill } = await supabase
+    const existingBill = unwrap(
+      await supabase
         .from("irregular_bills")
-        .select("sort_order")
+        .select("id")
         .eq("household_id", householdId)
-        .order("sort_order", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .eq("subcategory_id", subcategoryId)
+        .ilike("name", payeeName)
+        .maybeSingle(),
+      "irregular_bills",
+    );
+    if (!existingBill) {
+      const lastBill = unwrap(
+        await supabase
+          .from("irregular_bills")
+          .select("sort_order")
+          .eq("household_id", householdId)
+          .order("sort_order", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        "irregular_bills",
+      );
       await supabase.from("irregular_bills").insert({
         household_id: householdId,
         name: payeeName,
@@ -940,13 +1027,14 @@ export async function addTransaction(formData: FormData) {
   // path used by savings goals below.
   let directBucketId: string | null = null;
   if (bucketIdRaw && accountId) {
-    const { data: b } = await supabase
+    const { data: b, error: bucketError } = await supabase
       .from("buckets")
       .select("id")
       .eq("id", bucketIdRaw)
       .eq("account_id", accountId)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
     directBucketId = b?.id ?? null;
   }
 
@@ -1038,39 +1126,45 @@ export async function updateTransaction(formData: FormData) {
   // the old subcategory/amount/direction may differ from the new ones. Pull
   // the linked bucket/account ids for the OLD subcategory in the same round
   // trip via FK join, so the undo path doesn't need extra lookups.
-  const { data: prevTx } = await supabase
-    .from("transactions")
-    .select(
-      "subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal, subcategories(linked_bucket_id, linked_account_id), categories(kind)",
-    )
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .maybeSingle<{
-      subcategory_id: string;
-      category_id: string;
-      account_id: string | null;
-      bucket_id: string | null;
-      amount_cents: number;
-      is_withdrawal: boolean;
-      subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
-      categories: { kind: string } | null;
-    }>();
+  const prevTx = unwrap(
+    await supabase
+      .from("transactions")
+      .select(
+        "subcategory_id, category_id, account_id, bucket_id, amount_cents, is_withdrawal, subcategories(linked_bucket_id, linked_account_id), categories(kind)",
+      )
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle<{
+        subcategory_id: string;
+        category_id: string;
+        account_id: string | null;
+        bucket_id: string | null;
+        amount_cents: number;
+        is_withdrawal: boolean;
+        subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
+        categories: { kind: string } | null;
+      }>(),
+    "transactions",
+  );
 
   // New subcategory's category + link ids + kind, all in one query. The rest
   // of this action reads these fields from memory instead of firing three
   // more sequential lookups (getLinkedBucketId, getLinkedAccountId,
   // categoryKindOf) as it used to — the biggest source of save latency.
-  const { data: sub } = await supabase
-    .from("subcategories")
-    .select("category_id, linked_bucket_id, linked_account_id, categories(kind)")
-    .eq("id", subcategoryId)
-    .eq("household_id", householdId)
-    .maybeSingle<{
-      category_id: string;
-      linked_bucket_id: string | null;
-      linked_account_id: string | null;
-      categories: { kind: string } | null;
-    }>();
+  const sub = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("category_id, linked_bucket_id, linked_account_id, categories(kind)")
+      .eq("id", subcategoryId)
+      .eq("household_id", householdId)
+      .maybeSingle<{
+        category_id: string;
+        linked_bucket_id: string | null;
+        linked_account_id: string | null;
+        categories: { kind: string } | null;
+      }>(),
+    "subcategories",
+  );
   if (!sub) return;
   const prevLinkedBucketId = prevTx?.subcategories?.linked_bucket_id ?? null;
   const prevLinkedAccountId = prevTx?.subcategories?.linked_account_id ?? null;
@@ -1087,24 +1181,29 @@ export async function updateTransaction(formData: FormData) {
 
   let accountId: string | null = null;
   if (accountIdRaw) {
-    const { data: account } = await supabase
+    // Same reasoning as resolvePayeeId: a failed lookup used to collapse to
+    // `null` and write an account-less row. Only a genuine "not in this
+    // household" answer is allowed to null it out.
+    const { data: account, error: accountError } = await supabase
       .from("accounts")
       .select("id")
       .eq("id", accountIdRaw)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (accountError) throw new Error(`Could not verify the account: ${accountError.message}`);
     accountId = account?.id ?? null;
   }
 
   let directBucketId: string | null = null;
   if (bucketIdRaw && accountId) {
-    const { data: b } = await supabase
+    const { data: b, error: bucketError } = await supabase
       .from("buckets")
       .select("id")
       .eq("id", bucketIdRaw)
       .eq("account_id", accountId)
       .eq("household_id", householdId)
       .maybeSingle();
+    if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
     directBucketId = b?.id ?? null;
   }
 
@@ -1214,12 +1313,15 @@ export async function updateTransactionAmount(formData: FormData) {
   const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
   if (!id || amountCents <= 0) return;
 
-  const { data: tx } = await supabase
-    .from("transactions")
-    .select("occurred_on, amount_cents, memo, subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, is_withdrawal")
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const tx = unwrap(
+    await supabase
+      .from("transactions")
+      .select("occurred_on, amount_cents, memo, subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, is_withdrawal")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "transactions",
+  );
   if (!tx || tx.amount_cents === amountCents) return;
 
   if (tx.movement_type === "account_transfer") {
@@ -1328,12 +1430,15 @@ async function reverseMovementTransaction(
     // payCard also paid down any debt tracked against the card. Deleting the
     // payment puts that balance back on the debt.
     if (tx.paid_to_account_id) {
-      const { data: linkedDebt } = await supabase
-        .from("debts")
-        .select("subcategory_id")
-        .eq("household_id", householdId)
-        .eq("account_id", tx.paid_to_account_id)
-        .maybeSingle();
+      const linkedDebt = unwrap(
+        await supabase
+          .from("debts")
+          .select("subcategory_id")
+          .eq("household_id", householdId)
+          .eq("account_id", tx.paid_to_account_id)
+          .maybeSingle(),
+        "debts",
+      );
       if (linkedDebt?.subcategory_id) {
         await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, amount);
       }
@@ -1347,12 +1452,15 @@ async function reverseMovementTransaction(
     if (tx.bucket_id) {
       await adjustBucketBalance(supabase, householdId, tx.bucket_id, amount);
     } else if (tx.account_id) {
-      const { data: source } = await supabase
+      // Read-modify-write on a real balance: a lost read would persist
+      // `0 + amount` over the account's actual balance.
+      const { data: source, error: sourceError } = await supabase
         .from("accounts")
         .select("current_balance_cents")
         .eq("id", tx.account_id)
         .eq("household_id", householdId)
         .maybeSingle();
+      if (sourceError) throw new Error(`Could not read the source account: ${sourceError.message}`);
       await supabase
         .from("accounts")
         .update({
@@ -1364,12 +1472,13 @@ async function reverseMovementTransaction(
     }
     // Destination banking account was incremented on create — take it back.
     if (tx.paid_to_account_id) {
-      const { data: dest } = await supabase
+      const { data: dest, error: destError } = await supabase
         .from("accounts")
         .select("current_balance_cents")
         .eq("id", tx.paid_to_account_id)
         .eq("household_id", householdId)
         .maybeSingle();
+      if (destError) throw new Error(`Could not read the destination account: ${destError.message}`);
       await supabase
         .from("accounts")
         .update({
@@ -1390,12 +1499,15 @@ export async function deleteTransaction(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
-  const { data: tx } = await supabase
-    .from("transactions")
-    .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type")
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const tx = unwrap(
+    await supabase
+      .from("transactions")
+      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "transactions",
+  );
 
   if (tx?.movement_type === "account_transfer") {
     const { error } = await supabase.rpc("mutate_account_transfer", {
@@ -1600,22 +1712,28 @@ export async function copyPlansFromPreviousMonth(
   const prev = new Date(Date.UTC(y, m - 2, 1)); // JS month is 0-indexed; prev = m-2
   const prevMonth = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}-01`;
 
-  const { data: prevPlans } = await supabase
-    .from("budget_plans")
-    .select("subcategory_id, planned_cents")
-    .eq("household_id", householdId)
-    .eq("month", prevMonth);
+  const prevPlans = unwrap(
+    await supabase
+      .from("budget_plans")
+      .select("subcategory_id, planned_cents")
+      .eq("household_id", householdId)
+      .eq("month", prevMonth),
+    "budget_plans",
+  );
 
   const positivePrevPlans = (prevPlans ?? []).filter((p) => (p.planned_cents ?? 0) > 0);
   const candidateSubIds = positivePrevPlans.map((p) => p.subcategory_id as string);
   let paidOffDebtSubIds = new Set<string>();
   if (candidateSubIds.length > 0) {
-    const { data: paidOffDebts } = await supabase
-      .from("debts")
-      .select("subcategory_id")
-      .eq("household_id", householdId)
-      .in("subcategory_id", candidateSubIds)
-      .lte("current_balance_cents", 0);
+    const paidOffDebts = unwrap(
+      await supabase
+        .from("debts")
+        .select("subcategory_id")
+        .eq("household_id", householdId)
+        .in("subcategory_id", candidateSubIds)
+        .lte("current_balance_cents", 0),
+      "debts",
+    );
     paidOffDebtSubIds = new Set((paidOffDebts ?? []).map((debt) => debt.subcategory_id as string));
   }
 
@@ -1636,12 +1754,15 @@ export async function copyPlansFromPreviousMonth(
   const touchedSubIds = rows.map((r) => r.subcategory_id as string);
   let snapshot: Array<{ subcategory_id: string; planned_cents: number | null }> = [];
   if (touchedSubIds.length > 0) {
-    const { data: existing } = await supabase
-      .from("budget_plans")
-      .select("subcategory_id, planned_cents")
-      .eq("household_id", householdId)
-      .eq("month", month)
-      .in("subcategory_id", touchedSubIds);
+    const existing = unwrap(
+      await supabase
+        .from("budget_plans")
+        .select("subcategory_id, planned_cents")
+        .eq("household_id", householdId)
+        .eq("month", month)
+        .in("subcategory_id", touchedSubIds),
+      "budget_plans",
+    );
     const existingMap = new Map(
       (existing ?? []).map((e) => [e.subcategory_id as string, e.planned_cents as number | null]),
     );

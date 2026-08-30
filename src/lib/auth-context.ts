@@ -16,18 +16,22 @@ export const getSessionContext = cache(async () => {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id, display_name, avatar_url")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
 
-  const { data: household } = await supabase
+  const { data: household, error: householdError } = await supabase
     .from("households")
     .select("id, name, currency, snowball_monthly_extra_cents, snowball_start_date")
     .eq("id", profile.household_id)
     .single();
+  if (householdError) throw new Error(`Could not load your household: ${householdError.message}`);
   if (!household) redirect("/onboarding");
 
   return { supabase, user, profile, household };

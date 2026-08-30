@@ -5,16 +5,20 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { payeeKey, resolvePayeeIds } from "@/lib/payees";
+import { throwIfAny, unwrap } from "@/lib/supabase-result";
 
 async function requireHousehold() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
   return { supabase, householdId: profile.household_id as string };
 }
@@ -171,7 +175,14 @@ export async function previewImport(csvText: string): Promise<PreviewResult> {
   const { supabase, householdId } = await requireHousehold();
   const rows = parseCsvLines(csvText);
 
-  const [{ data: cats }, { data: subs }, { data: accts }] = await Promise.all([
+  // These three build the name -> id maps the whole import matches against.
+  // A swallowed error would leave them empty, and every row would then look
+  // unmapped — an import that silently skips everything.
+  const [
+    { data: cats, error: catsError },
+    { data: subs, error: subsError },
+    { data: accts, error: acctsError },
+  ] = await Promise.all([
     supabase.from("categories").select("id, name").eq("household_id", householdId),
     supabase
       .from("subcategories")
@@ -179,6 +190,7 @@ export async function previewImport(csvText: string): Promise<PreviewResult> {
       .eq("household_id", householdId),
     supabase.from("accounts").select("id, name").eq("household_id", householdId).eq("active", true),
   ]);
+  throwIfAny({ categories: catsError, subcategories: subsError, accounts: acctsError });
 
   const catByName = new Map((cats ?? []).map((c) => [c.name as string, c.id as string]));
   const subByKey = new Map<string, string>();
@@ -246,7 +258,14 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
   const { supabase, householdId } = await requireHousehold();
   const rows = parseCsvLines(csvText);
 
-  const [{ data: cats }, { data: subs }, { data: accts }] = await Promise.all([
+  // These three build the name -> id maps the whole import matches against.
+  // A swallowed error would leave them empty, and every row would then look
+  // unmapped — an import that silently skips everything.
+  const [
+    { data: cats, error: catsError },
+    { data: subs, error: subsError },
+    { data: accts, error: acctsError },
+  ] = await Promise.all([
     supabase.from("categories").select("id, name, kind").eq("household_id", householdId),
     supabase
       .from("subcategories")
@@ -254,6 +273,7 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
       .eq("household_id", householdId),
     supabase.from("accounts").select("id, name").eq("household_id", householdId).eq("active", true),
   ]);
+  throwIfAny({ categories: catsError, subcategories: subsError, accounts: acctsError });
 
   const catByName = new Map((cats ?? []).map((c) => [c.name as string, c.id as string]));
   const subByKey = new Map<string, string>();
@@ -271,13 +291,16 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
     if (subByKey.has(key)) continue;
     const categoryId = catByName.get(spec.category);
     if (!categoryId) continue;
-    const { data: siblings } = await supabase
-      .from("subcategories")
-      .select("sort_order")
-      .eq("household_id", householdId)
-      .eq("category_id", categoryId)
-      .order("sort_order", { ascending: false })
-      .limit(1);
+    const siblings = unwrap(
+      await supabase
+        .from("subcategories")
+        .select("sort_order")
+        .eq("household_id", householdId)
+        .eq("category_id", categoryId)
+        .order("sort_order", { ascending: false })
+        .limit(1),
+      "subcategories",
+    );
     const nextSort = (siblings?.[0]?.sort_order ?? -1) + 1;
     const { data: created, error } = await supabase
       .from("subcategories")

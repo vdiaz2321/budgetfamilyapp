@@ -7,18 +7,22 @@ export async function syncAccountFromBuckets(
   householdId: string,
   accountId: string,
 ) {
-  const { data: buckets } = await supabase
+  // A failed read used to look exactly like "this account has no buckets", so
+  // the account kept a stale total and quietly drifted from its buckets.
+  const { data: buckets, error: bucketsError } = await supabase
     .from("buckets")
     .select("balance_cents")
     .eq("account_id", accountId);
+  if (bucketsError) throw new Error(`Could not read the account's buckets: ${bucketsError.message}`);
   if (!buckets || buckets.length === 0) return;
 
   const sum = buckets.reduce((s, b) => s + (b.balance_cents ?? 0), 0);
-  await supabase
+  const { error: updateError } = await supabase
     .from("accounts")
     .update({ current_balance_cents: sum, updated_at: new Date().toISOString() })
     .eq("id", accountId)
     .eq("household_id", householdId);
+  if (updateError) throw new Error(`Could not sync the account total: ${updateError.message}`);
 }
 
 // Self-heals every account whose stored balance has drifted from its
@@ -27,10 +31,14 @@ export async function syncAllBucketedAccounts(
   supabase: SupabaseClient,
   householdId: string,
 ) {
-  const [{ data: accounts }, { data: buckets }] = await Promise.all([
+  const [{ data: accounts, error: accountsError }, { data: buckets, error: bucketsError }] = await Promise.all([
     supabase.from("accounts").select("id, current_balance_cents").eq("household_id", householdId),
     supabase.from("buckets").select("account_id, balance_cents").eq("household_id", householdId),
   ]);
+  // This is the self-heal pass — swallowing an error here meant the drift it
+  // exists to correct stayed uncorrected, silently.
+  if (accountsError) throw new Error(`Could not read accounts: ${accountsError.message}`);
+  if (bucketsError) throw new Error(`Could not read buckets: ${bucketsError.message}`);
   if (!accounts || !buckets || buckets.length === 0) return;
 
   const sums = new Map<string, number>();
@@ -64,21 +72,23 @@ export async function adjustBucketBalance(
   bucketId: string,
   deltaCents: number,
 ) {
-  const { data: bucket } = await supabase
+  const { data: bucket, error: bucketError } = await supabase
     .from("buckets")
     .select("id, account_id, balance_cents")
     .eq("id", bucketId)
     .eq("household_id", householdId)
     .maybeSingle();
+  if (bucketError) throw new Error(`Could not read the bucket: ${bucketError.message}`);
   if (!bucket) return;
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("buckets")
     .update({
       balance_cents: (bucket.balance_cents ?? 0) + deltaCents,
       updated_at: new Date().toISOString(),
     })
     .eq("id", bucket.id);
+  if (updateError) throw new Error(`Could not update the bucket balance: ${updateError.message}`);
 
   await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
 }

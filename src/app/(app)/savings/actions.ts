@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { displayToCents } from "@/lib/money";
 import { getSessionContext } from "@/lib/auth-context";
+import { unwrap } from "@/lib/supabase-result";
 
 /**
  * Edit the three goal fields the Savings page shows, from the Savings page.
@@ -31,12 +32,15 @@ export async function updateSavingsGoalFields(formData: FormData) {
     return { error: "Amounts can't be negative." };
   }
 
-  const { data: existing } = await supabase
-    .from("savings_goals")
-    .select("start_cents")
-    .eq("household_id", household.id)
-    .eq("subcategory_id", subcategoryId)
-    .maybeSingle();
+  const existing = unwrap(
+    await supabase
+      .from("savings_goals")
+      .select("start_cents")
+      .eq("household_id", household.id)
+      .eq("subcategory_id", subcategoryId)
+      .maybeSingle(),
+    "savings_goals",
+  );
 
   const { error } = await supabase.from("savings_goals").upsert(
     {

@@ -30,10 +30,15 @@ export async function resolvePayeeIds(
   const resolved = new Map<string, string>();
   if (wanted.size === 0) return resolved;
 
-  const { data: existing } = await supabase
+  // Errors here used to be discarded, so a dropped request on a phone made
+  // this return an empty map and the caller wrote the transaction with a NULL
+  // payee — silently, with no way to tell it apart from "no payee typed".
+  // Throw instead: a failed lookup must fail the save, not blank a field.
+  const { data: existing, error: existingError } = await supabase
     .from("payees")
     .select("id, name")
     .eq("household_id", householdId);
+  if (existingError) throw new Error(`Could not load payees: ${existingError.message}`);
   for (const row of existing ?? []) {
     const key = payeeKey(row.name as string);
     if (wanted.has(key)) resolved.set(key, row.id as string);
@@ -41,13 +46,14 @@ export async function resolvePayeeIds(
 
   const missing = [...wanted.entries()].filter(([key]) => !resolved.has(key));
   if (missing.length > 0) {
-    const { data: inserted } = await supabase
+    const { data: inserted, error: insertError } = await supabase
       .from("payees")
       .upsert(
         missing.map(([, name]) => ({ household_id: householdId, name })),
         { onConflict: "household_id,name" },
       )
       .select("id, name");
+    if (insertError) throw new Error(`Could not save payee: ${insertError.message}`);
     for (const row of inserted ?? []) resolved.set(payeeKey(row.name as string), row.id as string);
   }
 

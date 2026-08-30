@@ -10,7 +10,7 @@ import { currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } from "@/lib/buckets";
 import { adjustAccountLedger } from "@/lib/account-ledger";
 import { adjustDebtBalance } from "@/lib/debts";
-import { fetchAllRows } from "@/lib/fetch-all-rows";
+import { unwrap } from "@/lib/supabase-result";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
 // ordinary cards unless payoff tracking is explicitly enabled in Edit details.
@@ -23,11 +23,14 @@ async function requireHousehold() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("household_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  // A failed read is not "this user has no household" — redirecting on it
+  // would drop a signed-in user into onboarding and invite a second household.
+  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
   if (!profile) redirect("/onboarding");
 
   return { supabase, householdId: profile.household_id };
@@ -48,23 +51,29 @@ async function ensureDebtCategory(
   supabase: Awaited<ReturnType<typeof createClient>>,
   householdId: string,
 ) {
-  const { data: existing } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("household_id", householdId)
-    .eq("kind", "debt")
-    .order("sort_order")
-    .limit(1)
-    .maybeSingle();
+  const existing = unwrap(
+    await supabase
+      .from("categories")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("kind", "debt")
+      .order("sort_order")
+      .limit(1)
+      .maybeSingle(),
+    "categories",
+  );
   if (existing) return existing.id as string;
 
-  const { data: last } = await supabase
-    .from("categories")
-    .select("sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const last = unwrap(
+    await supabase
+      .from("categories")
+      .select("sort_order")
+      .eq("household_id", householdId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "categories",
+  );
   const { data, error } = await supabase
     .from("categories")
     .insert({ household_id: householdId, name: "Debt", kind: "debt", sort_order: (last?.sort_order ?? -1) + 1 })
@@ -94,34 +103,43 @@ async function ensurePayoffDebt(
     interestMethod: "monthly_estimate" | "statement_manual";
   },
 ) {
-  const { data: linked } = await supabase
-    .from("debts")
-    .select("id, subcategory_id, original_balance_cents")
-    .eq("household_id", householdId)
-    .eq("account_id", input.accountId)
-    .maybeSingle();
+  const linked = unwrap(
+    await supabase
+      .from("debts")
+      .select("id, subcategory_id, original_balance_cents")
+      .eq("household_id", householdId)
+      .eq("account_id", input.accountId)
+      .maybeSingle(),
+    "debts",
+  );
 
   let subcategoryId = linked?.subcategory_id as string | undefined;
   if (!subcategoryId) {
     const categoryId = await ensureDebtCategory(supabase, householdId);
-    const { data: sameName } = await supabase
-      .from("subcategories")
-      .select("id")
-      .eq("household_id", householdId)
-      .eq("category_id", categoryId)
-      .eq("name", input.name)
-      .maybeSingle();
+    const sameName = unwrap(
+      await supabase
+        .from("subcategories")
+        .select("id")
+        .eq("household_id", householdId)
+        .eq("category_id", categoryId)
+        .eq("name", input.name)
+        .maybeSingle(),
+      "subcategories",
+    );
     if (sameName) {
       subcategoryId = sameName.id as string;
     } else {
-      const { data: last } = await supabase
-        .from("subcategories")
-        .select("sort_order")
-        .eq("household_id", householdId)
-        .eq("category_id", categoryId)
-        .order("sort_order", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const last = unwrap(
+        await supabase
+          .from("subcategories")
+          .select("sort_order")
+          .eq("household_id", householdId)
+          .eq("category_id", categoryId)
+          .order("sort_order", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        "subcategories",
+      );
       const { data: inserted, error } = await supabase
         .from("subcategories")
         .insert({
@@ -201,13 +219,16 @@ export async function addAccount(formData: FormData) {
   if (!name) return { error: "Account name is required." };
   if (!ALLOWED_KINDS.includes(kind)) return { error: "Invalid account type." };
 
-  const { data: maxRow } = await supabase
-    .from("accounts")
-    .select("sort_order")
-    .eq("household_id", householdId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const maxRow = unwrap(
+    await supabase
+      .from("accounts")
+      .select("sort_order")
+      .eq("household_id", householdId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "accounts",
+  );
   const sortOrder = (maxRow?.sort_order ?? -1) + 1;
 
   // Banking accounts get their Checking/Savings badge set immediately from
@@ -431,74 +452,6 @@ export async function updateBalance(formData: FormData) {
   revalidate();
 }
 
-// Reconcile the account's balance from its transaction history — sums every
-// ledger delta on the account (income adds, everything else subtracts) and
-// sets current_balance_cents to that total. Assumes a starting balance of $0
-// (the current balance is discarded — call this only when you want a pure
-// rebuild from the tx log). Skipped for investment / bucketed accounts, which
-// aren't ledger-driven.
-export async function recalculateBalance(formData: FormData) {
-  const { supabase, householdId } = await requireHousehold();
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
-
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id, kind")
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .maybeSingle();
-  if (!account || account.kind === "investment") return;
-
-  const { count } = await supabase
-    .from("buckets")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", id);
-  if (count) return; // bucketed accounts already re-sum from buckets
-
-  // Paged: this sums an account's ENTIRE history and then writes the total
-  // back to current_balance_cents. PostgREST's 1000-row cap would silently
-  // truncate the sum on a heavily-used card and persist a wrong balance — a
-  // stored error rather than a display one.
-  const txs = await fetchAllRows<{ amount_cents: number; category_id: string }>((from, to) =>
-    supabase
-      .from("transactions")
-      .select("amount_cents, category_id")
-      .eq("household_id", householdId)
-      .eq("account_id", id)
-      .order("id")
-      .range(from, to),
-  );
-
-  // Cache category → kind lookups since many txs share categories.
-  const kindCache = new Map<string, string | null>();
-  let sum = 0;
-  for (const t of txs) {
-    let kind: string | null;
-    if (kindCache.has(t.category_id)) {
-      kind = kindCache.get(t.category_id) ?? null;
-    } else {
-      const { data: cat } = await supabase
-        .from("categories")
-        .select("kind")
-        .eq("id", t.category_id)
-        .maybeSingle();
-      kind = cat?.kind ?? null;
-      kindCache.set(t.category_id, kind);
-    }
-    sum += kind === "income" ? t.amount_cents : -t.amount_cents;
-  }
-
-  await supabase
-    .from("accounts")
-    .update({ current_balance_cents: sum, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("household_id", householdId);
-
-  await captureSnapshots(supabase, householdId, { force: true });
-  revalidate();
-}
-
 // Persist a manual drag/arrow reorder of a section's accounts. `orderedIds` is
 // that section's account ids in their new top-to-bottom order — only those
 // rows' sort_order changes, so other sections are untouched.
@@ -532,11 +485,14 @@ export async function deleteAccount(formData: FormData) {
 
   // Remove any linked payoff/loan debt (and its budget subcategory) so
   // the debts don't linger in Debt/Loans, Budget, and the sidebar totals.
-  const { data: linkedDebts } = await supabase
-    .from("debts")
-    .select("subcategory_id")
-    .eq("household_id", householdId)
-    .eq("account_id", id);
+  const linkedDebts = unwrap(
+    await supabase
+      .from("debts")
+      .select("subcategory_id")
+      .eq("household_id", householdId)
+      .eq("account_id", id),
+    "debts",
+  );
   const subIds = (linkedDebts ?? [])
     .map((d) => d.subcategory_id as string | null)
     .filter((s): s is string => !!s);
@@ -600,20 +556,24 @@ export async function upsertCardDetails(formData: FormData) {
   const accountId = String(formData.get("accountId") ?? "");
   if (!accountId) return { error: "Missing account." };
 
-  const { data: cardAccount } = await supabase
-    .from("accounts")
-    .select("id, name, kind")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const cardAccount = unwrap(
+    await supabase
+      .from("accounts")
+      .select("id, name, kind")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
   if (!cardAccount || cardAccount.kind !== "credit_card") return { error: "Card not found." };
 
-  const { data: existingDetails } = await supabase
+  const { data: existingDetails, error: existingDetailsError } = await supabase
     .from("credit_card_details")
     .select("debt_subcategory_id")
     .eq("account_id", accountId)
     .eq("household_id", householdId)
     .maybeSingle();
+  if (existingDetailsError) return { error: "Couldn't read the card's details. Try again." };
 
   const optText = (k: string) => {
     const v = String(formData.get(k) ?? "").trim();
@@ -647,12 +607,16 @@ export async function upsertCardDetails(formData: FormData) {
   // details column. Reading the column alone is what let the two drift apart:
   // when `debt_subcategory_id` was null but a debts row existed, the "off"
   // branch below silently did nothing and the debt stayed tracked forever.
-  const { data: existingLinkedDebt } = await supabase
+  const { data: existingLinkedDebt, error: existingLinkedDebtError } = await supabase
     .from("debts")
     .select("subcategory_id")
     .eq("household_id", householdId)
     .eq("account_id", accountId)
     .maybeSingle();
+  // Losing this read is the same failure the comment above describes, by
+  // another route: debtSubcategoryId falls to null, the "off" branch below
+  // skips the untrack, and the row is saved with the debt link erased.
+  if (existingLinkedDebtError) return { error: "Couldn't read the card's linked debt. Try again." };
   let debtSubcategoryId =
     (existingLinkedDebt?.subcategory_id as string | null) ??
     (existingDetails?.debt_subcategory_id as string | null) ??
@@ -765,12 +729,15 @@ export async function logCreditCardRewardActivity(formData: FormData) {
     return { error: "Enter a valid activity date." };
   }
 
-  const { data: details } = await supabase
-    .from("credit_card_details")
-    .select("current_points, free_night_credit_cents")
-    .eq("account_id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  const details = unwrap(
+    await supabase
+      .from("credit_card_details")
+      .select("current_points, free_night_credit_cents")
+      .eq("account_id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "credit_card_details",
+  );
   if (!details) return { error: "Card details were not found." };
 
   const pointsUsed = Math.max(0, Math.trunc(Number(String(formData.get("pointsUsed") ?? "0").replace(/,/g, "")) || 0));
@@ -819,124 +786,6 @@ export async function setCreditCardRewardActivityArchived(formData: FormData) {
   return { error: null };
 }
 
-
-// Surgical single-field update for the inline-edit UI on Accounts → Credit Cards.
-// Never touches other columns, so an empty save can't wipe adjacent data (which
-// upsertCardDetails would, since that action rewrites the whole row).
-export async function updateCardField(input: {
-  accountId: string;
-  field: string;
-  value: string;
-}): Promise<{ error?: string; ok?: true }> {
-  const { supabase, householdId } = await requireHousehold();
-  const { accountId, field, value } = input;
-  if (!accountId || !field) return { error: "Missing field." };
-
-  const { data: cardAccount } = await supabase
-    .from("accounts")
-    .select("id, kind")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
-  if (!cardAccount || cardAccount.kind !== "credit_card") return { error: "Card not found." };
-
-  const raw = value.trim();
-  const asCentsOrNull = () => (raw ? displayToCents(raw) : null);
-  const asIntOrNull = () => {
-    if (!raw) return null;
-    const n = parseInt(raw.replace(/,/g, ""), 10);
-    return Number.isFinite(n) ? n : null;
-  };
-  const asDateOrNull = () => (/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null);
-  const asTextOrNull = () => raw || null;
-  const asBool = () => raw === "true" || raw === "on" || raw === "1";
-
-  // Fields that live on the accounts table.
-  const accountUpdates: Record<string, unknown> = {};
-  switch (field) {
-    case "name":
-      if (!raw) return { error: "Card name is required." };
-      accountUpdates.name = raw;
-      break;
-    case "holder":
-      accountUpdates.holder = asTextOrNull();
-      break;
-    case "institution":
-      accountUpdates.institution = asTextOrNull();
-      break;
-    case "dateOpened":
-      accountUpdates.date_opened = asDateOrNull();
-      break;
-    case "dateClosed":
-      accountUpdates.date_closed = asDateOrNull();
-      break;
-    case "annualFee":
-      accountUpdates.annual_fee_cents = asCentsOrNull();
-      break;
-    case "feeWaived":
-      accountUpdates.fee_waived = asBool();
-      break;
-  }
-  if (Object.keys(accountUpdates).length > 0) {
-    const { error } = await supabase
-      .from("accounts")
-      .update({ ...accountUpdates, updated_at: new Date().toISOString() })
-      .eq("id", accountId)
-      .eq("household_id", householdId);
-    if (error) return { error: "Couldn't save — " + error.message };
-    revalidate();
-    return { ok: true };
-  }
-
-  // Fields that live on the credit_card_details table.
-  const detailUpdates: Record<string, unknown> = {};
-  switch (field) {
-    case "bank":
-      detailUpdates.bank = asTextOrNull();
-      break;
-    case "authUser":
-      detailUpdates.auth_user = asTextOrNull();
-      break;
-    case "charging":
-      detailUpdates.charging = asTextOrNull();
-      break;
-    case "currentPoints":
-      detailUpdates.current_points = asIntOrNull() ?? 0;
-      break;
-    case "spendingLimit":
-      detailUpdates.spending_limit_cents = asCentsOrNull();
-      break;
-    case "cardUrl":
-      detailUpdates.card_url = asTextOrNull();
-      break;
-    case "rewardsCategory":
-      detailUpdates.rewards_category = ["travel", "hotel"].includes(raw) ? raw : null;
-      break;
-    case "remarks":
-      detailUpdates.remarks = asTextOrNull();
-      break;
-    default:
-      return { error: `Unknown field: ${field}` };
-  }
-
-  // Upsert requires household_id + account_id since the row may not exist yet.
-  const { error } = await supabase
-    .from("credit_card_details")
-    .upsert(
-      {
-        account_id: accountId,
-        household_id: householdId,
-        ...detailUpdates,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "account_id" },
-    );
-  if (error) return { error: "Couldn't save — " + error.message };
-  revalidate();
-  return { ok: true };
-}
-
-
 // Pay a credit card: one transaction row that debits the source bank AND
 // (via paid_to_account_id) reduces the card's auto-computed "owed" tally.
 // For revolving cards with a linked debt subcategory, also lowers that debt.
@@ -984,12 +833,15 @@ export async function payCard(formData: FormData) {
   // VentureJ carried a live $1,968 debt row while its details flags said it
   // wasn't a payoff debt, so paying it here moved money out of the bank and
   // left the debt untouched.
-  const { data: linkedDebt } = await supabase
-    .from("debts")
-    .select("subcategory_id")
-    .eq("household_id", householdId)
-    .eq("account_id", cardId)
-    .maybeSingle();
+  const linkedDebt = unwrap(
+    await supabase
+      .from("debts")
+      .select("subcategory_id")
+      .eq("household_id", householdId)
+      .eq("account_id", cardId)
+      .maybeSingle(),
+    "debts",
+  );
   if (linkedDebt?.subcategory_id) {
     await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, -amountCents);
   }
@@ -1012,13 +864,16 @@ export async function addBucket(formData: FormData) {
   if (!accountId) return { error: "Missing account." };
   if (!name) return { error: "Bucket name is required." };
 
-  const { data: maxRow } = await supabase
-    .from("buckets")
-    .select("sort_order")
-    .eq("account_id", accountId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const maxRow = unwrap(
+    await supabase
+      .from("buckets")
+      .select("sort_order")
+      .eq("account_id", accountId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "buckets",
+  );
   const sortOrder = (maxRow?.sort_order ?? -1) + 1;
 
   const { error } = await supabase.from("buckets").insert({
@@ -1120,13 +975,16 @@ export async function updateBucketBalance(formData: FormData) {
 
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
 
-  const { data: bucket } = await supabase
-    .from("buckets")
-    .update({ balance_cents: balanceCents, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .select("account_id")
-    .single();
+  const bucket = unwrap(
+    await supabase
+      .from("buckets")
+      .update({ balance_cents: balanceCents, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .select("account_id")
+      .single(),
+    "buckets",
+  );
 
   if (bucket) await syncAccountFromBuckets(supabase, householdId, bucket.account_id);
   await captureSnapshots(supabase, householdId, { force: true });
@@ -1138,12 +996,15 @@ export async function deleteBucket(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
-  const { data: bucket } = await supabase
-    .from("buckets")
-    .select("account_id")
-    .eq("id", id)
-    .eq("household_id", householdId)
-    .single();
+  const bucket = unwrap(
+    await supabase
+      .from("buckets")
+      .select("account_id")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .single(),
+    "buckets",
+  );
 
   // bucket_snapshots cascade-delete with the bucket.
   await supabase

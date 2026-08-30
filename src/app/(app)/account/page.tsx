@@ -9,6 +9,7 @@ import {
   updateDisplayName,
 } from "./actions";
 import { DeleteAccountButton } from "./delete-account";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = {
   title: "Account · Capitall",
@@ -29,11 +30,12 @@ export default async function AccountPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("display_name, household_id, avatar_url")
     .eq("user_id", user.id)
     .maybeSingle();
+  throwIfAny({ profile: profileError });
 
   const memberCount = profile
     ? (await supabase

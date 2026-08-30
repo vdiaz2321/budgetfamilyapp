@@ -56,13 +56,16 @@ export async function accrueDebtInterest(
 ): Promise<AccrualResult> {
   const thisMonth = firstOfMonth(new Date());
 
-  const { data: debts } = await supabase
+  const { data: debts, error: debtsError } = await supabase
     .from("debts")
     .select("id, current_balance_cents, apr, interest_method, interest_accrued_through, interest_paid_cents")
     .eq("household_id", householdId)
     .eq("tracking_enabled", true)
     .gt("current_balance_cents", 0);
 
+  // A swallowed error looked like "no debts accrue interest", so the monthly
+  // accrual this function exists to apply was silently skipped.
+  if (debtsError) throw new Error(`Could not read debts: ${debtsError.message}`);
   if (!debts?.length) return { debtsTouched: 0, interestChargedCents: 0 };
 
   let debtsTouched = 0;

@@ -7,6 +7,7 @@ import { SnowballSettings } from "./snowball-settings";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { accrueDebtInterest } from "@/lib/debt-interest";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Debt/Loan Snowball · Capitall" };
 
@@ -25,7 +26,7 @@ export default async function SnowballPage() {
   // idempotent within a month — see lib/debt-interest.ts.
   await accrueDebtInterest(supabase, household.id);
 
-  const [{ data: debts }, { data: subs }, plans, { data: periodRows }, { data: debtSnapshotRows }] =
+  const [{ data: debts, error: debtsError }, { data: subs, error: subsError }, plans, { data: periodRows, error: periodRowsError }, { data: debtSnapshotRows, error: debtSnapshotRowsError }] =
     await Promise.all([
       supabase
         .from("debts")
@@ -70,6 +71,7 @@ export default async function SnowballPage() {
         .lt("month", month)
         .order("month"),
     ]);
+  throwIfAny({ debts: debtsError, subs: subsError, periodRows: periodRowsError, debtSnapshotRows: debtSnapshotRowsError });
 
   const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
   // Rows arrive oldest-first, so later months overwrite earlier ones and each
@@ -87,11 +89,12 @@ export default async function SnowballPage() {
   // row reflects what really happened rather than the projected schedule.
   const paidThisMonthBySub = new Map<string, number>();
   if (debtSubIds.length) {
-    const { data: paidRows } = await supabase
+    const { data: paidRows, error: paidRowsError } = await supabase
       .from("v_monthly_actuals")
       .select("subcategory_id, actual_cents, month")
       .eq("household_id", household.id)
       .in("subcategory_id", debtSubIds);
+    throwIfAny({ paidRows: paidRowsError });
     for (const r of paidRows ?? []) {
       paidBySub.set(r.subcategory_id, (paidBySub.get(r.subcategory_id) ?? 0) + r.actual_cents);
       if (r.month === month) {
@@ -110,7 +113,7 @@ export default async function SnowballPage() {
   let accountOptions: AccountOption[] = [];
   const accountKindById = new Map<string, string>();
   if (debtSubIds.length) {
-    const [{ data: txRows }, { data: payees }, { data: accounts }] = await Promise.all([
+    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }] = await Promise.all([
       supabase
         .from("transactions")
         .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal")
@@ -126,6 +129,7 @@ export default async function SnowballPage() {
         .eq("active", true)
         .order("name"),
     ]);
+    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError });
     const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
     const bankingKinds = new Set(["checking", "savings", "cash", "savings_bucket"]);
     accountOptions = (accounts ?? [])

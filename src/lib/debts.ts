@@ -18,12 +18,16 @@ export async function adjustDebtBalance(
 ): Promise<boolean> {
   if (!subcategoryId) return false;
 
-  const { data: debt } = await supabase
+  // Returning false on a failed read was indistinguishable from "this
+  // subcategory has no debt attached", so a payment posted and the debt
+  // balance stayed where it was.
+  const { data: debt, error: debtError } = await supabase
     .from("debts")
     .select("current_balance_cents, paid_off_at")
     .eq("subcategory_id", subcategoryId)
     .eq("household_id", householdId)
     .maybeSingle();
+  if (debtError) throw new Error(`Could not read the debt: ${debtError.message}`);
   if (!debt) return false;
 
   const newBalance = (debt.current_balance_cents ?? 0) + deltaCents;

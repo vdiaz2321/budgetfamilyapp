@@ -113,9 +113,15 @@ export function TransactionsTable({
   );
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
   const batchDelete = () => {
-    const ids = selectedTxs()
-      .filter((tx) => !tx.isCardPayment && !tx.isInvestmentTransfer)
-      .map((tx) => tx.id);
+    // Card payments and investment transfers used to be filtered out here, and
+    // their row delete was disabled too, which left them impossible to remove
+    // from anywhere in the app — they carry no subcategory, so the budget item
+    // panels never list them either. deleteTransaction already reverses both
+    // legs of a movement transaction (see reverseMovementTransaction); it just
+    // had no way to be called. Editing them stays blocked — only delete is
+    // allowed, which is what the original "delete and recreate it from the
+    // card" affordance did.
+    const ids = selectedTxs().map((tx) => tx.id);
     startBatch(async () => {
       for (const id of ids) {
         const fd = new FormData();
@@ -240,18 +246,44 @@ export function TransactionsTable({
     .reduce((sum, t) => sum + t.amountCents, 0);
   const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
 
-  const headerHidden = useHideOnScroll();
+  // The desktop table scrolls inside its own box (see the frozen header
+  // below), so the window barely moves — the toolbar has to react to THAT
+  // scroller, not the page, or it would never hide on a mouse wheel.
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const headerHidden = useHideOnScroll({ inner: tableScrollRef });
+
+  // Collapsing the toolbar has to give its height back to the table, so the
+  // table grows into the gap instead of leaving one. Measured rather than
+  // guessed: the filter row wraps at narrow widths and the summary card grows
+  // with the range, so a hard-coded offset would be wrong half the time.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [toolbarH, setToolbarH] = useState(0);
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    // offsetHeight, not contentRect — the toolbar has vertical padding, and a
+    // content-box measurement collapses it a few pixels short of its own box.
+    const ro = new ResizeObserver(() => setToolbarH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-2">
+    <div
+      className="mx-auto w-full max-w-7xl space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden"
+      style={{ "--tx-toolbar": `${toolbarH}px` } as React.CSSProperties}
+    >
       {/* Phone-only auto-hide: scrolling further down slides the month picker
           and the toolbar away so the list gets the screen; scrolling back up
           brings them straight back. Desktop pins it (md:translate-y-0) — there
           is room for both there, and a header that moves under a mouse wheel
           is just twitchy. */}
       <div
-        className={`sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm transition-transform duration-200 ease-out md:mx-0 md:translate-y-0 md:px-0 ${
-          headerHidden ? "-translate-y-full" : "translate-y-0"
+        ref={toolbarRef}
+        className={`sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm transition-[transform,margin-top] duration-200 ease-out md:static md:mx-0 md:translate-y-0 md:px-0 ${
+          headerHidden
+            ? "-translate-y-full md:mt-[calc(var(--tx-toolbar)*-1)]"
+            : "translate-y-0 md:mt-0"
         }`}
       >
       <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
@@ -516,11 +548,22 @@ export function TransactionsTable({
 
       </div>
 
-      <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
-        <div className="overflow-x-auto">
+      <section className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block md:mt-2 md:flex md:min-h-0 md:flex-1 md:flex-col dark:ring-white/10">
+        {/* Frozen column header. `position: sticky` resolves against the
+            nearest scroll container, and this div already is one — overflow-x
+            auto forces overflow-y to auto — so the header can only pin inside
+            it, never to the page. Giving the scroller its own viewport-sized
+            height is therefore what makes the freeze work: the rows scroll
+            under a pinned header instead of the whole table scrolling away.
+            (The section's own overflow-hidden, for the rounded corners, would
+            have blocked page-level sticky regardless.)
+            The offset leaves room for the sticky toolbar above; if that ever
+            wraps taller the table just gets a little shorter — it still
+            scrolls, nothing clips. */}
+        <div ref={tableScrollRef} className="max-h-[calc(100dvh-14rem)] min-h-[20rem] overflow-auto md:max-h-none md:h-full">
           <div className="min-w-[56.5rem]">
             {/* Header */}
-            <div className={`grid ${GRID} items-center gap-2 border-t border-b border-line px-4 py-2.5`}>
+            <div className={`sticky top-0 z-10 grid ${GRID} items-center gap-2 border-b border-line bg-surface px-4 py-2.5`}>
               <button
                 type="button"
                 onClick={cycleDateSort}
@@ -834,7 +877,7 @@ function TxLine({
         <input type="hidden" name="id" value={tx.id} />
         <button
           type="submit"
-          disabled={delPending || !canEdit}
+          disabled={delPending}
           title="Delete transaction"
           aria-label="Delete transaction"
           className="flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 transition hover:bg-negative/10 hover:text-negative group-hover:opacity-100 disabled:opacity-40"
@@ -884,8 +927,11 @@ function TxCard({
   const THRESH = 72;
   const MAX = 96;
 
+  // Gated on selectMode only: the left swipe deletes and the right swipe
+  // toggles Cleared, and both are available for these rows on desktop.
+  // Tapping to EDIT is still blocked below via `canEdit`.
   const onTouchStart = (e: React.TouchEvent) => {
-    if (selectMode || !canEdit) return;
+    if (selectMode) return;
     startX.current = e.touches[0].clientX;
     startY.current = e.touches[0].clientY;
     direction.current = null;
@@ -893,7 +939,7 @@ function TxCard({
     setDragging(true);
   };
   const onTouchMove = (e: React.TouchEvent) => {
-    if (selectMode || !canEdit || startX.current === 0) return;
+    if (selectMode || startX.current === 0) return;
     const rawX = e.touches[0].clientX - startX.current;
     const rawY = e.touches[0].clientY - startY.current;
     if (direction.current === null) {
@@ -904,7 +950,7 @@ function TxCard({
     setDx(Math.max(-MAX, Math.min(MAX, rawX)));
   };
   const onTouchEnd = () => {
-    if (selectMode || !canEdit) return;
+    if (selectMode) return;
     if (dx <= -THRESH) {
       setDx(-MAX);
       setCommitted(true);

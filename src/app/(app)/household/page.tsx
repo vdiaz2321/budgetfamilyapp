@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { CopyCodeButton } from "./copy-code-button";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Household · Capitall" };
 
 export default async function HouseholdPage() {
   const supabase = await createClient();
-  const { data: code } = await supabase.rpc("get_or_create_invite_code");
+  const { data: code, error: codeError } = await supabase.rpc("get_or_create_invite_code");
+  throwIfAny({ code: codeError });
 
   return (
     <div className="mx-auto max-w-xl">

@@ -2,6 +2,7 @@ import { currentMonthFirst } from "@/lib/snapshots";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
 import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
+import { throwIfAny } from "@/lib/supabase-result";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
 function monthsBefore(firstOfMonth: string, n: number): string {
@@ -25,15 +26,15 @@ export default async function AccountsPage() {
   const prev2Month = monthsBefore(currentMonth, 2);
 
   const [
-    { data: rows },
-    { data: bucketRows },
-    { data: debtRows },
-    { data: subRows },
+    { data: rows, error: rowsError },
+    { data: bucketRows, error: bucketRowsError },
+    { data: debtRows, error: debtRowsError },
+    { data: subRows, error: subRowsError },
     { data: cardDetailRowsInitial, error: cardDetailsError },
     { data: rewardActivityRowsInitial, error: rewardActivitiesError },
-    { data: acctSnapshotRows },
-    { data: bktSnapshotRows },
-    { data: debtSnapshotRows },
+    { data: acctSnapshotRows, error: acctSnapshotRowsError },
+    { data: bktSnapshotRows, error: bktSnapshotRowsError },
+    { data: debtSnapshotRows, error: debtSnapshotRowsError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -88,6 +89,7 @@ export default async function AccountsPage() {
       .select("subcategory_id, month, balance_cents")
       .eq("household_id", household.id),
   ]);
+  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError });
 
   // Keep the Accounts page usable before the user applies the new SQL in
   // Supabase. The existing rewards columns remain fully supported.
@@ -211,7 +213,7 @@ export default async function AccountsPage() {
     // is one row per card, so this costs the same at 900 transactions or
     // 900,000 — and it can't be silently truncated by the 1000-row response
     // cap the way the old client-side tally was.
-    const [{ data: balanceRows }, { data: monthRows }] = await Promise.all([
+    const [{ data: balanceRows, error: balanceRowsError }, { data: monthRows, error: monthRowsError }] = await Promise.all([
       supabase
         .from("v_card_balances")
         .select("account_id, owed_cents")
@@ -222,6 +224,7 @@ export default async function AccountsPage() {
         .eq("household_id", household.id)
         .eq("month", firstOfMonth),
     ]);
+    throwIfAny({ balanceRows: balanceRowsError, monthRows: monthRowsError });
     for (const r of balanceRows ?? []) {
       cardOwed.set(r.account_id as string, (r.owed_cents as number) ?? 0);
     }

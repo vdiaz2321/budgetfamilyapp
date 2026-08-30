@@ -5,6 +5,7 @@ import { MobileHeaderMenu } from "./mobile-header-menu";
 import type { SidebarGroup } from "./sidebar-accounts";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
+import { throwIfAny } from "@/lib/supabase-result";
 
 export default async function AppLayout({
   children,
@@ -21,7 +22,13 @@ export default async function AppLayout({
   const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [{ data: accounts }, { data: buckets }, { data: debts }, { data: subs }, { count: txCount }] =
+  const [
+    { data: accounts, error: accountsError },
+    { data: buckets, error: bucketsError },
+    { data: debts, error: debtsError },
+    { data: subs, error: subsError },
+    { count: txCount, error: txCountError },
+  ] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -44,6 +51,15 @@ export default async function AppLayout({
         .gte("occurred_on", monthStart)
         .lt("occurred_on", monthEnd),
     ]);
+  // The sidebar's balances and Net Worth pill come from these — a swallowed
+  // error would show them as $0 on every page.
+  throwIfAny({
+    accounts: accountsError,
+    buckets: bucketsError,
+    debts: debtsError,
+    subs: subsError,
+    transactionCount: txCountError,
+  });
 
   const subName = new Map((subs ?? []).map((s) => [s.id, s.name]));
 

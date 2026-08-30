@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { throwIfAny } from "./supabase-result";
 
 // First day of the current month as YYYY-MM-01 (local time).
 export function currentMonthFirst(): string {
@@ -36,7 +37,7 @@ export async function captureSnapshots(
   // A 5-minute window is long enough to collapse rapid navigation and short
   // enough that month-rollover always captures on the first visit.
   if (!options.force) {
-    const { data: fresh } = await supabase
+    const { data: fresh, error: freshError } = await supabase
       .from("account_snapshots")
       .select("updated_at")
       .eq("household_id", householdId)
@@ -44,13 +45,21 @@ export async function captureSnapshots(
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (freshError) throw new Error(`Could not check snapshot freshness: ${freshError.message}`);
     if (fresh?.updated_at) {
       const ageMs = Date.now() - new Date(fresh.updated_at).getTime();
       if (ageMs < 5 * 60 * 1000) return;
     }
   }
 
-  const [{ data: accounts }, { data: debts }, { data: buckets }] = await Promise.all([
+  // Each upsert below is guarded by `?.length`, so a swallowed error skipped
+  // that snapshot type and left the month showing a stale balance — the exact
+  // failure described at the top of this function, by another route.
+  const [
+    { data: accounts, error: accountsError },
+    { data: debts, error: debtsError },
+    { data: buckets, error: bucketsError },
+  ] = await Promise.all([
     supabase
       .from("accounts")
       .select("id, kind, current_balance_cents")
@@ -65,6 +74,7 @@ export async function captureSnapshots(
       .select("id, account_id, balance_cents")
       .eq("household_id", householdId),
   ]);
+  throwIfAny({ accounts: accountsError, debts: debtsError, buckets: bucketsError });
 
   if (accounts?.length) {
     await supabase.from("account_snapshots").upsert(
