@@ -19,6 +19,7 @@ export default async function BudgetPage({
   const { month: monthParam } = await searchParams;
   const month = resolveMonth(monthParam);
   const nextFirst = `${month.nextKey}-01`;
+  const prevFirstOfMonth = `${month.prevKey}-01`;
 
   const { supabase, household } = await getSessionContext();
   const snowballExtraCents = household.snowball_monthly_extra_cents ?? 0;
@@ -44,6 +45,7 @@ export default async function BudgetPage({
     categories,
     { data: rolloverRows, error: rolloverRowsError },
     allActuals,
+    { data: prevTxRows, error: prevTxRowsError },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -135,15 +137,28 @@ export default async function BudgetPage({
         .order("subcategory_id")
         .range(from, to),
     ),
+    // Last month's account + payee per item, for the "Prev Mo Spent" prefill.
+    // The main txRows fetch above is scoped to the *viewed* month and
+    // v_monthly_actuals carries only summed amounts, so neither can supply
+    // this — hence its own read, narrowed to the three columns the prefill
+    // needs. Ordered newest-first so the first row seen per subcategory is
+    // the one to copy forward.
+    supabase
+      .from("transactions")
+      .select("subcategory_id, account_id, payee_id")
+      .eq("household_id", household.id)
+      .gte("occurred_on", prevFirstOfMonth)
+      .lt("occurred_on", month.firstOfMonth)
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false }),
   ]);
-  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, rolloverRows: rolloverRowsError });
+  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, rolloverRows: rolloverRowsError, prevTxRows: prevTxRowsError });
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
   // Last month's actual per item, for the "Prev Mo Spent" one-click prefill on
   // recurring items. Free: allActuals is already fetched above for the
   // rollover walk and spans every month back to the anchor, so this is a
   // filter over data in hand rather than another round-trip.
-  const prevFirstOfMonth = `${month.prevKey}-01`;
   const prevSpentBySub = new Map<string, number>();
   for (const row of allActuals) {
     if (row.month === prevFirstOfMonth) {
@@ -159,6 +174,19 @@ export default async function BudgetPage({
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
   const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
+  // The account/payee half of the "Prev Mo Spent" prefill: last month's most
+  // recent transaction per item. prevTxRows arrives newest-first, so the first
+  // row seen for a subcategory wins and the rest are skipped. Either field can
+  // be null — history imported from the spreadsheet often has no account or
+  // payee — in which case the prefill just leaves that field for the user.
+  const prevTxDetailBySub = new Map<string, { accountId: string | null; payee: string | null }>();
+  for (const t of prevTxRows ?? []) {
+    if (!t.subcategory_id || prevTxDetailBySub.has(t.subcategory_id)) continue;
+    prevTxDetailBySub.set(t.subcategory_id, {
+      accountId: t.account_id ?? null,
+      payee: t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+    });
+  }
   const linkedBucketBySub = new Map(
     (subs ?? []).map((s) => [s.id, (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null]),
   );
@@ -287,6 +315,8 @@ export default async function BudgetPage({
           plannedCents,
           spentCents,
           prevSpentCents: prevSpentBySub.get(s.id) ?? 0,
+          prevAccountId: prevTxDetailBySub.get(s.id)?.accountId ?? null,
+          prevPayee: prevTxDetailBySub.get(s.id)?.payee ?? null,
           isRecurring: (s as { is_recurring?: boolean }).is_recurring ?? false,
           // Irregular bills contribute a *suggested* planned sum, but stay
           // editable so ad-hoc spending (rare bike repair, one-off dental)

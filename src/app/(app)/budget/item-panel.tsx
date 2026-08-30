@@ -18,7 +18,7 @@ import {
   upsertPlan,
   upsertSavingsGoalAndLink,
 } from "./actions";
-import type { AccountOption, BucketOption, RowData, SubOption, TxData } from "./types";
+import type { AccountOption, BucketOption, RowData, SubOption, TxData, TxPrefill } from "./types";
 import { DEBT_KINDS } from "./types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
@@ -50,7 +50,7 @@ type Props = {
   transactions: TxData[];
   accountNameById: Map<string, string>;
   onClose: () => void;
-  onAddTransaction: (prefillCents?: number) => void;
+  onAddTransaction: (prefill?: TxPrefill) => void;
   onEditTransaction: (tx: TxData) => void;
   onOverspentCovered: () => void;
 };
@@ -464,7 +464,7 @@ function RecurringStrip({
 }: {
   row: RowData;
   currency: string;
-  onAddTransaction: (prefillCents?: number) => void;
+  onAddTransaction: (prefill?: TxPrefill) => void;
 }) {
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -500,7 +500,13 @@ function RecurringStrip({
       {row.isRecurring && row.prevSpentCents > 0 ? (
         <button
           type="button"
-          onClick={() => onAddTransaction(row.prevSpentCents)}
+          onClick={() =>
+            onAddTransaction({
+              cents: row.prevSpentCents,
+              accountId: row.prevAccountId,
+              payee: row.prevPayee,
+            })
+          }
           className="min-w-0 rounded-full bg-brand-soft px-2.5 py-1 text-[11px] font-bold text-brand ring-1 ring-brand/20 transition hover:bg-brand/20"
         >
           <span aria-hidden="true">↺</span> Prev Mo Spent {formatMoney(row.prevSpentCents, currency)}
@@ -522,7 +528,7 @@ function DeleteFooter({
 }: {
   subId: string;
   onDeleted: () => void;
-  onAddTransaction: (prefillCents?: number) => void;
+  onAddTransaction: (prefill?: TxPrefill) => void;
   saveFormId?: string;
   onDetails?: () => void;
 }) {
@@ -694,7 +700,7 @@ function PlannedForm({
   autoPlanned?: boolean;
   showDetails: boolean;
   onCloseDetails: () => void;
-  onAddTransaction: (prefillCents?: number) => void;
+  onAddTransaction: (prefill?: TxPrefill) => void;
   formId: string;
 }) {
   const [, startDue] = useTransition();

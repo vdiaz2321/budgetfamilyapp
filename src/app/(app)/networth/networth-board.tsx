@@ -1,9 +1,9 @@
 "use client";
 
 import { Fragment, useRef, useState, useTransition, type CSSProperties } from "react";
-import { currencySymbol, formatMoney } from "@/lib/money";
+import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { upsertNetworthYear } from "./actions";
+import { setAccountSnapshot, setBucketSnapshot, upsertNetworthYear } from "./actions";
 import { reorderAccounts, reorderBuckets } from "../accounts/actions";
 
 export type MonthPoint = {
@@ -701,6 +701,87 @@ function GripHandle({ onMouseDown, label }: { onMouseDown: () => void; label: st
 
 // Accounts × months grid: your monthly checkup view. Cells are editable —
 // current-month edits also update the Accounts page; past months are history.
+// One month's balance for one account or bucket, typed in place in the grid.
+// Blank stays blank — a cell that was never recorded shows "—" and submits
+// nothing until something is actually typed, so tabbing across a row can't
+// backfill a year of zeros. Saves on blur (and on Enter) rather than behind a
+// button: the whole point is filling many cells in a row.
+function EditableBalanceCell({
+  accountId,
+  bucketId,
+  month,
+  balanceCents,
+  currency,
+}: {
+  accountId?: string;
+  bucketId?: string;
+  month: string;
+  balanceCents: number | null;
+  currency: string;
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+  // The currency symbol lives INSIDE the field rather than beside it. As a
+  // sibling it either sat marooned at the far left of the cell (input full
+  // width) or shrank the input to the width of its text — and an empty cell's
+  // input was then a one-character click target, which is exactly the cell
+  // that needs filling in. displayToCents strips the symbol on the way back.
+  const initial =
+    balanceCents == null ? "" : `${currencySymbol(currency)}${centsToGroupedDisplay(balanceCents)}`;
+  // The last value actually sent. Enter submits and then blurs, and the blur
+  // would otherwise submit the identical value a second time — `initial` is
+  // still the pre-save string until the server revalidates.
+  const lastSent = useRef<string | null>(null);
+
+  const submitIfChanged = (raw: string) => {
+    const value = raw.trim();
+    // Never write a snapshot for a cell that was empty and stayed empty —
+    // otherwise tabbing across a row backfills it with zeros.
+    if (value === "" && balanceCents == null) return;
+    if (raw === (lastSent.current ?? initial)) return;
+    lastSent.current = raw;
+    formRef.current?.requestSubmit();
+  };
+
+  return (
+    <form
+      ref={formRef}
+      action={(fd) => start(() => (bucketId ? setBucketSnapshot(fd) : setAccountSnapshot(fd)))}
+      className="block w-full"
+    >
+      {bucketId ? (
+        <input type="hidden" name="bucketId" value={bucketId} />
+      ) : (
+        <input type="hidden" name="accountId" value={accountId ?? ""} />
+      )}
+      <input type="hidden" name="month" value={month} />
+      <input
+        key={initial}
+        name="balance"
+        type="text"
+        inputMode="decimal"
+        defaultValue={initial}
+        placeholder="—"
+        aria-label={`Balance for ${monthLabel(month)}`}
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          // Submit directly rather than leaning on blur(): the blur fired from
+          // inside the keydown did not reliably reach the form, so Enter looked
+          // like it saved and silently did nothing.
+          e.preventDefault();
+          submitIfChanged(e.currentTarget.value);
+          e.currentTarget.blur();
+        }}
+        onBlur={(e) => submitIfChanged(e.currentTarget.value)}
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right tabular-nums transition placeholder:text-muted hover:bg-black/5 focus:bg-surface focus:outline-none focus:ring-2 dark:hover:bg-white/10 ${
+          pending ? "ring-2 ring-brand" : "focus:ring-brand"
+        }`}
+      />
+    </form>
+  );
+}
+
 function BalanceGrid({
   months: allMonths,
   rows,
@@ -930,6 +1011,23 @@ function BalanceGrid({
 
   const readCell = (r: GridRow, i: number) => {
     const v = r.balances[i];
+    // Accounts without buckets, and bucket rows, write their own snapshot — so
+    // their cells are typed into directly. A bucketed account's own row stays
+    // read-only: its figure is re-derived from its buckets on every save, so an
+    // edit here would be overwritten. Debt rows come from debt_snapshots and
+    // have no setter yet, so they stay read-only too.
+    if (r.editable && (r.bucketId || r.accountId)) {
+      return (
+        <EditableBalanceCell
+          key={`${r.bucketId ?? r.accountId}:${months[i]}`}
+          accountId={r.bucketId ? undefined : r.accountId}
+          bucketId={r.bucketId}
+          month={months[i]}
+          balanceCents={v}
+          currency={currency}
+        />
+      );
+    }
     if (v == null) return <span className="text-muted">—</span>;
     return (
       <span className={(r.liability && v > 0) || v < 0 ? "text-negative" : ""}>

@@ -69,6 +69,11 @@ export type RowData = {
   // What this item actually cost last month. Drives the "Prev Mo Spent"
   // prefill; 0 when the item had no activity (the chip stays hidden).
   prevSpentCents: number;
+  // Account and payee from last month's most recent transaction on this item,
+  // copied forward by the same prefill. Null when the item had no transaction
+  // last month, or when that transaction predates the app and never had them.
+  prevAccountId: string | null;
+  prevPayee: string | null;
   // Marked as a same-amount-every-month item (utilities, paycheck
   // deductions). Only these get the prefill chip — groceries shouldn't.
   isRecurring: boolean;
@@ -184,4 +189,13 @@ export type TxData = {
   isInvestmentTransfer: boolean;
   cleared: boolean;
   isWithdrawal: boolean;
+};
+
+// What the item panel's "Prev Mo Spent" chip hands the transaction modal:
+// last month's amount plus, when the history has them, the account and payee
+// to copy forward. Undefined instead of a TxPrefill means a blank quick-add.
+export type TxPrefill = {
+  cents: number;
+  accountId: string | null;
+  payee: string | null;
 };

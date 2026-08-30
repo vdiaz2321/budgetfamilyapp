@@ -27,6 +27,7 @@ import type {
   RowData,
   SubOption,
   TxData,
+  TxPrefill,
 } from "./types";
 import type { CreditCardOption } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
@@ -159,10 +160,10 @@ export function BudgetBoard({
   // require switching to the Log tab first. `true` = new; a TxData = edit
   // (opened by clicking a row in the panel's "This month" list).
   const [quickAdd, setQuickAdd] = useState<boolean | TxData>(false);
-  // Amount to seed a quick-add transaction with — set by the item panel's
-  // "Prev Mo Spent" chip so last month's figure lands in the form ready to
-  // review. undefined = a normal blank quick-add.
-  const [quickAddCents, setQuickAddCents] = useState<number | undefined>(undefined);
+  // What to seed a quick-add transaction with — set by the item panel's
+  // "Prev Mo Spent" chip so last month's figure, account and payee land in the
+  // form ready to review. undefined = a normal blank quick-add.
+  const [quickAddPrefill, setQuickAddPrefill] = useState<TxPrefill | undefined>(undefined);
   // Fresh transaction modal opened from the top header's "+ Transaction"
   // button — no preselected item/kind, renders as a centered overlay so it
   // works with or without a selected budget row.
@@ -334,7 +335,7 @@ export function BudgetBoard({
         transactions={transactions}
         accountNameById={accountNameById}
         onClose={() => setSelected(null)}
-        onAddTransaction={(prefillCents) => { loadPayees(); setQuickAddCents(prefillCents); setQuickAdd(true); }}
+        onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
         onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
         onOverspentCovered={() => {
           setRowFilter("all");
@@ -666,11 +667,11 @@ export function BudgetBoard({
               payeeLineItems={payeeLineItems}
               initialKind={duePayment?.kind ?? (quickAdd && selected ? selected.kind : undefined)}
               initialSubId={duePayment?.subId ?? (quickAdd && selected ? selected.subId : undefined)}
-              initialAccountId={duePayment?.accountId ?? undefined}
-              initialAmountCents={duePayment?.amountCents ?? quickAddCents}
-              initialPayee={duePayment?.name}
+              initialAccountId={duePayment?.accountId ?? quickAddPrefill?.accountId ?? undefined}
+              initialAmountCents={duePayment?.amountCents ?? quickAddPrefill?.cents}
+              initialPayee={duePayment?.name ?? quickAddPrefill?.payee ?? undefined}
               initialDate={duePayment?.dueDate}
-              onClose={() => { setShowAddModal(false); setQuickAdd(false); setQuickAddCents(undefined); setDuePayment(null); }}
+              onClose={() => { setShowAddModal(false); setQuickAdd(false); setQuickAddPrefill(undefined); setDuePayment(null); }}
             />
           </div>
         </div>
