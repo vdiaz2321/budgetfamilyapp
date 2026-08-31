@@ -169,14 +169,19 @@ export async function renameCategoryGroup(formData: FormData): Promise<{ error?:
   const name = String(formData.get("name") ?? "").trim();
   if (!id || !name) return { error: "Enter a group name." };
 
-  const { error } = await supabase
+  // System groups rename too. `kind` is what every query keys off — the name is
+  // a label, so "Savings" can read "Invest/Savings" without changing behaviour.
+  // The old `.eq("is_system", false)` guard matched zero rows for those groups
+  // and returned no error, so the modal reported success and changed nothing.
+  const { data: renamed, error } = await supabase
     .from("categories")
     .update({ name })
     .eq("id", id)
     .eq("household_id", householdId)
-    .eq("is_system", false);
+    .select("id");
   if (error?.code === "23505") return { error: "A group with that name already exists." };
   if (error) return { error: "The group could not be renamed." };
+  if (!renamed?.length) return { error: "That group no longer exists." };
 
   revalidatePath("/budget");
   revalidatePath("/annual");

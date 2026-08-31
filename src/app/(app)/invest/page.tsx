@@ -65,12 +65,13 @@ export default async function InvestPage({
   const categories = await ensureCategories(supabase, household.id);
   const savingsCategoryIds = categories.filter((c) => c.kind === "savings").map((c) => c.id);
   const incomeCategoryIds = categories.filter((c) => c.kind === "income").map((c) => c.id);
-  // Bills + Expenses are the "essential monthly spend" an emergency fund has
-  // to cover. Savings and debt principal are deliberately excluded — in a real
-  // emergency those get paused, so counting them would overstate the runway
+  // BILLS ONLY are the "essential monthly spend" an emergency fund has to
+  // cover — the obligations that keep arriving whatever happens. Expenses,
+  // savings and debt principal are deliberately excluded: in a real emergency
+  // discretionary spending stops, so counting it would overstate the runway
   // needed and understate the months of cover.
   const essentialCategoryIds = categories
-    .filter((c) => c.kind === "bills" || c.kind === "expenses")
+    .filter((c) => c.kind === "bills")
     .map((c) => c.id);
 
   const { data: subs, error: subsError } = await supabase
@@ -531,12 +532,6 @@ export default async function InvestPage({
       .filter((a) => !a.is_kids_account && (a.kind === "savings_bucket" || a.kind === "cash"))
       .map((a) => a.id),
   );
-  const snapsByBucket = new Map<string, { month: string; balanceCents: number }[]>();
-  for (const s of bucketSnaps ?? []) {
-    const arr = snapsByBucket.get(s.bucket_id) ?? [];
-    arr.push({ month: s.month, balanceCents: s.balance_cents ?? 0 });
-    snapsByBucket.set(s.bucket_id, arr);
-  }
   const goalByBucketId = new Map<
     string,
     { goalCents: number; monthlyCents: number }
@@ -557,9 +552,7 @@ export default async function InvestPage({
       return {
         id: b.id,
         name: b.name,
-        accountName: accountNameById.get(b.account_id) ?? "",
         balanceCents: b.balance_cents ?? 0,
-        history: (snapsByBucket.get(b.id) ?? []).slice(-12),
         // Only decides whether the months-of-cover track is drawn under this
         // row — the balance itself is never gated on the name matching.
         isEmergencyFund: /emergency/i.test(b.name ?? ""),
@@ -643,7 +636,10 @@ export default async function InvestPage({
             ]
           : acctBuckets.map((b) => ({
               key: investSlotKey(a.id, b.id, capYear),
-              label: `${a.name} · ${b.name}`,
+              // A bucket name already carries its brokerage ("TSP Roth",
+              // "Fidelity Roth Vic"), so prefixing the account repeats it —
+              // same rule as ledgerLabel on the portfolio tab.
+              label: b.name,
               bucketKind: (b.retirement_kind as string | null) ?? null,
               bucketName: b.name as string | null,
               // A brokerage can hold a Roth for each spouse, so the bucket's

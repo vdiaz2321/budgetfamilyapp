@@ -123,6 +123,15 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   };
 }
 
+/**
+ * What an account holds right now. Buckets own the balance when they exist —
+ * the account slot is then a container, and adding it would double-count.
+ */
+function liveBalanceCents(a: InvestAccount): number {
+  if (a.buckets.length > 0) return a.buckets.reduce((sum, b) => sum + b.balanceCents, 0);
+  return a.balanceCents;
+}
+
 export type DestAccount = { id: string; name: string };
 
 export type BoardTab = "portfolio" | "savings";
@@ -194,12 +203,17 @@ export function InvestBoard({
   savings,
 }: Props) {
   const [tab, setTab] = useState<BoardTab>(initialTab);
-  const [year, setYear] = useState<number>(years[0] ?? new Date().getFullYear());
+  // The page is pinned to the current year. A picker used to scope the
+  // Investments table, but the only column with history behind it is Contrib,
+  // and the Performance-by-year chart already plots every year side by side —
+  // paging the table one year at a time said nothing the chart didn't.
+  const year = years[0] ?? new Date().getFullYear();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [openTax, setOpenTax] = useState<TaxTreatment | null>(null);
+  const [showAllocationRows, setShowAllocationRows] = useState(true);
 
   const mine = accounts.filter((a) => !a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
@@ -218,10 +232,6 @@ export function InvestBoard({
     window.history.replaceState(null, "", url);
   };
 
-  const yearIdx = years.indexOf(year);
-  const goPrev = () => yearIdx < years.length - 1 && setYear(years[yearIdx + 1]);
-  const goNext = () => yearIdx > 0 && setYear(years[yearIdx - 1]);
-
   // Summary totals for the selected year (used in hero + stats bar).
   const summary = useMemo(() => {
     let contributed = 0;
@@ -231,7 +241,10 @@ export function InvestBoard({
       const c = effectiveCell(a, year);
       contributed += c.contributedCents;
       gains += c.accruedCents;
-      if (c.endBalanceCents != null) current += c.endBalanceCents;
+      // A year with no stored ending balance falls back to today's balance
+      // rather than contributing nothing — 2025 has no end_cents on file for
+      // any account, which made this tile read $0.00 for the whole year.
+      current += c.endBalanceCents ?? liveBalanceCents(a);
     }
     const accountCount = mine.reduce((sum, a) => sum + (a.buckets.length > 0 ? a.buckets.length : 1), 0);
     return { contributed, gains, current, accountCount };
@@ -286,7 +299,9 @@ export function InvestBoard({
     for (const a of mine) {
       if (a.buckets.length > 0) {
         for (const b of a.buckets) {
-          if (b.balanceCents > 0) rows.push({ label: `${a.name} · ${b.name}`, cents: b.balanceCents });
+          // A bucket name already carries its brokerage ("Fidelity (Taxable)
+          // Vic"), so prefixing the account repeats it. Same rule as ledgerLabel.
+          if (b.balanceCents > 0) rows.push({ label: ledgerLabel(a.name, b.name), cents: b.balanceCents });
         }
       } else if (a.balanceCents > 0) {
         rows.push({ label: a.name, cents: a.balanceCents });
@@ -297,6 +312,16 @@ export function InvestBoard({
     return { rows, total, top: rows[0] ?? null };
   }, [mine]);
   const showAllocation = allocation.rows.length > 1 && allocation.total > 0;
+
+  // Retirement contribution room, read straight off the rows the Savings tab
+  // renders so the two figures can never disagree.
+  const capYear = savings.capYear ?? new Date().getFullYear();
+  const limitRows = savings.contributionLimits ?? [];
+  const contributionRoomRows = limitRows.length;
+  const contributionRoomCents = limitRows.reduce(
+    (sum, r) => sum + Math.max(0, r.limitCents - r.contributedCents),
+    0,
+  );
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-7">
@@ -320,42 +345,6 @@ export function InvestBoard({
               </svg>
               Transfer/Withdraw
             </button>
-            {/* Year nav belongs to the portfolio view only — nothing on the
-                savings tab is scoped to a year. */}
-            <div className={`flex items-center gap-1 ${tab === "portfolio" ? "" : "hidden"}`}>
-              <button
-                type="button"
-                onClick={goPrev}
-                disabled={yearIdx >= years.length - 1}
-                aria-label="Previous year"
-                className="flex h-9 w-9 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
-              <select
-                aria-label="Year"
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-                className="cursor-pointer rounded-lg bg-background px-3 py-2 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                {years.map((y) => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={goNext}
-                disabled={yearIdx <= 0}
-                aria-label="Next year"
-                className="flex h-9 w-9 items-center justify-center rounded-lg ring-1 ring-line text-muted transition hover:bg-brand-soft hover:text-foreground disabled:opacity-30"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </button>
-            </div>
           </div>
         </div>
         {/* Hero stats. "Contributed this month" is the live figure in
@@ -363,17 +352,36 @@ export function InvestBoard({
             deliberately no savings budget item, which is misleading rather
             than informative. */}
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-line ring-1 ring-black/5 dark:ring-white/10 sm:grid-cols-4">
-          <SummaryStat label="Current value" value={formatMoney(summary.current, currency)} />
+          {/* Named for the pool it sums, not the moment: this is investment
+              accounts only, and excludes the cash in savings buckets that the
+              Savings tab counts. "Current value" read like it might be both. */}
+          <SummaryStat label="Investment Accounts" value={formatMoney(summary.current, currency)} />
           <SummaryStat
             label={`Contributed · ${currentMonthLabel.split(" ")[0]}`}
             value={formatMoney(contributedThisMonthCents, currency)}
             tone={contributedThisMonthCents > 0 ? "text-positive" : undefined}
           />
           <SummaryStat label={`Contributed · ${year}`} value={formatMoney(summary.contributed, currency)} />
+          {/* Mirrors the Savings tab's limits card. Scoped to the CAP year, not
+              the selected portfolio year — the room left to contribute doesn't
+              move when you page the grid back to 2024. Replaced unrealized
+              gains, which is typed once at year end and reads $0.00 until then. */}
           <SummaryStat
-            label={`Unrealized gains · ${year}`}
-            value={formatMoney(summary.gains, currency)}
-            tone={summary.gains >= 0 ? "text-[color:var(--viz-bills)]" : "text-negative"}
+            label={`Still allowed · ${capYear}`}
+            value={
+              contributionRoomRows === 0
+                ? "—"
+                : contributionRoomCents > 0
+                  ? formatMoneyWhole(contributionRoomCents, currency)
+                  : "All maxed"
+            }
+            tone={
+              contributionRoomRows === 0
+                ? undefined
+                : contributionRoomCents > 0
+                  ? "text-[color:var(--viz-savings)]"
+                  : "text-positive"
+            }
           />
         </div>
 
@@ -415,7 +423,7 @@ export function InvestBoard({
             </button>
             {showGuide ? (
               <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground/80">
-                <p className="mb-3 text-xs text-muted">Use the selected year to review each investment account against its year-end statement.</p>
+                <p className="mb-3 text-xs text-muted">Review each investment account against its year-end statement.</p>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg bg-surface/60 px-3 py-2.5">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Contributions</p>
@@ -539,12 +547,31 @@ export function InvestBoard({
               isn't rendered (a single-holding portfolio). */}
           <div className={showAllocation ? "grid items-start gap-6 lg:grid-cols-2" : ""}>
           {showAllocation ? (
-            <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <h2 className="text-sm font-bold">Total Investment Holdings</h2>
-              <p className="mt-0.5 text-[11px] text-muted">
-                Total: {formatMoney(allocation.total, currency)} — current balances, not the selected year.
-              </p>
-              <ul className="mt-2.5 space-y-1.5">
+            <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              {/* Same header band as "Performance by year" and "Investments":
+                  chevron on the left, brand-soft fill, no Hide/Show wording. */}
+              <button
+                type="button"
+                onClick={() => setShowAllocationRows((open) => !open)}
+                aria-expanded={showAllocationRows}
+                className="flex w-full items-start gap-2 rounded-t-2xl bg-brand-soft/35 px-4 py-3 text-left ring-1 ring-brand/10 transition hover:bg-brand-soft/50"
+              >
+                <svg
+                  width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  className={`mt-1 shrink-0 text-muted transition-transform ${showAllocationRows ? "" : "-rotate-90"}`}
+                  aria-hidden
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-bold">Total Investment Holdings</h2>
+                  <p className="text-xs text-muted">
+                    Total: {formatMoney(allocation.total, currency)} — current balances.
+                  </p>
+                </div>
+              </button>
+              <ul className={`space-y-1.5 px-4 py-3 ${showAllocationRows ? "" : "hidden"}`}>
                 {allocation.rows.slice(0, 8).map((r) => {
                   const pct = (r.cents / allocation.total) * 100;
                   return (

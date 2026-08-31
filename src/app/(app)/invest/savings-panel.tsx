@@ -233,7 +233,7 @@ function CapsEditor({
 // Annual caps on tax-advantaged accounts. Unused room doesn't roll over, so
 // the useful framing is what's left and how long is left to use it.
 function ContributionLimits({ rows, currency, year, published, latestYear, pendingYear, seedCaps }: { rows: ContributionLimitRow[]; currency: string; year: number; published: boolean; latestYear: number; pendingYear: number | null; seedCaps: { electiveDeferralCents: number; iraCents: number } | null }) {
-  const [state, setState] = useSessionCollapse("savings-contribution-limits", () => ({ open: false }));
+  const [state, setState] = useSessionCollapse("savings-contribution-limits", () => ({ open: true }));
   const open = state.open === true;
   // Which tax year the caps editor is open for, or null when it's closed.
   const [editingYear, setEditingYear] = useState<number | null>(null);
@@ -389,27 +389,29 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                   />
                 </div>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
-                  <span className="uppercase tracking-wide">{r.kind}</span>
-                  {" · "}
+                  {r.kind}
+                  {" - "}
                   {maxed ? (
                     <span style={{ color: "var(--positive)" }}>Maxed for {year}</span>
                   ) : (
                     <>
-                      Can still add{" "}
                       <span className="font-semibold tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {formatSavingsMoney(room, currency)}
                       </span>{" "}
                       {/* The date is the useful part. "5 mo" alone doesn't say
                           five months until what — and the two account types
-                          don't even share a cutoff. */}
-                      by {fmtDeadline(deadline)}
+                          don't even share a cutoff. An IRA's Dec 31 is a target
+                          we set, not the law's cutoff (that's ~15 April, in the
+                          footnote), so it's worded as a pace here. TSP money
+                          genuinely has to be out of payroll by the 31st. */}
+                      left {r.capKind === "ira" ? "at a pace to" : "by"} {fmtDeadline(deadline)}
                       {monthsLeft > 0 ? (
                         <>
-                          {" — "}
+                          {" - "}
                           <span className="tabular-nums">
                             {formatSavingsMoney(perMonth, currency)}/mo
                           </span>{" "}
-                          over the {monthsLeft} month{monthsLeft === 1 ? "" : "s"} left
+                          required
                         </>
                       ) : null}
                     </>
@@ -509,11 +511,31 @@ export function SavingsPanel({
     [currentMonthKey, scopedCards],
   );
 
+  // Limits only make sense once there are savings items to measure, and the
+  // card doubles as the caps editor when this year's numbers aren't published.
+  const showLimits = cards.length > 0 && (contributionLimits.length > 0 || !capsPublished);
+
   return (
     <div className="space-y-4">
       {/* Cash reserves come first: they are the money nearest to hand, and the
-          only section on this tab that renders without a savings budget item. */}
-      <CashReserves data={cashReserves} currency={currency} />
+          only section on this tab that renders without a savings budget item.
+          It shares a row with the contribution limits — both are short summary
+          cards, and stacking them pushed the month's activity a full screen
+          down. They stack again below lg. */}
+      <div className={showLimits ? "grid items-start gap-4 lg:grid-cols-2" : ""}>
+        <CashReserves data={cashReserves} currency={currency} />
+        {showLimits ? (
+          <ContributionLimits
+            rows={contributionLimits}
+            currency={currency}
+            year={capYear}
+            published={capsPublished}
+            latestYear={latestCapYearProp}
+            pendingYear={pendingCapYear}
+            seedCaps={seedCaps}
+          />
+        ) : null}
+      </div>
 
       {cards.length === 0 ? (
         <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -523,17 +545,6 @@ export function SavingsPanel({
         </section>
       ) : (
         <>
-          {contributionLimits.length > 0 || !capsPublished ? (
-            <ContributionLimits
-              rows={contributionLimits}
-              currency={currency}
-              year={capYear}
-              published={capsPublished}
-              latestYear={latestCapYearProp}
-              pendingYear={pendingCapYear}
-              seedCaps={seedCaps}
-            />
-          ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,.75fr)]">
             <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 bg-brand-soft/35 px-4 py-3 dark:bg-brand-soft/15">

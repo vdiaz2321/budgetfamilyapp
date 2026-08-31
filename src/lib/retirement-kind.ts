@@ -33,7 +33,7 @@ export const RETIREMENT_HINT: Record<RetirementKind, string> = {
 
 export const CAP_KIND_LABEL: Record<CapKind, string> = {
   ira: "IRA",
-  electiveDeferral: "Elective deferral (TSP / 401k)",
+  electiveDeferral: "Elective Deferral (401K)",
 };
 
 export function capKindFor(kind: RetirementKind): CapKind {

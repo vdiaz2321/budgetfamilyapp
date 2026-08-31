@@ -7,24 +7,20 @@ import { useSessionCollapse } from "@/lib/use-session-collapse";
 //
 // Deliberately NOT driven by `savings_goals`. There is no savings budget item
 // right now (see the Savings-vs-investing note): every bucket here has a
-// balance and a history but no goal row, so a goal-driven section would render
+// balance but no goal row, so a goal-driven section would render
 // five "no goal set" rows and hide ~$170k. This reads `bucket_snapshots`
 // instead, which is captured monthly for every bucket regardless.
 //
-// A balance going DOWN is normal here, not a warning. These funds exist to be
-// spent — the Vehicle Purchase and Real Estate buckets are earmarked for a
-// planned drawdown — so the delta is shown as a plain signed figure with no
-// pace badge and no "behind" styling. When a savings budget item does appear,
+// A balance going DOWN is normal here, not a warning — these funds exist to be
+// spent, and the Vehicle Purchase and Real Estate buckets are earmarked for a
+// planned drawdown. When a savings budget item does appear,
 // `goalCents` / `plannedMonthlyCents` start arriving non-null and the row grows
 // a target line without the section being rewritten.
 
 export type CashReserveRow = {
   id: string;
   name: string;
-  accountName: string;
   balanceCents: number;
-  /** Month-end balances, oldest first. */
-  history: { month: string; balanceCents: number }[];
   isEmergencyFund: boolean;
   /** Non-null once a savings goal exists for this bucket. */
   goalCents: number | null;
@@ -39,7 +35,6 @@ export type CashReservesData = {
   basisMonths: number;
 };
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function formatCash(cents: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
@@ -47,55 +42,6 @@ function formatCash(cents: number, currency: string): string {
     currency,
     maximumFractionDigits: 0,
   }).format(cents / 100);
-}
-
-function shortMonth(dateStr: string): string {
-  const [, m] = dateStr.split("-").map(Number);
-  return MONTHS[m - 1] ?? "";
-}
-
-/**
- * Balance history as a single line. Scaled to its own min/max so a bucket that
- * moved $500 is as readable as one that moved $50,000 — these are shapes, not
- * a shared axis, and they are never compared against each other.
- */
-function Sparkline({ history }: { history: { month: string; balanceCents: number }[] }) {
-  if (history.length < 2) return null;
-  const values = history.map((h) => h.balanceCents);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  // A balance that never moved has no shape to draw, and a dead-flat rule
-  // spanning the row reads as a divider rather than as data. Several of these
-  // funds sit untouched for months at a time, so this is the common case.
-  if (max === min) return null;
-  const span = max - min;
-  const points = values
-    .map((v, i) => {
-      const x = (i / (values.length - 1)) * 100;
-      // 2px of padding top and bottom so a flat line at the extreme still draws.
-      const y = 26 - ((v - min) / span) * 24;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-  return (
-    <svg
-      viewBox="0 0 100 28"
-      preserveAspectRatio="none"
-      className="mt-1.5 h-7 w-full"
-      role="img"
-      aria-label={`Balance from ${shortMonth(history[0].month)} to ${shortMonth(history[history.length - 1].month)}`}
-    >
-      <polyline
-        points={points}
-        fill="none"
-        stroke="var(--viz-savings)"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  );
 }
 
 /**
@@ -144,7 +90,7 @@ function RunwayTrack({
         </span>
       </div>
       <p className="mt-1 text-[10px] text-muted">
-        Based on {formatCash(monthlyEssentialCents, currency)}/mo of bills and expenses.
+        Based on {formatCash(monthlyEssentialCents, currency)}/mo of bills.
       </p>
     </div>
   );
@@ -159,10 +105,6 @@ function ReserveRow({
   currency: string;
   monthlyEssentialCents: number | null;
 }) {
-  const first = row.history[0];
-  const changeCents = first ? row.balanceCents - first.balanceCents : 0;
-  const showChange = row.history.length >= 2 && changeCents !== 0;
-
   return (
     <li className="px-4 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
@@ -171,32 +113,39 @@ function ReserveRow({
           {formatCash(row.balanceCents, currency)}
         </span>
       </div>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-        <span className="min-w-0 truncate text-[11px] text-muted">{row.accountName}</span>
-        {showChange ? (
-          <span
-            className={`shrink-0 text-[11px] font-medium tabular-nums ${
-              changeCents > 0 ? "text-positive" : "text-negative"
-            }`}
-          >
-            {changeCents > 0 ? "+" : "−"}
-            {formatCash(Math.abs(changeCents), currency)} since {shortMonth(first.month)}
-          </span>
-        ) : null}
-      </div>
-
-      <Sparkline history={row.history} />
 
       {row.goalCents != null && row.goalCents > 0 ? (
-        <div className="mt-1.5 flex items-baseline justify-between gap-2 text-[11px] text-muted">
-          <span>
-            Target {formatCash(row.goalCents, currency)}
-            {row.plannedMonthlyCents ? ` · ${formatCash(row.plannedMonthlyCents, currency)}/mo planned` : ""}
-          </span>
-          <span className="tabular-nums">
-            {Math.min(100, (row.balanceCents / row.goalCents) * 100).toFixed(0)}%
-          </span>
-        </div>
+        (() => {
+          // Same track the emergency fund gets, measured against the goal
+          // instead of against months of bills. A goal that's been reached
+          // goes green; anything short stays on the savings blue, so "not
+          // there yet" and "done" read apart at a glance.
+          const pct = Math.min(100, (row.balanceCents / row.goalCents) * 100);
+          const tone = pct >= 100 ? "var(--positive)" : "var(--viz-savings)";
+          const remaining = Math.max(0, row.goalCents - row.balanceCents);
+          return (
+            <div className="mt-1.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-[11px] text-muted">
+                <span>
+                  Target {formatCash(row.goalCents, currency)}
+                  {row.plannedMonthlyCents ? ` · ${formatCash(row.plannedMonthlyCents, currency)}/mo planned` : ""}
+                </span>
+                <span className="tabular-nums font-semibold" style={{ color: tone }}>
+                  {pct.toFixed(0)}%
+                </span>
+              </div>
+              <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-line/60">
+                <div
+                  className="h-full rounded-full transition-[width] duration-500"
+                  style={{ width: `${pct}%`, backgroundColor: tone }}
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-muted">
+                {remaining > 0 ? `${formatCash(remaining, currency)} to go` : "Target reached"}
+              </p>
+            </div>
+          );
+        })()
       ) : null}
 
       {row.isEmergencyFund && monthlyEssentialCents ? (
@@ -211,7 +160,7 @@ function ReserveRow({
 }
 
 export function CashReserves({ data, currency }: { data: CashReservesData; currency: string }) {
-  const [state, setState] = useSessionCollapse("invest-cash-reserves", () => ({ open: false }));
+  const [state, setState] = useSessionCollapse("invest-cash-reserves", () => ({ open: true }));
   const open = state.open === true;
 
   if (data.rows.length === 0) return null;
@@ -233,7 +182,7 @@ export function CashReserves({ data, currency }: { data: CashReservesData; curre
           >
             <path d="M9 18l6-6-6-6" />
           </svg>
-          <span className="text-base font-semibold">Cash reserves</span>
+          <span className="text-base font-semibold">Cash On Hand</span>
         </span>
         <span className="flex items-baseline gap-2">
           <span className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
@@ -247,8 +196,7 @@ export function CashReserves({ data, currency }: { data: CashReservesData; curre
       {open ? (
         <>
           <p className="border-b border-line/70 px-4 py-2 text-xs text-muted">
-            Bank and savings buckets held outside the market. These don&rsquo;t need a budget
-            item — the balances come straight from Accounts.
+            The balances come from Accounts.
           </p>
           <ul className="divide-y divide-line/60">
             {data.rows.map((row) => (

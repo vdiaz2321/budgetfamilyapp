@@ -1123,7 +1123,16 @@ function DueItemsList({
               </p>
             </div>
             <div className="shrink-0 text-right">
-              <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
+              {/* A zero here is a subscription whose price isn't on file (it
+                  varies, or was never entered) — those are kept in the list on
+                  purpose. "$0.00" read as "nothing owed", which is the opposite
+                  of what it means. Budget items never reach zero here: they're
+                  dropped from the list once nothing is left to pay. */}
+              {item.amountCents > 0 ? (
+                <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
+              ) : (
+                <p className="text-[11px] font-semibold text-muted">Amount not set</p>
+              )}
               {onPayDue && (
                 <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
                   {/* Only when last month actually had a charge to copy, and

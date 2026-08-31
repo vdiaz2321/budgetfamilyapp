@@ -182,7 +182,7 @@ export function BudgetGroup({
             <span className="hidden sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
-        {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
+        <CategoryGroupMenu group={group} />
         <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
           <span className="whitespace-nowrap text-xs tabular-nums">
             <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
@@ -242,7 +242,7 @@ export function BudgetGroup({
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
-          {!group.isSystem ? <CategoryGroupMenu group={group} /> : null}
+          <CategoryGroupMenu group={group} />
         </div>
         {/* Three tiles, two behaviours: Plan and the actual open the group and
             filter the transaction log by kind (as the whole block always did);
@@ -495,6 +495,12 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
               </label>
             </form>
 
+            {/* A system group's slot in the five-column order is fixed, and it
+                can never be deleted — so those two controls are hidden rather
+                than shown disabled. Renaming is the whole point of opening
+                this for a system group: the name is a label, the `kind` is
+                what the app actually keys off. */}
+            {group.isSystem ? null : (
             <div className="flex items-center gap-2 border-t border-line pt-4">
               <span className="mr-auto text-sm font-semibold">Position</span>
               {(["up", "down"] as const).map((direction) => (
@@ -507,7 +513,9 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
                 </form>
               ))}
             </div>
+            )}
 
+            {group.isSystem ? null : (
             <form
               action={(formData) =>
                 start(async () => {
@@ -527,6 +535,7 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
                 Delete group
               </button>
             </form>
+            )}
 
             {error ? <p className="rounded-lg bg-negative/10 px-3 py-2 text-sm text-negative">{error}</p> : null}
           </div>
