@@ -4,11 +4,12 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { TransactionModal } from "../budget/transaction-modal";
 import type { AccountOption, SubOption } from "../budget/types";
 import { centsToDisplay } from "@/lib/money";
-import { updateSavingsGoalFields, saveContributionCaps } from "./actions";
+import { updateSavingsGoalFields, saveContributionCaps } from "./savings-actions";
 import { listPayees } from "../budget/actions";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { IRS_LIMITS_URL, contributionDeadline, monthsUntilDeadline } from "@/lib/contribution-limits";
+import { CashReserves, type CashReservesData } from "./cash-reserves";
 
 export type SavingsTxData = {
   id: string;
@@ -38,10 +39,10 @@ export type SavingsCardData = {
   isKids: boolean;
 };
 
-type Props = {
+export type SavingsPanelProps = {
   cards: SavingsCardData[];
   currency: string;
-  emergencyFund?: EmergencyFundData | null;
+  cashReserves: CashReservesData;
   contributionLimits?: ContributionLimitRow[];
   capYear?: number;
   capsPublished?: boolean;
@@ -100,139 +101,6 @@ function statsFor(cards: SavingsCardData[]) {
   };
 }
 
-export type EmergencyFundData = {
-  name: string;
-  balanceCents: number;
-  monthlyEssentialCents: number;
-  monthsCovered: number;
-  basisMonths: number;
-};
-
-// Months of essential spending the emergency fund covers. 3 months is the
-// usual floor, 6 the usual target — shown as a track with both marked so the
-// number lands as a judgement, not just a figure.
-function EmergencyFundCard({ data, currency }: { data: EmergencyFundData; currency: string }) {
-  // Collapsed on a fresh login, then remembers the choice while navigating —
-  // same pattern as the Budget hero and the Accounts sections.
-  const [state, setState] = useSessionCollapse("savings-emergency-fund", () => ({ open: false }));
-  const open = state.open === true;
-  const { monthsCovered } = data;
-  const tone = monthsCovered >= 6 ? "var(--positive)" : monthsCovered >= 3 ? "var(--viz-savings)" : "var(--negative)";
-  const verdict =
-    monthsCovered >= 6 ? "Fully funded" : monthsCovered >= 3 ? "Solid floor" : "Below 3 months";
-  // Track runs to 6 months; anything beyond simply fills it.
-  const fillPct = Math.min(100, (monthsCovered / 6) * 100);
-  // What each milestone actually costs — a months figure is a diagnosis, but a
-  // dollar figure is something you can set a goal against.
-  const targetFor = (months: number) => data.monthlyEssentialCents * months;
-  const gapFor = (months: number) => Math.max(0, targetFor(months) - data.balanceCents);
-
-  return (
-    <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <button
-        type="button"
-        onClick={() => setState((s) => ({ ...s, open: !s.open }))}
-        aria-expanded={open}
-        className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line/70 px-4 py-3 text-left transition hover:bg-brand-soft/15"
-      >
-        <span className="flex items-baseline gap-2">
-          <svg
-            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 self-center text-muted transition-transform ${open ? "rotate-90" : ""}`}
-            aria-hidden
-          >
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-          <span className="text-base font-semibold">Emergency fund</span>
-        </span>
-        {/* Only while collapsed — expanded, the body states both again right
-            underneath, and repeating them in the header just reads as noise. */}
-        {!open ? (
-          <span className="flex items-baseline gap-2">
-            <span className="text-sm font-bold tabular-nums" style={{ color: tone }}>
-              {monthsCovered.toFixed(1)} mo
-            </span>
-            <span className="text-xs font-semibold" style={{ color: tone }}>{verdict}</span>
-          </span>
-        ) : null}
-      </button>
-      {open ? (
-      <div className="px-4 py-3">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-2xl font-bold tabular-nums" style={{ color: tone }}>
-            {monthsCovered.toFixed(1)}
-          </span>
-          <span className="text-sm text-muted">months of essentials covered</span>
-          <span className="ml-auto text-xs font-semibold" style={{ color: tone }}>
-            {verdict}
-          </span>
-        </div>
-
-        <div className="relative mt-3 h-2 w-full overflow-hidden rounded-full bg-line/60">
-          <div
-            className="h-full rounded-full transition-[width] duration-500"
-            style={{ width: `${fillPct}%`, backgroundColor: tone }}
-          />
-          {/* 3-month floor marker */}
-          <span className="absolute inset-y-0 w-px bg-foreground/40" style={{ left: "50%" }} aria-hidden />
-        </div>
-        <div className="mt-1 flex justify-between text-[10px] text-muted">
-          <span>0</span>
-          <span>3 mo floor</span>
-          <span>6 mo</span>
-        </div>
-
-        <p className="mt-3 text-xs leading-relaxed text-muted">
-          <span className="font-semibold text-foreground">{formatSavingsMoney(data.balanceCents, currency)}</span>{" "}
-          set aside against{" "}
-          <span className="font-semibold text-foreground">
-            {formatSavingsMoney(data.monthlyEssentialCents, currency)}
-          </span>{" "}
-          of average monthly bills and expenses
-          {data.basisMonths < 3 ? ` (${data.basisMonths}-month basis)` : ""}.
-        </p>
-
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {[3, 6].map((months) => {
-            const target = targetFor(months);
-            const gap = gapFor(months);
-            const reached = gap <= 0;
-            return (
-              <div key={months} className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                    {months}-month {months === 3 ? "floor" : "target"}
-                  </span>
-                  <span className="text-xs font-semibold tabular-nums">
-                    {formatSavingsMoney(target, currency)}
-                  </span>
-                </div>
-                {/* Target and shortfall only. A "months to get there" figure
-                    would need a savings rate for this fund, which isn't
-                    recorded anywhere — inventing one would read as advice. */}
-                <p className="mt-0.5 text-[11px] tabular-nums" style={{ color: reached ? "var(--positive)" : "var(--muted)" }}>
-                  {reached ? (
-                    "Reached"
-                  ) : (
-                    <>
-                      <span className="font-semibold" style={{ color: "var(--viz-savings)" }}>
-                        {formatSavingsMoney(gap, currency)}
-                      </span>{" "}
-                      to go
-                    </>
-                  )}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      ) : null}
-    </section>
-  );
-}
-
 export type ContributionLimitRow = {
   subId: string;
   name: string;
@@ -241,6 +109,21 @@ export type ContributionLimitRow = {
   capKind: "electiveDeferral" | "ira";
   limitCents: number;
   contributedCents: number;
+  /** The accounts and buckets rolled into this person's limit. */
+  sourceNames?: string[];
+  /**
+   * The kind was guessed from the account/bucket name because
+   * `retirement_kind` isn't set. A guess deciding how much room is left is
+   * worth saying out loud.
+   */
+  inferredKind?: boolean;
+  /**
+   * No holder is set on any slot in this row, so it couldn't be attributed to a
+   * person. The IRA cap is per person, so an unattributed row may really belong
+   * with someone else's — the card says so rather than presenting a confident
+   * total.
+   */
+  needsHolder?: boolean;
 };
 
 /**
@@ -359,6 +242,8 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
   // that, which matters only if the year goes badly — so it's said once, here,
   // instead of on every row where it would soften the target.
   const anyIra = rows.some((r) => r.capKind === "ira");
+  const anyUnattributedIra = rows.some((r) => r.needsHolder);
+  const anyInferredKind = rows.some((r) => r.inferredKind);
   const iraGrace = contributionDeadline("ira", year);
   const totalRoom = rows.reduce((s, r) => s + Math.max(0, r.limitCents - r.contributedCents), 0);
   const fmtDeadline = (d: Date) =>
@@ -489,6 +374,11 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                     of {formatSavingsMoney(r.limitCents, currency)}
                   </span>
                 </div>
+                {/* One limit can span several accounts — naming them is what
+                    makes the combined figure above verifiable. */}
+                {r.sourceNames && r.sourceNames.length > 0 ? (
+                  <p className="text-[11px] text-muted">{r.sourceNames.join(" + ")}</p>
+                ) : null}
                 <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
                   <div
                     className="h-full rounded-full transition-[width] duration-500"
@@ -537,7 +427,15 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                   TSP doesn&rsquo;t.{" "}
                 </>
               ) : null}
-              Caps are per person across all IRAs, before catch-up.
+              Traditional and Roth IRAs share one limit per person, before catch-up.
+              {/* Both caveats change how much the number above can be trusted,
+                  so they sit with it rather than being left implicit. */}
+              {anyUnattributedIra
+                ? " One row has no account holder set, so it couldn’t be grouped with a person — set the holder on Accounts to fold it into the right limit."
+                : ""}
+              {anyInferredKind
+                ? " Some rows were classified from the account name; set the retirement type on Accounts to make that exact."
+                : ""}
               {anyMaxed ? " Over-contributing is correctable but taxable." : ""}{" "}
               <a
                 href={IRS_LIMITS_URL}
@@ -564,7 +462,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
   );
 }
 
-export function SavingsBoard({
+export function SavingsPanel({
   cards,
   currency,
   contributionLimits = [],
@@ -573,14 +471,14 @@ export function SavingsBoard({
   latestCapYear: latestCapYearProp = capYear,
   pendingCapYear = null,
   seedCaps = null,
-  emergencyFund,
+  cashReserves,
   incomeReceivedCents,
   currentMonthKey,
   currentMonthLabel,
   firstOfMonth,
   withdrawalSubOptions,
   withdrawalAccountOptions,
-}: Props) {
+}: SavingsPanelProps) {
   const familyCards = cards.filter((card) => !card.isKids);
   const kidsCards = cards.filter((card) => card.isKids);
   const [scope, setScope] = useState<Scope>(familyCards.length > 0 ? "family" : "all");
@@ -612,11 +510,10 @@ export function SavingsBoard({
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-      <header className="pr-8 md:pr-0">
-        <h1 className="text-2xl font-bold tracking-tight">Savings goals</h1>
-        <p className="mt-1 text-sm text-muted">See what you saved from income, where it went, and what needs attention next.</p>
-      </header>
+    <div className="space-y-4">
+      {/* Cash reserves come first: they are the money nearest to hand, and the
+          only section on this tab that renders without a savings budget item. */}
+      <CashReserves data={cashReserves} currency={currency} />
 
       {cards.length === 0 ? (
         <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -626,25 +523,16 @@ export function SavingsBoard({
         </section>
       ) : (
         <>
-          {/* Two independent readouts of the same question — are the long-term
-              pots on track — so they sit side by side on desktop and stack on
-              mobile. `items-start` keeps each card at its own height rather
-              than stretching the collapsed one to match the expanded one. */}
-          {emergencyFund || contributionLimits.length > 0 || !capsPublished ? (
-            <div className="grid items-start gap-4 lg:grid-cols-2">
-              {emergencyFund ? <EmergencyFundCard data={emergencyFund} currency={currency} /> : null}
-              {contributionLimits.length > 0 || !capsPublished ? (
-                <ContributionLimits
-                  rows={contributionLimits}
-                  currency={currency}
-                  year={capYear}
-                  published={capsPublished}
-                  latestYear={latestCapYearProp}
-                  pendingYear={pendingCapYear}
-                  seedCaps={seedCaps}
-                />
-              ) : null}
-            </div>
+          {contributionLimits.length > 0 || !capsPublished ? (
+            <ContributionLimits
+              rows={contributionLimits}
+              currency={currency}
+              year={capYear}
+              published={capsPublished}
+              latestYear={latestCapYearProp}
+              pendingYear={pendingCapYear}
+              seedCaps={seedCaps}
+            />
           ) : null}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,.75fr)]">
             <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">

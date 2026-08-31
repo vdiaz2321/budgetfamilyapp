@@ -3,6 +3,7 @@
 import Link from "next/link";
 import React, { useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
+import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToDisplay, centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
@@ -79,6 +80,11 @@ export type BucketData = {
   // longer have to force the whole account into one type.
   bankGroup: "savings" | "spending" | null;
   taxTreatment: string | null;
+  // Which contribution limit governs this bucket, and whose money it is. Both
+  // live on the bucket as well as the account because one brokerage can hold a
+  // Roth for each spouse alongside a taxable bucket.
+  retirementKind: string | null;
+  holder: string | null;
   // Every recorded month of bucket_snapshots, keyed "YYYY-MM-01" (a missing
   // month = never recorded). Lets a bucket row follow the header's period
   // picker instead of being pinned to the last three months.
@@ -142,6 +148,7 @@ export type AccountData = {
   isKidsAccount: boolean;
   bankGroup: "savings" | "spending" | null;
   taxTreatment: string | null;
+  retirementKind: string | null;
   balanceCents: number;
   annualFeeCents: number | null;
   feeWaived: boolean;
@@ -297,6 +304,41 @@ type Props = {
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
  *  can't drift apart in labelling or option order. */
+/**
+ * Which annual contribution limit governs this holding.
+ *
+ * Separate from the tax-treatment picker beside it because the two answer
+ * different questions: a Roth IRA and a Roth TSP are both tax-free, but they
+ * are governed by completely different limits. Setting this explicitly is what
+ * stops the contribution-cap card guessing from the account name — and a guess
+ * there is what made a second Roth IRA look like a second full allowance.
+ */
+function RetirementKindSelect({
+  name,
+  value,
+  className,
+}: {
+  name: string;
+  value: string | null;
+  className?: string;
+}) {
+  return (
+    <select
+      name={name}
+      defaultValue={value ?? ""}
+      aria-label="Retirement type"
+      className={`rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${className ?? ""}`}
+    >
+      <option value="">Not a retirement account</option>
+      {RETIREMENT_KINDS.map((k) => (
+        <option key={k} value={k}>
+          {RETIREMENT_LABEL[k]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function TaxTreatmentSelect({
   name,
   value,
@@ -3235,8 +3277,23 @@ function BucketEditPanel({ bucket, onDone }: { bucket: BucketData; onDone: () =>
           defaultValue={bucket.name}
           autoFocus
           aria-label="Bucket name"
-          className="min-w-0 flex-1 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          // Holder and retirement type joined this row, and three fields
+          // sharing one line clipped the name to a few characters. The name
+          // takes the full width and the other two wrap beneath it.
+          className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-auto sm:flex-1 sm:basis-48"
         />
+        {/* Whose money this bucket is. IRA limits are per person and one
+            brokerage account routinely holds a Roth for each spouse, so
+            without this the cap card can only fall back to the account's
+            holder and would merge two people's separate allowances. */}
+        <input
+          name="holder"
+          defaultValue={bucket.holder ?? ""}
+          aria-label="Bucket holder"
+          placeholder="Holder (e.g. Victor)"
+          className="w-32 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <RetirementKindSelect name="retirementKind" value={bucket.retirementKind} />
         <button
           type="submit"
           disabled={savePending}
@@ -3781,6 +3838,22 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
                 ))}
               </select>
             </label>
+            {/* Asked at creation so the contribution-cap card never has to
+                guess. Traditional and Roth are both offered because that is
+                what the user knows about the account — they happen to share
+                one annual limit, which the hint says rather than hiding. */}
+            <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Retirement type
+              <RetirementKindSelect
+                name="retirementKind"
+                value={null}
+                className="mt-1 w-full font-normal normal-case tracking-normal text-foreground"
+              />
+              <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">
+                Sets which IRS contribution limit applies. Traditional and Roth IRAs share one
+                limit per person.
+              </span>
+            </label>
           </>
         ) : null}
         <LabeledInput label="Account name" name="name" placeholder={section.key === "loans" ? "e.g. Home Mortgage" : "e.g. Fidelity Roth IRA"} required autoFocus onChange={() => setError(null)} />
@@ -3978,11 +4051,14 @@ function EditAccountForm({
             )
           ) : null}
           {(section.key === "investments" || section.key === "kids") ? (
-            <TaxTreatmentSelect
-              name="taxTreatment"
-              value={account.taxTreatment}
-              className="!w-auto !py-1.5 !text-sm !text-foreground"
-            />
+            <>
+              <TaxTreatmentSelect
+                name="taxTreatment"
+                value={account.taxTreatment}
+                className="!w-auto !py-1.5 !text-sm !text-foreground"
+              />
+              <RetirementKindSelect name="retirementKind" value={account.retirementKind} />
+            </>
           ) : null}
           {section.key === "banking" ? (
             <select

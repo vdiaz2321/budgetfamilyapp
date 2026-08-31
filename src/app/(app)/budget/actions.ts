@@ -759,7 +759,7 @@ export async function upsertSavingsGoal(formData: FormData) {
   );
 
   revalidatePath("/budget");
-  revalidatePath("/savings");
+  revalidatePath("/invest");
 }
 
 // Links (or unlinks) a Savings item to a real bucket in Accounts. Once
@@ -1101,7 +1101,7 @@ export async function addTransaction(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
-  revalidatePath("/savings");
+  revalidatePath("/invest");
 }
 
 export async function updateTransaction(formData: FormData) {
@@ -1301,7 +1301,7 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
-  revalidatePath("/savings");
+  revalidatePath("/invest");
 }
 
 // Lightweight inline edit used by the transaction register. It changes only
@@ -1387,7 +1387,7 @@ export async function updateTransactionAmount(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
-  revalidatePath("/savings");
+  revalidatePath("/invest");
 }
 
 /**
@@ -1531,7 +1531,7 @@ export async function deleteTransaction(formData: FormData) {
     revalidatePath("/accounts");
     revalidatePath("/networth");
     revalidatePath("/annual");
-    revalidatePath("/savings");
+    revalidatePath("/invest");
     return;
   }
 
@@ -1546,7 +1546,7 @@ export async function deleteTransaction(formData: FormData) {
     revalidatePath("/accounts");
     revalidatePath("/networth");
     revalidatePath("/annual");
-    revalidatePath("/savings");
+    revalidatePath("/invest");
     revalidatePath("/invest");
     revalidatePath("/snowball");
     return;
@@ -1601,7 +1601,7 @@ export async function deleteTransaction(formData: FormData) {
   revalidatePath("/transactions");
   revalidatePath("/accounts");
   revalidatePath("/annual");
-  revalidatePath("/savings");
+  revalidatePath("/invest");
 }
 
 export async function deleteTransactions(ids: string[]) {

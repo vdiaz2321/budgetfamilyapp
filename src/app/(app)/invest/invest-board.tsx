@@ -14,6 +14,7 @@ import { AddMonthForm, AddHoldingsForm } from "./manual-entry";
 import { AllHoldingsTable } from "./holdings-rollup";
 import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { SavingsPanel, type SavingsPanelProps } from "./savings-panel";
 
 export type YearCell = {
   year: number;
@@ -124,12 +125,20 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
 
 export type DestAccount = { id: string; name: string };
 
+export type BoardTab = "portfolio" | "savings";
+
 type Props = {
   accounts: InvestAccount[];
   years: number[]; // newest first
   currency: string;
   destAccounts: DestAccount[];
   imports: InvestmentImportView[];
+  /** Net contributions logged into investment accounts this calendar month. */
+  contributedThisMonthCents: number;
+  currentMonthLabel: string;
+  /** Which tab the URL asked for, resolved on the server so there is no flash. */
+  initialTab: BoardTab;
+  savings: SavingsPanelProps;
 };
 
 // ---- Tax treatment ------------------------------------------------------
@@ -173,7 +182,18 @@ function gainVsContributed(cell: {
   return cell.accruedCents - cell.contributedCents;
 }
 
-export function InvestBoard({ accounts, years, currency, destAccounts, imports }: Props) {
+export function InvestBoard({
+  accounts,
+  years,
+  currency,
+  destAccounts,
+  imports,
+  contributedThisMonthCents,
+  currentMonthLabel,
+  initialTab,
+  savings,
+}: Props) {
+  const [tab, setTab] = useState<BoardTab>(initialTab);
   const [year, setYear] = useState<number>(years[0] ?? new Date().getFullYear());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
@@ -184,6 +204,19 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
   const mine = accounts.filter((a) => !a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
   const chartAccounts = selectedAccount ? [selectedAccount] : mine;
+
+  // The tab lives in the URL so /savings can deep-link straight to it and a
+  // reload keeps the view. `history.replaceState` rather than a router
+  // navigation: this is a pure view toggle, and routing would re-run the
+  // server component and refetch the whole page for nothing.
+  const selectTab = (next: BoardTab) => {
+    setTab(next);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (next === "portfolio") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", url);
+  };
 
   const yearIdx = years.indexOf(year);
   const goPrev = () => yearIdx < years.length - 1 && setYear(years[yearIdx + 1]);
@@ -267,13 +300,13 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-7">
-      {/* Header: title + hero total return + year nav */}
+      {/* Header: title + one Transfer/Withdraw entry + hero stats + tabs */}
       <header className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Investments</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Invest / Savings</h1>
             <p className="mt-1 text-sm text-muted">
-            Contributions vs. unrealized gains, per account, per year.
+              Portfolio growth and the cash behind it — contributions, gains, goals and reserves.
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 lg:flex-nowrap lg:justify-end">
@@ -287,15 +320,9 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
               </svg>
               Transfer/Withdraw
             </button>
-            <div className="text-right">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
-                Total gains ({year})
-              </p>
-              <p className={`mt-0.5 text-2xl font-semibold tabular-nums ${summary.gains >= 0 ? "text-positive" : "text-negative"}`}>
-                {summary.gains >= 0 ? "+" : ""}{formatMoney(summary.gains, currency)}
-              </p>
-            </div>
-            <div className="flex items-center gap-1">
+            {/* Year nav belongs to the portfolio view only — nothing on the
+                savings tab is scoped to a year. */}
+            <div className={`flex items-center gap-1 ${tab === "portfolio" ? "" : "hidden"}`}>
               <button
                 type="button"
                 onClick={goPrev}
@@ -331,44 +358,38 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
             </div>
           </div>
         </div>
-        <div className="max-w-3xl rounded-xl bg-brand-soft/50 ring-1 ring-brand/20">
-          <button
-            type="button"
-            onClick={() => setShowGuide((open) => !open)}
-            aria-expanded={showGuide}
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground"
-          >
-            <span>How investment tracking works</span>
-            <span className="flex items-center gap-1.5 text-xs font-medium text-brand">
-              <span>{showGuide ? "Hide details" : "Show details"}</span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showGuide ? "rotate-90" : ""}`} aria-hidden>
-                <path d="M9 6l6 6-6 6" />
-              </svg>
-            </span>
-          </button>
-          {showGuide ? (
-            <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground/80">
-              <p className="mb-3 text-xs text-muted">Use the selected year to review each investment account against its year-end statement.</p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Contributions</p>
-                  <p className="text-xs leading-relaxed">Log a deposit transaction to any investment account — it auto-adds to <span className="font-semibold text-foreground">Contrib</span> here.</p>
-                </div>
-                <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Gains / Losses</p>
-                  <p className="text-xs leading-relaxed">At year-end, type the market gain or loss from your brokerage statement into <span className="font-semibold text-foreground">Gains</span>.</p>
-                </div>
-                <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Current balance</p>
-                  <p className="text-xs leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage&apos;s ending balance.</p>
-                </div>
-              </div>
-            </div>
-          ) : null}
+        {/* Hero stats. "Contributed this month" is the live figure in
+            investing mode — a savings-rate percentage reads 0% while there is
+            deliberately no savings budget item, which is misleading rather
+            than informative. */}
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-line ring-1 ring-black/5 dark:ring-white/10 sm:grid-cols-4">
+          <SummaryStat label="Current value" value={formatMoney(summary.current, currency)} />
+          <SummaryStat
+            label={`Contributed · ${currentMonthLabel.split(" ")[0]}`}
+            value={formatMoney(contributedThisMonthCents, currency)}
+            tone={contributedThisMonthCents > 0 ? "text-positive" : undefined}
+          />
+          <SummaryStat label={`Contributed · ${year}`} value={formatMoney(summary.contributed, currency)} />
+          <SummaryStat
+            label={`Unrealized gains · ${year}`}
+            value={formatMoney(summary.gains, currency)}
+            tone={summary.gains >= 0 ? "text-[color:var(--viz-bills)]" : "text-negative"}
+          />
+        </div>
+
+        <div role="tablist" aria-label="Invest and savings views" className="flex gap-1 border-b border-line/70">
+          <TabButton active={tab === "portfolio"} onClick={() => selectTab("portfolio")}>
+            Portfolio
+          </TabButton>
+          <TabButton active={tab === "savings"} onClick={() => selectTab("savings")}>
+            Savings &amp; Contributions
+          </TabButton>
         </div>
       </header>
 
-      {accounts.length === 0 ? (
+      {tab === "savings" ? (
+        <SavingsPanel {...savings} />
+      ) : accounts.length === 0 ? (
         <div className="rounded-2xl bg-surface px-6 py-12 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <p className="text-sm text-muted">
             No investment accounts yet. Add one on the Accounts page (kind:
@@ -377,16 +398,40 @@ export function InvestBoard({ accounts, years, currency, destAccounts, imports }
         </div>
       ) : (
         <>
-          {/* Summary stats bar */}
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-line ring-1 ring-black/5 dark:ring-white/10 sm:grid-cols-4">
-            <SummaryStat label="Total contributed" value={formatMoney(summary.contributed, currency)} />
-            <SummaryStat
-              label="Unrealized gains"
-              value={formatMoney(summary.gains, currency)}
-              tone={summary.gains >= 0 ? "text-[color:var(--viz-bills)]" : "text-negative"}
-            />
-            <SummaryStat label="Current value" value={formatMoney(summary.current, currency)} />
-            <SummaryStat label="Accounts" value={String(summary.accountCount)} />
+          <div className="max-w-3xl rounded-xl bg-brand-soft/50 ring-1 ring-brand/20">
+            <button
+              type="button"
+              onClick={() => setShowGuide((open) => !open)}
+              aria-expanded={showGuide}
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground"
+            >
+              <span>How investment tracking works</span>
+              <span className="flex items-center gap-1.5 text-xs font-medium text-brand">
+                <span>{showGuide ? "Hide details" : "Show details"}</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showGuide ? "rotate-90" : ""}`} aria-hidden>
+                  <path d="M9 6l6 6-6 6" />
+                </svg>
+              </span>
+            </button>
+            {showGuide ? (
+              <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground/80">
+                <p className="mb-3 text-xs text-muted">Use the selected year to review each investment account against its year-end statement.</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Contributions</p>
+                    <p className="text-xs leading-relaxed">Log a deposit transaction to any investment account — it auto-adds to <span className="font-semibold text-foreground">Contrib</span> here.</p>
+                  </div>
+                  <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Gains / Losses</p>
+                    <p className="text-xs leading-relaxed">At year-end, type the market gain or loss from your brokerage statement into <span className="font-semibold text-foreground">Gains</span>.</p>
+                  </div>
+                  <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Current balance</p>
+                    <p className="text-xs leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage&apos;s ending balance.</p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {taxSplit.rows.length > 1 ? (
@@ -689,6 +734,33 @@ function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerforma
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Underline-style tab. Brand indigo is app chrome, which this is. */
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition ${
+        active
+          ? "border-brand text-brand"
+          : "border-transparent text-muted hover:border-line hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

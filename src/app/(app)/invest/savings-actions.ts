@@ -6,7 +6,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { unwrap } from "@/lib/supabase-result";
 
 /**
- * Edit the three goal fields the Savings page shows, from the Savings page.
+ * Edit the three goal fields the Savings page shows, from the Invest / Savings page.
  *
  * Deliberately narrower than Budget's `upsertSavingsGoal`, which also writes
  * `start_cents` and the bucket link. This editor manages neither, so it reads
@@ -56,13 +56,13 @@ export async function updateSavingsGoalFields(formData: FormData) {
   );
   if (error) return { error: "Couldn't save the goal." };
 
-  revalidatePath("/savings");
+  revalidatePath("/invest");
   revalidatePath("/budget");
   return { error: null };
 }
 
 /**
- * Record the IRS contribution caps for a tax year, from the Savings page.
+ * Record the IRS contribution caps for a tax year, from the Invest / Savings page.
  *
  * These are federal figures published each autumn. Storing them here means a
  * new tax year no longer needs a code change — the card would otherwise go
@@ -107,6 +107,6 @@ export async function saveContributionCaps(formData: FormData) {
   );
   if (error) return { error: "Couldn't save the caps." };
 
-  revalidatePath("/savings");
+  revalidatePath("/invest");
   return { error: null };
 }

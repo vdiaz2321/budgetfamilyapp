@@ -38,13 +38,13 @@ export default async function AccountsPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, tax_treatment")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, tax_treatment, retirement_kind")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, bank_group, tax_treatment")
+      .select("id, account_id, name, balance_cents, bank_group, tax_treatment, retirement_kind, holder")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -247,6 +247,7 @@ export default async function AccountsPage() {
     isKidsAccount: a.is_kids_account ?? false,
     bankGroup: (a.bank_group as "savings" | "spending" | null) ?? null,
     taxTreatment: (a.tax_treatment as string | null) ?? null,
+    retirementKind: (a.retirement_kind as string | null) ?? null,
     balanceCents: a.current_balance_cents ?? 0,
     annualFeeCents: a.annual_fee_cents ?? null,
     feeWaived: a.fee_waived ?? false,
@@ -277,6 +278,8 @@ export default async function AccountsPage() {
         balanceCents: b.balance_cents ?? 0,
         bankGroup: (b.bank_group as "savings" | "spending" | null) ?? null,
         taxTreatment: (b.tax_treatment as string | null) ?? null,
+        retirementKind: (b.retirement_kind as string | null) ?? null,
+        holder: (b.holder as string | null) ?? null,
         // Keyed "YYYY-MM-01", so a bucket row can show (and write) the month
         // the period picker is pointing at rather than only the last three.
         balancesByMonth: (() => {

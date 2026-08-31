@@ -11,6 +11,7 @@ import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } 
 import { adjustAccountLedger } from "@/lib/account-ledger";
 import { adjustDebtBalance } from "@/lib/debts";
 import { unwrap } from "@/lib/supabase-result";
+import { isRetirementKind } from "@/lib/retirement-kind";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
 // ordinary cards unless payoff tracking is explicitly enabled in Edit details.
@@ -262,6 +263,10 @@ export async function addAccount(formData: FormData) {
 
   // Investment/kids accounts pick their tax treatment at creation rather than
   // having it guessed from the account name afterwards.
+  if (formData.has("retirementKind")) {
+    const raw = String(formData.get("retirementKind") ?? "");
+    row.retirement_kind = isRetirementKind(raw) ? raw : null;
+  }
   if (formData.has("taxTreatment")) {
     const raw = String(formData.get("taxTreatment") ?? "");
     if (["taxable", "deferred", "free", "education"].includes(raw)) row.tax_treatment = raw;
@@ -389,6 +394,10 @@ export async function updateAccount(formData: FormData) {
   // Only the Investments/Kids edit forms submit taxTreatment; leave it
   // untouched otherwise. "" means Auto, stored as NULL so the value keeps
   // falling back to the inference rather than freezing today's guess.
+  if (formData.has("retirementKind")) {
+    const raw = String(formData.get("retirementKind") ?? "");
+    update.retirement_kind = isRetirementKind(raw) ? raw : null;
+  }
   if (formData.has("taxTreatment")) {
     const raw = String(formData.get("taxTreatment") ?? "");
     update.tax_treatment = ["taxable", "deferred", "free", "education"].includes(raw) ? raw : null;
@@ -905,9 +914,21 @@ export async function updateBucket(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!id || !name) return { error: "Bucket name is required." };
 
+  const update: Record<string, unknown> = { name, updated_at: new Date().toISOString() };
+  // Both are edited on the same row as the name, and both are meaningful when
+  // cleared — so an empty field writes NULL (fall back to the account) rather
+  // than being skipped.
+  if (formData.has("holder")) {
+    update.holder = String(formData.get("holder") ?? "").trim() || null;
+  }
+  if (formData.has("retirementKind")) {
+    const raw = String(formData.get("retirementKind") ?? "");
+    update.retirement_kind = isRetirementKind(raw) ? raw : null;
+  }
+
   const { error } = await supabase
     .from("buckets")
-    .update({ name, updated_at: new Date().toISOString() })
+    .update(update)
     .eq("id", id)
     .eq("household_id", householdId);
 
