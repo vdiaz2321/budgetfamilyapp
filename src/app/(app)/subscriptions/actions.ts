@@ -294,6 +294,39 @@ export async function updateIrregularBillTypical(formData: FormData) {
   revalidate();
 }
 
+// Planned amount for one irregular bill in one month. These items don't
+// recur monthly, so the plan is stored per month and an untouched month
+// simply has no row (= $0 planned) rather than inheriting the last amount.
+export async function setIrregularBillMonthPlan(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  const month = String(formData.get("month") ?? "").trim(); // YYYY-MM-01
+  if (!id || !/^\d{4}-\d{2}-01$/.test(month)) return;
+  const plannedCents = displayToCents(String(formData.get("planned") ?? "0"));
+  if (plannedCents === 0) {
+    await supabase
+      .from("irregular_bill_plans")
+      .delete()
+      .eq("household_id", householdId)
+      .eq("bill_id", id)
+      .eq("month", month);
+  } else {
+    await supabase
+      .from("irregular_bill_plans")
+      .upsert(
+        {
+          household_id: householdId,
+          bill_id: id,
+          month,
+          planned_cents: plannedCents,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "household_id,bill_id,month" },
+      );
+  }
+  revalidate();
+}
+
 export async function deleteIrregularBill(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");

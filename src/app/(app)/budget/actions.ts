@@ -1726,7 +1726,24 @@ export async function copyPlansFromPreviousMonth(
     "budget_plans",
   );
 
-  const positivePrevPlans = (prevPlans ?? []).filter((p) => (p.planned_cents ?? 0) > 0);
+  // Irregular bills are one-off by nature and are planned per month on their
+  // own card, so a roll-in must never carry their subcategory forward — a new
+  // month starts them at $0.
+  const irregularSubIdRows = unwrap(
+    await supabase
+      .from("irregular_bills")
+      .select("subcategory_id")
+      .eq("household_id", householdId)
+      .not("subcategory_id", "is", null),
+    "irregular_bills",
+  );
+  const irregularSubIds = new Set(
+    (irregularSubIdRows ?? []).map((r) => r.subcategory_id as string),
+  );
+
+  const positivePrevPlans = (prevPlans ?? [])
+    .filter((p) => (p.planned_cents ?? 0) > 0)
+    .filter((p) => !irregularSubIds.has(p.subcategory_id as string));
   const candidateSubIds = positivePrevPlans.map((p) => p.subcategory_id as string);
   let paidOffDebtSubIds = new Set<string>();
   if (candidateSubIds.length > 0) {

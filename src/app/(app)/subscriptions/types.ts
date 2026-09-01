@@ -36,4 +36,6 @@ export type IrregularBillRow = {
   // that rolls into Bills and the Annual Overview.
   monthSpentCents?: number;
   monthAccountNames?: string[];
+  /** Planned for the month being viewed. Absent/0 = nothing budgeted then. */
+  plannedCents?: number;
 };

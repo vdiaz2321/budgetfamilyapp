@@ -5,7 +5,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { DOT } from "./category-icons";
-import { reorderIrregularBills, reorderSubscriptions, updateIrregularBillTypical, updateSubscriptionAmount, updateSubscriptionDueDate } from "../subscriptions/actions";
+import { reorderIrregularBills, reorderSubscriptions, setIrregularBillMonthPlan, updateSubscriptionAmount, updateSubscriptionDueDate } from "../subscriptions/actions";
 import { CYCLE_LABEL, SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import { actualColorClass, remainingColorClass } from "./budget-row";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
@@ -436,12 +436,19 @@ function buildDueDate(value: string, currentDate: string | null, monthly: boolea
 
 export function IrregularBillsSummaryCard({
   currency,
+  monthFirstOfMonth,
+  plannedTotalCents,
   irregularBills,
   open,
   onToggle,
   onOpenSpent,
 }: {
   currency: string;
+  monthFirstOfMonth: string;
+  /** Month total for the header. Usually the sum of the rows below, but for
+      months predating this card it falls back to the subcategory's own
+      planned figure so the header matches the Bills group row. */
+  plannedTotalCents: number;
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
@@ -460,7 +467,9 @@ export function IrregularBillsSummaryCard({
     startReorder(() => reorderIrregularBills(next.map((r) => r.id)));
   });
 
-  const totalPlanned = irregularBills.reduce((sum, b) => sum + b.typicalAmountCents, 0);
+  // Planned is per month — an irregular bill has no plan in a month it isn't
+  // expected to hit, so a fresh month totals $0 until amounts are entered.
+  const totalPlanned = plannedTotalCents;
   const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0);
 
   return (
@@ -528,7 +537,7 @@ export function IrregularBillsSummaryCard({
                     </span>
                     <span className="min-w-0 flex-1 truncate">{b.name}</span>
                     <div className="hidden justify-end sm:flex">
-                      <IrregularPlannedInput id={b.id} typicalAmountCents={b.typicalAmountCents} currency={currency} />
+                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} currency={currency} />
                     </div>
                     <span className="hidden pl-6 text-right font-medium tabular-nums sm:block">
                       {formatMoney(b.monthSpentCents ?? 0, currency)}
@@ -538,7 +547,7 @@ export function IrregularBillsSummaryCard({
                     </span>
                     <div className="flex shrink-0 items-center gap-2 sm:hidden">
                       <span className="text-xs text-muted">Plan</span>
-                      <IrregularPlannedInput id={b.id} typicalAmountCents={b.typicalAmountCents} currency={currency} />
+                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} currency={currency} />
                       <span className="text-xs text-muted">Spent</span>
                       <span className="font-medium tabular-nums">{formatMoney(b.monthSpentCents ?? 0, currency)}</span>
                     </div>
@@ -658,28 +667,31 @@ function PlanInput({
 
 function IrregularPlannedInput({
   id,
-  typicalAmountCents,
+  month,
+  plannedCents,
   currency,
 }: {
   id: string;
-  typicalAmountCents: number;
+  month: string;
+  plannedCents: number;
   currency: string;
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = centsToDisplay(typicalAmountCents);
+  const initial = centsToDisplay(plannedCents);
   const initialValue = `${currencySymbol(currency)}${initial}`;
 
   return (
     <form
       ref={formRef}
-      action={(fd) => start(() => updateIrregularBillTypical(fd))}
+      action={(fd) => start(() => setIrregularBillMonthPlan(fd))}
       className="flex items-center"
     >
       <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="month" value={month} />
       <input
-        key={initial}
-        name="typicalAmount"
+        key={`${month}:${initial}`}
+        name="planned"
         type="text"
         inputMode="decimal"
         autoComplete="off"
@@ -688,7 +700,6 @@ function IrregularPlannedInput({
         onBlur={(e) => {
           if (e.currentTarget.value !== initialValue) formRef.current?.requestSubmit();
         }}
-        title="Type a value or calculation, for example $1200 + 75 - 30"
         className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-sm font-medium text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}

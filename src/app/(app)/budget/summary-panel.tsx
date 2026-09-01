@@ -115,6 +115,18 @@ export function SummaryPanel({ groups, currency }: Props) {
     ];
   };
 
+  // Line-item percentages use the SAME denominator as the category rows above
+  // them — the donut total — so one column means one thing everywhere and a
+  // group's children visibly add up to the group's own share. A tiny non-zero
+  // item reads "<1%" rather than a dead "0%".
+  const pctLabel = (value: number, total: number) => {
+    if (total <= 0) return "0%";
+    const exact = (value / total) * 100;
+    const rounded = Math.round(exact);
+    if (rounded === 0 && exact > 0) return "<1%";
+    return `${rounded}%`;
+  };
+
   return (
     <div className="flex flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
@@ -247,11 +259,17 @@ export function SummaryPanel({ groups, currency }: Props) {
                                   {formatMoney(sec.subtotal, currency)}
                                 </span>
                               </div>
-                              <ul>
+                              <ul className="divide-y divide-line">
                                 {sec.rows.map((r) => (
-                                  <li key={r.subId} className="flex items-center gap-2 py-1">
+                                  <li key={r.subId} className="flex items-center gap-2.5 py-1">
                                     <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
                                     <span className="shrink-0 text-xs tabular-nums">{formatMoney(r.value, currency)}</span>
+                                    <span className="w-9 shrink-0 text-right text-xs text-muted tabular-nums">
+                                      {pctLabel(r.value, total)}
+                                    </span>
+                                    {/* Stands in for the category row's chevron so the
+                                        percent columns line up down the panel. */}
+                                    <span className="w-3 shrink-0" aria-hidden />
                                   </li>
                                 ))}
                               </ul>
@@ -261,16 +279,22 @@ export function SummaryPanel({ groups, currency }: Props) {
                       );
                     }
                     return (
-                      <ul className="mb-1 ml-5 border-l border-line pl-3">
+                      <ul className="mb-1 ml-5 divide-y divide-line border-l border-line pl-3">
                         {subRows.length === 0 ? (
                           <li className="py-1 text-xs text-muted">
                             {mode === "spent" ? "Nothing spent here yet." : "Nothing remaining here."}
                           </li>
                         ) : (
                           subRows.map((r) => (
-                            <li key={r.subId} className="flex items-center gap-2 py-1">
+                            <li key={r.subId} className="flex items-center gap-2.5 py-1">
                               <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
                               <span className="shrink-0 text-xs tabular-nums">{formatMoney(r.value, currency)}</span>
+                              <span className="w-9 shrink-0 text-right text-xs text-muted tabular-nums">
+                                {pctLabel(r.value, total)}
+                              </span>
+                              {/* Stands in for the category row's chevron so the
+                                  percent columns line up down the panel. */}
+                              <span className="w-3 shrink-0" aria-hidden />
                             </li>
                           ))
                         )}

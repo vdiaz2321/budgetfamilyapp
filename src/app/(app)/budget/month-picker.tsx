@@ -46,13 +46,18 @@ export function MonthPicker({
     setOpen((v) => !v);
   }
 
+  // `select-none` on the trigger and the panel is load-bearing on touch: the
+  // month labels are plain text, so a tap that drifts a pixel starts a text
+  // selection and the browser swallows the click — the picker looked frozen on
+  // a phone until the page was reloaded. `touch-manipulation` drops the
+  // double-tap-zoom delay on the same taps.
   return (
     <div className="relative">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex items-center gap-1.5 text-2xl tracking-tight"
+        className="flex touch-manipulation select-none items-center gap-1.5 text-2xl tracking-tight"
       >
         <span className="font-bold text-foreground">{MONTHS_FULL[month1 - 1]}</span>
         <span className="font-normal text-muted">{year}</span>
@@ -81,7 +86,7 @@ export function MonthPicker({
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-40 cursor-default"
           />
-          <div className="absolute left-0 top-11 z-50 w-80 rounded-2xl bg-surface p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10">
+          <div className="absolute left-0 top-11 z-50 w-80 touch-manipulation select-none rounded-2xl bg-surface p-4 shadow-xl ring-1 ring-black/5 dark:ring-white/10">
             {/* Year navigator */}
             <div className="mb-3 flex items-center justify-between">
               <button

@@ -42,6 +42,15 @@ Every UI change on any `(app)/` page MUST be verified at **mobile width (375×81
 
 Common breakage patterns worth eyeballing on mobile: `grid-cols-[fixed-widths]` (use `grid-cols-1 sm:grid-cols-…` instead), `whitespace-nowrap` on long labels, footer button rows without `flex-wrap`, hero cards with 4–5 columns (use `grid-cols-2 sm:grid-cols-…`).
 
+**Never let a top-anchored overlay sit flush at `top-0` on mobile.** Victor is
+on an iPhone; a sheet, panel, or banner pinned to the very top has its first
+row of content — usually the title and the close button — clipped by the status
+bar and notch. Give the container
+`pt-[max(env(safe-area-inset-top),1.75rem)]`, and put that padding on the
+outer, non-scrolling box so it can't scroll away with the content. The same
+applies at the bottom, where `env(safe-area-inset-bottom)` clears the home
+indicator (see `transaction-modal.tsx` for the existing usages).
+
 # Never add tooltips (title="…") unless Victor asks
 
 Do NOT add `title="…"` attributes, hover tooltips, or any other hover-only affordance to buttons, chips, filter controls, stat tiles, or icons unless Victor explicitly asks for one. Victor has repeatedly asked to have these removed after they were added unprompted. Rationale: unsolicited tooltips clutter the UI, don't show on mobile at all, and imply the button isn't self-explanatory — which it should be.

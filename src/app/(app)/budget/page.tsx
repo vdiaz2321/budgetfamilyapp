@@ -42,6 +42,7 @@ export default async function BudgetPage({
     { data: buckets, error: bucketsError },
     { data: subscriptions, error: subscriptionsError },
     { data: irregularBills, error: irregularBillsError },
+    { data: irregularBillPlans, error: irregularBillPlansError },
     categories,
     { data: rolloverRows, error: rolloverRowsError },
     allActuals,
@@ -116,6 +117,13 @@ export default async function BudgetPage({
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
+    // Irregular bills are planned per month, not once and forever — a new
+    // month starts at $0 until a plan is entered for that specific month.
+    supabase
+      .from("irregular_bill_plans")
+      .select("bill_id, planned_cents")
+      .eq("household_id", household.id)
+      .eq("month", month.firstOfMonth),
     ensureCategories(supabase, household.id),
     supabase
       .from("budget_rollovers")
@@ -152,7 +160,7 @@ export default async function BudgetPage({
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false }),
   ]);
-  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, rolloverRows: rolloverRowsError, prevTxRows: prevTxRowsError });
+  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, rolloverRows: rolloverRowsError, prevTxRows: prevTxRowsError });
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
   // Last month's actual per item, for the "Prev Mo Spent" one-click prefill on
@@ -271,10 +279,27 @@ export default async function BudgetPage({
     subMonthSpentById.set(sub.id, total((txRows ?? []).filter(isThisSub)));
     subPrevSpentById.set(sub.id, total((prevTxRows ?? []).filter(isThisSub)));
   }
+  // Planned per bill for THIS month only (absent row = $0), and the per
+  // subcategory sum the Bills group row reads.
+  const irregularPlannedByBillId = new Map<string, number>(
+    (irregularBillPlans ?? []).map((p) => [p.bill_id as string, p.planned_cents as number]),
+  );
+  // Only months that actually carry per-bill plans are driven by the card.
+  // Months from before the Irregular Bills card existed have their planned
+  // amount recorded the old way, as a plain budget_plans row on the
+  // subcategory — treating those as "auto, therefore $0" would erase the
+  // history. So the card only takes over a subcategory once that month has
+  // at least one per-bill plan; otherwise the manual row still wins.
+  const irregularSubIdsWithPlans = new Set(
+    (irregularBills ?? [])
+      .filter((b) => b.subcategory_id && irregularPlannedByBillId.has(b.id))
+      .map((b) => b.subcategory_id as string),
+  );
   const irregularAutoPlannedBySub = new Map<string, number>();
   for (const bill of irregularBills ?? []) {
     if (!bill.subcategory_id) continue;
-    irregularAutoPlannedBySub.set(bill.subcategory_id, (irregularAutoPlannedBySub.get(bill.subcategory_id) ?? 0) + bill.typical_amount_cents);
+    if (!irregularSubIdsWithPlans.has(bill.subcategory_id)) continue;
+    irregularAutoPlannedBySub.set(bill.subcategory_id, (irregularAutoPlannedBySub.get(bill.subcategory_id) ?? 0) + (irregularPlannedByBillId.get(bill.id) ?? 0));
   }
 
   const isKidsAcctByIdEarly = new Map((accounts ?? []).map((a) => [a.id, a.is_kids_account ?? false]));
@@ -609,6 +634,7 @@ export default async function BudgetPage({
     id: b.id,
     name: b.name,
     typicalAmountCents: b.typical_amount_cents,
+    plannedCents: irregularPlannedByBillId.get(b.id) ?? 0,
     subcategoryId: b.subcategory_id,
     accountId: b.account_id ?? null,
     notes: b.notes,
@@ -632,6 +658,18 @@ export default async function BudgetPage({
   );
   const subscriptionMonthSpent = [...subSubcategoryIds].reduce(
     (sum, id) => sum + (spentBySub.get(id) ?? 0),
+    0,
+  );
+
+  // Same idea for the Irregular Bills card header, but it has to honour the
+  // legacy fallback above: in a month with no per-bill plans the header shows
+  // the subcategory's manual budget_plans figure, so it agrees with the Bills
+  // group row instead of contradicting it with $0.
+  const irregularSubcategoryIds = new Set(
+    (irregularBills ?? []).filter((b) => b.subcategory_id).map((b) => b.subcategory_id!),
+  );
+  const irregularMonthPlanned = [...irregularSubcategoryIds].reduce(
+    (sum, id) => sum + (irregularAutoPlannedBySub.get(id) ?? plannedBySub.get(id) ?? 0),
     0,
   );
 
@@ -679,6 +717,7 @@ export default async function BudgetPage({
       subscriptions={subscriptionRows}
       irregularBills={irregularBillRows}
       creditCards={creditCards}
+      irregularMonthPlanned={irregularMonthPlanned}
       subscriptionMonthPlanned={subscriptionMonthPlanned}
       subscriptionMonthSpent={subscriptionMonthSpent}
     />

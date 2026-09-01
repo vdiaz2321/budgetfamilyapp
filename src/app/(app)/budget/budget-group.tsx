@@ -460,13 +460,12 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
         type="button"
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}
         aria-label={`Manage ${group.name}`}
-        title={`Manage ${group.name}`}
         className="rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-muted hover:bg-surface/70 hover:text-foreground"
       >
         ···
       </button>
       {open ? (
-        <ModalShell title={`Manage ${group.name}`} onClose={() => setOpen(false)}>
+        <ModalShell title={`Manage ${group.name}`} onClose={() => setOpen(false)} mobileAlign="top" className="sm:max-w-md">
           <div className="space-y-4 p-5">
             <form
               action={(formData) =>
@@ -474,6 +473,7 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
                   setError(null);
                   const result = await renameCategoryGroup(formData);
                   if (result.error) setError(result.error);
+                  else setOpen(false);
                 })
               }
               className="space-y-2"
@@ -488,8 +488,20 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
                     defaultValue={group.name}
                     className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                   />
-                  <button type="submit" disabled={pending} className="rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
-                    Save
+                  <button
+                    type="submit"
+                    disabled={pending}
+                    aria-busy={pending}
+                    className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {pending ? (
+                      <>
+                        <span aria-hidden className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                        Saving…
+                      </>
+                    ) : (
+                      "Save"
+                    )}
                   </button>
                 </div>
               </label>

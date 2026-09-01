@@ -59,6 +59,7 @@ type Props = {
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
+  irregularMonthPlanned: number;
   subscriptionMonthPlanned: number;
   subscriptionMonthSpent: number;
 };
@@ -83,6 +84,7 @@ export function BudgetBoard({
   subscriptions,
   irregularBills,
   creditCards,
+  irregularMonthPlanned,
   subscriptionMonthPlanned,
   subscriptionMonthSpent,
 }: Props) {
@@ -350,6 +352,53 @@ export function BudgetBoard({
 
   const railContent = itemPanel;
 
+  // The rail rides the page scroll rather than sticking, so a selected item's
+  // detail panel would otherwise render at the very top of the page — far above
+  // a row clicked halfway down the list. Offsetting the rail drops the panel
+  // next to that row instead, centred on it so a tall panel doesn't hang off
+  // the bottom of the screen with its Save button out of reach.
+  const railRef = useRef<HTMLDivElement>(null);
+  const [railOffset, setRailOffset] = useState(0);
+  const selectedSubId = selected?.subId ?? null;
+  useEffect(() => {
+    // Below `lg` the panel is a bottom sheet, not the rail — no offset there.
+    if (!selectedSubId || window.innerWidth < 1024) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRailOffset(0);
+      return;
+    }
+    const rail = railRef.current;
+    const row = document.querySelector(`[data-drop-key="subcat:${selectedSubId}"]`);
+    if (!rail || !row) return;
+
+    const rowRect = row.getBoundingClientRect();
+    const railRect = rail.getBoundingClientRect();
+    const GAP = 16;
+    // Centre the panel on the row rather than aligning their top edges.
+    let wantTop = rowRect.top + rowRect.height / 2 - railRect.height / 2;
+    // Then keep the whole panel on screen where it fits, so nothing below the
+    // fold has to be scrolled to — the point of centring in the first place.
+    if (railRect.height + GAP * 2 <= window.innerHeight) {
+      wantTop = Math.min(
+        Math.max(wantTop, GAP),
+        window.innerHeight - railRect.height - GAP,
+      );
+    } else {
+      wantTop = Math.min(wantTop, rowRect.top);
+    }
+
+    // Both rects are viewport-relative, so the page's scroll position cancels
+    // out; the rail's own rect already includes the offset applied last time,
+    // which is why this adjusts the previous value rather than replacing it.
+    const delta = wantTop - railRect.top;
+    const column = rail.parentElement?.previousElementSibling as HTMLElement | null;
+    // Never push the panel past the bottom of the budget list — that would
+    // stretch the page taller just to hold empty rail.
+    const maxOffset = Math.max(0, (column?.offsetHeight ?? 0) - rail.offsetHeight);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRailOffset((prev) => Math.max(0, Math.min(prev + delta, maxOffset)));
+  }, [selectedSubId]);
+
   const heroRef = useRef<HTMLDivElement>(null);
   const [heroHidden, setHeroHidden] = useState(false);
   useEffect(() => {
@@ -557,6 +606,8 @@ export function BudgetBoard({
 
                 <IrregularBillsSummaryCard
                   currency={currency}
+                  monthFirstOfMonth={month.firstOfMonth}
+                  plannedTotalCents={irregularMonthPlanned}
                   subscriptions={subscriptions}
                   irregularBills={irregularBills}
                   creditCards={creditCards}
@@ -579,7 +630,12 @@ export function BudgetBoard({
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
       <aside className="hidden w-[380px] shrink-0 lg:block">
-        <div className="sticky top-20 space-y-3">
+        {/* Deliberately not sticky and not its own scroll container: the rail
+            rides the page scroll with the budget list beside it, so there is
+            one scrollbar for the whole page. Pinning it either hid the rail's
+            own overflow until the page had scrolled past, or forced a second
+            scrollbar that moved out of step with the list. */}
+        <div ref={railRef} className="space-y-3" style={railOffset ? { marginTop: railOffset } : undefined}>
           {railContent ?? (
             <>
               {/* Summary | Transactions toggle */}
@@ -649,9 +705,16 @@ export function BudgetBoard({
             onClick={() => setSelected(null)}
             className="fixed inset-0 z-40 bg-black/30"
           />
-          <div className="fixed inset-x-0 top-0 z-[70] max-h-[85vh] overflow-y-auto overscroll-contain rounded-b-2xl bg-background shadow-xl">
-            {railContent}
-            <div className="mx-auto mb-2 mt-2 h-1 w-10 rounded-full bg-line" />
+          {/* The sheet's surface reaches the very top of the screen, but its
+              CONTENT is pushed clear of it: flush against top:0 the panel's
+              title and close button land under the iPhone's status bar / notch
+              and get clipped. The padding sits on this outer, non-scrolling box
+              so it stays put instead of scrolling away with the content. */}
+          <div className="fixed inset-x-0 top-0 z-[70] flex max-h-[85vh] flex-col rounded-b-2xl bg-background pt-[max(env(safe-area-inset-top),1.75rem)] shadow-xl">
+            <div className="min-h-0 overflow-y-auto overscroll-contain">
+              {railContent}
+              <div className="mx-auto mb-2 mt-2 h-1 w-10 rounded-full bg-line" />
+            </div>
           </div>
         </div>
       ) : null}

@@ -2,6 +2,11 @@
 
 // A generic centered modal: backdrop (click closes) + scrollable panel, styled
 // to match the rest of the app's overlays (TransactionModal, item panels).
+//
+// The panel is `fixed`, but it is still a DOM descendant of whatever opened it
+// — often a clickable row or group header. Without the stopPropagation below,
+// every click inside the modal (Close, Save, even a text field) also fires that
+// parent's onClick, so closing the modal would toggle the row open behind it.
 export function ModalShell({
   title,
   onClose,
@@ -22,6 +27,7 @@ export function ModalShell({
   const alignsTop = mobileAlign === "top";
   return (
     <div
+      onClick={(event) => event.stopPropagation()}
       className={`fixed inset-0 z-50 flex justify-center sm:items-center sm:p-4 ${
         alignsTop ? "items-start p-3" : "items-end"
       }`}
