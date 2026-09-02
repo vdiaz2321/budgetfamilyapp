@@ -55,11 +55,13 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
   // Dynamic column count (label + N years + Total) → inline style, since Tailwind's
   // JIT can't see a computed grid-cols-[…] arbitrary value.
   const gridStyle: CSSProperties = {
-    // Let the line-item column use extra room on wider displays, while keeping
-    // enough width for long names on a laptop before horizontal scrolling begins.
-    gridTemplateColumns: `minmax(12rem, 1fr) minmax(7rem, 1fr) repeat(${years.length}, minmax(7rem, 1fr))`,
+    // Columns are sized to the figures they hold — a year column fits
+    // "$133,847.09" and no more — so nine years of history read as a table
+    // rather than as numbers marooned in white space. The line-item column
+    // still takes any width left over on a wide screen.
+    gridTemplateColumns: `minmax(9.5rem, 1fr) minmax(6.25rem, 1fr) repeat(${years.length}, minmax(5.5rem, 1fr))`,
   };
-  const minW = `${13 + (years.length + 1) * 7.25}rem`;
+  const minW = `${10.5 + 6.25 + years.length * 5.5}rem`;
 
   return (
     <section className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
@@ -91,7 +93,7 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
             <div
               ref={(el) => { if (el) scrollersRef.current.add(el); }}
               onScroll={(e) => syncScrollX(e.currentTarget.scrollLeft)}
-              className="overflow-x-auto"
+              className="scroll-handle overflow-x-auto"
             >
               <div style={{ minWidth: minW }}>
                 <div className="grid items-center gap-2 border-b border-line pr-4 py-2" style={gridStyle}>
@@ -119,16 +121,16 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
                 ))}
                 {/* Net (unallocated) — Income − Expenses − Savings − Investment */}
                 <div className="grid items-center gap-2 border-t border-line pr-4 py-2" style={gridStyle}>
-                  <span className="sticky left-0 z-10 bg-surface pl-4 text-sm font-bold">Net</span>
+                  <span className="sticky left-0 z-10 bg-surface pl-4 text-[13px] font-bold">Net</span>
                   {(() => { const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0); return (
-                    <span className={`text-center text-xs font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span>
+                    <span className={`text-center text-[11px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span>
                   ); })()}
                   {years.map((y) => {
                     const v = netByYear[y] ?? 0;
                     return (
                       <span
                         key={y}
-                        className={`text-center text-xs font-bold tabular-nums ${v < 0 ? "text-negative" : "text-positive"}`}
+                        className={`text-center text-[11px] font-bold tabular-nums ${v < 0 ? "text-negative" : "text-positive"}`}
                       >
                         {formatMoney(v, currency)}
                       </span>
@@ -168,12 +170,12 @@ function SummaryRow({
   const totalColor = kind === "income" || kind === "savings" || kind === "investment" ? "text-positive" : kind === "kidsFunding" ? "" : "text-negative";
   return (
     <div className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
-      <span className="sticky left-0 z-10 bg-surface pl-4 text-sm font-semibold">{label}</span>
-      <span className={`text-center text-xs font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span>
+      <span className="sticky left-0 z-10 bg-surface pl-4 text-[13px] font-semibold">{label}</span>
+      <span className={`text-center text-[11px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span>
       {years.map((y) => {
         const v = byYear[y] ?? 0;
         return (
-          <span key={y} className="text-center text-xs tabular-nums">
+          <span key={y} className="text-center text-[11px] tabular-nums">
             {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
           </span>
         );
@@ -252,7 +254,7 @@ function KindBlock({
               syncHeader();
               syncScrollX(e.currentTarget.scrollLeft);
             }}
-            className="overflow-x-auto"
+            className="scroll-handle overflow-x-auto"
           >
             <div style={{ minWidth: minW }}>
               {filteredGroups.map((g) => (
@@ -287,13 +289,13 @@ function Group({
           <span className="sticky left-0 z-10 bg-surface pl-4 text-xs font-bold leading-tight whitespace-nowrap" title={group.label}>
             {group.label}
           </span>
-          <span className="text-center text-xs font-bold tabular-nums">
+          <span className="text-center text-[11px] font-bold tabular-nums">
             {formatMoney(group.total, currency)}
           </span>
           {years.map((y) => {
             const v = group.subtotalByYear[y] ?? 0;
             return (
-              <span key={y} className="text-center text-xs font-semibold tabular-nums text-muted">
+              <span key={y} className="text-center text-[11px] font-semibold tabular-nums text-muted">
                 {v !== 0 ? formatMoney(v, currency) : "—"}
               </span>
             );

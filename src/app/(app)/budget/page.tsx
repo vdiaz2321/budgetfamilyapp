@@ -46,6 +46,7 @@ export default async function BudgetPage({
     { data: subscriptions, error: subscriptionsError },
     { data: irregularBills, error: irregularBillsError },
     { data: irregularPlanRows, error: irregularBillPlansError },
+    { data: subscriptionPlanRows, error: subscriptionPlansError },
     categories,
     { data: rolloverRows, error: rolloverRowsError },
     actualsSinceAnchor,
@@ -127,6 +128,13 @@ export default async function BudgetPage({
       .select("month, bill_id, planned_cents")
       .eq("household_id", household.id)
       .in("month", [prevFirstOfMonth, month.firstOfMonth]),
+    // Per-month plan overrides for subscriptions. Only months a subscription
+    // does NOT charge in read these — see subscriptionPlannedFor below.
+    supabase
+      .from("subscription_plans")
+      .select("month, subscription_id, planned_cents")
+      .eq("household_id", household.id)
+      .in("month", [prevFirstOfMonth, month.firstOfMonth]),
     ensureCategories(supabase, household.id),
     supabase
       .from("budget_rollovers")
@@ -151,7 +159,7 @@ export default async function BudgetPage({
         .range(from, to),
     ),
   ]);
-  throwIfAny({ subs: subsError, plans: plansError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, rolloverRows: rolloverRowsError });
+  throwIfAny({ subs: subsError, plans: plansError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, subscriptionPlans: subscriptionPlansError, rolloverRows: rolloverRowsError });
 
   // ---- Split the two-month reads back into the shapes the page works with.
   const txRows = (txWindow ?? []).filter((t) => t.occurred_on >= month.firstOfMonth);
@@ -160,6 +168,11 @@ export default async function BudgetPage({
   const prevPlans = (planRows ?? []).filter((p) => p.month === prevFirstOfMonth);
   const irregularBillPlans = (irregularPlanRows ?? []).filter((p) => p.month === month.firstOfMonth);
   const prevIrregularBillPlans = (irregularPlanRows ?? []).filter((p) => p.month === prevFirstOfMonth);
+  // Subscription overrides, keyed "<subscriptionId>:<month>" so both months
+  // are looked up the same way.
+  const subscriptionPlanOverrides = new Map<string, number>(
+    (subscriptionPlanRows ?? []).map((p) => [`${p.subscription_id}:${p.month}`, p.planned_cents as number]),
+  );
   // v_monthly_actuals now arrives as one range through the viewed month.
   const allActuals = actualsSinceAnchor.filter((a) => a.month < month.firstOfMonth);
   const actuals = actualsSinceAnchor.filter((a) => a.month === month.firstOfMonth);
@@ -250,18 +263,32 @@ export default async function BudgetPage({
     // quarterly / weekly: next_renewal_date is the exact next occurrence
     return sub.next_renewal_date.slice(0, 7) === monthKey;
   };
+  // What one subscription plans in one month: its own amount in the months it
+  // charges, otherwise whatever was budgeted by hand for that month (a
+  // subscription_plans row) — which is how an off-cycle charge, or one from a
+  // cancelled sub, gets covered instead of sitting permanently overspent.
+  const subscriptionPlannedFor = (
+    sub: { id: string; is_active: boolean | null; next_renewal_date: string | null; billing_cycle: string; subcategory_id: string | null; amount_cents: number },
+    monthKey: string,
+    firstOfMonth: string,
+  ) =>
+    subscriptionChargesIn(sub, monthKey)
+      ? sub.amount_cents
+      : subscriptionPlanOverrides.get(`${sub.id}:${firstOfMonth}`) ?? 0;
   const autoPlannedBySub = new Map<string, number>();
   // Same rule, kept per subscription so the card can show a row's own Plan.
   const subMonthPlannedById = new Map<string, number>();
   const prevAutoPlannedBySub = new Map<string, number>();
   for (const sub of subscriptions ?? []) {
     if (!sub.subcategory_id) continue;
-    if (subscriptionChargesIn(sub, month.key)) {
-      subMonthPlannedById.set(sub.id, sub.amount_cents);
-      autoPlannedBySub.set(sub.subcategory_id, (autoPlannedBySub.get(sub.subcategory_id) ?? 0) + sub.amount_cents);
+    const planned = subscriptionPlannedFor(sub, month.key, month.firstOfMonth);
+    if (planned > 0) {
+      subMonthPlannedById.set(sub.id, planned);
+      autoPlannedBySub.set(sub.subcategory_id, (autoPlannedBySub.get(sub.subcategory_id) ?? 0) + planned);
     }
-    if (subscriptionChargesIn(sub, month.prevKey)) {
-      prevAutoPlannedBySub.set(sub.subcategory_id, (prevAutoPlannedBySub.get(sub.subcategory_id) ?? 0) + sub.amount_cents);
+    const prevPlanned = subscriptionPlannedFor(sub, month.prevKey, prevFirstOfMonth);
+    if (prevPlanned > 0) {
+      prevAutoPlannedBySub.set(sub.subcategory_id, (prevAutoPlannedBySub.get(sub.subcategory_id) ?? 0) + prevPlanned);
     }
   }
 
@@ -677,6 +704,9 @@ export default async function BudgetPage({
     sortOrder: (s as { sort_order?: number }).sort_order ?? 0,
     isRecurring: (s as { is_recurring?: boolean }).is_recurring ?? false,
     monthPlannedCents: subMonthPlannedById.get(s.id) ?? 0,
+    // Charging months edit the subscription's own amount; quiet months edit
+    // that month's override. The Plan cell needs to know which it is.
+    chargesThisMonth: subscriptionChargesIn(s, month.key),
     monthSpentCents: subMonthSpentById.get(s.id) ?? 0,
     prevSpentCents: subPrevSpentById.get(s.id) ?? 0,
   }));

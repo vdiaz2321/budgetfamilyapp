@@ -18,6 +18,12 @@ export type SubscriptionRow = {
   // sub plans every month, an annual one only in its renewal month.
   monthPlannedCents?: number;
   monthSpentCents?: number;
+  /**
+   * Whether this subscription actually bills in the month being viewed. When
+   * it does, its Plan cell edits `amount_cents`; when it doesn't, the cell
+   * edits that one month's override (subscription_plans).
+   */
+  chargesThisMonth?: boolean;
   // What this subscription actually cost last month, matched by payee the same
   // way monthSpentCents is. Feeds the Prev Mo Spent prefill on recurring rows.
   prevSpentCents?: number;

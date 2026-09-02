@@ -4,15 +4,9 @@ import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { AnnualHero } from "./annual-hero";
 import { YearPicker } from "./year-picker";
-import {
-  CategoryMonthsTable,
-  type CatMonthGroup,
-  type CatMonthRow,
-} from "./category-months-table";
-import {
-  AnnualBreakdownHistory,
-  type BreakdownKind,
-} from "./annual-breakdown-history";
+import { AnnualPanels } from "./annual-panels";
+import type { CatMonthGroup, CatMonthRow } from "./category-months-table";
+import type { BreakdownKind } from "./annual-breakdown-history";
 import { ScrollToTop } from "@/components/scroll-to-top";
 import { throwIfAny } from "@/lib/supabase-result";
 
@@ -232,19 +226,77 @@ export default async function AnnualOverviewPage({
     subIdsByCategory.set(s.category_id, list);
   }
 
+  const payeeName = new Map((payees ?? []).map((p) => [p.id, p.name]));
+
+  // The two Budget lines that roll many charges into one figure. Only these
+  // get a payee split — every other line is one thing, and a chevron on it
+  // would be noise.
+  const DETAIL_SUB_NAMES = new Set(["subscriptions", "irregular bills"]);
+  const detailSubIds = new Set(
+    (subs ?? [])
+      .filter((s) => DETAIL_SUB_NAMES.has(s.name.toLowerCase()))
+      .map((s) => s.id),
+  );
+
+  // What sits behind those two figures, split by who was paid.
+  // v_monthly_actuals is a plain sum of the same transactions, so these lines
+  // add back up to the row exactly. Only the viewed year counts, and only from
+  // 2026 — earlier years are seeded totals with no transactions behind them.
+  const NO_PAYEE_LABEL = "Unassigned";
+  const payeeMonthsBySub = new Map<string, Map<string, number[]>>();
+  for (const t of liveTxRows ?? []) {
+    if (!t.subcategory_id || !detailSubIds.has(t.subcategory_id)) continue;
+    if (parseInt(t.occurred_on.slice(0, 4), 10) !== year) continue;
+    const label = (t.payee_id ? payeeName.get(t.payee_id) : null) ?? NO_PAYEE_LABEL;
+    let byPayee = payeeMonthsBySub.get(t.subcategory_id);
+    if (!byPayee) {
+      byPayee = new Map();
+      payeeMonthsBySub.set(t.subcategory_id, byPayee);
+    }
+    let months = byPayee.get(label);
+    if (!months) {
+      months = Array(12).fill(0);
+      byPayee.set(label, months);
+    }
+    months[parseInt(t.occurred_on.slice(5, 7), 10) - 1] += t.amount_cents;
+  }
+
   const categoryGroups: CatMonthGroup[] = categories.flatMap((category) => {
-    const rows: CatMonthRow[] = (subIdsByCategory.get(category.id) ?? [])
+    const allRows: CatMonthRow[] = (subIdsByCategory.get(category.id) ?? [])
       .map((subId) => {
         const months = actualBySub.get(subId) ?? Array(12).fill(0);
         const total = months.reduce((sum, v) => sum + v, 0);
-        return { subId, name: nameBySub.get(subId) ?? "—", months, total };
-      })
-      .filter((r) => r.months.some((v) => v !== 0));
+        const details = [...(payeeMonthsBySub.get(subId)?.entries() ?? [])]
+          .map(([name, detailMonths]) => ({
+            name,
+            months: detailMonths,
+            total: detailMonths.reduce((sum, v) => sum + v, 0),
+          }))
+          .sort((a, b) => b.total - a.total);
+        return {
+          subId,
+          name: nameBySub.get(subId) ?? "—",
+          months,
+          total,
+          // A lone detail line just restates the row it sits under, so a row
+          // only becomes expandable once there is genuinely a split to see.
+          ...(details.length > 1 ? { details } : {}),
+        };
+      });
 
-    if (!rows.length) return [];
+    // Order follows the Budget page (subcategories arrive by sort_order). A
+    // line with nothing logged this year drops to the bottom instead of
+    // holding its slot in the middle of the list — see feedback: dormant rows
+    // should shift down.
+    const active = allRows.filter((r) => r.months.some((v) => v !== 0));
+    if (!active.length) return [];
+    const rows = [
+      ...active,
+      ...allRows.filter((r) => !r.months.some((v) => v !== 0)).map((r) => ({ ...r, dormant: true })),
+    ];
 
     const monthTotals = Array(12).fill(0);
-    for (const r of rows) for (let i = 0; i < 12; i++) monthTotals[i] += r.months[i];
+    for (const r of active) for (let i = 0; i < 12; i++) monthTotals[i] += r.months[i];
     const total = monthTotals.reduce((sum, v) => sum + v, 0);
 
     return [{
@@ -280,16 +332,9 @@ export default async function AnnualOverviewPage({
     byYear.set(y, (byYear.get(y) ?? 0) + t.amount_cents);
   }
 
-  // Per-payee detail for line items that roll up (Subscriptions, Irregular Bills):
-  // subcategory_id → payee_name → year → cents
-  const DETAIL_SUB_NAMES = new Set(["subscriptions", "irregular bills"]);
+  // The same two roll-up lines again, this time per year for the Annual
+  // Breakdown card: subcategory_id → payee_name → year → cents.
   const detailPayeeBySub = new Map<string, Map<string, Map<number, number>>>();
-  const payeeName = new Map((payees ?? []).map((p) => [p.id, p.name]));
-  const detailSubIds = new Set(
-    (subs ?? [])
-      .filter((s) => DETAIL_SUB_NAMES.has(s.name.toLowerCase()))
-      .map((s) => s.id),
-  );
   for (const t of liveTxRows ?? []) {
     if (!t.subcategory_id || !detailSubIds.has(t.subcategory_id)) continue;
     if (!t.payee_id) continue;
@@ -386,7 +431,7 @@ export default async function AnnualOverviewPage({
         </div>
       </div>
 
-      {/* Year summary + Months table (client wrapper so Outflow can filter by clicking column totals) */}
+      {/* Year summary + Months table */}
       <AnnualHero
         year={year}
         columns={COLUMNS}
@@ -397,15 +442,11 @@ export default async function AnnualOverviewPage({
         gridCols={gridCols}
       />
 
-      {/* Category by Months */}
-      <CategoryMonthsTable
+      {/* Category by Months + Annual Breakdown history (multi-year, seeded
+          2018–2025). Paired so they can share a row while both are shut. */}
+      <AnnualPanels
         groups={categoryGroups}
         monthLabels={monthLabels}
-        currency={currency}
-      />
-
-      {/* Annual Breakdown history (multi-year, seeded 2018–2025) */}
-      <AnnualBreakdownHistory
         kinds={breakdownKinds}
         years={breakdownYears}
         netByYear={netByYear}

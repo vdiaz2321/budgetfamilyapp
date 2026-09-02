@@ -5,6 +5,7 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
+import { planNavKeyDown } from "./plan-nav";
 
 const ACTUAL_WORD: Record<CategoryKind, string> = {
   income: "received",
@@ -387,7 +388,7 @@ function MobilePlannedInput({
             formRef.current?.requestSubmit();
             setEditing(false);
           }}
-          className={MATCH_BTN_CLASS}
+          className={`absolute bottom-full right-0 ${MATCH_BTN_CLASS}`}
         >
           Match spent ({formatMoney(spentCents, currency)})
         </button>
@@ -415,27 +416,12 @@ function MobilePlannedInput({
 
 // The Match-spent affordance is a real button sitting over a data row, so it
 // has to read as pressable at a glance — solid fill, not a bordered tooltip.
-const MATCH_BTN_CLASS =
-  "absolute bottom-full right-0 z-20 mb-1 whitespace-nowrap rounded-full bg-muted px-2.5 py-1 text-[12px] font-bold text-white shadow-md ring-1 ring-black/10 transition hover:bg-foreground/75 active:scale-95";
-
-// Tab from a Planned cell should land on the next Planned cell, not on the
-// Actual/Remaining/% buttons that sit between them in DOM order — entering a
-// month's budget is a single top-to-bottom pass down one column. Groups are
-// crossed in list order; collapsed groups and read-only rows (Subscriptions,
-// Irregular Bills) simply aren't in the list, so they're skipped.
-function focusAdjacentPlanned(current: HTMLInputElement, direction: 1 | -1) {
-  const inputs = Array.from(
-    document.querySelectorAll<HTMLInputElement>('input[name="planned"]'),
-  ).filter((el) => !el.disabled && !el.readOnly && el.offsetParent !== null);
-  const index = inputs.indexOf(current);
-  if (index === -1) return false;
-  const next = inputs[index + direction];
-  if (!next) return false;
-  // Focusing fires the current input's blur, which saves it if it changed.
-  next.focus();
-  next.select();
-  return true;
-}
+// Shared with the Subscriptions card's Plan cell, which offers the same fix.
+// Look only — each site adds its own placement, because the pill is wider than
+// the cell it floats over and pinning BOTH edges would squeeze it to the
+// cell's width instead of letting it overflow.
+export const MATCH_BTN_CLASS =
+  "z-20 mb-1 whitespace-nowrap rounded-full bg-muted px-2.5 py-1 text-[12px] font-bold text-white shadow-md ring-1 ring-black/10 transition hover:bg-foreground/75 active:scale-95";
 
 function PlannedInput({
   subId,
@@ -481,7 +467,7 @@ function PlannedInput({
             el.value = `${currencySymbol(currency)}${centsToDisplay(spentCents)}`;
             formRef.current?.requestSubmit();
           }}
-          className={MATCH_BTN_CLASS}
+          className={`absolute bottom-full right-0 ${MATCH_BTN_CLASS}`}
         >
           Match spent ({formatMoney(spentCents, currency)})
         </button>
@@ -490,15 +476,13 @@ function PlannedInput({
         key={initial}
         ref={inputRef}
         name="planned"
+        data-plan-nav=""
         type="text"
         inputMode="decimal"
         autoComplete="off"
         defaultValue={`${currencySymbol(currency)}${initial}`}
         onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
-        onKeyDown={(e) => {
-          if (e.key !== "Tab") return;
-          if (focusAdjacentPlanned(e.currentTarget, e.shiftKey ? -1 : 1)) e.preventDefault();
-        }}
+        onKeyDown={planNavKeyDown}
         onBlur={(e) => {
           setFocused(false);
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();

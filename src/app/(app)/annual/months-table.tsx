@@ -31,9 +31,6 @@ type Props = {
   totalNet: number;
   currency: string;
   gridCols: string;
-  outflowKinds?: CategoryKind[];
-  selectedOutflow?: Set<CategoryKind>;
-  onToggleOutflow?: (kind: CategoryKind) => void;
 };
 
 export function MonthsTable({
@@ -43,9 +40,6 @@ export function MonthsTable({
   totalNet,
   currency,
   gridCols,
-  outflowKinds,
-  selectedOutflow,
-  onToggleOutflow,
 }: Props) {
   // Default expanded on fresh login; toggle state survives within-session nav.
   const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: true }));
@@ -134,11 +128,8 @@ export function MonthsTable({
                 </span>
                 {columns.map((c) => {
                   const percent = shareOfIncome(totals[c.kind]);
-                  const isOutflow = outflowKinds?.includes(c.kind) ?? false;
-                  const isSelected = selectedOutflow?.has(c.kind) ?? false;
-                  const clickable = isOutflow && !!onToggleOutflow;
-                  const content = (
-                    <>
+                  return (
+                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
                       <span className="text-sm font-bold">
                         {formatMoney(totals[c.kind], currency)}
                       </span>
@@ -146,7 +137,6 @@ export function MonthsTable({
                         <span
                           className="mt-1 w-full border-t border-line pt-1 text-xs font-semibold"
                           style={{ color: KIND_COLOR[c.kind] }}
-                          title="Percent of total income"
                         >
                           {percent === null ? "—" : `${percent.toFixed(1)}%`}
                         </span>
@@ -159,25 +149,6 @@ export function MonthsTable({
                           &nbsp;
                         </span>
                       ) : null}
-                    </>
-                  );
-                  return clickable ? (
-                    <button
-                      key={c.kind}
-                      type="button"
-                      onClick={() => onToggleOutflow!(c.kind)}
-                      aria-pressed={isSelected}
-                      className={`flex cursor-pointer flex-col items-center rounded-md px-1 py-0.5 text-center tabular-nums ring-1 transition hover:bg-black/5 dark:hover:bg-white/10 ${
-                        isSelected
-                          ? "bg-black/[0.06] ring-2 ring-foreground/70 dark:bg-white/10"
-                          : "ring-line"
-                      }`}
-                    >
-                      {content}
-                    </button>
-                  ) : (
-                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
-                      {content}
                     </span>
                   );
                 })}
@@ -193,7 +164,6 @@ export function MonthsTable({
                     className={`mt-1 w-full border-t border-line pt-1 text-xs font-semibold ${
                       totalNet >= 0 ? "text-positive" : "text-negative"
                     }`}
-                    title="Net as a percent of total income"
                   >
                     {shareOfIncome(totalNet) === null ? "—" : `${shareOfIncome(totalNet)!.toFixed(1)}%`}
                   </span>

@@ -135,8 +135,22 @@ export function BudgetBoard({
   const [openGroups, setOpenGroups] = useSessionCollapse("budget-sections-open", () =>
     Object.fromEntries([...groups.map((g) => [g.categoryId, false]), ["subscriptions", false], ["irregularBills", false]]),
   );
-  const toggleGroup = (categoryId: string) =>
+  // While the overspent filter is on, groups open on their own so the
+  // offending rows are visible. That expansion is throwaway state — it must
+  // never leak into the persisted map, or clearing the filter would leave
+  // groups open that Victor never opened himself.
+  const [overspentOpenGroups, setOverspentOpenGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (categoryId: string) => {
+    if (showingOverspent) {
+      setOverspentOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? true) }));
+      return;
+    }
     setOpenGroups((o) => ({ ...o, [categoryId]: !(o[categoryId] ?? false) }));
+  };
+  const isGroupOpen = (categoryId: string) =>
+    showingOverspent
+      ? overspentOpenGroups[categoryId] ?? true
+      : openGroups[categoryId] ?? false;
 
   const isOverspentRow = (kind: CategoryKind, row: RowData) =>
     (kind === "bills" || kind === "expenses") && row.spentCents > row.plannedCents;
@@ -161,15 +175,8 @@ export function BudgetBoard({
     (s) => (s.monthSpentCents ?? 0) > (s.monthPlannedCents ?? 0),
   );
   const showOverspent = () => {
+    setOverspentOpenGroups({});
     setRowFilter("overspent");
-    setOpenGroups((current) => ({
-      ...current,
-      ...Object.fromEntries(
-        groups
-          .filter((group) => group.rows.some((row) => isOverspentRow(group.kind, row)))
-          .map((group) => [group.categoryId, true]),
-      ),
-    }));
   };
   // Set from the item panel's "+ Add transaction" button so it doesn't
   // require switching to the Log tab first. `true` = new; a TxData = edit
@@ -364,67 +371,6 @@ export function BudgetBoard({
 
   const railContent = itemPanel;
 
-  // The rail rides the page scroll rather than sticking, so a selected item's
-  // detail panel would otherwise render at the very top of the page — far above
-  // a row clicked halfway down the list. Offsetting the rail drops the panel
-  // next to that row instead, centred on it so a tall panel doesn't hang off
-  // the bottom of the screen with its Save button out of reach.
-  //
-  // The offset is applied as `position: relative; top`, NOT as a margin: a
-  // margin grows the document by the offset, so closing the panel shrank the
-  // page again and the browser clamped the scroll position — you'd get yanked
-  // back toward the top of the budget every time you dismissed an item.
-  const railRef = useRef<HTMLDivElement>(null);
-  const [railOffset, setRailOffset] = useState(0);
-  // Key the offset off the panel that is actually on screen, not off `selected`
-  // alone: a selected row can vanish (deleted, or filtered out of the list) and
-  // leave the panel unrendered. Keying on `selected` then stranded the Summary
-  // card at the panel's old offset, way down the page with nothing above it.
-  const panelSubId = railContent ? selected?.subId ?? null : null;
-  useEffect(() => {
-    // Below `lg` the panel is a bottom sheet, not the rail — no offset there.
-    if (!panelSubId || window.innerWidth < 1024) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setRailOffset(0);
-      return;
-    }
-    const rail = railRef.current;
-    const row = document.querySelector(`[data-drop-key="subcat:${panelSubId}"]`);
-    if (!rail || !row) {
-      // No row to centre on (collapsed group, filtered list): sit at the top
-      // rather than keeping whatever offset the previous selection left behind.
-      setRailOffset(0);
-      return;
-    }
-
-    const rowRect = row.getBoundingClientRect();
-    const railRect = rail.getBoundingClientRect();
-    const GAP = 16;
-    // Centre the panel on the row rather than aligning their top edges.
-    let wantTop = rowRect.top + rowRect.height / 2 - railRect.height / 2;
-    // Then keep the whole panel on screen where it fits, so nothing below the
-    // fold has to be scrolled to — the point of centring in the first place.
-    if (railRect.height + GAP * 2 <= window.innerHeight) {
-      wantTop = Math.min(
-        Math.max(wantTop, GAP),
-        window.innerHeight - railRect.height - GAP,
-      );
-    } else {
-      wantTop = Math.min(wantTop, rowRect.top);
-    }
-
-    // Both rects are viewport-relative, so the page's scroll position cancels
-    // out; the rail's own rect already includes the offset applied last time,
-    // which is why this adjusts the previous value rather than replacing it.
-    const delta = wantTop - railRect.top;
-    const column = rail.parentElement?.previousElementSibling as HTMLElement | null;
-    // Never push the panel past the bottom of the budget list, so it can't
-    // float off into empty space below the last group.
-    const maxOffset = Math.max(0, (column?.offsetHeight ?? 0) - rail.offsetHeight);
-
-    setRailOffset((prev) => Math.max(0, Math.min(prev + delta, maxOffset)));
-  }, [panelSubId]);
-
   // Clicking anywhere off the panel closes it, same as the mobile sheet's
   // backdrop. Clicks on a budget row are left alone — those switch the
   // selection — and the whole thing stands down while a transaction modal is
@@ -616,7 +562,7 @@ export function BudgetBoard({
                 monthKey={month.firstOfMonth}
                 selectedSubId={selected?.subId ?? null}
                 onSelectRow={(row, kind) => setSelected({ subId: row.subId, kind })}
-                open={openGroups[group.categoryId] ?? false}
+                open={isGroupOpen(group.categoryId)}
                 onToggle={() => toggleGroup(group.categoryId)}
                 compact={true}
                 detailsExpanded={detailsExpanded}
@@ -636,6 +582,7 @@ export function BudgetBoard({
                 currency={currency}
                 subscriptions={subscriptions}
                 creditCards={creditCards}
+                monthFirstOfMonth={month.firstOfMonth}
                 open
                 onToggle={() => {}}
                 monthPlannedCents={subscriptionMonthPlanned}
@@ -656,6 +603,7 @@ export function BudgetBoard({
                   currency={currency}
                   subscriptions={subscriptions}
                   creditCards={creditCards}
+                  monthFirstOfMonth={month.firstOfMonth}
                   open={openGroups["subscriptions"] ?? false}
                   onToggle={() => toggleGroup("subscriptions")}
                   monthPlannedCents={subscriptionMonthPlanned}
@@ -696,16 +644,22 @@ export function BudgetBoard({
 
       {/* Right rail: item detail when selected, otherwise Summary / Log */}
       <aside className="hidden w-[380px] shrink-0 lg:block">
-        {/* Deliberately not sticky and not its own scroll container: the rail
-            rides the page scroll with the budget list beside it, so there is
-            one scrollbar for the whole page. Pinning it either hid the rail's
-            own overflow until the page had scrolled past, or forced a second
-            scrollbar that moved out of step with the list. */}
+        {/* Pinned to the viewport so the Summary donut, the Log, and a
+            selected item's detail panel stay in view the whole way down the
+            budget — the list is far taller than the screen and scrolling back
+            up to read the summary was the whole complaint. `top-4` lines the
+            rail up with the budget column's own sticky strip.
+
+            It caps at the viewport height and scrolls INSIDE itself when its
+            content is taller (a long Log, a detail panel with many
+            transactions). That inner scrollbar is the price of pinning: with
+            plain `sticky` and no cap, anything below the fold in a tall rail
+            could never be reached, because the rail stops moving with the
+            page. `overscroll-contain` keeps a wheel over the rail from
+            grabbing the page scroll once it bottoms out. */}
         <div
-          ref={railRef}
           data-item-panel-root
-          className="relative space-y-3"
-          style={railOffset ? { top: railOffset } : undefined}
+          className="sticky top-4 max-h-[calc(100vh-2rem)] space-y-3 overflow-y-auto overscroll-contain pr-0.5"
         >
           {railContent ?? (
             <>

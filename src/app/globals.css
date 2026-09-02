@@ -151,3 +151,28 @@ input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* Always-visible horizontal scrollbar for the wide year tables. macOS and
+   Windows both hide overlay scrollbars until something scrolls, which leaves
+   a table that runs past its container looking like it simply ends — these
+   sit in half-width panels where that matters. */
+.scroll-handle {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+.scroll-handle::-webkit-scrollbar {
+  height: 10px;
+}
+.scroll-handle::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-handle::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+.scroll-handle::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
+  background-clip: content-box;
+}

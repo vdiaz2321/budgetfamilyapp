@@ -9,6 +9,8 @@ import { reorderIrregularBills, reorderSubscriptions, setIrregularBillMonthPlan,
 import { CYCLE_LABEL, SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import { actualColorClass, remainingColorClass } from "./budget-row";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
+import { planNavKeyDown } from "./plan-nav";
+import { MATCH_BTN_CLASS } from "./budget-row";
 
 // One column template for the header and every row, so a column added on one
 // can't drift from the other. Mobile keeps Name / Plan / Left — Spent is the
@@ -54,6 +56,7 @@ export function SubscriptionsSummaryCard({
   currency,
   subscriptions,
   creditCards,
+  monthFirstOfMonth,
   open,
   onToggle,
   monthPlannedCents,
@@ -63,6 +66,9 @@ export function SubscriptionsSummaryCard({
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
+  /** First of the month being viewed (YYYY-MM-01) — the month a Plan edit
+   *  applies to when the row isn't billed then. */
+  monthFirstOfMonth: string;
   creditCards?: CreditCardOption[];
   onOpenSpent?: () => void;
   open: boolean;
@@ -263,7 +269,14 @@ export function SubscriptionsSummaryCard({
                       <span className="text-center tabular-nums text-muted/50">—</span>
                     ) : (
                       <span onClick={(event) => event.stopPropagation()}>
-                        <PlanInput id={s.id} amountCents={planned} currency={currency} />
+                        <PlanInput
+                          id={s.id}
+                          amountCents={planned}
+                          spentCents={spent}
+                          currency={currency}
+                          month={monthFirstOfMonth}
+                          perMonth={s.chargesThisMonth === false}
+                        />
                       </span>
                     )}
                     <span className={`hidden text-center tabular-nums sm:inline ${offCycle ? "text-muted/50" : actualColorClass("bills", spent)}`}>
@@ -615,41 +628,82 @@ function RenewalBadge({
 function PlanInput({
   id,
   amountCents,
+  spentCents,
   currency,
+  month,
+  perMonth,
 }: {
   id: string;
   amountCents: number;
+  spentCents: number;
   currency: string;
+  month: string;
+  /** True in a month this subscription doesn't bill: the number typed here
+   *  budgets that month alone instead of changing the subscription's price. */
+  perMonth: boolean;
 }) {
   const [pending, start] = useTransition();
+  const [focused, setFocused] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const initial = centsToDisplay(amountCents);
+  // Same offer the budget rows make: a charge that came in over (or under)
+  // plan is nearly always fixed by planning what was actually spent. Nothing
+  // to match on an untouched row, and no point when the two already agree.
+  const canMatch = spentCents > 0 && spentCents !== amountCents;
 
   return (
     <form
       ref={formRef}
       action={(fd) => start(() => updateSubscriptionAmount(fd))}
-      className="flex items-center justify-center gap-px"
+      className="relative flex items-center justify-center gap-px"
     >
       <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="month" value={month} />
+      <input type="hidden" name="perMonth" value={perMonth ? "1" : "0"} />
+      {focused && canMatch ? (
+        <button
+          type="button"
+          // pointerdown lands before the input's blur, so preventing its
+          // default keeps focus — and therefore this button — alive long
+          // enough for the tap to register. A mousedown handler is too late
+          // on iOS.
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const el = inputRef.current;
+            if (!el) return;
+            el.value = centsToDisplay(spentCents);
+            formRef.current?.requestSubmit();
+            el.blur();
+          }}
+          className={`absolute bottom-full left-1/2 -translate-x-1/2 ${MATCH_BTN_CLASS}`}
+        >
+          Match spent ({formatMoney(spentCents, currency)})
+        </button>
+      ) : null}
       <span className={`pointer-events-none select-none text-sm ${amountCents === 0 ? "text-muted/50" : "text-muted"}`}>
         {currencySymbol(currency)}
       </span>
       <input
-        key={initial}
+        key={`${month}:${initial}`}
+        ref={inputRef}
         name="amount"
+        data-plan-nav=""
         type="text"
         inputMode="decimal"
         autoComplete="off"
         defaultValue={initial}
-        onFocus={(e) => e.currentTarget.select()}
+        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             e.currentTarget.blur();
+            return;
           }
+          planNavKeyDown(e);
         }}
         onBlur={(e) => {
+          setFocused(false);
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
         style={{
@@ -692,11 +746,13 @@ function IrregularPlannedInput({
       <input
         key={`${month}:${initial}`}
         name="planned"
+        data-plan-nav=""
         type="text"
         inputMode="decimal"
         autoComplete="off"
         defaultValue={initialValue}
         onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={planNavKeyDown}
         onBlur={(e) => {
           if (e.currentTarget.value !== initialValue) formRef.current?.requestSubmit();
         }}

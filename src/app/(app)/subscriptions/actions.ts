@@ -244,6 +244,35 @@ export async function updateSubscriptionAmount(formData: FormData) {
   if (!id) return;
   const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
   if (amountCents < 0) return;
+  const month = String(formData.get("month") ?? "").trim(); // YYYY-MM-01
+  // A month this subscription doesn't bill in has no sticker price to edit —
+  // the number typed there budgets that month alone, so it goes to
+  // subscription_plans and leaves the subscription's own amount untouched.
+  if (formData.get("perMonth") === "1" && /^\d{4}-\d{2}-01$/.test(month)) {
+    if (amountCents === 0) {
+      await supabase
+        .from("subscription_plans")
+        .delete()
+        .eq("household_id", householdId)
+        .eq("subscription_id", id)
+        .eq("month", month);
+    } else {
+      await supabase
+        .from("subscription_plans")
+        .upsert(
+          {
+            household_id: householdId,
+            subscription_id: id,
+            month,
+            planned_cents: amountCents,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "household_id,subscription_id,month" },
+        );
+    }
+    revalidate();
+    return;
+  }
   await supabase
     .from("subscriptions")
     .update({ amount_cents: amountCents, updated_at: new Date().toISOString() })

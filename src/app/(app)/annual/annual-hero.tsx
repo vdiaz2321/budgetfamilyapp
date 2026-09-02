@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { MonthsTable } from "./months-table";
@@ -33,31 +32,12 @@ export function AnnualHero({
   currency,
   gridCols,
 }: Props) {
-  const [selected, setSelected] = useState<Set<CategoryKind>>(new Set());
-
-  function toggle(kind: CategoryKind) {
-    if (!outflowKinds.includes(kind)) return;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(kind)) next.delete(kind);
-      else next.add(kind);
-      return next;
-    });
-  }
-
-  const isFiltered = selected.size > 0;
-  const activeOutflow = isFiltered
-    ? outflowKinds.filter((k) => selected.has(k))
-    : outflowKinds;
-  // Group totals (independent of the filter). Investment contributions get
+  // Group totals. Investment contributions get
   // folded into "savings" upstream, so the Savings card already reflects both.
   const spendingTotal = totals.bills + totals.expenses;
   const savingsTotal = totals.savings;
   const debtTotal = totals.debt;
-  // Net honors the outflow filter — clicking column totals in the months
-  // table lets you see "what would net look like if only these outflows
-  // counted", which is the whole point of the filter interaction.
-  const outflowTotal = activeOutflow.reduce((sum, k) => sum + totals[k], 0);
+  const outflowTotal = outflowKinds.reduce((sum, k) => sum + totals[k], 0);
   const netTotal = totals.income - outflowTotal;
   const pct = (v: number) =>
     totals.income === 0 ? null : (v / totals.income) * 100;
@@ -119,18 +99,7 @@ export function AnnualHero({
           >
             {formatMoney(netTotal, currency)}
           </p>
-          {isFiltered ? (
-            <p className="mt-0.5 flex items-center justify-center gap-1.5 whitespace-nowrap text-xs font-semibold text-foreground">
-              filtered
-              <button
-                type="button"
-                onClick={() => setSelected(new Set())}
-                className="cursor-pointer rounded-md bg-positive/15 px-2 py-0.5 text-[10px] font-semibold text-positive ring-1 ring-positive/40 transition hover:bg-positive/25"
-              >
-                clear
-              </button>
-            </p>
-          ) : netPct !== null ? (
+          {netPct !== null ? (
             <p
               className={`mt-0.5 whitespace-nowrap text-xs font-semibold ${
                 netTotal >= 0 ? "text-positive" : "text-negative"
@@ -149,9 +118,6 @@ export function AnnualHero({
         totalNet={netTotal}
         currency={currency}
         gridCols={gridCols}
-        outflowKinds={outflowKinds}
-        selectedOutflow={selected}
-        onToggleOutflow={toggle}
       />
     </>
   );
