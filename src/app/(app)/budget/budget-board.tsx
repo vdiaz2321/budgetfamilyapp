@@ -50,6 +50,7 @@ type Props = {
   };
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  propertyOptions?: AccountOption[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
   bucketsByAccount?: BucketsByAccount;
@@ -81,6 +82,7 @@ export function BudgetBoard({
   rollover,
   subOptions,
   accountOptions,
+  propertyOptions = [],
   debtAccountOptions,
   bucketOptions,
   bucketsByAccount = {},
@@ -706,6 +708,7 @@ export function BudgetBoard({
                   transactions={transactions}
                   subOptions={subOptions}
                   accountOptions={accountOptions}
+                  propertyOptions={propertyOptions}
                   bucketsByAccount={bucketsByAccount}
                   payeeOptions={payeeOptions}
                   payeeLineItems={payeeLineItems}
@@ -824,6 +827,7 @@ export function BudgetBoard({
               firstOfMonth={month.firstOfMonth}
               subOptions={subOptions}
               accountOptions={accountOptions}
+              propertyOptions={propertyOptions}
               bucketsByAccount={bucketsByAccount}
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}

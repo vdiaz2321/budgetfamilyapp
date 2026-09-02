@@ -1,9 +1,16 @@
 "use client";
 
+import type { CategoryKind } from "@/lib/categories";
+import { MonthsTable, type MonthRow } from "./months-table";
 import { CategoryMonthsTable, type CatMonthGroup } from "./category-months-table";
 import { AnnualBreakdownHistory, type BreakdownKind } from "./annual-breakdown-history";
 
 type Props = {
+  columns: { kind: CategoryKind; label: string }[];
+  monthRows: MonthRow[];
+  totals: Record<CategoryKind, number>;
+  totalNet: number;
+  gridCols: string;
   groups: CatMonthGroup[];
   monthLabels: string[];
   kinds: BreakdownKind[];
@@ -13,26 +20,39 @@ type Props = {
 };
 
 /**
- * The year's two big drill-down panels, side by side from `lg` up whether
- * they're open or shut — opening one must never push the other off the bottom
- * of the page. Each keeps its own horizontal scroller for the columns that
- * don't fit in half a screen, newest period first so what's in view is what's
- * worth reading.
+ * The year's drill-downs. Months and Category by Months share the top row from
+ * `lg` up — both are this-year tables, and opening one must never push the
+ * other off the bottom of the page. Annual Breakdown sits below them at full
+ * width: its nine year columns and two-column section layout need the room.
  */
-export function AnnualPanels({ groups, monthLabels, kinds, years, netByYear, currency }: Props) {
+export function AnnualPanels({
+  columns, monthRows, totals, totalNet, gridCols,
+  groups, monthLabels, kinds, years, netByYear, currency,
+}: Props) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-      <div className="min-w-0">
-        <CategoryMonthsTable groups={groups} monthLabels={monthLabels} currency={currency} />
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="min-w-0">
+          <MonthsTable
+            columns={columns}
+            rows={monthRows}
+            totals={totals}
+            totalNet={totalNet}
+            currency={currency}
+            gridCols={gridCols}
+          />
+        </div>
+        <div className="min-w-0">
+          <CategoryMonthsTable groups={groups} monthLabels={monthLabels} currency={currency} />
+        </div>
       </div>
-      <div className="min-w-0">
-        <AnnualBreakdownHistory
-          kinds={kinds}
-          years={years}
-          netByYear={netByYear}
-          currency={currency}
-        />
-      </div>
+
+      <AnnualBreakdownHistory
+        kinds={kinds}
+        years={years}
+        netByYear={netByYear}
+        currency={currency}
+      />
     </div>
   );
 }

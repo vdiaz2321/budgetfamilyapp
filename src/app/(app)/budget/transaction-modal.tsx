@@ -70,6 +70,7 @@ export function TransactionModal({
   bucketsByAccount = {},
   payeeOptions = [],
   payeeLineItems = [],
+  propertyOptions = [],
   initialKind,
   initialSubId,
   initialAccountId,
@@ -88,6 +89,9 @@ export function TransactionModal({
   bucketsByAccount?: BucketsByAccount;
   payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
+  // Property accounts this transaction can be tagged to. Empty for a
+  // household that owns none, and then the field never renders.
+  propertyOptions?: AccountOption[];
   initialKind?: CategoryKind;
   initialSubId?: string;
   initialAccountId?: string;
@@ -658,6 +662,22 @@ export function TransactionModal({
                 <option value="">Bucket (optional)</option>
                 {availableBuckets.map((b) => (
                   <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            ) : null}
+
+            {/* Property tag — only a household that owns property sees this.
+                It is what joins a rental's income to its expenses, which live
+                in different category groups. */}
+            {propertyOptions.length > 0 ? (
+              <select
+                name="propertyId"
+                defaultValue={editTx?.propertyId ?? ""}
+                className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+              >
+                <option value="">Property (optional)</option>
+                {propertyOptions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
             ) : null}

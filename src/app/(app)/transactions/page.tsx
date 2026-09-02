@@ -17,6 +17,7 @@ type TransactionQueryRow = {
   payee_id: string | null;
   account_id: string | null;
   bucket_id: string | null;
+  property_id: string | null;
   paid_to_account_id: string | null;
   paid_to_bucket_id: string | null;
   movement_type: "account_transfer" | "card_payment" | "investment_transfer" | null;
@@ -45,7 +46,7 @@ export default async function TransactionsPage({
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -158,11 +159,18 @@ export default async function TransactionsPage({
     if (a.kind === "debt_loan") return "Loans";
     return "Other";
   };
-  const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
-    id: a.id,
-    name: a.name,
-    group: accountGroupFor(a),
-  }));
+  // Property accounts are a place, not somewhere money comes from: they are
+  // offered as the transaction's Property tag instead of in the account picker.
+  const propertyOptions: AccountOption[] = (accounts ?? [])
+    .filter((a) => a.kind === "property")
+    .map((a) => ({ id: a.id, name: a.name }));
+  const accountOptions: AccountOption[] = (accounts ?? [])
+    .filter((a) => a.kind !== "property")
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      group: accountGroupFor(a),
+    }));
 
   // Buckets grouped by parent account, restricted to investment accounts —
   // powers the transaction modal's Bucket picker (Fidelity → Roth IRA Vic).
@@ -202,6 +210,7 @@ export default async function TransactionsPage({
               ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
               : "Uncategorized",
       accountId: t.account_id ?? null,
+      propertyId: t.property_id ?? null,
       toAccountId: t.paid_to_account_id ?? null,
       fromBucketId: t.bucket_id ?? null,
       toBucketId: t.paid_to_bucket_id ?? null,
@@ -241,6 +250,7 @@ export default async function TransactionsPage({
       transactions={transactions}
       subOptions={subOptions}
       accountOptions={accountOptions}
+      propertyOptions={propertyOptions}
       bucketsByAccount={bucketsByAccount}
       transferBuckets={(buckets ?? []).map((b) => ({ id: b.id, accountId: b.account_id, name: b.name }))}
       payeeLineItems={payeeLineItems}

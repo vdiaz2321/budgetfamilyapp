@@ -15,7 +15,7 @@ const KIND_COLOR: Record<CategoryKind, string> = {
   debt: "var(--negative)",
 };
 
-type MonthRow = {
+export type MonthRow = {
   idx: number;
   name: string;
   values: Record<CategoryKind, number>;
@@ -70,9 +70,9 @@ export function MonthsTable({
       {open ? (
         <div className="border-t border-line">
           <div className="overflow-x-auto">
-            <div className="min-w-[42rem]">
+            <div className="mx-auto w-max">
               {/* Header */}
-              <div className={`grid ${gridCols} items-center gap-2 border-b border-line px-4 py-2.5`}>
+              <div className={`grid ${gridCols} items-center gap-1 border-b border-line px-4 py-2.5`}>
                 <span className="text-[11px] font-medium uppercase tracking-wide text-muted">Month</span>
                 {columns.map((c) => (
                   <span key={c.kind} className="text-center text-[11px] font-medium uppercase tracking-wide text-muted">
@@ -86,20 +86,13 @@ export function MonthsTable({
                 {rows.map((r) => (
                   <li
                     key={r.idx}
-                    className={`grid ${gridCols} items-center gap-2 px-4 py-2 ${
+                    className={`grid ${gridCols} items-center gap-1 px-4 py-2 ${
                       r.status === "current" ? "bg-black/[0.04] dark:bg-white/[0.06]" : ""
                     } ${r.status === "future" ? "text-muted" : ""}`}
                   >
-                    <span className="flex items-center gap-1.5 text-sm font-medium">
-                      {r.name.slice(0, 3)}
-                      {r.status === "current" ? (
-                        <span className="rounded bg-foreground px-1 py-0.5 text-[9px] font-bold uppercase text-background">
-                          Now
-                        </span>
-                      ) : null}
-                    </span>
+                    <span className="text-[13px] font-medium">{r.name.slice(0, 3)}</span>
                     {columns.map((c) => (
-                      <span key={c.kind} className="text-center text-sm tabular-nums">
+                      <span key={c.kind} className="text-center text-[11px] tabular-nums">
                         {r.values[c.kind] !== 0 ? (
                           formatMoney(r.values[c.kind], currency)
                         ) : (
@@ -108,7 +101,7 @@ export function MonthsTable({
                       </span>
                     ))}
                     <span
-                      className={`text-center text-sm font-semibold tabular-nums ${
+                      className={`text-center text-[11px] font-semibold tabular-nums ${
                         !r.hasData ? "" : r.net >= 0 ? "text-positive" : "text-negative"
                       }`}
                     >
@@ -119,8 +112,8 @@ export function MonthsTable({
               </ul>
 
               {/* Totals */}
-              <div className={`grid ${gridCols} items-center gap-2 border-t border-line bg-black/[0.03] px-4 py-3 dark:bg-white/[0.05]`}>
-                <span className="flex flex-col items-center text-sm font-bold">
+              <div className={`grid ${gridCols} items-center gap-1 border-t border-line bg-black/[0.03] px-4 py-3 dark:bg-white/[0.05]`}>
+                <span className="flex flex-col items-center text-[13px] font-bold">
                   <span className="self-start">Total</span>
                   <span className="mt-1 w-full whitespace-nowrap border-t border-line pt-1 text-center text-[11px] font-medium uppercase tracking-wide text-muted">
                     Total % from income
@@ -130,12 +123,12 @@ export function MonthsTable({
                   const percent = shareOfIncome(totals[c.kind]);
                   return (
                     <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
-                      <span className="text-sm font-bold">
+                      <span className="text-[11px] font-bold">
                         {formatMoney(totals[c.kind], currency)}
                       </span>
                       {c.kind === "income" ? null : (
                         <span
-                          className="mt-1 w-full border-t border-line pt-1 text-xs font-semibold"
+                          className="mt-1 w-full border-t border-line pt-1 text-[10px] font-semibold"
                           style={{ color: KIND_COLOR[c.kind] }}
                         >
                           {percent === null ? "—" : `${percent.toFixed(1)}%`}
@@ -144,7 +137,7 @@ export function MonthsTable({
                       {c.kind === "income" ? (
                         <span
                           aria-hidden
-                          className="mt-1 w-full border-t border-line pt-1 text-xs text-transparent"
+                          className="mt-1 w-full border-t border-line pt-1 text-[10px] text-transparent"
                         >
                           &nbsp;
                         </span>
@@ -154,14 +147,14 @@ export function MonthsTable({
                 })}
                 <span className="flex flex-col items-center text-center tabular-nums">
                   <span
-                    className={`text-sm font-bold ${
+                    className={`text-[11px] font-bold ${
                       totalNet >= 0 ? "text-positive" : "text-negative"
                     }`}
                   >
                     {formatMoney(totalNet, currency)}
                   </span>
                   <span
-                    className={`mt-1 w-full border-t border-line pt-1 text-xs font-semibold ${
+                    className={`mt-1 w-full border-t border-line pt-1 text-[10px] font-semibold ${
                       totalNet >= 0 ? "text-positive" : "text-negative"
                     }`}
                   >

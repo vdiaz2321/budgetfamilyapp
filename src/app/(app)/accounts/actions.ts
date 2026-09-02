@@ -15,7 +15,7 @@ import { isRetirementKind } from "@/lib/retirement-kind";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
 // ordinary cards unless payoff tracking is explicitly enabled in Edit details.
-const ALLOWED_KINDS = ["cash", "checking", "savings_bucket", "investment", "credit_card", "debt_loan"];
+const ALLOWED_KINDS = ["cash", "checking", "savings_bucket", "investment", "property", "credit_card", "debt_loan"];
 
 async function requireHousehold() {
   const supabase = await createClient();

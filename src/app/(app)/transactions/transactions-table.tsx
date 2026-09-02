@@ -35,6 +35,7 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  propertyOptions?: AccountOption[];
   bucketsByAccount?: import("../budget/types").BucketsByAccount;
   transferBuckets?: { id: string; accountId: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
@@ -47,6 +48,7 @@ export function TransactionsTable({
   transactions,
   subOptions,
   accountOptions,
+  propertyOptions = [],
   bucketsByAccount = {},
   transferBuckets = [],
   payeeLineItems = [],
@@ -82,6 +84,9 @@ export function TransactionsTable({
   // on any given day. Kept in local state (not URL) so a filter clicks off
   // easily and doesn't linger across sessions.
   const [uncleredOnly, setUnclearedOnly] = useState(false);
+  // Which property's rows to show ("" = all). Local state like the other
+  // filters, so it clears itself when the page is left.
+  const [propertyFilter, setPropertyFilter] = useState("");
   const hasRange = Boolean(dateRange.from || dateRange.to);
 
   useEffect(() => {
@@ -181,6 +186,7 @@ export function TransactionsTable({
     });
     if (!matchesSearch) return false;
     if (uncleredOnly && t.cleared) return false;
+    if (propertyFilter && t.propertyId !== propertyFilter) return false;
     return true;
   });
   {
@@ -388,6 +394,30 @@ export function TransactionsTable({
           <span className="sm:hidden">Unclear</span>
           <span className="hidden sm:inline">Uncleared</span>
         </button>
+        {/* Property filter — only for a household that owns property. Pulls up
+            one property's rows; the totals row then reads as its cash flow. */}
+        {propertyOptions.length > 0 ? (
+          <select
+            value={propertyFilter}
+            onChange={(e) => setPropertyFilter(e.target.value)}
+            aria-label="Filter by property"
+            className={`order-2 shrink-0 rounded-xl px-2 py-1 text-[11px] font-semibold transition sm:order-4 sm:px-3 sm:py-1.5 sm:text-sm ${
+              propertyFilter
+                ? "text-white ring-1"
+                : "bg-surface text-foreground ring-1 ring-line hover:bg-black/5 dark:hover:bg-white/10"
+            }`}
+            style={
+              propertyFilter
+                ? { backgroundColor: "var(--viz-bills)", boxShadow: "inset 0 0 0 1px var(--viz-bills)" }
+                : undefined
+            }
+          >
+            <option value="">All properties</option>
+            {propertyOptions.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        ) : null}
         {query ? (
           <button
             type="button"
@@ -579,6 +609,7 @@ export function TransactionsTable({
               firstOfMonth={month.firstOfMonth}
               subOptions={subOptions}
               accountOptions={accountOptions}
+              propertyOptions={propertyOptions}
               bucketsByAccount={bucketsByAccount}
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}

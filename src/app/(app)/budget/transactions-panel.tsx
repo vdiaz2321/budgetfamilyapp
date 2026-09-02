@@ -39,6 +39,7 @@ type Props = {
   transactions: TxData[];
   subOptions: SubOption[];
   accountOptions: AccountOption[];
+  propertyOptions?: AccountOption[];
   bucketsByAccount?: import("./types").BucketsByAccount;
   payeeOptions?: { id: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
@@ -65,6 +66,7 @@ export function TransactionsPanel({
   transactions,
   subOptions,
   accountOptions,
+  propertyOptions = [],
   bucketsByAccount = {},
   payeeOptions = [],
   payeeLineItems = [],
@@ -128,6 +130,7 @@ export function TransactionsPanel({
         firstOfMonth={firstOfMonth}
         subOptions={subOptions}
         accountOptions={accountOptions}
+        propertyOptions={propertyOptions}
         bucketsByAccount={bucketsByAccount}
         payeeOptions={payeeOptions}
         payeeLineItems={payeeLineItems}

@@ -410,8 +410,11 @@ export default async function AnnualOverviewPage({
     netByYear[y] = get("income") - get("bills") - get("expenses") - get("debt") - get("savings") - get("investment") - get("kidsFunding");
   }
 
+  const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
   const currency = household.currency;
-  const gridCols = "grid-cols-[6.5rem_repeat(6,minmax(5.5rem,1fr))]";
+  // Fixed tracks, not 1fr: the figures sit next to each other instead of
+  // drifting apart across a half-width panel.
+  const gridCols = "grid-cols-[3.75rem_repeat(6,4.75rem)]";
 
   return (
     <div className="mx-auto w-full space-y-4">
@@ -434,17 +437,19 @@ export default async function AnnualOverviewPage({
       {/* Year summary + Months table */}
       <AnnualHero
         year={year}
-        columns={COLUMNS}
         outflowKinds={OUTFLOW_KINDS}
-        rows={rows}
         totals={totals}
         currency={currency}
-        gridCols={gridCols}
       />
 
-      {/* Category by Months + Annual Breakdown history (multi-year, seeded
-          2018–2025). Paired so they can share a row while both are shut. */}
+      {/* Months + Category by Months share the top row; Annual Breakdown
+          history (multi-year, seeded 2018–2025) runs full width below. */}
       <AnnualPanels
+        columns={COLUMNS}
+        monthRows={rows}
+        totals={totals}
+        totalNet={totalNet}
+        gridCols={gridCols}
         groups={categoryGroups}
         monthLabels={monthLabels}
         kinds={breakdownKinds}
@@ -471,14 +476,23 @@ type BreakdownRow = {
   line_sort: number;
 };
 
-const KIND_ORDER: BreakdownKind["kind"][] = ["income", "bills", "expenses", "debt", "investment", "savings", "kidsFunding"];
+const KIND_ORDER: BreakdownKind["kind"][] = ["income", "investment", "savings", "bills", "expenses", "debt", "kidsFunding"];
+// Merged lines carry the current Budget name, not the older sheet name:
+// "Fidelity" is now "Fidelity (Taxable) Vic", "TSP" is "TSP Roth". (River
+// merges into Bitcoin, which keeps its own name.)
+const LINE_DISPLAY_LABEL: Record<string, string> = {
+  fidelity: "Fidelity (Taxable) Vic",
+  tsp: "TSP Roth",
+};
+const displayLineLabel = (label: string) => LINE_DISPLAY_LABEL[label.toLowerCase()] ?? label;
+
 const KIND_LABEL: Record<BreakdownKind["kind"], string> = {
   income: "Income",
   bills: "Bills",
   expenses: "Expenses",
   debt: "Debt",
   savings: "Savings",
-  investment: "Investment",
+  investment: "Invest/Savings",
   kidsFunding: "Kids Funding",
 };
 
@@ -554,6 +568,16 @@ function buildBreakdown(
     return groups.get(label)!;
   };
 
+  // Budget subs that are the same account as a seeded history line under a
+  // different name — folded onto the history row so each account is one row
+  // rather than a 2026-only orphan in "From Budget".
+  const LINE_ALIASES: Record<string, string> = {
+    "fidelity (taxable) vic": "fidelity",
+    "tsp roth": "tsp",
+    river: "bitcoin",
+  };
+  const aliasFor = (name: string) => LINE_ALIASES[name.toLowerCase()] ?? name.toLowerCase();
+
   const resolveSheetKind = (sub: LiveBudgetSub): BreakdownKind["kind"] => {
     if (sub.isKids) return "kidsFunding";
     if (sub.isInvestment) return "investment";
@@ -564,7 +588,7 @@ function buildBreakdown(
     // Budget "savings" is ambiguous — could be sheet Savings OR Investment.
     // Prefer Investment when the name matches a seeded investment line (e.g.
     // "Fidelity 401k", "TSP"); otherwise fall back to Savings.
-    const nameLower = sub.name.toLowerCase();
+    const nameLower = aliasFor(sub.name);
     if (lineIndex.get("investment")?.has(nameLower)) return "investment";
     return "savings";
   };
@@ -594,13 +618,17 @@ function buildBreakdown(
   for (const sub of liveBudgetSubs) {
     const sheetKind = resolveSheetKind(sub);
     const idx = lineIndex.get(sheetKind);
-    const match = sub.customGroup ? undefined : idx?.get(sub.name.toLowerCase());
+    const lookup = aliasFor(sub.name);
+    const aliased = lookup !== sub.name.toLowerCase();
+    // An aliased sub folds onto its history row even when it came from a
+    // custom Budget group — the alias is the explicit instruction to merge.
+    const match = sub.customGroup && !aliased ? undefined : idx?.get(lookup);
     if (match) {
       for (const [y, v] of sub.byYear) {
         match.byYear[y] = (match.byYear[y] ?? 0) + v;
         match.total += v;
       }
-      mergeLiveDetails(sheetKind, sub.name, sub);
+      mergeLiveDetails(sheetKind, lookup, sub);
     } else {
       const useNamedBudgetGroup = !sub.isKids && !sub.isInvestment && Boolean(sub.groupLabel);
       const group = ensureBudgetGroup(
@@ -684,7 +712,7 @@ function buildBreakdown(
               }
               merged = [...map.values()].sort((a, b) => b.total - a.total);
             }
-            return { label: lineLabel, byYear: l.byYear, total: l.total, ...(merged ? { details: merged } : {}) };
+            return { label: displayLineLabel(lineLabel), byYear: l.byYear, total: l.total, ...(merged ? { details: merged } : {}) };
           });
 
         const subtotalByYear: Record<number, number> = {};
@@ -709,7 +737,48 @@ function buildBreakdown(
 
     result.push({ kind, label: KIND_LABEL[kind], groups: groupList, totalByYear, total });
   }
-  return result;
+  return mergeInvestSavings(result);
+}
+
+// Savings and Investment are the same money to Victor (see the Savings ⇄
+// Investments reconciliation), so the breakdown shows them as one
+// "Invest/Savings" kind: savings groups are appended to the investment entry
+// (merging any same-named group) and the standalone savings entry is dropped.
+function mergeInvestSavings(kinds: BreakdownKind[]): BreakdownKind[] {
+  const inv = kinds.find((k) => k.kind === "investment");
+  const sav = kinds.find((k) => k.kind === "savings");
+  if (!sav) return kinds;
+  if (!inv) {
+    return kinds.map((k) => (k.kind === "savings" ? { ...k, label: KIND_LABEL.investment } : k));
+  }
+
+  const groups = [...inv.groups];
+  for (const g of sav.groups) {
+    const existing = groups.find((x) => x.label === g.label);
+    if (!existing) {
+      groups.push(g);
+      continue;
+    }
+    const merged = { ...existing, lines: [...existing.lines, ...g.lines], subtotalByYear: { ...existing.subtotalByYear }, total: existing.total + g.total };
+    for (const [y, v] of Object.entries(g.subtotalByYear)) {
+      merged.subtotalByYear[Number(y)] = (merged.subtotalByYear[Number(y)] ?? 0) + v;
+    }
+    groups[groups.indexOf(existing)] = merged;
+  }
+
+  const totalByYear = { ...inv.totalByYear };
+  for (const [y, v] of Object.entries(sav.totalByYear)) {
+    totalByYear[Number(y)] = (totalByYear[Number(y)] ?? 0) + v;
+  }
+
+  const combined: BreakdownKind = {
+    kind: "investment",
+    label: KIND_LABEL.investment,
+    groups,
+    totalByYear,
+    total: inv.total + sav.total,
+  };
+  return kinds.flatMap((k) => (k.kind === "investment" ? [combined] : k.kind === "savings" ? [] : [k]));
 }
 
 function YearArrow({ year, dir }: { year: number; dir: "prev" | "next" }) {

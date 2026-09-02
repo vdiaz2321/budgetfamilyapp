@@ -1,6 +1,6 @@
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
-import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
+import { isDebtExcludedFromNetWorth, hasPropertyAsset, PROPERTY_KIND } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
@@ -97,9 +97,12 @@ export default async function NetworthPage() {
   ]);
   throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError });
 
+  // Once a property carries the home's value, the mortgage against it counts
+  // as the liability it is — before that it stays out (lib/net-worth.ts).
+  const ownsProperty = hasPropertyAsset(accountRows ?? []);
   const excludedDebtIds = new Set(
     (debtRows ?? [])
-      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind))
+      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind, ownsProperty))
       .map((debt) => debt.subcategory_id),
   );
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
@@ -115,7 +118,9 @@ export default async function NetworthPage() {
   const excludedIds = isKidsAccount;
   const sectionForAccount = (accountId: string): GridRow["section"] => {
     if (isKidsAccount.has(accountId)) return "Kids Funding";
-    return accountKindById.get(accountId) === "investment" ? "Investments" : "Banking";
+    const kind = accountKindById.get(accountId);
+    if (kind === PROPERTY_KIND) return "Property";
+    return kind === "investment" ? "Investments" : "Banking";
   };
   const sectionForDebt = (): GridRow["section"] => "Debt";
 
@@ -124,10 +129,11 @@ export default async function NetworthPage() {
   //  - banking kind (checking/savings_bucket) tagged 'savings' → Savings
   //  - banking kind otherwise → Bank
   // Kids + liability-kind accounts feed none (excluded / handled as debt).
-  type Slice = "savings" | "bank" | "stocks";
+  type Slice = "savings" | "bank" | "stocks" | "property";
   const sliceForAccount = (accountId: string, kind: string): Slice | null => {
     if (excludedIds.has(accountId)) return null;
     if (LIABILITY_KINDS.includes(kind)) return null;
+    if (kind === PROPERTY_KIND) return "property";
     if (kind === "investment") return "stocks";
     return bankGroupById.get(accountId) === "savings" ? "savings" : "bank";
   };
@@ -136,8 +142,8 @@ export default async function NetworthPage() {
   // For months that have per-account snapshots, derive the four slices from
   // them. Months with none fall back to the networth_history table (the
   // pre-per-account era: Victor's 2018–2025, or any user's early history).
-  type Totals = { savings: number; bank: number; stocks: number; debt: number };
-  const zero = (): Totals => ({ savings: 0, bank: 0, stocks: 0, debt: 0 });
+  type Totals = { savings: number; bank: number; stocks: number; property: number; debt: number };
+  const zero = (): Totals => ({ savings: 0, bank: 0, stocks: 0, property: 0, debt: 0 });
   const derived = new Map<string, Totals>();
   const snapshotMonths = new Set<string>();
 
@@ -173,6 +179,8 @@ export default async function NetworthPage() {
         savings: h.savings_cents,
         bank: h.bank_cents,
         stocks: h.stocks_cents,
+        // No property before the app tracked one — history has no such column.
+        property: 0,
         debt: h.debt_cents,
       } as Totals,
     ]),
@@ -189,12 +197,13 @@ export default async function NetworthPage() {
   const points: MonthPoint[] = allMonths.map((month) => {
     const fromHistory = history.has(month);
     const t = (fromHistory ? history.get(month) : derived.get(month)) ?? zero();
-    const assets = t.savings + t.bank + t.stocks;
+    const assets = t.savings + t.bank + t.stocks + t.property;
     return {
       month,
       savings: t.savings,
       bank: t.bank,
       stocks: t.stocks,
+      property: t.property,
       debt: t.debt,
       assets,
       liabilities: t.debt,

@@ -2,35 +2,19 @@
 
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
-import { MonthsTable } from "./months-table";
-
-type MonthRow = {
-  idx: number;
-  name: string;
-  values: Record<CategoryKind, number>;
-  net: number;
-  status: "past" | "current" | "future";
-  hasData: boolean;
-};
 
 type Props = {
   year: number;
-  columns: { kind: CategoryKind; label: string }[];
   outflowKinds: CategoryKind[];
-  rows: MonthRow[];
   totals: Record<CategoryKind, number>;
   currency: string;
-  gridCols: string;
 };
 
 export function AnnualHero({
   year,
-  columns,
   outflowKinds,
-  rows,
   totals,
   currency,
-  gridCols,
 }: Props) {
   // Group totals. Investment contributions get
   // folded into "savings" upstream, so the Savings card already reflects both.
@@ -110,15 +94,6 @@ export function AnnualHero({
           ) : null}
         </div>
       </div>
-
-      <MonthsTable
-        columns={columns}
-        rows={rows}
-        totals={totals}
-        totalNet={netTotal}
-        currency={currency}
-        gridCols={gridCols}
-      />
     </>
   );
 }

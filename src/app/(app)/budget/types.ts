@@ -181,6 +181,8 @@ export type TxData = {
   subId: string | null;
   subName: string;
   accountId: string | null;
+  // The property this row is attributed to (accounts.kind = 'property').
+  propertyId: string | null;
   toAccountId: string | null;
   fromBucketId: string | null;
   toBucketId: string | null;

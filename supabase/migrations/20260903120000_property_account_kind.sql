@@ -1,0 +1,14 @@
+-- Property as an account kind.
+--
+-- Real estate was the one asset the app could hold a loan for but not a value:
+-- `real_estate_loan` debts were excluded from Net Worth precisely because
+-- counting a mortgage with no matching home value understates net worth by the
+-- price of the house. A `property` account carries that value — its monthly
+-- balance is the home's worth, recorded through the same account_snapshots path
+-- as every other balance — so the mortgage can now be counted as the liability
+-- it is (see src/lib/net-worth.ts: the exclusion is conditional on owning one).
+--
+-- No view, constraint, or policy enumerates account_kind, so adding a value is
+-- the whole schema change. v_investment_contributions filters kind='investment'
+-- and so ignores property accounts, which is what we want.
+alter type account_kind add value if not exists 'property';

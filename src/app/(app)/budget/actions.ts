@@ -110,7 +110,7 @@ async function requireHousehold() {
   return { supabase, householdId: profile.household_id };
 }
 
-const CUSTOM_GROUP_KINDS = new Set(["bills", "expenses", "savings"]);
+const CUSTOM_GROUP_KINDS = new Set(["income", "bills", "expenses", "savings"]);
 
 // Payee autocomplete list, fetched on demand instead of shipped with every
 // budget page render — the full list is ~28KB of RSC payload for a control
@@ -133,7 +133,7 @@ export async function addCategoryGroup(formData: FormData): Promise<{ error?: st
   const name = String(formData.get("name") ?? "").trim();
   const kind = String(formData.get("kind") ?? "");
   if (!name) return { error: "Enter a group name." };
-  if (!CUSTOM_GROUP_KINDS.has(kind)) return { error: "Choose Bills, Expenses, or Savings." };
+  if (!CUSTOM_GROUP_KINDS.has(kind)) return { error: "Choose Income, Bills, Expenses, or Savings." };
 
   const last = unwrap(
     await supabase
@@ -929,6 +929,30 @@ export async function upsertDebtAndPlan(formData: FormData) {
 
 // ---------- Transactions (the Log, right rail) ----------
 
+/**
+ * Resolve the "which property is this for?" tag to an id we can store.
+ *
+ * Verified the same way accountId is: only a genuine "not a property of this
+ * household" answer nulls it out, so a slow or failing lookup can't silently
+ * drop the tag off a row the user did tag.
+ */
+async function resolvePropertyId(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  raw: string,
+): Promise<string | null> {
+  if (!raw) return null;
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id")
+    .eq("id", raw)
+    .eq("household_id", householdId)
+    .eq("kind", "property")
+    .maybeSingle();
+  if (error) throw new Error(`Could not verify the property: ${error.message}`);
+  return data?.id ?? null;
+}
+
 export async function addTransaction(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const subcategoryId = String(formData.get("subcategoryId") ?? "");
@@ -938,6 +962,7 @@ export async function addTransaction(formData: FormData) {
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
+  const propertyIdRaw = String(formData.get("propertyId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   const isRefund = formData.get("isRefund") === "on";
   const cleared = formData.get("cleared") === "on";
@@ -1052,6 +1077,7 @@ export async function addTransaction(formData: FormData) {
     payee_id: payeeId,
     account_id: accountId,
     bucket_id: directBucketId,
+    property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
     memo,
     is_withdrawal: isWithdrawal,
     cleared,
@@ -1119,6 +1145,7 @@ export async function updateTransaction(formData: FormData) {
   const memo = String(formData.get("memo") ?? "").trim() || null;
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
+  const propertyIdRaw = String(formData.get("propertyId") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   const isRefund = formData.get("isRefund") === "on";
   if (!id || !subcategoryId || !occurredOn || enteredCents <= 0) return;
@@ -1222,6 +1249,7 @@ export async function updateTransaction(formData: FormData) {
       payee_id: payeeId,
       account_id: accountId,
       bucket_id: directBucketId,
+      property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
       memo,
       is_withdrawal: isWithdrawal,
     })

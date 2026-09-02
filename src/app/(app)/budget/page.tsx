@@ -79,7 +79,7 @@ export default async function BudgetPage({
     supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id)
       .gte("occurred_on", prevFirstOfMonth)
@@ -587,7 +587,12 @@ export default async function BudgetPage({
     if (a.kind === "debt_loan") return "Loans";
     return "Other";
   };
-  const accountOptions: AccountOption[] = (accounts ?? []).map((a) => ({
+  // Property accounts are a place, not somewhere money comes from: they are
+  // offered as the transaction's Property tag instead of in the account picker.
+  const propertyOptions: AccountOption[] = (accounts ?? [])
+    .filter((a) => a.kind === "property" && a.active !== false)
+    .map((a) => ({ id: a.id, name: a.name }));
+  const accountOptions: AccountOption[] = (accounts ?? []).filter((a) => a.kind !== "property").map((a) => ({
     id: a.id,
     name:
       (nameCounts.get(a.name) ?? 0) > 1 && a.holder
@@ -660,6 +665,7 @@ export default async function BudgetPage({
               ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
               : "Uncategorized",
       accountId: t.account_id ?? null,
+      propertyId: t.property_id ?? null,
       toAccountId: t.paid_to_account_id ?? null,
       fromBucketId: t.bucket_id ?? null,
       toBucketId: t.paid_to_bucket_id ?? null,
@@ -785,6 +791,7 @@ export default async function BudgetPage({
       }}
       subOptions={subOptions}
       accountOptions={accountOptions}
+      propertyOptions={propertyOptions}
       debtAccountOptions={debtAccountOptions}
       bucketOptions={bucketOptions}
       bucketsByAccount={bucketsByAccount}

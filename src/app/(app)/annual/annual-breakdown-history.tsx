@@ -38,9 +38,6 @@ type Props = {
 export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Props) {
   const [collapse, setCollapse] = useSessionCollapse("annual-breakdown-history", () => ({ open: false }));
   const open = collapse.open;
-  const [search, setSearch] = useState("");
-  const searchLower = search.toLowerCase();
-
   // All overflow-x-auto scroll containers (summary + each kind body) share one
   // scroll position so horizontal scrolling moves everything together.
   const scrollersRef = useRef<Set<HTMLDivElement>>(new Set());
@@ -73,23 +70,12 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
       >
         <Chevron open={open} />
         <span className="font-semibold">Annual Breakdown</span>
-        <span className="text-xs text-muted">
-          {years[years.length - 1]}–{years[0]} history · yearly totals
-        </span>
       </button>
 
       {open ? (
         <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
-          {/* Search */}
-          <input
-            type="search"
-            placeholder="Search line items…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-sm placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-brand/50"
-          />
-          {/* Summary strip — sticky so year columns stay visible while scrolling into detail */}
-          <div className="sticky top-0 z-30 rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
+          {/* Summary strip — the whole panel's totals, above the two section columns */}
+          <div className="rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
             <div
               ref={(el) => { if (el) scrollersRef.current.add(el); }}
               onScroll={(e) => syncScrollX(e.currentTarget.scrollLeft)}
@@ -97,8 +83,8 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
             >
               <div style={{ minWidth: minW }}>
                 <div className="grid items-center gap-2 border-b border-line pr-4 py-2" style={gridStyle}>
-                  <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-bold uppercase tracking-wide">
-                    Annual Breakdown
+                  <span className="pl-4 text-[11px] font-bold uppercase tracking-wide">
+                    Category
                   </span>
                   <span className="text-center text-[11px] font-bold uppercase tracking-wide text-foreground">Total</span>
                   {years.map((y) => (
@@ -121,7 +107,7 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
                 ))}
                 {/* Net (unallocated) — Income − Expenses − Savings − Investment */}
                 <div className="grid items-center gap-2 border-t border-line pr-4 py-2" style={gridStyle}>
-                  <span className="sticky left-0 z-10 bg-surface pl-4 text-[13px] font-bold">Net</span>
+                  <span className="pl-4 text-[13px] font-bold">Net</span>
                   {(() => { const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0); return (
                     <span className={`text-center text-[11px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span>
                   ); })()}
@@ -141,7 +127,8 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
             </div>
           </div>
 
-          {/* Per-kind detail */}
+          {/* Per-kind detail, stacked in the same order as the summary rows
+              above so a section is where its total says it is. */}
           {kinds.map((k) => (
             <KindBlock
               key={k.kind}
@@ -150,7 +137,6 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
               gridStyle={gridStyle}
               minW={minW}
               currency={currency}
-              search={searchLower}
               scrollersRef={scrollersRef}
               syncScrollX={syncScrollX}
             />
@@ -170,7 +156,7 @@ function SummaryRow({
   const totalColor = kind === "income" || kind === "savings" || kind === "investment" ? "text-positive" : kind === "kidsFunding" ? "" : "text-negative";
   return (
     <div className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
-      <span className="sticky left-0 z-10 bg-surface pl-4 text-[13px] font-semibold">{label}</span>
+      <span className="pl-4 text-[13px] font-semibold">{label}</span>
       <span className={`text-center text-[11px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span>
       {years.map((y) => {
         const v = byYear[y] ?? 0;
@@ -185,9 +171,9 @@ function SummaryRow({
 }
 
 function KindBlock({
-  kind, years, gridStyle, minW, currency, search, scrollersRef, syncScrollX,
+  kind, years, gridStyle, minW, currency, scrollersRef, syncScrollX,
 }: {
-  kind: BreakdownKind; years: number[]; gridStyle: CSSProperties; minW: string; currency: string; search: string;
+  kind: BreakdownKind; years: number[]; gridStyle: CSSProperties; minW: string; currency: string;
   scrollersRef: RefObject<Set<HTMLDivElement>>; syncScrollX: (x: number) => void;
 }) {
   const [collapse, setCollapse] = useSessionCollapse(`annual-breakdown-kind-${kind.kind}`, () => ({ open: false }));
@@ -201,13 +187,8 @@ function KindBlock({
     }
   }
 
-  // When searching, filter to groups/lines that match; auto-expand if there are hits.
-  const filteredGroups = search
-    ? kind.groups
-        .map((g) => ({ ...g, lines: g.lines.filter((l) => l.label.toLowerCase().includes(search)) }))
-        .filter((g) => g.lines.length > 0)
-    : kind.groups;
-  const effectiveOpen = open || (search.length > 0 && filteredGroups.length > 0);
+  const filteredGroups = kind.groups;
+  const effectiveOpen = open;
 
   return (
     <div className="rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
@@ -226,12 +207,12 @@ function KindBlock({
           {/* Sticky column header — overflow hidden so no scrollbar; JS-synced to body scroll */}
           <div
             ref={headerRef}
-            className="sticky top-0 z-20 border-y border-line bg-surface"
+            className="border-y border-line bg-surface"
             style={{ overflowX: "hidden" }}
           >
             <div style={{ minWidth: minW }}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle}>
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted">
+                <span className="pl-4 text-[11px] font-medium uppercase tracking-wide text-muted">
                   Line item
                 </span>
                 <span className="text-center text-[11px] font-bold uppercase tracking-wide text-foreground">Total</span>
@@ -286,7 +267,7 @@ function Group({
           Savings, Investment) whose name would just repeat the section. */}
       {!singleGroup ? (
         <div className="grid items-center gap-2 bg-brand-soft/15 pr-4 py-1.5" style={gridStyle}>
-          <span className="sticky left-0 z-10 bg-surface pl-4 text-xs font-bold leading-tight whitespace-nowrap" title={group.label}>
+          <span className="pl-4 text-xs font-bold leading-tight truncate">
             {group.label}
           </span>
           <span className="text-center text-[11px] font-bold tabular-nums">
@@ -334,11 +315,10 @@ function LineRow({
         onClick={hasDetails ? () => setExpanded((v) => !v) : undefined}
       >
         <span
-          className={`sticky left-0 z-10 bg-surface text-xs leading-tight whitespace-nowrap ${indent} ${hasDetails ? "flex items-center gap-1.5" : ""}`}
-          title={line.label}
+          className={`min-w-0 text-xs leading-tight ${indent} ${hasDetails ? "flex items-center gap-1.5" : "truncate"}`}
         >
           {hasDetails ? <Chevron open={expanded} small /> : null}
-          {line.label}
+          <span className="truncate">{line.label}</span>
         </span>
         <span className="text-center text-[11px] font-semibold tabular-nums">{formatMoney(line.total, currency)}</span>
         {years.map((y) => {
@@ -352,10 +332,7 @@ function LineRow({
       </li>
       {hasDetails && expanded ? line.details!.map((d) => (
         <li key={`${line.label}::${d.label}`} className="grid items-center gap-2 pr-4 py-1 bg-brand-soft/10" style={gridStyle}>
-          <span
-            className="sticky left-0 z-10 bg-brand-soft/5 pl-12 text-[11px] leading-tight whitespace-nowrap text-muted"
-            title={d.label}
-          >
+          <span className="truncate pl-12 text-[11px] leading-tight text-muted">
             └ {d.label}
           </span>
           <span className="text-center text-[10px] font-medium tabular-nums text-muted">{formatMoney(d.total, currency)}</span>

@@ -5,6 +5,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { addCategoryGroup } from "./actions";
 
 const GROUP_TYPES = [
+  { value: "income", label: "Income" },
   { value: "bills", label: "Bills" },
   { value: "expenses", label: "Expenses" },
   { value: "savings", label: "Savings" },
@@ -46,7 +47,7 @@ function AddCategoryGroupModal({ onClose }: { onClose: () => void }) {
         className="space-y-4 p-5"
       >
         <p className="text-sm text-muted">
-          Create a separate section while keeping its totals under Bills, Expenses, or Savings.
+          Create a separate section while keeping its totals under Income, Bills, Expenses, or Savings.
         </p>
         <label className="flex flex-col gap-1.5 text-sm">
           <span className="font-semibold">Group name</span>

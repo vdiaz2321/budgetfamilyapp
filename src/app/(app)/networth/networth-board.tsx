@@ -11,8 +11,9 @@ export type MonthPoint = {
   savings: number; // long-term savings pile (Banking, bank_group=savings)
   bank: number; // everyday bank accounts (Banking, not savings)
   stocks: number; // investments
+  property: number; // real estate — the value of what a mortgage is against
   debt: number; // = liabilities
-  assets: number; // savings + bank + stocks (gross)
+  assets: number; // savings + bank + stocks + property (gross)
   liabilities: number; // = debt
   net: number; // assets − debt (actual net worth)
   nwWithoutInvest: number; // savings + bank
@@ -103,7 +104,7 @@ export type GridRow = {
   // Funding or a mortgage whose matching home equity is tracked elsewhere).
   excluded?: boolean;
   // Same grouping as the sidebar, so the two views read as one system.
-  section: "Banking" | "Investments" | "Kids Funding" | "Debt";
+  section: "Banking" | "Investments" | "Property" | "Kids Funding" | "Debt";
   balances: (number | null)[]; // aligned to gridMonths
   // A bucket sub-row indented under its parent account.
   indent?: boolean;
@@ -128,6 +129,7 @@ export type GridRow = {
 const SECTION_ORDER: GridRow["section"][] = [
   "Banking",
   "Investments",
+  "Property",
   "Debt",
   "Kids Funding",
 ];

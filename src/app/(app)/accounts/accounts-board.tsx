@@ -28,7 +28,7 @@ import {
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
-import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
+import { isDebtExcludedFromNetWorth, hasPropertyAsset } from "@/lib/net-worth";
 import { PeriodPicker } from "../insights/insights-period-picker";
 import { currentPeriodKey, periodLabel, priorKey, type Granularity } from "../insights/period";
 
@@ -210,6 +210,8 @@ type Section = {
   fixedKind?: string;
   // Free-text "Type" field (e.g. Retirement, Roth IRA, 529, Trump Account).
   offerSubtype?: boolean;
+  // A fixed Type vocabulary for this section, in place of free text.
+  subtypeOptions?: string[];
   kidsGroup?: boolean;
   creditCard?: boolean;
 };
@@ -269,6 +271,17 @@ const SECTIONS: Section[] = [
     kindLabels: { credit_card: "Credit card" },
     offerSubtype: true,
     creditCard: true,
+  },
+  {
+    key: "property",
+    label: "Property",
+    dot: "bg-[color:var(--viz-bills)]",
+    liability: false,
+    match: (a) => !a.isKidsAccount && a.kind === "property",
+    kindLabels: { property: "Property" },
+    fixedKind: "property",
+    offerSubtype: true,
+    subtypeOptions: ["Primary residence", "Rental property", "Land", "Other"],
   },
   {
     key: "loans",
@@ -391,6 +404,36 @@ const ACCOUNT_SUBTYPES = [
   "TSP Traditional",
   "REIT",
 ];
+
+/** A section whose Type field has a fixed vocabulary (Property). Unlike
+ *  SubtypeSelect there is no "Add type…" escape hatch — the list is the list. */
+function FixedSubtypeSelect({
+  name,
+  options,
+  value,
+  className,
+}: {
+  name: string;
+  options: string[];
+  value: string | null;
+  className?: string;
+}) {
+  const current = (value ?? "").trim();
+  const all = current && !options.includes(current) ? [...options, current] : options;
+  return (
+    <select
+      name={name}
+      defaultValue={current}
+      aria-label="Type"
+      className={`rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${className ?? ""}`}
+    >
+      <option value="">Type…</option>
+      {all.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+    </select>
+  );
+}
 
 /** Custom types already in use, so "Mortgage" only has to be typed once. */
 const SubtypeOptionsContext = React.createContext<string[]>([]);
@@ -517,6 +560,9 @@ export function AccountsBoard({
     return a.balancesByMonth?.[priorSnapshotMonth] ?? null;
   };
   const active = accounts.filter((a) => a.active);
+  // A mortgage only counts against Net Worth once the home behind it is
+  // tracked — see lib/net-worth.ts.
+  const ownsProperty = hasPropertyAsset(active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
 
   const assets = active
@@ -555,7 +601,7 @@ export function AccountsBoard({
     .filter((a) => a.kind === "debt_loan")
     .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
   const countedDirectDebtTotal = active
-    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype))
+    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype, ownsProperty))
     .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
 
   // Budget debts only count rows NOT already represented as a debt_loan account
@@ -565,7 +611,7 @@ export function AccountsBoard({
     0,
   );
   const countedBudgetDebtTotal = budgetDebts.reduce(
-    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind) ? sum : sum + debtBalanceOf(d)),
+    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, ownsProperty) ? sum : sum + debtBalanceOf(d)),
     0,
   );
   // Rewards cards are tracked separately from the Debt section. Their
@@ -598,7 +644,7 @@ export function AccountsBoard({
     let sum = 0;
     let covered = 0;
     for (const a of debtLoanAccounts) {
-      if (isDebtExcludedFromNetWorth(a.subtype)) continue;
+      if (isDebtExcludedFromNetWorth(a.subtype, ownsProperty)) continue;
       const p = priorBalanceOf(a);
       if (p == null) {
         sum += Math.abs(balanceOf(a));
@@ -628,7 +674,7 @@ export function AccountsBoard({
     let sum = 0;
     let covered = 0;
     for (const d of budgetDebts) {
-      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
+      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, ownsProperty)) continue;
       const p = priorDebtBalanceOf(d);
       if (p == null) {
         sum += debtBalanceOf(d);
@@ -3814,7 +3860,17 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           </label>
         ) : (
           <>
-            {usesSubtypeList(section.key) ? (
+            {section.subtypeOptions ? (
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Type
+                <FixedSubtypeSelect
+                  name="subtype"
+                  options={section.subtypeOptions}
+                  value={null}
+                  className="mt-1 w-full font-normal normal-case tracking-normal text-foreground"
+                />
+              </label>
+            ) : usesSubtypeList(section.key) ? (
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
                 Type
                 <SubtypeSelect name="subtype" value={null} className="mt-1 w-full font-normal normal-case tracking-normal text-foreground" />
@@ -3822,6 +3878,10 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             ) : (
               <LabeledInput label="Type" name="subtype" placeholder="e.g. AMEX, Chase" />
             )}
+            {/* Tax treatment and contribution limits are investment questions —
+                a house has neither. */}
+            {section.key === "property" ? null : (
+            <>
             {/* Set at creation rather than guessed from the name later — this
                 is the value "How it's taxed" on /invest bands the account by. */}
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -3854,9 +3914,18 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
                 limit per person.
               </span>
             </label>
+            </>
+            )}
           </>
         ) : null}
-        <LabeledInput label="Account name" name="name" placeholder={section.key === "loans" ? "e.g. Home Mortgage" : "e.g. Fidelity Roth IRA"} required autoFocus onChange={() => setError(null)} />
+        <LabeledInput
+          label={section.key === "property" ? "Property name" : "Account name"}
+          name="name"
+          placeholder={section.key === "loans" ? "e.g. Home Mortgage" : section.key === "property" ? "e.g. 123 Main St" : "e.g. Fidelity Roth IRA"}
+          required
+          autoFocus
+          onChange={() => setError(null)}
+        />
         <LabeledInput label="Account holder(s)" name="holder" placeholder="e.g. Victor, Johana, or Joint" />
         <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
         <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -3867,7 +3936,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           </select>
         </label>
         <LabeledInput
-          label={section.key === "loans" ? "Current balance owed" : "Current balance"}
+          label={section.key === "loans" ? "Current balance owed" : section.key === "property" ? "Current value" : "Current balance"}
           name="balance"
           type="number"
           step="0.01"
@@ -3924,7 +3993,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
 function AddAccountModal({ onClose }: { onClose: () => void }) {
   const [sectionKey, setSectionKey] = useState<string | null>(null);
   const choices = SECTIONS.filter((section) =>
-    ["banking", "investments", "credit", "loans", "kids"].includes(section.key),
+    ["banking", "investments", "property", "credit", "loans", "kids"].includes(section.key),
   );
   const section = choices.find((choice) => choice.key === sectionKey) ?? null;
 
@@ -3934,7 +4003,7 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface px-5 py-4">
           <div>
             <h2 id="add-account-title" className="text-lg font-bold">
-              {section ? `Add ${{ banking: "banking account", investments: "investment", credit: "credit card details", loans: "debt", kids: "Kids Funding account" }[section.key] ?? "account"}` : "Add account"}
+              {section ? `Add ${{ banking: "banking account", investments: "investment", property: "property", credit: "credit card details", loans: "debt", kids: "Kids Funding account" }[section.key] ?? "account"}` : "Add account"}
             </h2>
             <p className="text-xs text-muted">
               {section ? "Enter the details you want your family to be able to find later." : "Choose where this account belongs."}
@@ -3958,6 +4027,7 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
                   <span className="mt-0.5 block text-xs leading-relaxed text-muted">
                     {choice.key === "banking" && "Checking, savings, or cash."}
                     {choice.key === "investments" && "Brokerage, retirement, 529, HSA, crypto, and more."}
+                    {choice.key === "property" && "A home, rental, or land — its value is what a mortgage nets against."}
                     {choice.key === "credit" && "Rewards cards, benefits, free nights, and card balances."}
                     {choice.key === "loans" && "Mortgage, auto, student, personal, medical, or other debt."}
                     {choice.key === "kids" && "Savings, investments, or 529s kept separate from household investments."}
@@ -4039,7 +4109,14 @@ function EditAccountForm({
             <option value="joint">Joint</option>
           </select>
           {section.offerSubtype ? (
-            usesSubtypeList(section.key) ? (
+            section.subtypeOptions ? (
+              <FixedSubtypeSelect
+                name="subtype"
+                options={section.subtypeOptions}
+                value={account.subtype}
+                className="min-w-[8rem] flex-1"
+              />
+            ) : usesSubtypeList(section.key) ? (
               <SubtypeSelect name="subtype" value={account.subtype} className="min-w-[8rem] flex-1" />
             ) : (
               <input
