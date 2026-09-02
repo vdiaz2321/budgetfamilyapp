@@ -53,6 +53,10 @@ type Props = {
   onAddTransaction: (prefill?: TxPrefill) => void;
   onEditTransaction: (tx: TxData) => void;
   onOverspentCovered: () => void;
+  /** Save was clicked; the panel is about to close and the write is in flight. */
+  onSaveStart: () => void;
+  /** The write settled — an error message if it failed, nothing if it landed. */
+  onSaveDone: (error?: string) => void;
 };
 
 // Move planned dollars from a category that has room into this overspent one.
@@ -191,12 +195,53 @@ export function ItemPanel({
   onAddTransaction,
   onEditTransaction,
   onOverspentCovered,
+  onSaveStart,
+  onSaveDone,
 }: Props) {
   const [showItemDetails, setShowItemDetails] = useState(false);
   // BudgetBoard keeps both the desktop rail and mobile sheet mounted. Each
   // copy needs a unique form id so its external Save button submits the form
   // in the panel the user actually edited.
   const saveFormId = `plan-form-${useId()}`;
+  // The Save button lives in the sticky footer, OUTSIDE the form it submits
+  // (it reaches it by `form={saveFormId}`), so `useFormStatus` can't see the
+  // pending state and the click looked like it did nothing. Each editor form
+  // reports its own write through these instead: the button says "Saving…"
+  // while it's in flight, and the panel closes once it lands.
+  const [saving, setSaving] = useState(false);
+  const onSaving = () => {
+    setSaving(true);
+    onSaveStart();
+    // Close on the next macrotask, not now: the panel holds the form, and
+    // unmounting it inside the click handler would kill the submit before the
+    // browser dispatches it. One tick later the action is already in flight
+    // and finishes on its own — which is the point, because in dev that round
+    // trip re-renders the whole budget page and takes several seconds. The
+    // board carries the "Saving…" pill from here on.
+    setTimeout(onClose, 0);
+  };
+  // Every editor form runs its write through here, so neither a failure nor a
+  // slow revalidation can strand the button on "Saving…".
+  //
+  // The finish has to escape the action's transition. Everything a form action
+  // runs — including this — is inside one, and React holds those state updates
+  // until the WHOLE transition resolves, `router.refresh()`'s RSC fetch
+  // included. The write would land, the data would come back, and the panel
+  // would still be sitting there saying "Saving…" while the refresh dragged.
+  // A `setTimeout` callback runs outside that scope, so the close commits as
+  // soon as the write itself is done and the refresh finishes on its own time.
+  // The write outlives this panel, so the result is reported to the board,
+  // which is still mounted to show it. The report escapes the action's
+  // transition through a timeout: React holds state set inside one until the
+  // whole transition resolves, so anything set here would land late.
+  const runSave = async (write: () => Promise<void>) => {
+    try {
+      await write();
+      setTimeout(() => onSaveDone(), 0);
+    } catch (error) {
+      setTimeout(() => onSaveDone(error instanceof Error ? error.message : "Couldn't save — try again."), 0);
+    }
+  };
   const isPlainForm = !(kind === "debt" && row.debt) && !(kind === "savings" && row.savings);
   // Filter txs to this row's subcategory and the currently-viewed month. The
   // month is a "first of the month" ISO date; a tx belongs if its YYYY-MM
@@ -280,7 +325,14 @@ export function ItemPanel({
         onDeleted={onClose}
         onAddTransaction={onAddTransaction}
         saveFormId={saveFormId}
+        saving={saving}
+        onSaving={onSaving}
         onDetails={isPlainForm ? () => setShowItemDetails(true) : undefined}
+        // A debt item carries its balance, payment history and payoff dates,
+        // and deleting the subcategory cascades all of it away — too much to
+        // lose to a stray click next to Save. A paid-off debt drops off the
+        // board on its own once its balance reaches zero.
+        canDelete={kind !== "debt"}
       />
 
       {/* Expenses are the variable side of the budget — groceries, fuel,
@@ -305,9 +357,10 @@ export function ItemPanel({
               snowballExtraCents={snowballExtraCents}
               isSnowballFocus={isSnowballFocus}
               formId={saveFormId}
+              runSave={runSave}
             />
           ) : kind === "savings" && row.savings ? (
-            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} formId={saveFormId} />
+            <SavingsForm key={row.subId} row={row} bucketOptions={bucketOptions} monthKey={monthKey} formId={saveFormId} runSave={runSave} />
           ) : (
             <PlannedForm
               subId={row.subId}
@@ -326,6 +379,7 @@ export function ItemPanel({
               onCloseDetails={() => setShowItemDetails(false)}
               onAddTransaction={onAddTransaction}
               formId={saveFormId}
+              runSave={runSave}
             />
           );
         return body ? <div className="space-y-4 px-5 pb-4 pt-4">{body}</div> : null;
@@ -440,14 +494,25 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
 // This button lives outside its target form and associates through `form`.
 // Do not synchronously disable it from its click handler: doing so cancels the
 // browser's default submit activation before React receives the form action.
-function SaveButton({ saveFormId }: { saveFormId: string }) {
+function SaveButton({ saveFormId, saving, onSaving }: { saveFormId: string; saving: boolean; onSaving: () => void }) {
   return (
     <button
       type="submit"
       form={saveFormId}
-      className="flex shrink-0 items-center gap-1.5 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
+      disabled={saving}
+      // The label flips from the click, NOT from inside the form action:
+      // React commits state set during an action's transition only once that
+      // transition resolves, so "Saving…" would land at the same moment the
+      // panel closes — which is to say, never. Skipped when the browser is
+      // about to block the submit on an invalid field, or the button would
+      // stick on "Saving…" for a write that never ran.
+      onClick={() => {
+        const form = document.getElementById(saveFormId) as HTMLFormElement | null;
+        if (!form || form.checkValidity()) onSaving();
+      }}
+      className="flex shrink-0 items-center gap-1.5 rounded bg-brand px-5 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-70"
     >
-      Save
+      {saving ? "Saving…" : "Save"}
     </button>
   );
 }
@@ -524,13 +589,19 @@ function DeleteFooter({
   onDeleted,
   onAddTransaction,
   saveFormId,
+  saving = false,
+  onSaving,
   onDetails,
+  canDelete = true,
 }: {
   subId: string;
   onDeleted: () => void;
   onAddTransaction: (prefill?: TxPrefill) => void;
   saveFormId?: string;
+  saving?: boolean;
+  onSaving: () => void;
   onDetails?: () => void;
+  canDelete?: boolean;
 }) {
   const [pending, start] = useTransition();
   return (
@@ -553,7 +624,8 @@ function DeleteFooter({
       >
         +Transaction
       </button>
-      {saveFormId ? <SaveButton saveFormId={saveFormId} /> : null}
+      {saveFormId ? <SaveButton saveFormId={saveFormId} saving={saving} onSaving={onSaving} /> : null}
+      {canDelete ? (
       <form
         action={(fd) => start(() => deleteSubcategory(fd).then(onDeleted))}
         className="shrink-0"
@@ -567,6 +639,7 @@ function DeleteFooter({
           {pending ? "Deleting…" : "Delete"}
         </button>
       </form>
+      ) : null}
     </div>
   );
 }
@@ -685,6 +758,7 @@ function PlannedForm({
   showDetails,
   onCloseDetails,
   formId,
+  runSave,
 }: {
   subId: string;
   monthKey: string;
@@ -702,6 +776,7 @@ function PlannedForm({
   onCloseDetails: () => void;
   onAddTransaction: (prefill?: TxPrefill) => void;
   formId: string;
+  runSave: (write: () => Promise<void>) => Promise<void>;
 }) {
   const [, startDue] = useTransition();
   const router = useRouter();
@@ -728,11 +803,11 @@ function PlannedForm({
     <>
       <form
         id={formId}
-        action={(fd) => startDue(async () => {
+        action={(fd) => startDue(() => runSave(async () => {
           if (!autoPlanned) await upsertPlan(fd);
           await updateSubcategory(fd);
           router.refresh();
-        })}
+        }))}
         className="space-y-2"
       >
         {/* Never name a hidden input just "id" — that clashes with React 19's
@@ -834,6 +909,9 @@ function ItemDetailsPopover({
 
   return createPortal(
     <div
+      // Marked as panel chrome so the board's click-outside handler doesn't
+      // close the item panel out from under this overlay.
+      data-item-panel-root
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
@@ -965,6 +1043,7 @@ function DebtForm({
   snowballExtraCents,
   isSnowballFocus,
   formId,
+  runSave,
 }: {
   row: RowData;
   currency: string;
@@ -973,6 +1052,7 @@ function DebtForm({
   snowballExtraCents: number;
   isSnowballFocus: boolean;
   formId: string;
+  runSave: (write: () => Promise<void>) => Promise<void>;
 }) {
   const [, start] = useTransition();
   const router = useRouter();
@@ -985,7 +1065,11 @@ function DebtForm({
   const scheduledCents = d.minCents + (isSnowballFocus ? snowballExtraCents : 0);
   return (
     <Section title="Debt details">
-      <form id={formId} action={(fd) => start(async () => { await upsertDebtAndPlan(fd); router.refresh(); })} className="space-y-2">
+      <form
+        id={formId}
+        action={(fd) => start(() => runSave(async () => { await upsertDebtAndPlan(fd); router.refresh(); }))}
+        className="space-y-2"
+      >
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <label className="block">
@@ -1097,7 +1181,7 @@ function savingsPace(goalCents: number, startCents: number, monthlyCents: number
   return monthlyCents >= required ? "on_track" as const : "behind" as const;
 }
 
-function SavingsForm({ row, bucketOptions, monthKey, formId }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; formId: string }) {
+function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: RowData; bucketOptions: BucketOption[]; monthKey: string; formId: string; runSave: (write: () => Promise<void>) => Promise<void> }) {
   const [pending, start] = useTransition();
   const router = useRouter();
   const s = row.savings!;
@@ -1135,7 +1219,11 @@ function SavingsForm({ row, bucketOptions, monthKey, formId }: { row: RowData; b
           <span>✓</span> On track
         </p>
       )}
-      <form id={formId} action={(fd) => start(async () => { await upsertSavingsGoalAndLink(fd); router.refresh(); })} className="space-y-2">
+      <form
+        id={formId}
+        action={(fd) => start(() => runSave(async () => { await upsertSavingsGoalAndLink(fd); router.refresh(); }))}
+        className="space-y-2"
+      >
         <input type="hidden" name="subcategoryId" value={row.subId} />
         <input type="hidden" name="month" value={monthKey} />
         <Grid>

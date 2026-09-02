@@ -242,7 +242,12 @@ export function BudgetGroup({
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
-          <CategoryGroupMenu group={group} />
+          {/* Fades in with the "+" beside it: both are header-level actions
+              that would otherwise sit there competing with the group name. */}
+          <CategoryGroupMenu
+            group={group}
+            className="opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus-visible:opacity-100"
+          />
         </div>
         {/* Three tiles, two behaviours: Plan and the actual open the group and
             filter the transaction log by kind (as the whole block always did);
@@ -378,7 +383,13 @@ export function BudgetGroup({
               })()}
               {/* Mobile subtotal: keep the planned/spent pair, then name the
                   remaining figure explicitly so its meaning is unambiguous. */}
-              <div className="flex items-center gap-2 border-t border-line bg-background/50 px-3 py-2 sm:hidden">
+              {/* Clicking the subtotal collapses the group — it's the end of
+                  the list, where you're done reading it, and the header you'd
+                  otherwise have to scroll back up to is far above. */}
+              <div
+                className="flex cursor-pointer items-center gap-2 border-t border-line bg-background/50 px-3 py-2 sm:hidden"
+                onClick={onToggle}
+              >
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <rect x="4" y="3" width="16" height="18" rx="2" />
@@ -403,7 +414,10 @@ export function BudgetGroup({
               </div>
 
               {/* Desktop subtotal: 12-col grid matching row layout */}
-              <div className={`hidden grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 sm:grid ${compact ? "py-2" : "py-2.5"}`}>
+              <div
+                className={`hidden cursor-pointer grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 hover:bg-brand-soft/30 sm:grid ${compact ? "py-2" : "py-2.5"}`}
+                onClick={onToggle}
+              >
                 <div className="col-span-5 flex items-center gap-2 pl-6 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-4">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <rect x="4" y="3" width="16" height="18" rx="2" />
@@ -449,7 +463,7 @@ export function BudgetGroup({
   );
 }
 
-function CategoryGroupMenu({ group }: { group: GroupData }) {
+function CategoryGroupMenu({ group, className = "" }: { group: GroupData; className?: string }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -460,7 +474,7 @@ function CategoryGroupMenu({ group }: { group: GroupData }) {
         type="button"
         onClick={(event) => { event.stopPropagation(); setOpen(true); }}
         aria-label={`Manage ${group.name}`}
-        className="rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-muted hover:bg-surface/70 hover:text-foreground"
+        className={`rounded-md px-1.5 py-0.5 text-sm font-bold leading-none text-muted hover:bg-surface/70 hover:text-foreground ${className}`}
       >
         ···
       </button>

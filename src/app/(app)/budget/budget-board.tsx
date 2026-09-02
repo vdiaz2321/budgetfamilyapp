@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -59,6 +60,12 @@ type Props = {
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
   creditCards?: CreditCardOption[];
+  /** Items that ended last month spending more than they were planned. */
+  prevMonthOverspent: {
+    monthKey: string;
+    monthLabel: string;
+    items: { subId: string; name: string; kind: CategoryKind; plannedCents: number; spentCents: number }[];
+  };
   irregularMonthPlanned: number;
   subscriptionMonthPlanned: number;
   subscriptionMonthSpent: number;
@@ -84,12 +91,18 @@ export function BudgetBoard({
   subscriptions,
   irregularBills,
   creditCards,
+  prevMonthOverspent,
   irregularMonthPlanned,
   subscriptionMonthPlanned,
   subscriptionMonthSpent,
 }: Props) {
+  const router = useRouter();
   const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
   const [rowFilter, setRowFilter] = useState<"all" | "overspent">("all");
+  const [showPrevOverspent, setShowPrevOverspent] = useState(false);
+  // An item panel's Save closes the panel straight away and leaves the write
+  // running, so the board — not the panel — reports how it went.
+  const [saveStatus, setSaveStatus] = useState<"saving" | { error: string } | null>(null);
   // Progress bars start visible on a fresh login. The versioned key also
   // upgrades any earlier saved "off" preference from the two-button control.
   const [rowDetail, setRowDetail] = useSessionCollapse("budget-row-detail-v2", () => ({ expanded: true }));
@@ -315,9 +328,6 @@ export function BudgetBoard({
   const savings = kindTotals(["savings"]);
   const debt = kindTotals(["debt"]);
 
-  // What's really left of the cash you've actually received this month.
-  const actualLeft = actualIncome - actualSpent;
-
   // Re-derive the selected row from fresh data each render so the panel
   // reflects saved values (and clears if the row was deleted).
   const selectedRow: RowData | null = selected
@@ -347,6 +357,8 @@ export function BudgetBoard({
           setRowFilter("all");
           setSelected(null);
         }}
+        onSaveStart={() => setSaveStatus("saving")}
+        onSaveDone={(error) => setSaveStatus(error ? { error } : null)}
       />
     ) : null;
 
@@ -357,19 +369,33 @@ export function BudgetBoard({
   // a row clicked halfway down the list. Offsetting the rail drops the panel
   // next to that row instead, centred on it so a tall panel doesn't hang off
   // the bottom of the screen with its Save button out of reach.
+  //
+  // The offset is applied as `position: relative; top`, NOT as a margin: a
+  // margin grows the document by the offset, so closing the panel shrank the
+  // page again and the browser clamped the scroll position — you'd get yanked
+  // back toward the top of the budget every time you dismissed an item.
   const railRef = useRef<HTMLDivElement>(null);
   const [railOffset, setRailOffset] = useState(0);
-  const selectedSubId = selected?.subId ?? null;
+  // Key the offset off the panel that is actually on screen, not off `selected`
+  // alone: a selected row can vanish (deleted, or filtered out of the list) and
+  // leave the panel unrendered. Keying on `selected` then stranded the Summary
+  // card at the panel's old offset, way down the page with nothing above it.
+  const panelSubId = railContent ? selected?.subId ?? null : null;
   useEffect(() => {
     // Below `lg` the panel is a bottom sheet, not the rail — no offset there.
-    if (!selectedSubId || window.innerWidth < 1024) {
+    if (!panelSubId || window.innerWidth < 1024) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRailOffset(0);
       return;
     }
     const rail = railRef.current;
-    const row = document.querySelector(`[data-drop-key="subcat:${selectedSubId}"]`);
-    if (!rail || !row) return;
+    const row = document.querySelector(`[data-drop-key="subcat:${panelSubId}"]`);
+    if (!rail || !row) {
+      // No row to centre on (collapsed group, filtered list): sit at the top
+      // rather than keeping whatever offset the previous selection left behind.
+      setRailOffset(0);
+      return;
+    }
 
     const rowRect = row.getBoundingClientRect();
     const railRect = rail.getBoundingClientRect();
@@ -392,12 +418,36 @@ export function BudgetBoard({
     // which is why this adjusts the previous value rather than replacing it.
     const delta = wantTop - railRect.top;
     const column = rail.parentElement?.previousElementSibling as HTMLElement | null;
-    // Never push the panel past the bottom of the budget list — that would
-    // stretch the page taller just to hold empty rail.
+    // Never push the panel past the bottom of the budget list, so it can't
+    // float off into empty space below the last group.
     const maxOffset = Math.max(0, (column?.offsetHeight ?? 0) - rail.offsetHeight);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setRailOffset((prev) => Math.max(0, Math.min(prev + delta, maxOffset)));
-  }, [selectedSubId]);
+  }, [panelSubId]);
+
+  // Clicking anywhere off the panel closes it, same as the mobile sheet's
+  // backdrop. Clicks on a budget row are left alone — those switch the
+  // selection — and the whole thing stands down while a transaction modal is
+  // open, since that modal is rendered on top of (and gated by) the selection.
+  const modalOpen = Boolean(showAddModal || quickAdd || duePayment);
+  useEffect(() => {
+    if (!selected || modalOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest("[data-item-panel-root]") || target.closest("[data-drop-key]")) return;
+      setSelected(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelected(null);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [selected, modalOpen]);
 
   const heroRef = useRef<HTMLDivElement>(null);
   const [heroHidden, setHeroHidden] = useState(false);
@@ -430,7 +480,6 @@ export function BudgetBoard({
         <div ref={heroRef}>
         <SummaryHeroCard
           heroSubOptions={subOptions}
-          actualLeft={actualLeft}
           displayLeft={displayLeft}
           incomePlanned={incomePlanned}
           outflowPlanned={outflowPlanned}
@@ -474,6 +523,23 @@ export function BudgetBoard({
               </svg>
               Overspent ({overspentCount})
             </button>
+            {/* Last month's unfinished business. A transaction entered days
+                later can push an item past a plan you've stopped looking at,
+                so the month you're on carries the reminder rather than leaving
+                it to be found by chance. */}
+            {prevMonthOverspent.items.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowPrevOverspent(true)}
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-surface px-2.5 py-1 text-[11px] font-semibold text-negative ring-1 ring-negative/25 transition hover:bg-negative/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 sm:text-xs"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M3 10a9 9 0 1 1 2.6 6.4" />
+                  <path d="M3 5v5h5" />
+                </svg>
+                {prevMonthOverspent.monthLabel.split(" ")[0]} overspent ({prevMonthOverspent.items.length})
+              </button>
+            ) : null}
             {/* Same order on both widths: [Due this week] [+ Cat Group]
                 [+ Transaction], pushed right on mobile where the toolbar has
                 no card chrome, left-aligned on desktop. */}
@@ -635,7 +701,12 @@ export function BudgetBoard({
             one scrollbar for the whole page. Pinning it either hid the rail's
             own overflow until the page had scrolled past, or forced a second
             scrollbar that moved out of step with the list. */}
-        <div ref={railRef} className="space-y-3" style={railOffset ? { marginTop: railOffset } : undefined}>
+        <div
+          ref={railRef}
+          data-item-panel-root
+          className="relative space-y-3"
+          style={railOffset ? { top: railOffset } : undefined}
+        >
           {railContent ?? (
             <>
               {/* Summary | Transactions toggle */}
@@ -710,7 +781,7 @@ export function BudgetBoard({
               title and close button land under the iPhone's status bar / notch
               and get clipped. The padding sits on this outer, non-scrolling box
               so it stays put instead of scrolling away with the content. */}
-          <div className="fixed inset-x-0 top-0 z-[70] flex max-h-[85vh] flex-col rounded-b-2xl bg-background pt-[max(env(safe-area-inset-top),1.75rem)] shadow-xl">
+          <div data-item-panel-root className="fixed inset-x-0 top-0 z-[70] flex max-h-[85vh] flex-col rounded-b-2xl bg-background pt-[max(env(safe-area-inset-top),1.75rem)] shadow-xl">
             <div className="min-h-0 overflow-y-auto overscroll-contain">
               {railContent}
               <div className="mx-auto mb-2 mt-2 h-1 w-10 rounded-full bg-line" />
@@ -720,6 +791,76 @@ export function BudgetBoard({
       ) : null}
 
       {/* Centered modal: header "+ Transaction" OR item panel "+ Transaction" */}
+      {saveStatus ? (
+        <div
+          // Clear of the mobile tab bar and the home indicator — pinned at
+          // bottom-4 the pill landed on top of "Transactions".
+          className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[80] flex justify-center px-4 sm:bottom-6"
+        >
+          {saveStatus === "saving" ? (
+            <p className="rounded-full bg-foreground/90 px-4 py-2 text-xs font-semibold text-background shadow-lg">
+              Saving…
+            </p>
+          ) : (
+            <p className="pointer-events-auto flex items-center gap-3 rounded-xl bg-negative px-4 py-2.5 text-xs font-semibold text-white shadow-lg">
+              {saveStatus.error}
+              <button type="button" onClick={() => setSaveStatus(null)} className="rounded px-1 text-white/80 hover:text-white">
+                Dismiss
+              </button>
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {showPrevOverspent ? (
+        <ModalShell
+          title={`Overspent in ${prevMonthOverspent.monthLabel}`}
+          onClose={() => setShowPrevOverspent(false)}
+          mobileAlign="top"
+          className="sm:max-w-lg"
+        >
+          <div className="space-y-3 p-5">
+            {/* Rows stack on a phone: side by side, the amounts squeeze the
+                name down to "Johana's ..." and the row stops being readable,
+                which is the whole point of the list. */}
+            <ul className="divide-y divide-line/60 rounded-xl ring-1 ring-black/5 dark:ring-white/10">
+              {prevMonthOverspent.items.map((item) => (
+                <li key={item.subId} className="grid grid-cols-1 items-center gap-x-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">{item.name}</span>
+                  {/* Both figures are labelled: "$1,596.79 of $1,571.77" reads
+                      either way round, and the two numbers are close enough
+                      that the bigger one isn't obviously the spend. Planned
+                      first, then Spent — the same order as the columns on the
+                      board. Each half is nowrap so a phone breaks between
+                      them, not mid-phrase. */}
+                  <span className="flex items-baseline justify-between gap-2 text-xs tabular-nums sm:justify-end">
+                    <span className="whitespace-nowrap text-muted">
+                      Planned {formatMoney(item.plannedCents, currency)} · Spent {formatMoney(item.spentCents, currency)}
+                    </span>
+                    <span className="whitespace-nowrap font-bold text-negative">
+                      +{formatMoney(item.spentCents - item.plannedCents, currency)}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => {
+                setShowPrevOverspent(false);
+                // Same cookie the month picker writes, so the board keeps
+                // showing that month until it's navigated away from.
+                document.cookie = `budget-month=${prevMonthOverspent.monthKey}; path=/; SameSite=Lax`;
+                router.push(`/budget?month=${prevMonthOverspent.monthKey}`);
+              }}
+              className="w-full rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand/90"
+            >
+              Go to {prevMonthOverspent.monthLabel}
+            </button>
+          </div>
+        </ModalShell>
+      ) : null}
+
       {(showAddModal || (quickAdd && selected) || duePayment) ? (
         <div className="fixed inset-0 z-[70] flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
@@ -947,10 +1088,15 @@ function AssignLeftover({
   );
 }
 
+// Overspent means the month's spending has passed the income PLANNED for it,
+// not the income received so far. Measured against what has landed, the badge
+// fired on the 1st of every month — before a single paycheque was in, any
+// spending at all read as overspending.
 function getBudgetStatus(
-  actualLeft: number,
+  actualSpent: number,
+  incomePlanned: number,
 ): { tone: BudgetTone; badgeText: string } {
-  if (actualLeft < 0) return { tone: "bad", badgeText: "Overspent" };
+  if (actualSpent > incomePlanned) return { tone: "bad", badgeText: "Overspent" };
   return { tone: "good", badgeText: "On track" };
 }
 
@@ -1023,7 +1169,6 @@ function UndoRolloverButton({ monthFirstOfMonth }: { monthFirstOfMonth: string }
 }
 
 function SummaryHeroCard({
-  actualLeft,
   displayLeft,
   incomePlanned,
   outflowPlanned,
@@ -1038,7 +1183,6 @@ function SummaryHeroCard({
   heroSubOptions,
   currency,
 }: {
-  actualLeft: number;
   displayLeft: number;
   incomePlanned: number;
   outflowPlanned: number;
@@ -1053,7 +1197,7 @@ function SummaryHeroCard({
   heroSubOptions: SubOption[];
   currency: string;
 }) {
-  const { tone, badgeText } = getBudgetStatus(actualLeft);
+  const { tone, badgeText } = getBudgetStatus(actualSpent, incomePlanned);
   const toneClasses = TONE_CLASSES[tone];
 
   return (

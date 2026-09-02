@@ -427,11 +427,16 @@ export function TransactionsTable({
             <BatchActionButtons onClear={() => batchClear(true)} />
           </div>
         ) : (
-          <div className={`grid ${GRID} items-center gap-2 bg-positive/5 px-4 py-2.5 dark:bg-positive/10`}>
-            <span className="col-span-2 whitespace-nowrap text-xs font-medium text-muted">
+          <div
+            // Flex, not the row GRID: the count and the totals together spanned
+            // more columns than the table has, so the summary wrapped onto a
+            // second line. Nothing here lines up with a data column anyway.
+            className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-positive/5 px-4 py-2.5 dark:bg-positive/10"
+          >
+            <span className="whitespace-nowrap text-xs font-medium text-muted">
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
-            <span className="col-span-7 whitespace-nowrap text-xs text-muted">
+            <span className="whitespace-nowrap text-xs text-muted">
               <span className="font-bold text-foreground">Income Received</span>{" "}
               <span className="tabular-nums font-semibold text-positive">{formatMoney(incomeTotal, currency)}</span>
               <span className="mx-1.5">–</span>
@@ -443,7 +448,6 @@ export function TransactionsTable({
                 {formatMoney(incomeLeft, currency)}
               </span>
             </span>
-            <span />
           </div>
         )}
       </div>

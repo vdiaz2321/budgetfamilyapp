@@ -418,6 +418,25 @@ function MobilePlannedInput({
 const MATCH_BTN_CLASS =
   "absolute bottom-full right-0 z-20 mb-1 whitespace-nowrap rounded-full bg-muted px-2.5 py-1 text-[12px] font-bold text-white shadow-md ring-1 ring-black/10 transition hover:bg-foreground/75 active:scale-95";
 
+// Tab from a Planned cell should land on the next Planned cell, not on the
+// Actual/Remaining/% buttons that sit between them in DOM order — entering a
+// month's budget is a single top-to-bottom pass down one column. Groups are
+// crossed in list order; collapsed groups and read-only rows (Subscriptions,
+// Irregular Bills) simply aren't in the list, so they're skipped.
+function focusAdjacentPlanned(current: HTMLInputElement, direction: 1 | -1) {
+  const inputs = Array.from(
+    document.querySelectorAll<HTMLInputElement>('input[name="planned"]'),
+  ).filter((el) => !el.disabled && !el.readOnly && el.offsetParent !== null);
+  const index = inputs.indexOf(current);
+  if (index === -1) return false;
+  const next = inputs[index + direction];
+  if (!next) return false;
+  // Focusing fires the current input's blur, which saves it if it changed.
+  next.focus();
+  next.select();
+  return true;
+}
+
 function PlannedInput({
   subId,
   monthKey,
@@ -476,6 +495,10 @@ function PlannedInput({
         autoComplete="off"
         defaultValue={`${currencySymbol(currency)}${initial}`}
         onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
+        onKeyDown={(e) => {
+          if (e.key !== "Tab") return;
+          if (focusAdjacentPlanned(e.currentTarget, e.shiftKey ? -1 : 1)) e.preventDefault();
+        }}
         onBlur={(e) => {
           setFocused(false);
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 const MONTHS_SHORT = [
@@ -25,6 +25,12 @@ export function MonthPicker({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // The server render for a month takes a while, so the click needs to say so
+  // immediately: the title swaps to the month being opened and dims until the
+  // new page commits. Without it the picker just closed and nothing appeared
+  // to happen.
+  const [pending, startNavigation] = useTransition();
+  const [target, setTarget] = useState<string | null>(null);
 
   const [year, month1] = monthKey.split("-").map(Number); // month1 is 1-based
   const [viewYear, setViewYear] = useState(year);
@@ -35,16 +41,29 @@ export function MonthPicker({
 
   function goTo(key: string) {
     setOpen(false);
+    setTarget(key);
     // Session cookie (no Max-Age) — cleared when browser closes, so fresh
     // logins always land on the current month.
     document.cookie = `budget-month=${key}; path=/; SameSite=Lax`;
-    router.push(`${basePath}?month=${key}`);
+    startNavigation(() => router.push(`${basePath}?month=${key}`));
   }
 
   function toggle() {
     setViewYear(year); // reset view to the active month's year each open
     setOpen((v) => !v);
+    // Warm the months either side of this one while the panel is open, so the
+    // most likely picks are already on their way when they're clicked.
+    if (!open) {
+      for (const offset of [-1, 1]) {
+        const d = new Date(year, month1 - 1 + offset, 1);
+        router.prefetch(`${basePath}?month=${d.getFullYear()}-${pad2(d.getMonth() + 1)}`);
+      }
+    }
   }
+
+  // While a month is loading the trigger shows where you're going, not where
+  // you were.
+  const [shownYear, shownMonth1] = (pending && target ? target : monthKey).split("-").map(Number);
 
   // `select-none` on the trigger and the panel is load-bearing on touch: the
   // month labels are plain text, so a tap that drifts a pixel starts a text
@@ -57,10 +76,10 @@ export function MonthPicker({
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex touch-manipulation select-none items-center gap-1.5 text-2xl tracking-tight"
+        className={`flex touch-manipulation select-none items-center gap-1.5 text-2xl tracking-tight transition-opacity ${pending ? "opacity-50" : ""}`}
       >
-        <span className="font-bold text-foreground">{MONTHS_FULL[month1 - 1]}</span>
-        <span className="font-normal text-muted">{year}</span>
+        <span className="font-bold text-foreground">{MONTHS_FULL[shownMonth1 - 1]}</span>
+        <span className="font-normal text-muted">{shownYear}</span>
         <svg
           width="18"
           height="18"

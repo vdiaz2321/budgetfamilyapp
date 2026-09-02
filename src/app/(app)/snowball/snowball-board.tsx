@@ -115,6 +115,21 @@ export function SnowballBoard(props: Props) {
     if (filter === "paid") return row.balanceCents <= 0;
     return true;
   });
+  // Cards run soonest payoff first, so whatever is about to clear leads and
+  // the long tail sits at the end. Paid-off debts have no upcoming payoff and
+  // stay at the back, and so does anything whose payment is too low to ever
+  // clear — there's no date to sort it by.
+  const orderedRows = [...visibleRows].sort((a, b) => {
+    const aDone = a.balanceCents <= 0;
+    const bDone = b.balanceCents <= 0;
+    if (aDone !== bDone) return aDone ? 1 : -1;
+    const aMonth = payoffMonth[a.subId] ?? null;
+    const bMonth = payoffMonth[b.subId] ?? null;
+    if (aMonth && bMonth && aMonth !== bMonth) return aMonth.localeCompare(bMonth);
+    if (aMonth && !bMonth) return -1;
+    if (!aMonth && bMonth) return 1;
+    return a.name.localeCompare(b.name);
+  });
   const selected = selectedId ? rows.find((row) => row.subId === selectedId) ?? null : null;
   const selectedMonths = selected ? ledger[selected.subId] ?? [] : [];
   const masterMonths = useMemo(() => aggregateDebtLedger(rows, ledger, startMonth), [ledger, rows, startMonth]);
@@ -171,7 +186,7 @@ export function SnowballBoard(props: Props) {
         <p className="rounded-2xl bg-surface px-4 py-6 text-center text-sm text-muted shadow-sm ring-1 ring-black/5">No debts match this filter.</p>
       ) : (
         <div className="flex gap-3 overflow-x-auto pb-1">
-          {visibleRows.map((row, index) => (
+          {orderedRows.map((row, index) => (
             <DebtCard
               key={row.subId}
               row={row}
