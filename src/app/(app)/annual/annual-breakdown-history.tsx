@@ -144,14 +144,20 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
               line item nine years across is only worth anything next to the
               category totals it belongs to. The hero cards have released by
               the time this panel is on screen, so top-0 is free. */}
-          <div className="sticky top-0 z-30 rounded-lg bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
+          {/* The solid rule and drop shadow are the point: pinned at top-0
+              this strip lands where the hero cards were a moment ago, and
+              without a hard edge the two read as one floating thing. */}
+          <div
+            className="sticky top-0 z-30 rounded-lg bg-surface ring-1 ring-black/10 shadow-[0_3px_0_0_var(--color-line),0_12px_16px_-12px_rgba(0,0,0,0.45)] dark:ring-white/15"
+            style={{ overflow: "clip" }}
+          >
             <div
               ref={(el) => { if (el) scrollersRef.current.add(el); }}
               onScroll={(e) => syncScrollX(e.currentTarget.scrollLeft)}
               className="scroll-handle overflow-x-auto"
             >
               <div style={{ minWidth: minW }}>
-                <div className="grid items-center gap-2 border-b border-line pr-4 py-2" style={gridStyle}>
+                <div className="grid items-center gap-2 border-b border-line bg-black/[0.05] pr-4 py-2 dark:bg-white/[0.08]" style={gridStyle}>
                   <span className="pl-4 text-[13px] font-bold uppercase tracking-wide">
                     Category
                   </span>
