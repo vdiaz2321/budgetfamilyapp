@@ -1,5 +1,21 @@
 @AGENTS.md
 
+# Never commit or push — Victor does that himself
+
+Do NOT run `git commit`, `git push`, `git reset`, or anything else that
+rewrites history in this repo. Not after a verified change, not "to keep the
+work safe", not because the change is finished. Victor stages and commits
+every change himself through VS Code's Source Control panel (see
+[docs/machine-setup.md](docs/machine-setup.md)) — the history is his to shape,
+and he works across two machines on one repo, so an unasked-for commit lands
+in a log he has to untangle later.
+
+Leave finished work uncommitted in the working tree and say what changed. If
+a commit genuinely seems warranted, offer it in a sentence and wait for a yes.
+
+Reading git is always fine — `git status`, `git log`, `git diff`, `git show`
+are how you answer questions about the code's history.
+
 # Environment rules
 
 - `.env.local` is gitignored and never committed. Never put the Supabase
