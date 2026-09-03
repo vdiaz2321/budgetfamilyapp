@@ -126,14 +126,13 @@ export function AnnualHero({
   // Cards that drop out of a filtered view leave their grid slot behind rather
   // than collapsing it: clicking a second cell must not move the row the
   // pointer is already over. The first freed slot carries the way back.
-  let clearSlotUsed = false;
+  const clearSlot = CARD_ORDER.find((id) => !shows(id));
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {CARD_ORDER.map((id) => {
         if (shows(id)) return <div key={id}>{card(id)}</div>;
-        if (!clearSlotUsed) {
-          clearSlotUsed = true;
+        if (id === clearSlot) {
           return (
             <button
               key={id}

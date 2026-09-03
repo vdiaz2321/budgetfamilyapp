@@ -4,6 +4,13 @@ import { useRef } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { usePersistentCollapse } from "@/lib/use-session-collapse";
+import { MoneyCell } from "./annual-cell";
+import {
+  KIND_COLOR,
+  categoryCellKey,
+  type Selection,
+  type SelectedCell,
+} from "./annual-selection";
 
 /** One payee's share of a row, same 12-month shape as the row itself. */
 export type CatMonthDetail = {
@@ -39,6 +46,9 @@ type Props = {
   groups: CatMonthGroup[];
   monthLabels: string[]; // 12 short labels (Jan…Dec)
   currency: string;
+  /** Cells currently driving the hero cards, across both tables. */
+  selected: Selection;
+  onToggleCell: (key: string, cell: SelectedCell) => void;
 };
 
 // Months run newest-first, left to right: the panel is half a screen wide, so
@@ -63,7 +73,13 @@ function trackMinWidth(monthCount: number) {
   return { minWidth: `${12 + 7 + 6.25 * monthCount}rem` };
 }
 
-export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
+export function CategoryMonthsTable({
+  groups,
+  monthLabels,
+  currency,
+  selected,
+  onToggleCell,
+}: Props) {
   // Open by default, and persistent: this panel is the year read line by
   // line, so it should be found as it was left rather than collapsed on
   // every fresh login.
@@ -108,6 +124,8 @@ export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
                 currency={currency}
                 scrollersRef={scrollersRef}
                 syncScrollX={syncScrollX}
+                selected={selected}
+                onToggleCell={onToggleCell}
               />
             ))}
           </div>
@@ -129,6 +147,8 @@ function Group({
   currency,
   scrollersRef,
   syncScrollX,
+  selected,
+  onToggleCell,
 }: {
   group: CatMonthGroup;
   monthLabels: string[];
@@ -136,6 +156,8 @@ function Group({
   currency: string;
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
+  selected: Selection;
+  onToggleCell: (key: string, cell: SelectedCell) => void;
 }) {
   const [collapse, setCollapse] = usePersistentCollapse(`annual-category-${group.categoryId}`, () => ({ open: false }));
   const open = collapse.open;
@@ -237,14 +259,45 @@ function Group({
                           </span>
                         )}
                       </span>
-                      <span className={`text-center text-[18px] tabular-nums ${r.dormant ? "text-muted" : ""}`}>
-                        {r.total !== 0 ? formatMoney(r.total, currency) : <span className="text-muted">—</span>}
-                      </span>
-                      {visibleMonths(r.months, monthCount).map((v, i) => (
-                        <span key={i} className="text-center text-[18px] tabular-nums">
-                          {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
-                        </span>
-                      ))}
+                      <MoneyCell
+                        empty={r.total === 0}
+                        color={KIND_COLOR[group.kind]}
+                        className={r.dormant ? "text-muted" : ""}
+                        active={selected.has(categoryCellKey(r.subId, null))}
+                        onToggle={() =>
+                          onToggleCell(categoryCellKey(r.subId, null), {
+                            kind: group.kind,
+                            amountCents: r.total,
+                            monthIdx: null,
+                            source: "category",
+                          })
+                        }
+                      >
+                        {formatMoney(r.total, currency)}
+                      </MoneyCell>
+                      {visibleMonths(r.months, monthCount).map((v, i) => {
+                        // visibleMonths slices to monthCount then reverses, so
+                        // the leftmost rendered column is the newest month.
+                        const monthIdx = monthCount - 1 - i;
+                        return (
+                          <MoneyCell
+                            key={monthIdx}
+                            empty={v === 0}
+                            color={KIND_COLOR[group.kind]}
+                            active={selected.has(categoryCellKey(r.subId, monthIdx))}
+                            onToggle={() =>
+                              onToggleCell(categoryCellKey(r.subId, monthIdx), {
+                                kind: group.kind,
+                                amountCents: v,
+                                monthIdx,
+                                source: "category",
+                              })
+                            }
+                          >
+                            {formatMoney(v, currency)}
+                          </MoneyCell>
+                        );
+                      })}
                     </div>
 
                     {rowOpen

@@ -9,10 +9,9 @@ import { AnnualBreakdownHistory, type BreakdownKind } from "./annual-breakdown-h
 import { PropertyRollupPanel, type PropertyRollup } from "./property-rollup";
 import {
   CARD_FOR_KIND,
-  cellKey,
-  parseCellKey,
   type CardId,
-  type CellKind,
+  type Selection,
+  type SelectedCell,
 } from "./annual-selection";
 
 type Props = {
@@ -33,6 +32,10 @@ type Props = {
 };
 
 const CARD_ORDER: CardId[] = ["income", "spending", "savings", "debt", "net"];
+const MONTH_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
 /**
  * The year's drill-downs, plus the hero cards they drive.
@@ -50,18 +53,23 @@ export function AnnualPanels({
   year, outflowKinds, columns, monthRows, totals, totalNet, gridCols,
   groups, monthLabels, properties, kinds, years, netByYear, currency,
 }: Props) {
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [selected, setSelected] = useState<Selection>(() => new Map());
 
-  const toggleCell = (monthIdx: number, kind: CellKind) => {
+  const toggleCell = (key: string, cell: SelectedCell) => {
     setSelected((prev) => {
-      const next = new Set(prev);
-      const key = cellKey(monthIdx, kind);
+      // A selection lives in one table at a time. Months' "Aug bills" and
+      // Category's "Groceries, Aug" describe the same money from different
+      // angles; adding them together would count it twice, so starting a
+      // selection in one table drops the other's.
+      const sameSource =
+        prev.size === 0 || prev.values().next().value?.source === cell.source;
+      const next = sameSource ? new Map(prev) : new Map<string, SelectedCell>();
       if (next.has(key)) next.delete(key);
-      else next.add(key);
+      else next.set(key, cell);
       return next;
     });
   };
-  const clear = () => setSelected(new Set());
+  const clear = () => setSelected(new Map());
 
   const filter = useMemo<HeroFilter | null>(() => {
     if (selected.size === 0) return null;
@@ -73,20 +81,22 @@ export function AnnualPanels({
       income: new Set(), spending: new Set(), savings: new Set(),
       debt: new Set(), net: new Set(),
     };
-    const kindsUsed: Record<CardId, Set<CellKind>> = {
+    const kindsUsed: Record<CardId, Set<string>> = {
       income: new Set(), spending: new Set(), savings: new Set(),
       debt: new Set(), net: new Set(),
     };
-    const rowByIdx = new Map(monthRows.map((r) => [r.idx, r]));
+    // Whole-year Total cells belong to no single month; they caption as
+    // "full year" instead of joining the month list.
+    const wholeYear = new Set<CardId>();
+    const touched = new Set<CardId>();
 
-    for (const key of selected) {
-      const { monthIdx, kind } = parseCellKey(key);
-      const row = rowByIdx.get(monthIdx);
-      if (!row) continue;
-      const card = CARD_FOR_KIND[kind];
-      sums[card] += kind === "net" ? row.net : row.values[kind];
-      months[card].add(monthIdx);
-      kindsUsed[card].add(kind);
+    for (const cell of selected.values()) {
+      const card = CARD_FOR_KIND[cell.kind];
+      sums[card] += cell.amountCents;
+      touched.add(card);
+      if (cell.monthIdx === null) wholeYear.add(card);
+      else months[card].add(cell.monthIdx);
+      kindsUsed[card].add(cell.kind);
     }
 
     // Net is the point of the selection, not another column of it: whatever
@@ -100,31 +110,31 @@ export function AnnualPanels({
     for (const card of CARD_ORDER) {
       const monthPart = [...months[card]]
         .sort((a, b) => a - b)
-        .map((i) => rowByIdx.get(i)?.name.slice(0, 3) ?? "")
+        .map((i) => MONTH_ABBR[i] ?? "")
         .join(", ");
+      const parts = [wholeYear.has(card) ? "full year" : "", monthPart].filter(Boolean);
       // Spending is the only card fed by two columns, so it is the only one
       // that has to say which of them a total came from.
       const kindPart =
         card === "spending" && kindsUsed[card].size > 0
           ? ` · ${[...kindsUsed[card]].sort().join(" + ")}`
           : "";
-      captions[card] = monthPart ? `${monthPart}${kindPart}` : "";
+      captions[card] = parts.length ? `${parts.join(" + ")}${kindPart}` : "";
     }
-
     captions.net = `net of ${selected.size} selected cell${selected.size === 1 ? "" : "s"}`;
 
     // Net earns its slot once the selection spans more than one card, where
     // "what does this leave me" is a real question. Against a single card it
     // would only restate that card with the sign flipped.
-    const filled = CARD_ORDER.filter((c) => c !== "net" && months[c].size > 0);
-    const showNet = filled.length > 1 || months.net.size > 0;
+    const filled = CARD_ORDER.filter((c) => c !== "net" && touched.has(c));
+    const showNet = filled.length > 1 || touched.has("net");
 
     return {
-      cards: CARD_ORDER.filter((c) => (c === "net" ? showNet : months[c].size > 0)),
+      cards: CARD_ORDER.filter((c) => (c === "net" ? showNet : touched.has(c))),
       sums,
       captions,
     };
-  }, [selected, monthRows]);
+  }, [selected]);
 
   return (
     <div className="space-y-4">
@@ -160,7 +170,13 @@ export function AnnualPanels({
           />
         </div>
         <div className="min-w-0">
-          <CategoryMonthsTable groups={groups} monthLabels={monthLabels} currency={currency} />
+          <CategoryMonthsTable
+            groups={groups}
+            monthLabels={monthLabels}
+            currency={currency}
+            selected={selected}
+            onToggleCell={toggleCell}
+          />
         </div>
 
         {properties.length > 0 ? (
