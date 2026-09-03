@@ -285,11 +285,14 @@ export default async function AnnualOverviewPage({
         };
       });
 
-    // Order follows the Budget page (subcategories arrive by sort_order). A
-    // line with nothing logged this year drops to the bottom instead of
-    // holding its slot in the middle of the list — see feedback: dormant rows
-    // should shift down.
-    const active = allRows.filter((r) => r.months.some((v) => v !== 0));
+    // Ranked by the Total column, biggest first: the question this panel
+    // answers is "where did the year's money go", and Budget's sort_order
+    // (what it used to follow) buried the largest lines mid-list. A line with
+    // nothing logged this year drops below all of them instead of holding a
+    // slot in the middle — see feedback: dormant rows should shift down.
+    const active = allRows
+      .filter((r) => r.months.some((v) => v !== 0))
+      .sort((a, b) => b.total - a.total);
     if (!active.length) return [];
     const rows = [
       ...active,
