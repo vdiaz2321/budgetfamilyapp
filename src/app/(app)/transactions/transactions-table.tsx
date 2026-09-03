@@ -144,14 +144,22 @@ export function TransactionsTable({
   }
 
   const accountName = new Map(accountOptions.map((a) => [a.id, a.name]));
+  const propertyName = new Map(propertyOptions.map((p) => [p.id, p.name]));
 
   function exportCsv() {
     const qf = (v: string | number | null | undefined) => {
       const s = String(v ?? "");
       return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
     };
+    // Property is a column only for a household that owns one — otherwise
+    // every row would carry an empty field the reader has to scroll past.
+    const withProperty = propertyOptions.length > 0;
     const rows = [
-      ["Date", "Cleared", "Amount", "Type", "Category", "Payee", "Account", "Remarks"].join(","),
+      [
+        "Date", "Cleared", "Amount", "Type", "Category", "Payee", "Account",
+        ...(withProperty ? ["Property"] : []),
+        "Remarks",
+      ].join(","),
       ...filtered.map((t) =>
         [
           qf(t.date),
@@ -161,6 +169,7 @@ export function TransactionsTable({
           qf(t.subName),
           qf(t.payee),
           qf(t.accountId ? accountName.get(t.accountId) : ""),
+          ...(withProperty ? [qf(t.propertyId ? propertyName.get(t.propertyId) : "")] : []),
           qf(t.memo),
         ].join(",")
       ),
@@ -169,7 +178,13 @@ export function TransactionsTable({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `transactions-${month.key}.csv`;
+    // A filtered export is one property's book — say so in the filename
+    // rather than handing over three identically named files.
+    const filteredName = propertyFilter ? propertyName.get(propertyFilter) : null;
+    const slug = filteredName
+      ? `-${filteredName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`
+      : "";
+    a.download = `transactions-${month.key}${slug}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
