@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
-import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { usePersistentCollapse } from "@/lib/use-session-collapse";
 
 /** One payee's share of a row, same 12-month shape as the row itself. */
 export type CatMonthDetail = {
@@ -64,7 +64,10 @@ function trackMinWidth(monthCount: number) {
 }
 
 export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
-  const [collapse, setCollapse] = useSessionCollapse("annual-category-months", () => ({ open: false }));
+  // Open by default, and persistent: this panel is the year read line by
+  // line, so it should be found as it was left rather than collapsed on
+  // every fresh login.
+  const [collapse, setCollapse] = usePersistentCollapse("annual-category-months", () => ({ open: true }));
   const open = collapse.open;
   // The last month anything was logged in, across every group — the table
   // stops there rather than running out to December with nothing in it.
@@ -134,11 +137,11 @@ function Group({
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
 }) {
-  const [collapse, setCollapse] = useSessionCollapse(`annual-category-${group.categoryId}`, () => ({ open: false }));
+  const [collapse, setCollapse] = usePersistentCollapse(`annual-category-${group.categoryId}`, () => ({ open: false }));
   const open = collapse.open;
   // Which rows are showing their payee split. Per-session like every other
   // collapse on the page, so coming back to the year finds it as it was left.
-  const [openRows, setOpenRows] = useSessionCollapse(
+  const [openRows, setOpenRows] = usePersistentCollapse(
     `annual-category-rows-${group.categoryId}`,
     () => ({}),
   );
@@ -238,7 +241,7 @@ function Group({
                         {r.total !== 0 ? formatMoney(r.total, currency) : <span className="text-muted">—</span>}
                       </span>
                       {visibleMonths(r.months, monthCount).map((v, i) => (
-                        <span key={i} className="text-center text-[13px] 2xl:text-[18px] tabular-nums">
+                        <span key={i} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums">
                           {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                         </span>
                       ))}
@@ -265,7 +268,7 @@ function Group({
                               {formatMoney(d.total, currency)}
                             </span>
                             {visibleMonths(d.months, monthCount).map((v, i) => (
-                              <span key={i} className="text-center text-[13px] 2xl:text-[18px] tabular-nums text-muted">
+                              <span key={i} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums text-muted">
                                 {v !== 0 ? formatMoney(v, currency) : "—"}
                               </span>
                             ))}

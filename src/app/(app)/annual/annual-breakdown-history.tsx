@@ -161,7 +161,7 @@ function SummaryRow({
       {years.map((y) => {
         const v = byYear[y] ?? 0;
         return (
-          <span key={y} className="text-center text-[13px] 2xl:text-[18px] tabular-nums">
+          <span key={y} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums">
             {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
           </span>
         );
@@ -324,7 +324,7 @@ function LineRow({
         {years.map((y) => {
           const v = line.byYear[y] ?? 0;
           return (
-            <span key={y} className="text-center text-[13px] 2xl:text-[18px] tabular-nums">
+            <span key={y} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums">
               {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
             </span>
           );
@@ -339,7 +339,7 @@ function LineRow({
           {years.map((y) => {
             const v = d.byYear[y] ?? 0;
             return (
-              <span key={y} className="text-center text-[12px] 2xl:text-[16px] tabular-nums text-muted">
+              <span key={y} className="text-center text-[12px] 2xl:text-[16px] font-semibold tabular-nums text-muted">
                 {v !== 0 ? formatMoney(v, currency) : <span className="opacity-40">—</span>}
               </span>
             );

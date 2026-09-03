@@ -138,7 +138,7 @@ function PropertyCard({
           </span>
         ) : null}
         {/* Wraps to its own line on a phone rather than squeezing the name. */}
-        <span className="ml-auto flex items-center gap-3 tabular-nums">
+        <span className="ml-auto flex items-center gap-3 font-semibold tabular-nums">
           <Figure label="In" value={property.incomeTotal} color="var(--positive)" currency={currency} />
           <Figure label="Out" value={property.costTotal} color="var(--negative)" currency={currency} />
           <Figure
@@ -291,7 +291,7 @@ function LineRow({
         {line.total !== 0 ? formatMoney(line.total, currency) : <span className="text-muted">—</span>}
       </span>
       {line.months.slice(0, monthCount).map((v, i) => (
-        <span key={i} className="text-center text-[13px] 2xl:text-[18px] tabular-nums text-muted">
+        <span key={i} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums text-muted">
           {v !== 0 ? formatMoney(v, currency) : "—"}
         </span>
       ))}

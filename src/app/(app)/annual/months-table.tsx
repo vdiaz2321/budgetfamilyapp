@@ -92,7 +92,7 @@ export function MonthsTable({
                   >
                     <span className="text-[15px] 2xl:text-[21px] font-medium">{r.name.slice(0, 3)}</span>
                     {columns.map((c) => (
-                      <span key={c.kind} className="text-center text-[13px] 2xl:text-[18px] tabular-nums">
+                      <span key={c.kind} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums">
                         {r.values[c.kind] !== 0 ? (
                           formatMoney(r.values[c.kind], currency)
                         ) : (
@@ -122,7 +122,7 @@ export function MonthsTable({
                 {columns.map((c) => {
                   const percent = shareOfIncome(totals[c.kind]);
                   return (
-                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
+                    <span key={c.kind} className="flex flex-col items-center text-center font-semibold tabular-nums">
                       <span className="text-[13px] 2xl:text-[18px] font-bold">
                         {formatMoney(totals[c.kind], currency)}
                       </span>
@@ -145,7 +145,7 @@ export function MonthsTable({
                     </span>
                   );
                 })}
-                <span className="flex flex-col items-center text-center tabular-nums">
+                <span className="flex flex-col items-center text-center font-semibold tabular-nums">
                   <span
                     className={`text-[13px] 2xl:text-[18px] font-bold ${
                       totalNet >= 0 ? "text-positive" : "text-negative"
