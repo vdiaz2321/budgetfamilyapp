@@ -89,6 +89,13 @@ export function AnnualPanels({
       kindsUsed[card].add(kind);
     }
 
+    // Net is the point of the selection, not another column of it: whatever
+    // cells are chosen, the card answers "what does this leave me". Income
+    // less the outflows, exactly as the year's own Net card is built. A Net
+    // cell picked directly is already that month's income less its outflows,
+    // so it folds into the same sum rather than competing with it.
+    sums.net += sums.income - sums.spending - sums.savings - sums.debt;
+
     const captions = {} as Record<CardId, string>;
     for (const card of CARD_ORDER) {
       const monthPart = [...months[card]]
@@ -104,8 +111,16 @@ export function AnnualPanels({
       captions[card] = monthPart ? `${monthPart}${kindPart}` : "";
     }
 
+    captions.net = `net of ${selected.size} selected cell${selected.size === 1 ? "" : "s"}`;
+
+    // Net earns its slot once the selection spans more than one card, where
+    // "what does this leave me" is a real question. Against a single card it
+    // would only restate that card with the sign flipped.
+    const filled = CARD_ORDER.filter((c) => c !== "net" && months[c].size > 0);
+    const showNet = filled.length > 1 || months.net.size > 0;
+
     return {
-      cards: CARD_ORDER.filter((c) => months[c].size > 0),
+      cards: CARD_ORDER.filter((c) => (c === "net" ? showNet : months[c].size > 0)),
       sums,
       captions,
     };
