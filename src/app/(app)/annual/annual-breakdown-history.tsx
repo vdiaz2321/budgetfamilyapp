@@ -128,15 +128,27 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
 
   return (
     <section className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
-      <button
-        type="button"
-        onClick={() => setCollapse({ open: !open })}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
-      >
-        <Chevron open={open} />
-        <span className="font-semibold">Annual Breakdown</span>
-      </button>
+      {/* The collapse control and the export sit side by side rather than
+          nested — a button inside a button is invalid, and clicking Export
+          must not fold the panel shut under it. */}
+      <div className="flex items-center gap-2 pr-3">
+        <button
+          type="button"
+          onClick={() => setCollapse({ open: !open })}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+        >
+          <Chevron open={open} />
+          <span className="font-semibold">Annual Breakdown</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => downloadBreakdownCsv(kinds, years, netByYear, currency)}
+          className="shrink-0 rounded-lg bg-surface px-3 py-1.5 text-xs font-medium ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+        >
+          Export CSV
+        </button>
+      </div>
 
       {open ? (
         <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
@@ -248,6 +260,68 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
       ) : null}
     </section>
   );
+}
+
+/**
+ * The panel, flattened for a spreadsheet: one row per figure-bearing line,
+ * with Section / Group / Line item / Detail naming where it sat in the
+ * hierarchy, then Total and one column per year.
+ *
+ * Values go out as plain numbers, not formatted money — a CSV whose cells
+ * can't be summed is a screenshot with extra steps. The currency is named in
+ * the header instead.
+ */
+function downloadBreakdownCsv(
+  kinds: BreakdownKind[],
+  years: number[],
+  netByYear: Record<number, number>,
+  currency: string,
+) {
+  const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const money = (cents: number) => (cents / 100).toFixed(2);
+  const byYear = (rec: Record<number, number>) => years.map((y) => money(rec[y] ?? 0));
+
+  const rows: string[] = [];
+  const push = (section: string, group: string, line: string, detail: string,
+                total: number, rec: Record<number, number>) =>
+    rows.push([q(section), q(group), q(line), q(detail), money(total), ...byYear(rec)].join(","));
+
+  // Summary block first, in the order the sticky strip shows it.
+  for (const k of kinds) push("Summary", "", k.label, "", k.total, k.totalByYear);
+  const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0);
+  push("Summary", "", "Net", "", netTotal, netByYear);
+
+  for (const k of kinds) {
+    for (const g of k.groups) {
+      // A kind that is one unnamed group doesn't get a subtotal row of its
+      // own on screen either — it would just restate the section.
+      if (k.groups.length > 1) {
+        push(k.label, g.label, "Subtotal", "", g.total, g.subtotalByYear);
+      }
+      for (const l of g.lines) {
+        push(k.label, k.groups.length > 1 ? g.label : "", l.label, "", l.total, l.byYear);
+        for (const d of l.details ?? []) {
+          push(k.label, k.groups.length > 1 ? g.label : "", l.label, d.label, d.total, d.byYear);
+        }
+      }
+    }
+  }
+
+  const header = [
+    "Section", "Group", "Line item", "Detail",
+    `Total (${currency})`,
+    ...years.map((y) => `${y} (${currency})`),
+  ].map(q).join(",");
+
+  const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `annual-breakdown-${years[years.length - 1]}-${years[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function SummaryRow({
