@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
+import { PROPERTY_KIND } from "@/lib/net-worth";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { AnnualHero } from "./annual-hero";
 import { YearPicker } from "./year-picker";
 import { AnnualPanels } from "./annual-panels";
+import type { PropertyLine, PropertyRollup } from "./property-rollup";
 import type { CatMonthGroup, CatMonthRow } from "./category-months-table";
 import type { BreakdownKind } from "./annual-breakdown-history";
 import { ScrollToTop } from "@/components/scroll-to-top";
@@ -107,11 +109,11 @@ export default async function AnnualOverviewPage({
     fetchAllRows<{
       subcategory_id: string; account_id: string | null; bucket_id: string | null;
       amount_cents: number; occurred_on: string; is_withdrawal: boolean | null;
-      payee_id: string | null;
+      payee_id: string | null; property_id: string | null;
     }>((from, to) =>
       supabase
         .from("transactions")
-        .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal, payee_id")
+        .select("subcategory_id, account_id, bucket_id, amount_cents, occurred_on, is_withdrawal, payee_id, property_id")
         .eq("household_id", household.id)
         .gte("occurred_on", liveRangeStart)
         .lte("occurred_on", liveRangeEnd)
@@ -127,7 +129,7 @@ export default async function AnnualOverviewPage({
       .lte("year", currentYear),
     supabase
       .from("accounts")
-      .select("id, name, kind, is_kids_account")
+      .select("id, name, kind, subtype, is_kids_account")
       .eq("household_id", household.id),
     supabase
       .from("buckets")
@@ -410,6 +412,85 @@ export default async function AnnualOverviewPage({
     netByYear[y] = get("income") - get("bills") - get("expenses") - get("debt") - get("savings") - get("investment") - get("kidsFunding");
   }
 
+  // Per-property rollup. A rental's rent is Income and its repairs are
+  // Expenses, so the two halves of one property's year live in different
+  // category groups and no other panel on this page puts them side by side.
+  // transactions.property_id is the join; see the transaction_property_tag
+  // migration. Only 2026+ is covered — the tag did not exist before, and
+  // liveTxRows starts there.
+  const propertyAccounts = (investmentAccounts ?? []).filter(
+    (a) => a.kind === PROPERTY_KIND,
+  );
+  const propertyRollups: PropertyRollup[] = [];
+  if (propertyAccounts.length > 0) {
+    // property id → subcategory id → 12 months of cents.
+    const linesByProperty = new Map<string, Map<string, number[]>>();
+    for (const t of liveTxRows ?? []) {
+      if (!t.property_id || !t.subcategory_id) continue;
+      if (parseInt(t.occurred_on.slice(0, 4), 10) !== year) continue;
+      if (!kindBySub.get(t.subcategory_id)) continue;
+      let lines = linesByProperty.get(t.property_id);
+      if (!lines) {
+        lines = new Map();
+        linesByProperty.set(t.property_id, lines);
+      }
+      let months = lines.get(t.subcategory_id);
+      if (!months) {
+        months = Array(12).fill(0);
+        lines.set(t.subcategory_id, months);
+      }
+      months[parseInt(t.occurred_on.slice(5, 7), 10) - 1] += t.amount_cents;
+    }
+
+    for (const account of propertyAccounts) {
+      const lines: PropertyLine[] = [];
+      const incomeMonths = Array(12).fill(0);
+      const costMonths = Array(12).fill(0);
+      for (const [subId, months] of linesByProperty.get(account.id) ?? []) {
+        const kind = kindBySub.get(subId);
+        if (!kind) continue;
+        const target = kind === "income" ? incomeMonths : costMonths;
+        for (let i = 0; i < 12; i++) target[i] += months[i];
+        lines.push({
+          subId,
+          name: nameBySub.get(subId) ?? "—",
+          kind,
+          months,
+          total: months.reduce((sum, v) => sum + v, 0),
+        });
+      }
+      // Income first, then the costs, each biggest-first: the year reads as
+      // "this came in, and here is what ate it".
+      lines.sort((a, b) =>
+        a.kind === b.kind
+          ? b.total - a.total
+          : a.kind === "income"
+            ? -1
+            : b.kind === "income"
+              ? 1
+              : 0,
+      );
+      const sum = (months: number[]) => months.reduce((acc, v) => acc + v, 0);
+      propertyRollups.push({
+        id: account.id,
+        name: account.name,
+        subtype: account.subtype ?? null,
+        lines,
+        incomeMonths,
+        costMonths,
+        netMonths: incomeMonths.map((v, i) => v - costMonths[i]),
+        incomeTotal: sum(incomeMonths),
+        costTotal: sum(costMonths),
+        netTotal: sum(incomeMonths) - sum(costMonths),
+      });
+    }
+    // Busiest property first; an untagged one still lists, so its empty state
+    // can say the tag is what is missing.
+    propertyRollups.sort(
+      (a, b) => b.incomeTotal + b.costTotal - (a.incomeTotal + a.costTotal),
+    );
+  }
+
   const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
   const currency = household.currency;
   // Fixed tracks, not 1fr: the figures sit next to each other instead of
@@ -452,6 +533,7 @@ export default async function AnnualOverviewPage({
         gridCols={gridCols}
         groups={categoryGroups}
         monthLabels={monthLabels}
+        properties={propertyRollups}
         kinds={breakdownKinds}
         years={breakdownYears}
         netByYear={netByYear}
