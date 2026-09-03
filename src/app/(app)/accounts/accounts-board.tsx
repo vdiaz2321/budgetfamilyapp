@@ -984,6 +984,8 @@ function CreditCardSection({
   // Free-night certificates still on the table: the card grants one, nothing
   // has been booked against it, and it hasn't run out of time.
   const [showOnlyUnbookedNights, setShowOnlyUnbookedNights] = useState(false);
+  // Which rewards column the section is showing. Null = both, plus Other.
+  const [categoryFilter, setCategoryFilter] = useState<"travel" | "hotel" | null>(null);
   // Holder filter — clicking a name (Vic / Johana / …) limits the visible
   // cards to that holder. Null = all holders.
   const [holderFilter, setHolderFilter] = useState<string | null>(null);
@@ -1089,6 +1091,8 @@ function CreditCardSection({
     && (!showOnlyHotelRedeem || hasRedeemableIn(a, "hotel")),
   );
   const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
+  const hideTravelColumn = showOnlyHotelRedeem || categoryFilter === "hotel";
+  const hideHotelColumn = showOnlyTravelRedeem || categoryFilter === "travel";
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const renderCards = (cards: AccountData[]) => (
@@ -1172,7 +1176,7 @@ function CreditCardSection({
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
         <div className="px-4 py-4 sm:px-6 sm:py-5">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={onToggle}
@@ -1181,6 +1185,31 @@ function CreditCardSection({
             >
               <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
             </button>
+            {/* Free nights still available, under the holder filter in force —
+                the count and the list it filters to always agree. It sits in
+                the title row because it is the question this section gets
+                opened to answer, not one more way to narrow a list. */}
+            {(() => {
+              const available = holderScoped(allCreditCards.filter((a) => !a.dateClosed)).filter(hasUnbookedNight);
+              if (available.length === 0) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() => setShowOnlyUnbookedNights((v) => !v)}
+                  // Its own row on a phone: sharing the title line squeezed
+                  // "Travel & Credit Card Rewards" onto three.
+                  className={`order-last w-full shrink-0 rounded-md px-2 py-1 text-left text-[11px] font-semibold transition sm:order-none sm:w-auto ${
+                    showOnlyUnbookedNights
+                      ? "text-white"
+                      : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                  style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                >
+                  Free nights unbooked:{" "}
+                  <span className="tabular-nums">{available.length}</span>
+                </button>
+              );
+            })()}
             <a
               href="https://www.dailydrop.com/calculator"
               target="_blank"
@@ -1289,27 +1318,6 @@ function CreditCardSection({
                   Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
                 </span>
               ) : null}
-              {/* Free nights still available, under the holder filter in force
-                  — the count and the list it filters to always agree. */}
-              {(() => {
-                const available = holderScoped(allCreditCards.filter((a) => !a.dateClosed)).filter(hasUnbookedNight);
-                if (available.length === 0) return null;
-                return (
-                  <button
-                    type="button"
-                    onClick={() => setShowOnlyUnbookedNights((v) => !v)}
-                    className={`rounded-md px-2 py-1 font-semibold transition ${
-                      showOnlyUnbookedNights
-                        ? "text-white"
-                        : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
-                    }`}
-                    style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                  >
-                    Free nights unbooked{" "}
-                    <span className="tabular-nums">{available.length}</span>
-                  </button>
-                );
-              })()}
               {/* Holder filter — chip per unique cardholder plus an "All" reset.
                   Clicking narrows every card list (Travel / Hotel / Other) to
                   that person's cards. */}
@@ -1354,15 +1362,39 @@ function CreditCardSection({
                   </div>
                 );
               })()}
+              {/* The card counts double as the column filter: travel shows the
+                  travel column alone, hotel the hotel one, total puts both
+                  back with Other underneath. */}
               {(() => {
                 const scoped = holderScoped(accounts);
+                const count = (cat: "travel" | "hotel" | null) =>
+                  cat === null
+                    ? scoped.length
+                    : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
+                const countChip = (cat: "travel" | "hotel" | null, label: string) => (
+                  <button
+                    type="button"
+                    onClick={() => setCategoryFilter(cat)}
+                    className={`rounded-md px-1.5 py-0.5 transition ${
+                      categoryFilter === cat
+                        ? "text-white"
+                        : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                    style={categoryFilter === cat ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                  >
+                    <span className={`font-semibold tabular-nums ${categoryFilter === cat ? "" : "text-foreground"}`}>
+                      {count(cat)}
+                    </span>{" "}
+                    {label}
+                  </button>
+                );
                 return (
-                  <span className="sm:ml-auto">
-                    <span className="font-semibold tabular-nums text-foreground">{scoped.filter((a) => a.cardDetails?.rewardsCategory === "travel").length}</span> travel
-                    <span className="mx-1.5 text-slate-400">·</span>
-                    <span className="font-semibold tabular-nums text-foreground">{scoped.filter((a) => a.cardDetails?.rewardsCategory === "hotel").length}</span> hotel
-                    <span className="mx-1.5 text-slate-400">·</span>
-                    <span className="font-semibold tabular-nums text-foreground">{scoped.length}</span> total
+                  <span className="flex items-center gap-0.5 sm:ml-auto">
+                    {countChip("travel", "travel")}
+                    <span className="text-slate-400">·</span>
+                    {countChip("hotel", "hotel")}
+                    <span className="text-slate-400">·</span>
+                    {countChip(null, "total")}
                   </span>
                 );
               })()}
@@ -1412,8 +1444,13 @@ function CreditCardSection({
             </p>
           ) : isMain ? (
             <div>
-              <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-                {showOnlyHotelRedeem ? <section aria-hidden /> : (
+              {/* Two columns only while both are showing. Filtered to one, the
+                  survivor takes the full width instead of sitting in half a
+                  panel next to an empty cell. */}
+              <div className={`grid grid-cols-1 divide-y divide-line ${
+                hideTravelColumn || hideHotelColumn ? "" : "sm:grid-cols-2 sm:divide-x sm:divide-y-0"
+              }`}>
+                {hideTravelColumn ? null : (
                 <section>
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
@@ -1432,7 +1469,7 @@ function CreditCardSection({
                   {travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
                 </section>
                 )}
-                {showOnlyTravelRedeem ? <section aria-hidden /> : (
+                {hideHotelColumn ? null : (
                 <section>
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
@@ -1453,7 +1490,7 @@ function CreditCardSection({
                 </section>
                 )}
               </div>
-              {otherCards.length > 0 && !showOnlyTravelRedeem && !showOnlyHotelRedeem ? (
+              {otherCards.length > 0 && !showOnlyTravelRedeem && !showOnlyHotelRedeem && categoryFilter === null ? (
                 <section className="border-t border-line">
                   <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-400">
