@@ -1198,10 +1198,12 @@ function CreditCardSection({
                   onClick={() => setShowOnlyUnbookedNights((v) => !v)}
                   // Its own row on a phone: sharing the title line squeezed
                   // "Travel & Credit Card Rewards" onto three.
-                  className={`order-last w-full shrink-0 rounded-md px-2 py-1 text-left text-[11px] font-semibold transition sm:order-none sm:w-auto ${
+                  // Outlined like the calculator control beside it, so it
+                  // reads as something to press rather than a label.
+                  className={`order-last w-full shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-semibold transition sm:order-none sm:w-auto ${
                     showOnlyUnbookedNights
-                      ? "text-white"
-                      : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
+                      ? "border-transparent text-white"
+                      : "border-black/25 bg-background text-foreground hover:bg-slate-100 dark:border-white/30 dark:hover:bg-slate-800"
                   }`}
                   style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
                 >
