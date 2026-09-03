@@ -3,6 +3,7 @@
 import { useState, useRef, type CSSProperties, type RefObject } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { MoneyCell } from "./annual-cell";
 
 export type BreakdownLine = {
   label: string;
@@ -28,6 +29,36 @@ export type BreakdownKind = {
   total: number;
 };
 
+type KindKey = BreakdownKind["kind"];
+
+/** Ring color for a selected cell — the --viz palette, never the brand indigo. */
+const BREAKDOWN_COLOR: Record<KindKey, string> = {
+  income: "var(--positive)",
+  savings: "var(--viz-savings)",
+  investment: "var(--viz-savings)",
+  bills: "var(--negative)",
+  expenses: "var(--negative)",
+  debt: "var(--negative)",
+  kidsFunding: "var(--foreground)",
+};
+
+/**
+ * How a kind enters the panel's Net row: income adds, every outflow subtracts,
+ * and Kids Funding sits outside it — the same arithmetic the seeded netByYear
+ * uses, so a selection's net reads on the same terms as the row above it.
+ */
+const NET_SIGN: Record<KindKey, 1 | -1 | 0> = {
+  income: 1,
+  savings: -1,
+  investment: -1,
+  bills: -1,
+  expenses: -1,
+  debt: -1,
+  kidsFunding: 0,
+};
+
+type SelectedYearCell = { year: number; kind: KindKey; amountCents: number };
+
 type Props = {
   kinds: BreakdownKind[];
   years: number[]; // newest-first
@@ -40,6 +71,21 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
   const open = collapse.open;
   // All overflow-x-auto scroll containers (summary + each kind body) share one
   // scroll position so horizontal scrolling moves everything together.
+  // Cells picked out of the line-item rows below. Kept here rather than in
+  // the hero: those cards are year-scoped ("2026 Spending") and have already
+  // scrolled away by the time this panel is on screen, so the answer belongs
+  // in this panel's own sticky strip, on its own category x year terms.
+  const [selected, setSelected] = useState<Map<string, SelectedYearCell>>(() => new Map());
+  const toggleCell = (key: string, cell: SelectedYearCell) => {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, cell);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelected(new Map());
+
   const scrollersRef = useRef<Set<HTMLDivElement>>(new Set());
   function syncScrollX(scrollLeft: number) {
     scrollersRef.current.forEach((el) => {
@@ -59,6 +105,26 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
     gridTemplateColumns: `minmax(9.5rem, 1fr) minmax(8rem, 1fr) repeat(${years.length}, minmax(6.25rem, 1fr))`,
   };
   const minW = `${10 + 8 + years.length * 6.25}rem`;
+
+  // What the selection adds up to, per year and overall. `net` only means
+  // anything once both sides of the ledger are in play, so it is computed but
+  // shown conditionally.
+  const pickedByYear: Record<number, number> = {};
+  const netPickedByYear: Record<number, number> = {};
+  let pickedTotal = 0;
+  let netPickedTotal = 0;
+  let hasInflow = false;
+  let hasOutflow = false;
+  for (const cell of selected.values()) {
+    pickedByYear[cell.year] = (pickedByYear[cell.year] ?? 0) + cell.amountCents;
+    pickedTotal += cell.amountCents;
+    const signed = NET_SIGN[cell.kind] * cell.amountCents;
+    netPickedByYear[cell.year] = (netPickedByYear[cell.year] ?? 0) + signed;
+    netPickedTotal += signed;
+    if (NET_SIGN[cell.kind] === 1) hasInflow = true;
+    if (NET_SIGN[cell.kind] === -1) hasOutflow = true;
+  }
+  const showNetPicked = hasInflow && hasOutflow;
 
   return (
     <section className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
@@ -126,6 +192,31 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
                     );
                   })}
                 </div>
+
+                {selected.size > 0 ? (
+                  <>
+                    <SelectionRow
+                      label="Selected"
+                      onClear={clearSelection}
+                      total={pickedTotal}
+                      byYear={pickedByYear}
+                      years={years}
+                      gridStyle={gridStyle}
+                      currency={currency}
+                    />
+                    {showNetPicked ? (
+                      <SelectionRow
+                        label="Net of selection"
+                        total={netPickedTotal}
+                        byYear={netPickedByYear}
+                        years={years}
+                        gridStyle={gridStyle}
+                        currency={currency}
+                        signed
+                      />
+                    ) : null}
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
@@ -142,6 +233,8 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
               currency={currency}
               scrollersRef={scrollersRef}
               syncScrollX={syncScrollX}
+              selected={selected}
+              onToggleCell={toggleCell}
             />
           ))}
         </div>
@@ -175,9 +268,12 @@ function SummaryRow({
 
 function KindBlock({
   kind, years, gridStyle, minW, currency, scrollersRef, syncScrollX,
+  selected, onToggleCell,
 }: {
   kind: BreakdownKind; years: number[]; gridStyle: CSSProperties; minW: string; currency: string;
   scrollersRef: RefObject<Set<HTMLDivElement>>; syncScrollX: (x: number) => void;
+  selected: Map<string, SelectedYearCell>;
+  onToggleCell: (key: string, cell: SelectedYearCell) => void;
 }) {
   const [collapse, setCollapse] = useSessionCollapse(`annual-breakdown-kind-${kind.kind}`, () => ({ open: false }));
   const open = collapse.open;
@@ -248,9 +344,12 @@ function KindBlock({
                 <Group
                   key={g.label}
                   group={g}
+                  kindKey={kind.kind}
                   years={years}
                   gridStyle={gridStyle}
                   currency={currency}
+                  selected={selected}
+                  onToggleCell={onToggleCell}
                   singleGroup={kind.groups.length === 1}
                 />
               ))}
@@ -263,9 +362,12 @@ function KindBlock({
 }
 
 function Group({
-  group, years, gridStyle, currency, singleGroup,
+  group, kindKey, years, gridStyle, currency, singleGroup, selected, onToggleCell,
 }: {
-  group: BreakdownGroup; years: number[]; gridStyle: CSSProperties; currency: string; singleGroup: boolean;
+  group: BreakdownGroup; kindKey: KindKey; years: number[]; gridStyle: CSSProperties;
+  currency: string; singleGroup: boolean;
+  selected: Map<string, SelectedYearCell>;
+  onToggleCell: (key: string, cell: SelectedYearCell) => void;
 }) {
   return (
     <div className="border-b border-line last:border-b-0">
@@ -295,10 +397,14 @@ function Group({
           <LineRow
             key={l.label}
             line={l}
+            rowKey={`${kindKey}|${group.label}|${l.label}`}
+            kindKey={kindKey}
             years={years}
             gridStyle={gridStyle}
             currency={currency}
             indent={singleGroup ? "pl-4" : "pl-7"}
+            selected={selected}
+            onToggleCell={onToggleCell}
           />
         ))}
       </ul>
@@ -307,9 +413,12 @@ function Group({
 }
 
 function LineRow({
-  line, years, gridStyle, currency, indent,
+  line, rowKey, kindKey, years, gridStyle, currency, indent, selected, onToggleCell,
 }: {
-  line: BreakdownLine; years: number[]; gridStyle: CSSProperties; currency: string; indent: string;
+  line: BreakdownLine; rowKey: string; kindKey: KindKey; years: number[];
+  gridStyle: CSSProperties; currency: string; indent: string;
+  selected: Map<string, SelectedYearCell>;
+  onToggleCell: (key: string, cell: SelectedYearCell) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails = (line.details?.length ?? 0) > 0;
@@ -329,10 +438,21 @@ function LineRow({
         <span className="text-center text-[18px] tabular-nums">{formatMoney(line.total, currency)}</span>
         {years.map((y) => {
           const v = line.byYear[y] ?? 0;
+          const key = `${rowKey}|${y}`;
           return (
-            <span key={y} className="text-center text-[18px] tabular-nums">
-              {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
-            </span>
+            <MoneyCell
+              key={y}
+              empty={v === 0}
+              color={BREAKDOWN_COLOR[kindKey]}
+              active={selected.has(key)}
+              // A row with a payee split toggles it on click. A cell click is
+              // about the figure, not the row, so it must not also open the
+              // split underneath it.
+              stopPropagation
+              onToggle={() => onToggleCell(key, { year: y, kind: kindKey, amountCents: v })}
+            >
+              {formatMoney(v, currency)}
+            </MoneyCell>
           );
         })}
       </li>
@@ -373,5 +493,59 @@ function Chevron({ open, small }: { open: boolean; small?: boolean }) {
     >
       <path d="M6 9l6 6 6-6" />
     </svg>
+  );
+}
+
+/**
+ * The selection's answer, rendered as one more row of the sticky summary
+ * strip: same columns, same reading order, directly above the cells being
+ * picked. `signed` rows carry a sign that means something (a net), so they
+ * take the positive/negative tint; a plain sum does not.
+ */
+function SelectionRow({
+  label, onClear, total, byYear, years, gridStyle, currency, signed,
+}: {
+  label: string;
+  onClear?: () => void;
+  total: number;
+  byYear: Record<number, number>;
+  years: number[];
+  gridStyle: CSSProperties;
+  currency: string;
+  signed?: boolean;
+}) {
+  const tint = (v: number) => (signed ? (v < 0 ? "text-negative" : "text-positive") : "");
+  return (
+    <div
+      className="grid items-center gap-2 border-t border-line bg-black/[0.03] pr-4 py-2 dark:bg-white/[0.06]"
+      style={gridStyle}
+    >
+      <span className="flex items-center gap-2 pl-4">
+        <span className="text-[15px] font-bold">{label}</span>
+        {onClear ? (
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded-md bg-black/5 px-2 py-0.5 text-[12px] font-semibold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
+          >
+            Clear
+          </button>
+        ) : null}
+      </span>
+      <span className={`text-center text-[18px] font-bold tabular-nums ${tint(total)}`}>
+        {formatMoney(total, currency)}
+      </span>
+      {years.map((y) => {
+        const v = byYear[y] ?? 0;
+        return (
+          <span
+            key={y}
+            className={`text-center text-[18px] font-semibold tabular-nums ${v === 0 ? "text-muted" : tint(v)}`}
+          >
+            {v !== 0 ? formatMoney(v, currency) : "—"}
+          </span>
+        );
+      })}
+    </div>
   );
 }

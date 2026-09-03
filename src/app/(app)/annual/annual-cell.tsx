@@ -14,6 +14,7 @@ export function MoneyCell({
   className,
   active,
   onToggle,
+  stopPropagation,
 }: {
   children: React.ReactNode;
   empty: boolean;
@@ -21,6 +22,9 @@ export function MoneyCell({
   className?: string;
   active: boolean;
   onToggle: () => void;
+  /** For cells inside a row that is itself clickable (Annual Breakdown's
+   *  expandable line items): picking a figure shouldn't also open the row. */
+  stopPropagation?: boolean;
 }) {
   if (empty) {
     return <span className="text-center text-[18px] tabular-nums text-muted">—</span>;
@@ -28,7 +32,10 @@ export function MoneyCell({
   return (
     <button
       type="button"
-      onClick={onToggle}
+      onClick={(e) => {
+        if (stopPropagation) e.stopPropagation();
+        onToggle();
+      }}
       aria-pressed={active}
       className={`mx-auto w-full rounded-md px-1 py-0.5 text-center text-[18px] tabular-nums transition hover:bg-black/[0.06] dark:hover:bg-white/[0.10] ${
         active ? "font-semibold" : ""
