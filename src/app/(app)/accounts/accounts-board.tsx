@@ -1373,29 +1373,34 @@ function CreditCardSection({
                   cat === null
                     ? scoped.length
                     : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
-                const countChip = (cat: "travel" | "hotel" | null, label: string) => (
-                  <button
-                    type="button"
-                    onClick={() => setCategoryFilter(cat)}
-                    className={`rounded-md px-1.5 py-0.5 transition ${
-                      categoryFilter === cat
-                        ? "text-white"
-                        : "hover:bg-slate-100 dark:hover:bg-slate-800"
-                    }`}
-                    style={categoryFilter === cat ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                  >
-                    <span className={`font-semibold tabular-nums ${categoryFilter === cat ? "" : "text-foreground"}`}>
-                      {count(cat)}
-                    </span>{" "}
-                    {label}
-                  </button>
-                );
+                // Outlined so all three read as pressable, filled only when
+                // one is actually narrowing the list. "Total" is the resting
+                // state, so a filled pill there said a filter was on when
+                // none was.
+                const countChip = (cat: "travel" | "hotel" | null, label: string) => {
+                  const active = cat !== null && categoryFilter === cat;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setCategoryFilter(cat)}
+                      className={`rounded-md border px-1.5 py-0.5 transition ${
+                        active
+                          ? "border-transparent text-white"
+                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-slate-800"
+                      }`}
+                      style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                    >
+                      <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
+                        {count(cat)}
+                      </span>{" "}
+                      {label}
+                    </button>
+                  );
+                };
                 return (
-                  <span className="flex items-center gap-0.5 sm:ml-auto">
+                  <span className="flex items-center gap-1 sm:ml-auto">
                     {countChip("travel", "travel")}
-                    <span className="text-slate-400">·</span>
                     {countChip("hotel", "hotel")}
-                    <span className="text-slate-400">·</span>
                     {countChip(null, "total")}
                   </span>
                 );
