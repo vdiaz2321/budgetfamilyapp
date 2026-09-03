@@ -493,12 +493,30 @@ export default async function AnnualOverviewPage({
 
   const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
   const currency = household.currency;
-  // Fixed tracks, not 1fr: the figures sit next to each other instead of
-  // drifting apart across a half-width panel.
-  const gridCols = "grid-cols-[3.75rem_repeat(6,4.75rem)]";
+  // Tracks have a floor and a ceiling: they fill the panel Months now has to
+  // itself (see annual-panels.tsx), but the table is capped at 78rem so six
+  // figures keep reading as a row instead of drifting apart on a 2560px
+  // monitor. The 2xl step matches the larger type there.
+  const gridCols =
+    "grid-cols-[minmax(3.5rem,5rem)_repeat(6,minmax(5.25rem,1fr))] 2xl:grid-cols-[minmax(4rem,6rem)_repeat(6,minmax(7rem,1fr))]";
 
   return (
     <div className="mx-auto w-full space-y-4">
+      {/* Desktop only. Twelve months against five kinds, then the same again
+          per category and per year, is more table than a phone can show
+          without shrinking it past reading — and /annual is deliberately
+          absent from the mobile tab bar and its More menu for the same
+          reason. Below lg the page says where to find it instead of
+          rendering a wall of figures nobody can use. */}
+      <div className="rounded-xl bg-surface p-5 shadow-sm ring-1 ring-black/5 lg:hidden dark:ring-white/10">
+        <h1 className="text-lg font-bold">Annual Overview</h1>
+        <p className="mt-1 text-sm text-muted">
+          This one is built for a big screen — twelve months across five kinds, plus the
+          multi-year breakdown. Open it on a desktop or laptop.
+        </p>
+      </div>
+
+      <div className="hidden space-y-4 lg:block">
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Annual Overview</h1>
@@ -539,6 +557,7 @@ export default async function AnnualOverviewPage({
         netByYear={netByYear}
         currency={currency}
       />
+      </div>
 
       <ScrollToTop />
     </div>

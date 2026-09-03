@@ -54,13 +54,13 @@ function visibleMonths<T>(values: T[], count: number) {
 // one, so neither table strands its numbers in white space.
 function gridStyle(monthCount: number) {
   return {
-    gridTemplateColumns: `9.5rem minmax(6rem,1fr) repeat(${monthCount},minmax(4.75rem,1fr))`,
+    gridTemplateColumns: `11rem minmax(7rem,1fr) repeat(${monthCount},minmax(6.25rem,1fr))`,
   };
 }
 // Enough width for every column at its minimum; narrower than a full year
 // once the empty tail months are dropped.
 function trackMinWidth(monthCount: number) {
-  return { minWidth: `${10.5 + 6 + 4.75 * monthCount}rem` };
+  return { minWidth: `${12 + 7 + 6.25 * monthCount}rem` };
 }
 
 export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
@@ -109,7 +109,7 @@ export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
             ))}
           </div>
         ) : (
-          <p className="border-t border-line px-4 py-3 text-sm text-muted">
+          <p className="border-t border-line px-4 py-3 text-sm 2xl:text-base text-muted">
             No actuals recorded yet this year. Line items appear here once they have logged
             transactions.
           </p>
@@ -165,8 +165,8 @@ function Group({
         className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
       >
         <Chevron open={open} small />
-        <span className="text-[11px] font-bold uppercase tracking-wide">{group.label}</span>
-        <span className="ml-auto text-[13px] font-semibold tabular-nums text-muted">
+        <span className="text-[13px] 2xl:text-[16px] font-bold uppercase tracking-wide">{group.label}</span>
+        <span className="ml-auto text-[15px] 2xl:text-[18px] font-semibold tabular-nums text-muted">
           {formatMoney(group.total, currency)}
         </span>
       </button>
@@ -180,16 +180,16 @@ function Group({
           >
             <div style={trackMinWidth(monthCount)}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle(monthCount)}>
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[10px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[12px] 2xl:text-[14px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
                   Annual Cat by Mos
                 </span>
-                <span className="text-center text-[11px] font-bold uppercase tracking-wide text-foreground">
+                <span className="text-center text-[13px] 2xl:text-[16px] font-bold uppercase tracking-wide text-foreground">
                   Total
                 </span>
                 {monthLabels.map((m) => (
                   <span
                     key={m}
-                    className="text-center text-[11px] font-medium uppercase tracking-wide text-muted"
+                    className="text-center text-[13px] 2xl:text-[16px] font-medium uppercase tracking-wide text-muted"
                   >
                     {m}
                   </span>
@@ -223,22 +223,22 @@ function Group({
                             type="button"
                             onClick={() => toggleRow(r.subId)}
                             aria-expanded={rowOpen}
-                            className="flex min-w-0 items-center gap-1.5 rounded text-left text-[13px] font-medium transition hover:text-brand"
+                            className="flex min-w-0 items-center gap-1.5 rounded text-left text-[15px] 2xl:text-[18px] font-medium transition hover:text-brand"
                           >
                             <Chevron open={rowOpen} small />
                             <span className="truncate">{r.name}</span>
                           </button>
                         ) : (
-                          <span className={`truncate text-[13px] font-medium ${anyExpandable ? "pl-[1.4rem]" : ""}`}>
+                          <span className={`truncate text-[15px] 2xl:text-[18px] font-medium ${anyExpandable ? "pl-[1.4rem]" : ""}`}>
                             {r.name}
                           </span>
                         )}
                       </span>
-                      <span className={`text-center text-[11px] font-semibold tabular-nums ${r.dormant ? "text-muted" : ""}`}>
+                      <span className={`text-center text-[13px] 2xl:text-[16px] font-semibold tabular-nums ${r.dormant ? "text-muted" : ""}`}>
                         {r.total !== 0 ? formatMoney(r.total, currency) : <span className="text-muted">—</span>}
                       </span>
                       {visibleMonths(r.months, monthCount).map((v, i) => (
-                        <span key={i} className="text-center text-[11px] tabular-nums">
+                        <span key={i} className="text-center text-[13px] 2xl:text-[16px] tabular-nums">
                           {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                         </span>
                       ))}
@@ -256,16 +256,16 @@ function Group({
                             style={gridStyle(monthCount)}
                           >
                             <span
-                              className="sticky left-0 z-10 truncate bg-background pl-9 text-[11px] text-muted"
+                              className="sticky left-0 z-10 truncate bg-background pl-9 text-[13px] 2xl:text-[16px] text-muted"
                               title={d.name}
                             >
                               {d.name}
                             </span>
-                            <span className="text-center text-[11px] font-medium tabular-nums text-muted">
+                            <span className="text-center text-[13px] 2xl:text-[16px] font-medium tabular-nums text-muted">
                               {formatMoney(d.total, currency)}
                             </span>
                             {visibleMonths(d.months, monthCount).map((v, i) => (
-                              <span key={i} className="text-center text-[11px] tabular-nums text-muted">
+                              <span key={i} className="text-center text-[13px] 2xl:text-[16px] tabular-nums text-muted">
                                 {v !== 0 ? formatMoney(v, currency) : "—"}
                               </span>
                             ))}
@@ -282,12 +282,12 @@ function Group({
                 className="grid items-center gap-2 border-t border-line pr-4 py-2"
                 style={gridStyle(monthCount)}
               >
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[13px] font-bold">Total</span>
-                <span className="text-center text-[11px] font-bold tabular-nums">
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[15px] 2xl:text-[18px] font-bold">Total</span>
+                <span className="text-center text-[13px] 2xl:text-[16px] font-bold tabular-nums">
                   {formatMoney(group.total, currency)}
                 </span>
                 {visibleMonths(group.monthTotals, monthCount).map((v, i) => (
-                  <span key={i} className="text-center text-[11px] font-bold tabular-nums">
+                  <span key={i} className="text-center text-[13px] 2xl:text-[16px] font-bold tabular-nums">
                     {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                   </span>
                 ))}

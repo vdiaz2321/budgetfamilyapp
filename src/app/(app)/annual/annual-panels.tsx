@@ -35,20 +35,22 @@ export function AnnualPanels({
 }: Props) {
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-        <div className="min-w-0">
-          <MonthsTable
-            columns={columns}
-            rows={monthRows}
-            totals={totals}
-            totalNet={totalNet}
-            currency={currency}
-            gridCols={gridCols}
-          />
-        </div>
-        <div className="min-w-0">
-          <CategoryMonthsTable groups={groups} monthLabels={monthLabels} currency={currency} />
-        </div>
+      {/* One panel per row. Side by side, Months' deliberately fixed columns
+          (see gridCols in page.tsx) left it a small island in half an empty
+          panel, and neither table got the width its figures wanted. Stacked,
+          each one gets the whole page. */}
+      <div className="min-w-0">
+        <MonthsTable
+          columns={columns}
+          rows={monthRows}
+          totals={totals}
+          totalNet={totalNet}
+          currency={currency}
+          gridCols={gridCols}
+        />
+      </div>
+      <div className="min-w-0">
+        <CategoryMonthsTable groups={groups} monthLabels={monthLabels} currency={currency} />
       </div>
 
       {properties.length > 0 ? (
