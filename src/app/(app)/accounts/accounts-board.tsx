@@ -981,12 +981,27 @@ function CreditCardSection({
   const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
   const [showOnlyTravelRedeem, setShowOnlyTravelRedeem] = useState(false);
   const [showOnlyHotelRedeem, setShowOnlyHotelRedeem] = useState(false);
+  // Free-night certificates still on the table: the card grants one, nothing
+  // has been booked against it, and it hasn't run out of time.
+  const [showOnlyUnbookedNights, setShowOnlyUnbookedNights] = useState(false);
   // Holder filter — clicking a name (Vic / Johana / …) limits the visible
   // cards to that holder. Null = all holders.
   const [holderFilter, setHolderFilter] = useState<string | null>(null);
   const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
   const hasOwed = (a: AccountData) => (a.owedCents ?? 0) > 0;
   const hasPts = (a: AccountData) => (a.cardDetails?.currentPoints ?? 0) > 0;
+  // "Available" is all three: there is a night credit, no stay has been booked
+  // against it (benefitUsedOn is the booking), and its expiry hasn't passed —
+  // an expired certificate is no more spendable than a used one.
+  const sectionToday = new Date().toISOString().slice(0, 10);
+  const hasUnbookedNight = (a: AccountData) => {
+    const d = a.cardDetails;
+    if (!d) return false;
+    if (!d.freeNightCreditCents && !d.freeNightPointsLimit) return false;
+    if (d.benefitUsedOn) return false;
+    if (d.freeNightExpiresOn && d.freeNightExpiresOn < sectionToday) return false;
+    return true;
+  };
   // A card "contributes" to the Redeemable tile when it's in that rewards
   // category and has redeemable value (points × micro-value + free-night credit).
   const hasRedeemableIn = (a: AccountData, cat: "travel" | "hotel") => {
@@ -1058,8 +1073,9 @@ function CreditCardSection({
   const owedFilter = (a: AccountData) => !showOnlyOwedCards || hasOwed(a);
   const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
   const holderFilterFn = (a: AccountData) => !holderFilter || (a.holder ?? "") === holderFilter;
+  const nightFilter = (a: AccountData) => !showOnlyUnbookedNights || hasUnbookedNight(a);
   const passesFilters = (a: AccountData) =>
-    feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a);
+    feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && nightFilter(a);
   // Per-category "contributes to Redeemable" filters — scoped to their own
   // section so clicking Travel Redeemable doesn't empty the Hotel list.
   const travelCards = localAccounts.filter((a) =>
@@ -1273,6 +1289,27 @@ function CreditCardSection({
                   Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
                 </span>
               ) : null}
+              {/* Free nights still available, under the holder filter in force
+                  — the count and the list it filters to always agree. */}
+              {(() => {
+                const available = holderScoped(allCreditCards.filter((a) => !a.dateClosed)).filter(hasUnbookedNight);
+                if (available.length === 0) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setShowOnlyUnbookedNights((v) => !v)}
+                    className={`rounded-md px-2 py-1 font-semibold transition ${
+                      showOnlyUnbookedNights
+                        ? "text-white"
+                        : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
+                    style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                  >
+                    Free nights unbooked{" "}
+                    <span className="tabular-nums">{available.length}</span>
+                  </button>
+                );
+              })()}
               {/* Holder filter — chip per unique cardholder plus an "All" reset.
                   Clicking narrows every card list (Travel / Hotel / Other) to
                   that person's cards. */}
