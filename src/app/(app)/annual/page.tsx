@@ -3,7 +3,6 @@ import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
 import { PROPERTY_KIND } from "@/lib/net-worth";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
-import { AnnualHero } from "./annual-hero";
 import { YearPicker } from "./year-picker";
 import { AnnualPanels } from "./annual-panels";
 import type { PropertyLine, PropertyRollup } from "./property-rollup";
@@ -533,17 +532,12 @@ export default async function AnnualOverviewPage({
         </div>
       </div>
 
-      {/* Year summary + Months table */}
-      <AnnualHero
+      {/* The hero cards ride along inside AnnualPanels: they stay pinned over
+          Months / Category by Months / Properties and release at Annual
+          Breakdown, and clicking cells in Months filters them. */}
+      <AnnualPanels
         year={year}
         outflowKinds={OUTFLOW_KINDS}
-        totals={totals}
-        currency={currency}
-      />
-
-      {/* Months + Category by Months share the top row; Annual Breakdown
-          history (multi-year, seeded 2018–2025) runs full width below. */}
-      <AnnualPanels
         columns={COLUMNS}
         monthRows={rows}
         totals={totals}

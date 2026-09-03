@@ -3,6 +3,7 @@
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { cellKey, type CellKind } from "./annual-selection";
 
 // Color per category kind — matches the hero cards' value color so a reader
 // can scan a column and its total tint reads as one thing. Uses the --viz-*
@@ -31,6 +32,10 @@ type Props = {
   totalNet: number;
   currency: string;
   gridCols: string;
+  /** Cell keys currently driving the hero cards. */
+  selected: Set<string>;
+  onToggleCell: (monthIdx: number, kind: CellKind) => void;
+  onClearSelection: () => void;
 };
 
 export function MonthsTable({
@@ -40,6 +45,9 @@ export function MonthsTable({
   totalNet,
   currency,
   gridCols,
+  selected,
+  onToggleCell,
+  onClearSelection,
 }: Props) {
   // Default expanded on fresh login; toggle state survives within-session nav.
   const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: true }));
@@ -65,6 +73,31 @@ export function MonthsTable({
           <path d="M6 9l6 6 6-6" />
         </svg>
         <span className="font-semibold">Months</span>
+        {selected.size > 0 ? (
+          <span className="ml-auto flex items-center gap-2">
+            <span className="text-[12px] font-medium text-muted">
+              {selected.size} cell{selected.size === 1 ? "" : "s"} filtering the cards above
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearSelection();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onClearSelection();
+                }
+              }}
+              className="rounded-md bg-black/5 px-2 py-1 text-[12px] font-semibold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
+            >
+              Clear
+            </span>
+          </span>
+        ) : null}
       </button>
 
       {open ? (
@@ -92,21 +125,25 @@ export function MonthsTable({
                   >
                     <span className="text-[15px] font-medium">{r.name.slice(0, 3)}</span>
                     {columns.map((c) => (
-                      <span key={c.kind} className="text-center text-[18px] tabular-nums">
-                        {r.values[c.kind] !== 0 ? (
-                          formatMoney(r.values[c.kind], currency)
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
-                      </span>
+                      <Cell
+                        key={c.kind}
+                        empty={r.values[c.kind] === 0}
+                        color={KIND_COLOR[c.kind]}
+                        active={selected.has(cellKey(r.idx, c.kind))}
+                        onToggle={() => onToggleCell(r.idx, c.kind)}
+                      >
+                        {formatMoney(r.values[c.kind], currency)}
+                      </Cell>
                     ))}
-                    <span
-                      className={`text-center text-[18px] tabular-nums ${
-                        !r.hasData ? "" : r.net >= 0 ? "text-positive" : "text-negative"
-                      }`}
+                    <Cell
+                      empty={!r.hasData}
+                      color={r.net >= 0 ? "var(--positive)" : "var(--negative)"}
+                      className={r.net >= 0 ? "text-positive" : "text-negative"}
+                      active={selected.has(cellKey(r.idx, "net"))}
+                      onToggle={() => onToggleCell(r.idx, "net")}
                     >
-                      {r.hasData ? formatMoney(r.net, currency) : "—"}
-                    </span>
+                      {formatMoney(r.net, currency)}
+                    </Cell>
                   </li>
                 ))}
               </ul>
@@ -167,5 +204,50 @@ export function MonthsTable({
         </div>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * One money cell. Clicking it adds the month+kind to the hero-card filter; a
+ * month with nothing in it has nothing to add, so it stays an inert em dash.
+ * Selection reads as the column's own color rather than a generic highlight,
+ * so a filtered set is legible as "these three are savings".
+ */
+function Cell({
+  children,
+  empty,
+  color,
+  className,
+  active,
+  onToggle,
+}: {
+  children: React.ReactNode;
+  empty: boolean;
+  color: string;
+  className?: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  if (empty) {
+    return (
+      <span className="text-center text-[18px] tabular-nums text-muted">—</span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className={`mx-auto w-full rounded-md px-1 py-0.5 text-center text-[18px] tabular-nums transition hover:bg-black/[0.06] dark:hover:bg-white/[0.10] ${
+        active ? "font-semibold" : ""
+      } ${className ?? ""}`}
+      style={
+        active
+          ? { boxShadow: `inset 0 0 0 1.5px ${color}`, color }
+          : undefined
+      }
+    >
+      {children}
+    </button>
   );
 }
