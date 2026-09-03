@@ -203,6 +203,7 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
                   <>
                     <SelectionRow
                       label="Selected"
+                      dividerAbove
                       onClear={clearSelection}
                       total={pickedTotal}
                       byYear={pickedByYear}
@@ -509,7 +510,7 @@ function Chevron({ open, small }: { open: boolean; small?: boolean }) {
  * take the positive/negative tint; a plain sum does not.
  */
 function SelectionRow({
-  label, onClear, total, byYear, years, gridStyle, currency, signed,
+  label, onClear, total, byYear, years, gridStyle, currency, signed, dividerAbove,
 }: {
   label: string;
   onClear?: () => void;
@@ -519,11 +520,19 @@ function SelectionRow({
   gridStyle: CSSProperties;
   currency: string;
   signed?: boolean;
+  /** Hard rule above the first selection row: the year totals it sits under
+   *  are the panel's own figures, and these are the reader's — the two must
+   *  not read as one continuous block. */
+  dividerAbove?: boolean;
 }) {
   const tint = (v: number) => (signed ? (v < 0 ? "text-negative" : "text-positive") : "");
   return (
     <div
-      className="grid items-center gap-2 border-t border-line bg-black/[0.03] pr-4 py-2 dark:bg-white/[0.06]"
+      className={`grid items-center gap-2 bg-black/[0.03] pr-4 py-2 dark:bg-white/[0.06] ${
+        dividerAbove
+          ? "border-t-[3px] border-foreground/80"
+          : "border-t border-line"
+      }`}
       style={gridStyle}
     >
       <span className="flex items-center gap-2 pl-4">
