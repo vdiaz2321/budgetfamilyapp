@@ -74,8 +74,11 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
 
       {open ? (
         <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
-          {/* Summary strip — the whole panel's totals, above the two section columns */}
-          <div className="rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
+          {/* Summary strip — the whole panel's totals, and sticky: reading a
+              line item nine years across is only worth anything next to the
+              category totals it belongs to. The hero cards have released by
+              the time this panel is on screen, so top-0 is free. */}
+          <div className="sticky top-0 z-30 rounded-lg bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10" style={{ overflow: "clip" }}>
             <div
               ref={(el) => { if (el) scrollersRef.current.add(el); }}
               onScroll={(e) => syncScrollX(e.currentTarget.scrollLeft)}
@@ -204,7 +207,10 @@ function KindBlock({
 
       {effectiveOpen ? (
         <>
-          {/* Sticky column header — overflow hidden so no scrollbar; JS-synced to body scroll */}
+          {/* Column header — overflow hidden so no scrollbar; JS-synced to
+              body scroll. Not sticky itself: the summary strip above holds
+              top-0 for the whole panel, and its own header names the same
+              year columns. */}
           <div
             ref={headerRef}
             className="border-y border-line bg-surface"
