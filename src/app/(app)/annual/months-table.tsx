@@ -75,9 +75,6 @@ export function MonthsTable({
         <span className="font-semibold">Months</span>
         {selected.size > 0 ? (
           <span className="ml-auto flex items-center gap-2">
-            <span className="text-[12px] font-medium text-muted">
-              {selected.size} cell{selected.size === 1 ? "" : "s"} filtering the cards above
-            </span>
             <span
               role="button"
               tabIndex={0}
