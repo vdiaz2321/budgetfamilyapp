@@ -83,12 +83,12 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
             >
               <div style={{ minWidth: minW }}>
                 <div className="grid items-center gap-2 border-b border-line pr-4 py-2" style={gridStyle}>
-                  <span className="pl-4 text-[13px] 2xl:text-[16px] font-bold uppercase tracking-wide">
+                  <span className="pl-4 text-[13px] 2xl:text-[18px] font-bold uppercase tracking-wide">
                     Category
                   </span>
-                  <span className="text-center text-[13px] 2xl:text-[16px] font-bold uppercase tracking-wide text-foreground">Total</span>
+                  <span className="text-center text-[13px] 2xl:text-[18px] font-bold uppercase tracking-wide text-foreground">Total</span>
                   {years.map((y) => (
-                    <span key={y} className="text-center text-[13px] 2xl:text-[16px] font-medium uppercase tracking-wide text-muted">
+                    <span key={y} className="text-center text-[13px] 2xl:text-[18px] font-medium uppercase tracking-wide text-muted">
                       {y}
                     </span>
                   ))}
@@ -107,16 +107,16 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
                 ))}
                 {/* Net (unallocated) — Income − Expenses − Savings − Investment */}
                 <div className="grid items-center gap-2 border-t border-line pr-4 py-2" style={gridStyle}>
-                  <span className="pl-4 text-[15px] 2xl:text-[18px] font-bold">Net</span>
+                  <span className="pl-4 text-[15px] 2xl:text-[21px] font-bold">Net</span>
                   {(() => { const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0); return (
-                    <span className={`text-center text-[13px] 2xl:text-[16px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span>
+                    <span className={`text-center text-[13px] 2xl:text-[18px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span>
                   ); })()}
                   {years.map((y) => {
                     const v = netByYear[y] ?? 0;
                     return (
                       <span
                         key={y}
-                        className={`text-center text-[13px] 2xl:text-[16px] font-bold tabular-nums ${v < 0 ? "text-negative" : "text-positive"}`}
+                        className={`text-center text-[13px] 2xl:text-[18px] font-bold tabular-nums ${v < 0 ? "text-negative" : "text-positive"}`}
                       >
                         {formatMoney(v, currency)}
                       </span>
@@ -156,12 +156,12 @@ function SummaryRow({
   const totalColor = kind === "income" || kind === "savings" || kind === "investment" ? "text-positive" : kind === "kidsFunding" ? "" : "text-negative";
   return (
     <div className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
-      <span className="pl-4 text-[15px] 2xl:text-[18px] font-semibold">{label}</span>
-      <span className={`text-center text-[13px] 2xl:text-[16px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span>
+      <span className="pl-4 text-[15px] 2xl:text-[21px] font-semibold">{label}</span>
+      <span className={`text-center text-[13px] 2xl:text-[18px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span>
       {years.map((y) => {
         const v = byYear[y] ?? 0;
         return (
-          <span key={y} className="text-center text-[13px] 2xl:text-[16px] tabular-nums">
+          <span key={y} className="text-center text-[13px] 2xl:text-[18px] tabular-nums">
             {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
           </span>
         );
@@ -199,7 +199,7 @@ function KindBlock({
         className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
       >
         <Chevron open={effectiveOpen} small />
-        <span className="text-[13px] 2xl:text-[16px] font-bold uppercase tracking-wide">{kind.label}</span>
+        <span className="text-[13px] 2xl:text-[18px] font-bold uppercase tracking-wide">{kind.label}</span>
       </button>
 
       {effectiveOpen ? (
@@ -212,12 +212,12 @@ function KindBlock({
           >
             <div style={{ minWidth: minW }}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle}>
-                <span className="pl-4 text-[13px] 2xl:text-[16px] font-medium uppercase tracking-wide text-muted">
+                <span className="pl-4 text-[13px] 2xl:text-[18px] font-medium uppercase tracking-wide text-muted">
                   Line item
                 </span>
-                <span className="text-center text-[13px] 2xl:text-[16px] font-bold uppercase tracking-wide text-foreground">Total</span>
+                <span className="text-center text-[13px] 2xl:text-[18px] font-bold uppercase tracking-wide text-foreground">Total</span>
                 {years.map((y) => (
-                  <span key={y} className="text-center text-[13px] 2xl:text-[16px] font-medium uppercase tracking-wide text-muted">
+                  <span key={y} className="text-center text-[13px] 2xl:text-[18px] font-medium uppercase tracking-wide text-muted">
                     {y}
                   </span>
                 ))}
@@ -267,16 +267,16 @@ function Group({
           Savings, Investment) whose name would just repeat the section. */}
       {!singleGroup ? (
         <div className="grid items-center gap-2 bg-brand-soft/15 pr-4 py-1.5" style={gridStyle}>
-          <span className="pl-4 text-sm 2xl:text-base font-bold leading-tight truncate">
+          <span className="pl-4 text-sm 2xl:text-lg font-bold leading-tight truncate">
             {group.label}
           </span>
-          <span className="text-center text-[13px] 2xl:text-[16px] font-bold tabular-nums">
+          <span className="text-center text-[13px] 2xl:text-[18px] font-bold tabular-nums">
             {formatMoney(group.total, currency)}
           </span>
           {years.map((y) => {
             const v = group.subtotalByYear[y] ?? 0;
             return (
-              <span key={y} className="text-center text-[13px] 2xl:text-[16px] font-semibold tabular-nums text-muted">
+              <span key={y} className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums text-muted">
                 {v !== 0 ? formatMoney(v, currency) : "—"}
               </span>
             );
@@ -315,16 +315,16 @@ function LineRow({
         onClick={hasDetails ? () => setExpanded((v) => !v) : undefined}
       >
         <span
-          className={`min-w-0 text-sm 2xl:text-base leading-tight ${indent} ${hasDetails ? "flex items-center gap-1.5" : "truncate"}`}
+          className={`min-w-0 text-sm 2xl:text-lg leading-tight ${indent} ${hasDetails ? "flex items-center gap-1.5" : "truncate"}`}
         >
           {hasDetails ? <Chevron open={expanded} small /> : null}
           <span className="truncate">{line.label}</span>
         </span>
-        <span className="text-center text-[13px] 2xl:text-[16px] font-semibold tabular-nums">{formatMoney(line.total, currency)}</span>
+        <span className="text-center text-[13px] 2xl:text-[18px] font-semibold tabular-nums">{formatMoney(line.total, currency)}</span>
         {years.map((y) => {
           const v = line.byYear[y] ?? 0;
           return (
-            <span key={y} className="text-center text-[13px] 2xl:text-[16px] tabular-nums">
+            <span key={y} className="text-center text-[13px] 2xl:text-[18px] tabular-nums">
               {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
             </span>
           );
@@ -332,14 +332,14 @@ function LineRow({
       </li>
       {hasDetails && expanded ? line.details!.map((d) => (
         <li key={`${line.label}::${d.label}`} className="grid items-center gap-2 pr-4 py-1 bg-brand-soft/10" style={gridStyle}>
-          <span className="truncate pl-12 text-[13px] 2xl:text-[16px] leading-tight text-muted">
+          <span className="truncate pl-12 text-[13px] 2xl:text-[18px] leading-tight text-muted">
             └ {d.label}
           </span>
-          <span className="text-center text-[12px] 2xl:text-[14px] font-medium tabular-nums text-muted">{formatMoney(d.total, currency)}</span>
+          <span className="text-center text-[12px] 2xl:text-[16px] font-medium tabular-nums text-muted">{formatMoney(d.total, currency)}</span>
           {years.map((y) => {
             const v = d.byYear[y] ?? 0;
             return (
-              <span key={y} className="text-center text-[12px] 2xl:text-[14px] tabular-nums text-muted">
+              <span key={y} className="text-center text-[12px] 2xl:text-[16px] tabular-nums text-muted">
                 {v !== 0 ? formatMoney(v, currency) : <span className="opacity-40">—</span>}
               </span>
             );

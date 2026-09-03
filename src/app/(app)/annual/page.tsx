@@ -498,10 +498,10 @@ export default async function AnnualOverviewPage({
   // figures keep reading as a row instead of drifting apart on a 2560px
   // monitor. The 2xl step matches the larger type there.
   const gridCols =
-    "grid-cols-[minmax(3.5rem,5rem)_repeat(6,minmax(5.25rem,1fr))] 2xl:grid-cols-[minmax(4rem,6rem)_repeat(6,minmax(7rem,1fr))]";
+    "grid-cols-[minmax(3.5rem,5rem)_repeat(6,minmax(5.25rem,1fr))] 2xl:grid-cols-[minmax(5rem,7rem)_repeat(6,minmax(9rem,1fr))]";
 
   return (
-    <div className="mx-auto w-full space-y-4">
+    <div className="mx-auto w-full space-y-4 2xl:max-w-[1800px]">
       {/* Desktop only. Twelve months against five kinds, then the same again
           per category and per year, is more table than a phone can show
           without shrinking it past reading — and /annual is deliberately

@@ -73,11 +73,11 @@ export function AnnualHero({
           }
         />
         <div className="rounded-2xl bg-surface px-4 py-3 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-          <p className="text-[13px] 2xl:text-[16px] font-medium uppercase tracking-wide text-muted">
+          <p className="text-[13px] 2xl:text-[18px] font-medium uppercase tracking-wide text-muted">
             {year} Net
           </p>
           <p
-            className={`mt-0.5 text-lg 2xl:text-2xl font-bold tabular-nums ${
+            className={`mt-0.5 text-lg 2xl:text-3xl font-bold tabular-nums ${
               netTotal >= 0 ? "text-positive" : "text-negative"
             }`}
           >
@@ -85,7 +85,7 @@ export function AnnualHero({
           </p>
           {netPct !== null ? (
             <p
-              className={`mt-0.5 whitespace-nowrap text-sm 2xl:text-base font-semibold ${
+              className={`mt-0.5 whitespace-nowrap text-sm 2xl:text-lg font-semibold ${
                 netTotal >= 0 ? "text-positive" : "text-negative"
               }`}
             >
@@ -125,16 +125,16 @@ function Stat({
 }) {
   return (
     <div className="rounded-2xl bg-surface px-4 py-3 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[13px] 2xl:text-[16px] font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-[13px] 2xl:text-[18px] font-medium uppercase tracking-wide text-muted">{label}</p>
       <p
-        className={`mt-0.5 text-lg 2xl:text-2xl font-bold tabular-nums ${tone ?? ""}`}
+        className={`mt-0.5 text-lg 2xl:text-3xl font-bold tabular-nums ${tone ?? ""}`}
         style={color ? { color } : undefined}
       >
         {formatMoney(value, currency)}
       </p>
       {subtitle ? (
         <p
-          className={`mt-0.5 whitespace-nowrap text-sm 2xl:text-base font-semibold ${
+          className={`mt-0.5 whitespace-nowrap text-sm 2xl:text-lg font-semibold ${
             subtitleTone ?? (subtitleColor ? "" : "text-foreground")
           }`}
           style={subtitleColor ? { color: subtitleColor } : undefined}
