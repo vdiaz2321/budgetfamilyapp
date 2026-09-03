@@ -184,7 +184,17 @@ export function TransactionsTable({
     const slug = filteredName
       ? `-${filteredName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`
       : "";
-    a.download = `transactions-${month.key}${slug}.csv`;
+    // `month` is whatever month is selected in the picker, which a custom
+    // range overrides entirely (see the page's hasRange branch) — naming a
+    // range export after it labels August's rows as September's file.
+    const scope = hasRange
+      ? dateRange.from && dateRange.to
+        ? `${dateRange.from}_to_${dateRange.to}`
+        : dateRange.from
+          ? `from-${dateRange.from}`
+          : `through-${dateRange.to}`
+      : month.key;
+    a.download = `transactions-${scope}${slug}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
