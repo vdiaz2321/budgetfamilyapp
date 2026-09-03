@@ -76,7 +76,7 @@ export function PropertyRollupPanel({ properties, monthLabels, currency }: Props
       >
         <Chevron open={open} />
         <span className="font-semibold">Properties</span>
-        <span className="ml-auto text-[18px] font-medium uppercase tracking-wide text-muted">
+        <span className="ml-auto text-[13px] font-medium uppercase tracking-wide text-muted">
           Income vs costs
         </span>
       </button>
@@ -131,9 +131,9 @@ function PropertyCard({
           className="size-2 shrink-0 rounded-full bg-[color:var(--viz-bills)]"
           aria-hidden
         />
-        <span className="text-[21px] font-bold">{property.name}</span>
+        <span className="text-[15px] font-bold">{property.name}</span>
         {property.subtype ? (
-          <span className="rounded-full bg-black/5 px-2 py-0.5 text-[16px] font-semibold uppercase tracking-wide text-muted dark:bg-white/10">
+          <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-white/10">
             {property.subtype}
           </span>
         ) : null}
@@ -153,7 +153,7 @@ function PropertyCard({
 
       {open ? (
         empty ? (
-          <p className="border-t border-line px-3 py-3 text-lg text-muted">
+          <p className="border-t border-line px-3 py-3 text-sm text-muted">
             Nothing tagged to this property yet. Set{" "}
             <span className="font-medium text-foreground">Property</span> on a transaction — in the
             Log or on the Transactions page — and its rent and costs collect here.
@@ -165,16 +165,16 @@ function PropertyCard({
                 className="grid items-center gap-2 border-b border-line py-2 pr-3"
                 style={gridStyle(monthCount)}
               >
-                <span className="sticky left-0 z-10 bg-surface pl-3 text-[16px] font-medium uppercase tracking-wide text-muted">
+                <span className="sticky left-0 z-10 bg-surface pl-3 text-[11px] font-medium uppercase tracking-wide text-muted">
                   Line
                 </span>
-                <span className="text-center text-[18px] font-bold uppercase tracking-wide text-foreground">
+                <span className="text-center text-[13px] font-bold uppercase tracking-wide text-foreground">
                   Total
                 </span>
                 {monthLabels.map((m) => (
                   <span
                     key={m}
-                    className="text-center text-[18px] font-medium uppercase tracking-wide text-muted"
+                    className="text-center text-[13px] font-medium uppercase tracking-wide text-muted"
                   >
                     {m}
                   </span>
@@ -213,7 +213,7 @@ function PropertyCard({
                 className="grid items-center gap-2 border-t border-line bg-background py-2.5 pr-3"
                 style={gridStyle(monthCount)}
               >
-                <span className="sticky left-0 z-10 bg-background pl-3 text-[21px] font-bold">Net</span>
+                <span className="sticky left-0 z-10 bg-background pl-3 text-[15px] font-bold">Net</span>
                 <span
                   className="text-center text-[18px] font-bold tabular-nums"
                   style={{ color: property.netTotal >= 0 ? "var(--positive)" : "var(--negative)" }}
@@ -256,7 +256,7 @@ function SummaryRow({
   return (
     <div className="grid items-center gap-2 py-2 pr-3" style={gridStyle(monthCount)}>
       <span
-        className="sticky left-0 z-10 bg-surface pl-3 text-[18px] font-bold uppercase tracking-wide"
+        className="sticky left-0 z-10 bg-surface pl-3 text-[13px] font-bold uppercase tracking-wide"
         style={{ color }}
       >
         {label}
@@ -284,7 +284,7 @@ function LineRow({
 }) {
   return (
     <div className="grid items-center gap-2 py-1.5 pr-3" style={gridStyle(monthCount)}>
-      <span className="sticky left-0 z-10 truncate bg-surface pl-6 text-[18px] text-muted">
+      <span className="sticky left-0 z-10 truncate bg-surface pl-6 text-[13px] text-muted">
         {line.name}
       </span>
       <span className="text-center text-[18px] font-medium tabular-nums">
@@ -314,8 +314,8 @@ function Figure({
 }) {
   return (
     <span className="flex items-baseline gap-1">
-      <span className="text-[16px] font-medium uppercase tracking-wide text-muted">{label}</span>
-      <span className={`text-[18px] ${strong ? "font-bold" : "font-semibold"}`} style={{ color }}>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</span>
+      <span className={`text-[13px] ${strong ? "font-bold" : "font-semibold"}`} style={{ color }}>
         {formatMoney(value, currency)}
       </span>
     </span>

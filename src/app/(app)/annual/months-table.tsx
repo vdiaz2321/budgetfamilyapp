@@ -73,13 +73,13 @@ export function MonthsTable({
             <div className="mx-auto w-full min-w-[42rem] max-w-[108rem]">
               {/* Header */}
               <div className={`grid ${gridCols} items-center gap-1 border-b border-line px-4 py-2.5`}>
-                <span className="text-[18px] font-medium uppercase tracking-wide text-muted">Month</span>
+                <span className="text-[13px] font-medium uppercase tracking-wide text-muted">Month</span>
                 {columns.map((c) => (
-                  <span key={c.kind} className="text-center text-[18px] font-medium uppercase tracking-wide text-muted">
+                  <span key={c.kind} className="text-center text-[13px] font-medium uppercase tracking-wide text-muted">
                     {c.label}
                   </span>
                 ))}
-                <span className="text-center text-[18px] font-medium uppercase tracking-wide text-muted">Net</span>
+                <span className="text-center text-[13px] font-medium uppercase tracking-wide text-muted">Net</span>
               </div>
 
               <ul className="divide-y divide-line">
@@ -90,7 +90,7 @@ export function MonthsTable({
                       r.status === "current" ? "bg-black/[0.04] dark:bg-white/[0.06]" : ""
                     } ${r.status === "future" ? "text-muted" : ""}`}
                   >
-                    <span className="text-[21px] font-medium">{r.name.slice(0, 3)}</span>
+                    <span className="text-[15px] font-medium">{r.name.slice(0, 3)}</span>
                     {columns.map((c) => (
                       <span key={c.kind} className="text-center text-[18px] tabular-nums">
                         {r.values[c.kind] !== 0 ? (
@@ -113,9 +113,9 @@ export function MonthsTable({
 
               {/* Totals */}
               <div className={`grid ${gridCols} items-center gap-1 border-t border-line bg-black/[0.03] px-4 py-3 dark:bg-white/[0.05]`}>
-                <span className="flex flex-col items-center text-[21px] font-bold">
+                <span className="flex flex-col items-center text-[15px] font-bold">
                   <span className="self-start">Total</span>
-                  <span className="mt-1 w-full whitespace-nowrap border-t border-line pt-1 text-center text-[18px] font-medium uppercase tracking-wide text-muted">
+                  <span className="mt-1 w-full whitespace-nowrap border-t border-line pt-1 text-center text-[13px] font-medium uppercase tracking-wide text-muted">
                     Total % from income
                   </span>
                 </span>
@@ -128,7 +128,7 @@ export function MonthsTable({
                       </span>
                       {c.kind === "income" ? null : (
                         <span
-                          className="mt-1 w-full border-t border-line pt-1 text-[16px] font-semibold"
+                          className="mt-1 w-full border-t border-line pt-1 text-[11px] font-semibold"
                           style={{ color: KIND_COLOR[c.kind] }}
                         >
                           {percent === null ? "—" : `${percent.toFixed(1)}%`}
@@ -137,7 +137,7 @@ export function MonthsTable({
                       {c.kind === "income" ? (
                         <span
                           aria-hidden
-                          className="mt-1 w-full border-t border-line pt-1 text-[16px] text-transparent"
+                          className="mt-1 w-full border-t border-line pt-1 text-[11px] text-transparent"
                         >
                           &nbsp;
                         </span>
@@ -154,7 +154,7 @@ export function MonthsTable({
                     {formatMoney(totalNet, currency)}
                   </span>
                   <span
-                    className={`mt-1 w-full border-t border-line pt-1 text-[16px] font-semibold ${
+                    className={`mt-1 w-full border-t border-line pt-1 text-[11px] font-semibold ${
                       totalNet >= 0 ? "text-positive" : "text-negative"
                     }`}
                   >

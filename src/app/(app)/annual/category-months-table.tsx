@@ -112,7 +112,7 @@ export function CategoryMonthsTable({ groups, monthLabels, currency }: Props) {
             ))}
           </div>
         ) : (
-          <p className="border-t border-line px-4 py-3 text-lg text-muted">
+          <p className="border-t border-line px-4 py-3 text-sm text-muted">
             No actuals recorded yet this year. Line items appear here once they have logged
             transactions.
           </p>
@@ -168,8 +168,8 @@ function Group({
         className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
       >
         <Chevron open={open} small />
-        <span className="text-[18px] font-bold uppercase tracking-wide">{group.label}</span>
-        <span className="ml-auto text-[21px] tabular-nums text-muted">
+        <span className="text-[13px] font-bold uppercase tracking-wide">{group.label}</span>
+        <span className="ml-auto text-[18px] font-semibold tabular-nums text-muted">
           {formatMoney(group.total, currency)}
         </span>
       </button>
@@ -183,16 +183,16 @@ function Group({
           >
             <div style={trackMinWidth(monthCount)}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle(monthCount)}>
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[16px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
                   Annual Cat by Mos
                 </span>
-                <span className="text-center text-[18px] font-bold uppercase tracking-wide text-foreground">
+                <span className="text-center text-[13px] font-bold uppercase tracking-wide text-foreground">
                   Total
                 </span>
                 {monthLabels.map((m) => (
                   <span
                     key={m}
-                    className="text-center text-[18px] font-medium uppercase tracking-wide text-muted"
+                    className="text-center text-[13px] font-medium uppercase tracking-wide text-muted"
                   >
                     {m}
                   </span>
@@ -226,13 +226,13 @@ function Group({
                             type="button"
                             onClick={() => toggleRow(r.subId)}
                             aria-expanded={rowOpen}
-                            className="flex min-w-0 items-center gap-1.5 rounded text-left text-[21px] font-medium transition hover:text-brand"
+                            className="flex min-w-0 items-center gap-1.5 rounded text-left text-[15px] font-medium transition hover:text-brand"
                           >
                             <Chevron open={rowOpen} small />
                             <span className="truncate">{r.name}</span>
                           </button>
                         ) : (
-                          <span className={`truncate text-[21px] font-medium ${anyExpandable ? "pl-[1.4rem]" : ""}`}>
+                          <span className={`truncate text-[15px] font-medium ${anyExpandable ? "pl-[1.4rem]" : ""}`}>
                             {r.name}
                           </span>
                         )}
@@ -259,7 +259,7 @@ function Group({
                             style={gridStyle(monthCount)}
                           >
                             <span
-                              className="sticky left-0 z-10 truncate bg-background pl-9 text-[18px] text-muted"
+                              className="sticky left-0 z-10 truncate bg-background pl-9 text-[13px] text-muted"
                               title={d.name}
                             >
                               {d.name}
@@ -285,7 +285,7 @@ function Group({
                 className="grid items-center gap-2 border-t border-line pr-4 py-2"
                 style={gridStyle(monthCount)}
               >
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[21px] font-bold">Total</span>
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[15px] font-bold">Total</span>
                 <span className="text-center text-[18px] font-bold tabular-nums">
                   {formatMoney(group.total, currency)}
                 </span>
