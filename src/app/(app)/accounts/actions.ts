@@ -741,7 +741,7 @@ export async function logCreditCardRewardActivity(formData: FormData) {
   const details = unwrap(
     await supabase
       .from("credit_card_details")
-      .select("current_points, free_night_credit_cents")
+      .select("current_points, free_night_credit_cents, points_value_micros")
       .eq("account_id", accountId)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -751,26 +751,66 @@ export async function logCreditCardRewardActivity(formData: FormData) {
 
   const pointsUsed = Math.max(0, Math.trunc(Number(String(formData.get("pointsUsed") ?? "0").replace(/,/g, "")) || 0));
   const hotelCreditUsedCents = Math.max(0, displayToCents(String(formData.get("hotelCreditUsed") ?? "0")));
+  // A free night booked with points spends them like any other redemption, so
+  // both types draw down the same balance. The card's yearly allotment is a
+  // cap the form warns about, not a second pool of points.
+  const spendsPoints = activityType === "points_redemption" || activityType === "free_night_booking";
   if (activityType === "points_redemption" && pointsUsed <= 0) return { error: "Enter the points you used." };
   if (activityType === "hotel_credit_redemption" && hotelCreditUsedCents <= 0) return { error: "Enter the hotel credit you used." };
-  if (activityType === "points_redemption" && pointsUsed > (details.current_points ?? 0)) return { error: "That is more points than this card currently has." };
+  if (spendsPoints && pointsUsed > (details.current_points ?? 0)) return { error: "That is more points than this card currently has." };
   if (activityType === "hotel_credit_redemption" && hotelCreditUsedCents > (details.free_night_credit_cents ?? 0)) return { error: "That is more hotel credit than this card currently has." };
 
-  const { error } = await supabase.from("credit_card_reward_activities").insert({
-    household_id: householdId,
-    account_id: accountId,
-    activity_type: activityType,
-    occurred_on: occurredOn,
-    points_delta: activityType === "points_redemption" ? -pointsUsed : 0,
-    hotel_credit_delta_cents: activityType === "hotel_credit_redemption" ? -hotelCreditUsedCents : 0,
-    booked_on: bookedOn || (activityType === "free_night_booking" ? occurredOn : null),
-    note,
-  });
+  const { data: activity, error } = await supabase
+    .from("credit_card_reward_activities")
+    .insert({
+      household_id: householdId,
+      account_id: accountId,
+      activity_type: activityType,
+      occurred_on: occurredOn,
+      points_delta: spendsPoints ? -pointsUsed : 0,
+      hotel_credit_delta_cents: activityType === "hotel_credit_redemption" ? -hotelCreditUsedCents : 0,
+      booked_on: bookedOn || (activityType === "free_night_booking" ? occurredOn : null),
+      note,
+    })
+    .select("id")
+    .single();
   if (error) {
     console.error("[logCreditCardRewardActivity]", error);
     return { error: "Couldn't log that reward activity — " + error.message };
   }
+
+  // A booked night with a property name is a reservation, so it also belongs
+  // in the travel log. One entry, both places — the log is never a second
+  // thing to remember to fill in.
+  const propertyName = String(formData.get("hotelName") ?? "").trim();
+  if (activityType === "free_night_booking" && propertyName) {
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("name, holder")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle();
+    const { error: stayError } = await supabase.from("travel_stays").insert({
+      household_id: householdId,
+      account_id: accountId,
+      card_label: account?.name ?? null,
+      holder: account?.holder ?? null,
+      property_name: propertyName,
+      reserved_on: occurredOn,
+      check_in: bookedOn || occurredOn,
+      points_cost: pointsUsed,
+      points_value_micros: details.points_value_micros ?? null,
+      hotel_credit_cents: activityType === "free_night_booking" ? 0 : hotelCreditUsedCents,
+      reward_activity_id: activity.id,
+      remarks: note,
+    });
+    if (stayError) {
+      console.error("[logCreditCardRewardActivity:stay]", stayError);
+      return { error: `Points were logged, but the travel log entry failed — ${stayError.message}` };
+    }
+  }
   revalidate();
+  revalidatePath("/travel");
   return { error: null };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
@@ -1124,6 +1125,17 @@ function CreditCardSection({
   const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
   const hideTravelColumn = showOnlyHotelRedeem || categoryFilter === "hotel";
   const hideHotelColumn = showOnlyTravelRedeem || categoryFilter === "travel";
+  // Each rewards group collapses on its own header, persisted for the session
+  // like the other collapsibles on this page. Undefined means open.
+  const [groupOpen, setGroupOpen] = useSessionCollapse(
+    "accounts-credit-groups-open",
+    () => ({ travel: true, hotel: true, other: true }),
+  );
+  const toggleGroup = (key: string) =>
+    setGroupOpen((state) => ({ ...state, [key]: state[key] === false }));
+  const travelOpen = groupOpen.travel !== false;
+  const hotelOpen = groupOpen.hotel !== false;
+  const otherOpen = groupOpen.other !== false;
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const renderCards = (cards: AccountData[]) => (
@@ -1164,6 +1176,15 @@ function CreditCardSection({
       .reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
   const travelPoints = pointsForCategory("travel");
   const hotelPoints = pointsForCategory("hotel");
+  // Cash value of the points balance itself, summed with each card's own
+  // cents-per-point — the section-level total of the per-card "Total value"
+  // metric. Free-night credits are excluded here (they show in the Travel /
+  // Hotel redeemable tiles) so this tile answers "what are the points worth".
+  const totalCardValueCents = rewardCards.reduce((sum, a) => {
+    const d = a.cardDetails;
+    if (!d || d.currentPoints <= 0 || !d.pointsValueMicros) return sum;
+    return sum + Math.round((d.currentPoints * d.pointsValueMicros) / 10_000);
+  }, 0);
   // ---- Credit utilisation: balances owed as a share of total credit limit.
   // The single biggest lever on a credit score, and computable from limits
   // already stored per card. Only cards with a recorded limit are counted, so
@@ -1273,7 +1294,7 @@ function CreditCardSection({
 
           {(totalPoints > 0 || travelRedeemable > 0 || hotelRedeemable > 0 || feesPaid > 0 || totalOwed > 0) ? (
             <>
-            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-5">
               {totalPoints > 0 ? (
                 <StatTile
                   label="Current Pts"
@@ -1289,6 +1310,14 @@ function CreditCardSection({
                   tone="emerald"
                   onClick={() => setShowOnlyPtsCards((v) => !v)}
                   active={showOnlyPtsCards}
+                />
+              ) : null}
+              {totalCardValueCents > 0 ? (
+                <StatTile
+                  label="Total Card Value"
+                  value={formatMoney(totalCardValueCents, currency)}
+                  sub="Points only"
+                  tone="emerald"
                 />
               ) : null}
               {travelRedeemable > 0 ? (
@@ -1482,55 +1511,76 @@ function CreditCardSection({
             </p>
           ) : isMain ? (
             <div>
-              {/* Two columns only while both are showing. Filtered to one, the
-                  survivor takes the full width instead of sitting in half a
-                  panel next to an empty cell. */}
-              <div className={`grid grid-cols-1 divide-y divide-line ${
-                hideTravelColumn || hideHotelColumn ? "" : "sm:grid-cols-2 sm:divide-x sm:divide-y-0"
-              }`}>
+              {/* Travel stacks above Hotel at every width. Side-by-side halves
+                  squeezed each card's badges into a 3-4 line pile; full width
+                  lets the per-card metrics line up in columns left-to-right. */}
+              <div className="grid grid-cols-1 divide-y divide-line">
                 {hideTravelColumn ? null : (
                 <section>
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup("travel")}
+                      aria-expanded={travelOpen}
+                      className="flex flex-1 items-center gap-2 text-left sm:gap-2.5"
+                    >
+                    <GroupChevron open={travelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
                       </svg>
                     </span>
-                    <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
+                    <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
                     <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
+                    </button>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
                   </div>
-                  {travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
+                  {!travelOpen ? null : travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
                 </section>
                 )}
                 {hideHotelColumn ? null : (
                 <section>
                   <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup("hotel")}
+                      aria-expanded={hotelOpen}
+                      className="flex flex-1 items-center gap-2 text-left sm:gap-2.5"
+                    >
+                    <GroupChevron open={hotelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="M3 21V7l7-4v4h11v14" />
                         <path d="M7 10h.01M11 10h.01M15 14h.01M11 14h.01M7 14h.01M15 18h.01M11 18h.01M7 18h.01" />
                       </svg>
                     </span>
-                    <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
+                    <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
                     <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
+                    </button>
                     <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
                   </div>
-                  {hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-muted">No hotel cards yet.</p>}
+                  {!hotelOpen ? null : hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-muted">No hotel cards yet.</p>}
                 </section>
                 )}
               </div>
               {otherCards.length > 0 && !showOnlyTravelRedeem && !showOnlyHotelRedeem && categoryFilter === null ? (
                 <section className="border-t border-line">
                   <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup("other")}
+                      aria-expanded={otherOpen}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    >
+                    <GroupChevron open={otherOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <rect x="2" y="5" width="20" height="14" rx="2" />
@@ -1541,9 +1591,10 @@ function CreditCardSection({
                     <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
                       {otherCards.length} card{otherCards.length !== 1 ? "s" : ""}
                     </span>
+                    </button>
                     <span className="ml-auto text-xs text-muted">Choose Travel or Hotel when editing a card.</span>
                   </div>
-                  {renderCards(otherCards)}
+                  {otherOpen ? renderCards(otherCards) : null}
                 </section>
               ) : null}
             </div>
@@ -1617,6 +1668,50 @@ function CreditCardSection({
         </div>
       ) : null}
     </section>
+  );
+}
+
+// One cell of the credit-card metric grid: a small fixed label with the value
+// under it, so the same metric lands at the same x across every card. Empty
+// values print an em dash rather than collapsing the cell.
+// Disclosure caret for the rewards group headers (Travel / Hotel / Other).
+function GroupChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+      className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+      aria-hidden
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function MetricCell({
+  label,
+  children,
+  omit = false,
+}: {
+  label: string;
+  children: React.ReactNode;
+  // `omit` = the metric doesn't apply to this card at all (not just blank):
+  // the cell keeps its grid slot on wide screens so neighbouring cards stay in
+  // register, but shows no label and no dash.
+  omit?: boolean;
+}) {
+  // Empty cells hold the column open from 420px up so the grid stays aligned,
+  // but drop out entirely on a phone, where six dashes per card would triple
+  // the scroll for no information.
+  const empty = children === null || children === undefined || children === false;
+  if (omit) return <span aria-hidden className="hidden min-[420px]:block" />;
+  return (
+    <span className={`min-w-0 text-center ${empty ? "hidden min-[420px]:block" : "block"}`}>
+      <span className="block text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="block truncate text-[12px] leading-tight">
+        {empty ? <span className="text-muted/60">&mdash;</span> : children}
+      </span>
+    </span>
   );
 }
 
@@ -1750,6 +1845,16 @@ function CreditCardPanel({
   const fnExpired = fnExpires ? fnExpires < today : false;
   const fnExpiresColor = fnExpired ? "text-negative font-semibold" : "text-foreground font-semibold";
   const bank = d?.bank ?? card.institution ?? card.subtype ?? null;
+  // One card showing any reward figure turns the metric grid on for that row;
+  // plain cards (no points, no night credit) keep the single identity line.
+  // "Booked" only means something on a card that carries a free-night / hotel
+  // credit — on a plain points card the column is noise, so it holds its grid
+  // slot but prints nothing.
+  const hasNightCredit = Boolean(d?.freeNightCreditCents || d?.freeNightPointsLimit);
+  const hasMetrics = Boolean(
+    d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit
+      || d.freeNightExpiresOn || d.benefitUsedOn || d.charging),
+  );
 
   return (
     <li
@@ -1790,6 +1895,14 @@ function CreditCardPanel({
                 {bank}
               </span>
             ) : null}
+            {/* Authorized user sits right of the bank so the row reads
+                holder -> bank -> who else can charge on it. "AU" stays muted
+                so it doesn't compete with the holder chip. */}
+            {d?.authUser ? (
+              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+                AU: <span className="text-foreground">{d.authUser}</span>
+              </span>
+            ) : null}
             {card.dateClosed ? (
               <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
                 Closed {card.dateClosed}
@@ -1806,79 +1919,63 @@ function CreditCardPanel({
               </span>
             ) : null}
           </span>
-          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightExpiresOn || d?.benefitUsedOn || d?.charging || (d && d.currentPoints > 0)) ? (
-            <span className="mt-1 block space-y-1">
-            {/* Wraps at every width. `sm:flex-nowrap` used to force these onto
-                one line, and since each badge is whitespace-nowrap the row
-                overflowed its card — the right-hand column clipped
-                "35,000 pts Night Credit" mid-word. */}
-            <span className="flex flex-wrap items-center gap-1.5">
-              {d && d.currentPoints > 0 ? (
-                <>
-                  <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
-                    Current Pts: <span className="ml-1 tabular-nums">{d.currentPoints.toLocaleString()}</span>
+          {hasMetrics ? (
+            /* Excel-style metric row: one labelled cell per column, aligned
+               across every card in the section. Cells stay in place even when
+               a card has no value for them ("—") so the eye can scan down a
+               column instead of re-reading a wrapped badge pile. */
+            <span className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1.5 min-[420px]:grid-cols-3 lg:grid-cols-6">
+              <MetricCell label="Current pts">
+                {d && d.currentPoints > 0 ? (
+                  <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
+                    {d.currentPoints.toLocaleString()}
                   </span>
-                  {d.pointsValueMicros ? (
-                    <span className="inline-flex items-center whitespace-nowrap rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
-                      Total Value: <span className="ml-1 tabular-nums">${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}</span>
-                    </span>
-                  ) : null}
-                </>
-              ) : null}
-              {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
-                <span
-                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-black/5 px-1.5 py-0.5 text-[11px] font-bold ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/15"
-                  style={{ color: "var(--viz-savings)" }}
-                >
-                  <span className="tabular-nums">
+                ) : null}
+              </MetricCell>
+              <MetricCell label="Total value">
+                {d && d.currentPoints > 0 && d.pointsValueMicros ? (
+                  <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
+                    ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}
+                  </span>
+                ) : null}
+              </MetricCell>
+              <MetricCell label="Night credit">
+                {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
+                  <span className="tabular-nums font-bold" style={{ color: "var(--viz-savings)" }}>
                     {d?.freeNightCreditCents
                       ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
                       : `${d.freeNightPointsLimit!.toLocaleString()} pts`}
                   </span>
-                  <span>Night Credit</span>
-                </span>
-              ) : null}
-            </span>
-              {(d?.freeNightExpiresOn || d?.benefitUsedOn || d?.charging) ? (
-                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  {d?.charging ? (
-                    <span className="whitespace-nowrap text-[11px] text-muted">
-                      <span className="font-semibold text-foreground">Charging:</span> {d.charging}
-                    </span>
-                  ) : null}
-                  {d?.freeNightExpiresOn ? (
-                    <span
-                      className={`inline-flex items-center gap-1 whitespace-nowrap text-[11px] ${fnExpiresColor}`}
-                    >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <circle cx="12" cy="12" r="9" />
-                        <path d="M12 7v5l3 2" />
-                      </svg>
-                      {fnExpired ? "Expired" : "Expires"} {d.freeNightExpiresOn.replace(/-/g, "‑")}
-                    </span>
-                  ) : null}
-                  {d?.benefitUsedOn ? (
-                    <span
-                      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${
-                        d.benefitUsedOn < today
-                          ? "bg-rose-500/10 text-negative ring-rose-500/30"
-                          : "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:text-emerald-300"
-                      }`}
-                    >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <rect x="3" y="4" width="18" height="17" rx="2" />
-                        <path d="M16 2v4M8 2v4M3 10h18" />
-                        <path d="m9 15 2 2 4-4" />
-                      </svg>
-                      Booked: {d.benefitUsedOn.replace(/-/g, "‑")}
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
+                ) : null}
+              </MetricCell>
+              <MetricCell label="Charging">
+                {d?.charging ? <span className="font-semibold">{d.charging}</span> : null}
+              </MetricCell>
+              <MetricCell label={fnExpired ? "Expired" : "Expires"}>
+                {d?.freeNightExpiresOn ? (
+                  <span className={`tabular-nums ${fnExpiresColor}`}>
+                    {d.freeNightExpiresOn.replace(/-/g, "\u2011")}
+                  </span>
+                ) : null}
+              </MetricCell>
+              <MetricCell label="Booked" omit={!hasNightCredit}>
+                {d?.benefitUsedOn ? (
+                  <span
+                    className={`tabular-nums font-semibold ${
+                      d.benefitUsedOn < today ? "text-negative" : "text-emerald-700 dark:text-emerald-300"
+                    }`}
+                  >
+                    {d.benefitUsedOn.replace(/-/g, "\u2011")}
+                  </span>
+                ) : null}
+              </MetricCell>
             </span>
           ) : null}
         </span>
-        <span className={`ml-2 shrink-0 whitespace-nowrap text-right text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
+        {/* Fixed width, not shrink-to-fit: a variable balance column would give
+            every row a different amount of space for the metric grid, and the
+            columns would zig-zag from card to card instead of lining up. */}
+        <span className={`ml-2 w-20 shrink-0 whitespace-nowrap text-right text-sm font-semibold tabular-nums sm:w-28 ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
           {owed !== 0 ? formatMoney(owed, currency) : "—"}
         </span>
         <svg
@@ -2013,7 +2110,10 @@ function RewardActivityForm({
   currency: string;
   onDone: () => void;
 }) {
+  const router = useRouter();
   const [activityType, setActivityType] = useState<RewardActivity["type"]>("points_redemption");
+  // Controlled so the allotment line under it can react as you type.
+  const [freeNightPoints, setFreeNightPoints] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const d = card.cardDetails;
@@ -2038,7 +2138,12 @@ function RewardActivityForm({
           setError(null);
           const result = await logCreditCardRewardActivity(formData);
           if (result?.error) setError(result.error);
-          else onDone();
+          else {
+            // The card's points and Booked date are server-rendered; without
+            // this the row keeps showing the pre-redemption balance.
+            router.refresh();
+            onDone();
+          }
         })}
         className="grid grid-cols-1 gap-2 sm:grid-cols-2"
       >
@@ -2052,11 +2157,56 @@ function RewardActivityForm({
           </select>
         </label>
         <LabeledInput label="Activity date" name="occurredOn" type="date" defaultValue={today} />
+        {/* Keyed: the free-night branch below renders a controlled input under
+            the same name, and without distinct keys React reuses this node and
+            warns about an uncontrolled input becoming controlled. */}
         {activityType === "points_redemption" ? (
-          <LabeledInput label={`Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`} name="pointsUsed" type="number" min="1" step="1" placeholder="0" />
+          <LabeledInput key="points-redeemed" label={`Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`} name="pointsUsed" type="number" min="1" step="1" placeholder="0" />
         ) : null}
         {activityType === "hotel_credit_redemption" ? (
           <LabeledInput label={`Hotel credit used · ${d?.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : formatMoney(0, currency)} available`} name="hotelCreditUsed" type="number" min="0.01" step="0.01" prefix={currencySymbol(currency)} placeholder="0" />
+        ) : null}
+        {/* A booked free night is a reservation: the hotel name and what it
+            cost in points are what make the entry mean anything a year later,
+            and they carry straight through to the Travel Log. */}
+        {activityType === "free_night_booking" ? (
+          <>
+            <label className="block sm:col-span-2">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Hotel / apartment booked</span>
+              <input
+                name="hotelName"
+                placeholder="Hilton Frankfurt Gravenbruch"
+                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+            </label>
+            <label key="free-night-points" className="block sm:col-span-2">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+                Points cost · {(d?.currentPoints ?? 0).toLocaleString()} available
+              </span>
+              <input
+                name="pointsUsed"
+                type="number"
+                min="0"
+                step="1"
+                value={freeNightPoints}
+                onChange={(e) => setFreeNightPoints(e.target.value)}
+                placeholder="0"
+                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+              {/* Whether the night fits inside the card's yearly certificate. */}
+              {d?.freeNightPointsLimit ? (
+                <span
+                  className={`mt-0.5 block text-[10px] font-medium ${
+                    Number(freeNightPoints) > d.freeNightPointsLimit ? "text-negative" : "text-muted"
+                  }`}
+                >
+                  {Number(freeNightPoints) > d.freeNightPointsLimit
+                    ? `${(Number(freeNightPoints) - d.freeNightPointsLimit).toLocaleString()} pts over the ${d.freeNightPointsLimit.toLocaleString()} allotted — you pay the difference`
+                    : `${(Number(freeNightPoints) || 0).toLocaleString()} of ${d.freeNightPointsLimit.toLocaleString()} allotted pts used`}
+                </span>
+              ) : null}
+            </label>
+          </>
         ) : null}
         <LabeledInput label={activityType === "free_night_booking" ? "Booked / check-in date" : "Booked / check-in date (optional)"} name="bookedOn" type="date" defaultValue={activityType === "free_night_booking" ? today : ""} />
         <div className="sm:col-span-2">
@@ -2064,7 +2214,11 @@ function RewardActivityForm({
           <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
         </div>
         <div className="sm:col-span-2 flex items-center justify-between gap-3 pt-1">
-          <p className="text-xs text-muted">{labels[activityType]} will be added to this card&apos;s activity log.</p>
+          <p className="text-xs text-muted">
+            {activityType === "free_night_booking"
+              ? "Booked nights also land in the Travel Log, where the cash rate and savings go."
+              : `${labels[activityType]} will be added to this card's activity log.`}
+          </p>
           <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}

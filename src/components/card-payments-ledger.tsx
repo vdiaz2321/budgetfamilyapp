@@ -214,7 +214,7 @@ export function CardPaymentsLedger({
             {/* The running total reads as a figure worth looking at, not a
                 caption: its own tile, label above value. */}
             <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-surface px-3 py-1.5 text-right ring-1 ring-black/5 dark:ring-white/10">
+              <div className="rounded-lg bg-surface px-3 py-1.5 text-center ring-1 ring-black/5 dark:ring-white/10">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total paid</div>
                 <div className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
                   {money(grandTotal)}
@@ -222,7 +222,7 @@ export function CardPaymentsLedger({
               </div>
               {/* Shown in both views — in By year it's the average month across
                   the whole history — so the header keeps its width. */}
-              <div className="rounded-lg bg-surface px-3 py-1.5 text-right ring-1 ring-black/5 dark:ring-white/10">
+              <div className="rounded-lg bg-surface px-3 py-1.5 text-center ring-1 ring-black/5 dark:ring-white/10">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Avg / month</div>
                 <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
               </div>

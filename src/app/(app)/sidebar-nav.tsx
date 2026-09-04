@@ -59,6 +59,16 @@ const NAV: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    href: "/travel",
+    label: "Travel Log",
+    icon: (
+      <>
+        <path d="M3 20h18M5 20V9l7-5 7 5v11" />
+        <path d="M9 20v-5h6v5" />
+      </>
+    ),
+  },
+  {
     href: "/insights",
     label: "Insights",
     icon: <path d="M3 3v18h18M8 15v3M13 10v8M18 6v12" />,
