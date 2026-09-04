@@ -1221,9 +1221,6 @@ function CreditCardSection({
       }, 0);
   const travelRedeemable = redeemableForCategory("travel");
   const hotelRedeemable = redeemableForCategory("hotel");
-  const rewardActivityEntries = allCreditCards
-    .flatMap((card) => card.rewardActivities.map((activity) => ({ ...activity, cardName: card.name })))
-    .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
