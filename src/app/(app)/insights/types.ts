@@ -1,5 +1,6 @@
 import type { CategoryKind } from "@/lib/categories";
 import type { Granularity } from "./period";
+import type { CardPayment } from "@/components/card-payments-ledger";
 
 export type { Granularity };
 
@@ -81,4 +82,9 @@ export type InsightsData = {
   // category totals but no per-transaction detail (merchants / purchases).
   detailAvailable: boolean;
   currency: string;
+  // Card payments report — all-time, with its own year filter, so it is not
+  // sliced by the page's period picker.
+  cardPayments: CardPayment[];
+  cardNames: Record<string, string>;
+  sourceNames: Record<string, string>;
 };

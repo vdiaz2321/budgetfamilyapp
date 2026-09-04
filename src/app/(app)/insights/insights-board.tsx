@@ -14,6 +14,7 @@ import {
 import { Donut, KIND_COLOR, KIND_LABEL, TrendChart } from "./insights-charts";
 import { PeriodPicker } from "./insights-period-picker";
 import { currentPeriodKey } from "./period";
+import { CardPaymentsLedger } from "@/components/card-payments-ledger";
 
 export function InsightsBoard({ data }: { data: InsightsData }) {
   const router = useRouter();
@@ -242,6 +243,18 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
           )}
         </>
       )}
+
+      {/* Card payments — its own report with its own year filter, so it shows
+          the full history regardless of the period selected above. */}
+      <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+        <CardPaymentsLedger
+          payments={data.cardPayments}
+          cardNames={data.cardNames}
+          sourceNames={data.sourceNames}
+          currency={data.currency}
+          storageKey="insights-card-payments-open"
+        />
+      </div>
     </div>
   );
 }

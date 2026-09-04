@@ -1,5 +1,6 @@
 import { currentMonthFirst } from "@/lib/snapshots";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
+import type { CardPayment } from "@/components/card-payments-ledger";
 import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
 import { throwIfAny } from "@/lib/supabase-result";
@@ -35,6 +36,7 @@ export default async function AccountsPage() {
     { data: acctSnapshotRows, error: acctSnapshotRowsError },
     { data: bktSnapshotRows, error: bktSnapshotRowsError },
     { data: debtSnapshotRows, error: debtSnapshotRowsError },
+    { data: cardPaymentRows, error: cardPaymentRowsError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -88,8 +90,18 @@ export default async function AccountsPage() {
       .from("debt_snapshots")
       .select("subcategory_id, month, balance_cents")
       .eq("household_id", household.id),
+    // Card payments only — the transactions that move money TO a credit card.
+    // The charges made ON a card are deliberately left out: this feeds the
+    // "Card payments" report, which tracks what leaves the bank per card, not
+    // the register. Read-only; nothing here writes back to balances.
+    supabase
+      .from("transactions")
+      .select("id, occurred_on, amount_cents, memo, account_id, paid_to_account_id, movement_type")
+      .eq("household_id", household.id)
+      .not("paid_to_account_id", "is", null)
+      .order("occurred_on", { ascending: false }),
   ]);
-  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError });
+  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError, cardPaymentRows: cardPaymentRowsError });
 
   // Keep the Accounts page usable before the user applies the new SQL in
   // Supabase. The existing rewards columns remain fully supported.
@@ -302,6 +314,26 @@ export default async function AccountsPage() {
       hasBuckets: a.buckets.length > 0,
     }));
 
+  // Keep only the movements that land on a credit card. `movement_type` is
+  // null on rows written before that column existed, so fall back to the same
+  // rule the register uses: destination account is a credit card.
+  const cardIds = new Set((rows ?? []).filter((a) => a.kind === "credit_card").map((a) => a.id));
+  const cardPayments: CardPayment[] = (cardPaymentRows ?? [])
+    .filter(
+      (t) =>
+        t.paid_to_account_id &&
+        cardIds.has(t.paid_to_account_id) &&
+        (t.movement_type === "card_payment" || t.movement_type == null),
+    )
+    .map((t) => ({
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: t.amount_cents,
+      cardId: t.paid_to_account_id as string,
+      fromAccountId: t.account_id ?? null,
+      memo: t.memo ?? null,
+    }));
+
   return (
     <AccountsBoard
       accounts={accounts}
@@ -309,6 +341,7 @@ export default async function AccountsPage() {
       currency={household.currency}
       nonCardAccounts={nonCardAccounts}
       historyMonths={[currentMonth, prevMonth, prev2Month]}
+      cardPayments={cardPayments}
     />
   );
 }

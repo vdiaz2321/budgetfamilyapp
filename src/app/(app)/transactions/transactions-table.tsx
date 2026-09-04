@@ -105,7 +105,10 @@ export function TransactionsTable({
   // bar at the bottom for Clear / Delete on many transactions at once.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [, startBatch] = useTransition();
+  const [batchPending, startBatch] = useTransition();
+  // Which batch action is in flight, so the button that was pressed is the one
+  // that shows the spinner (and so the other one can't be fired mid-run).
+  const [batchAction, setBatchAction] = useState<"clear" | "unclear" | null>(null);
   const toggleSelected = (id: string) => setSelectedIds((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -119,6 +122,7 @@ export function TransactionsTable({
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
   const batchClear = (cleared: boolean) => {
     const ids = [...selectedIds];
+    setBatchAction(cleared ? "clear" : "unclear");
     startBatch(async () => {
       for (const id of ids) {
         const fd = new FormData();
@@ -126,9 +130,13 @@ export function TransactionsTable({
         fd.append("cleared", cleared ? "true" : "false");
         await toggleCleared(fd);
       }
+      setBatchAction(null);
       exitSelectMode();
     });
   };
+  // Which actions to offer: an all-cleared selection only needs Unclear, an
+  // all-uncleared one only needs Clear, and a mixed selection gets both.
+  const selectedClearedCount = () => selectedTxs().filter((t) => t.cleared).length;
   function applyRange(nextFrom: string, nextTo: string) {
     const params = new URLSearchParams();
     if (nextFrom) params.set("from", nextFrom);
@@ -414,10 +422,10 @@ export function TransactionsTable({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <rect x="4" y="4" width="16" height="16" rx="2.5" />
           </svg>
-          {/* Shorter label on mobile so the whole toolbar stays on one row
-              next to +Transaction; full "Uncleared" text on sm+. */}
-          <span className="sm:hidden">Unclear</span>
-          <span className="hidden sm:inline">Uncleared</span>
+          {/* Full "Uncleared" at every width: the short "Unclear" label read
+              as the batch Unclear button that sits right below it in select
+              mode, and this one is a filter, not an action. */}
+          Uncleared
         </button>
         {/* Property filter — only for a household that owns property. Pulls up
             one property's rows; the totals row then reads as its cash flow. */}
@@ -479,7 +487,14 @@ export function TransactionsTable({
               </span>
             </div>
             <span className="text-base font-bold leading-none text-muted">/</span>
-            <BatchActionButtons onClear={() => batchClear(true)} />
+            <BatchActionButtons
+              onClear={() => batchClear(true)}
+              onUnclear={() => batchClear(false)}
+              clearedCount={selectedClearedCount()}
+              selectedCount={selectedIds.size}
+              pending={batchPending}
+              pendingAction={batchAction}
+            />
           </div>
         ) : (
           <div
@@ -513,7 +528,15 @@ export function TransactionsTable({
             <span className="font-semibold text-foreground">{selectedIds.size} selected</span>
             <span className="text-muted">Total <span className={`font-bold tabular-nums ${selectedNetCents() < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(selectedNetCents(), currency)}</span></span>
           </div>
-          <BatchActionButtons onClear={() => batchClear(true)} mobile />
+          <BatchActionButtons
+            onClear={() => batchClear(true)}
+            onUnclear={() => batchClear(false)}
+            clearedCount={selectedClearedCount()}
+            selectedCount={selectedIds.size}
+            pending={batchPending}
+            pendingAction={batchAction}
+            mobile
+          />
         </div>
       ) : (
         <div className="-mx-4 flex items-center justify-between gap-2 bg-positive/5 px-4 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
@@ -662,24 +685,72 @@ export function TransactionsTable({
   );
 }
 
-// Clear is the only batch action. Uncheck / Export / Delete were removed at
+// Clear / Unclear are the batch actions. Export / Delete were removed at
 // Victor's request: per-row delete still exists, and the toolbar's Export CSV
-// covers exporting.
+// covers exporting. Which of the two shows depends on the selection — rows
+// that are already cleared can only be un-cleared, so offering "Clear" on
+// them was a no-op button.
 function BatchActionButtons({
   onClear,
+  onUnclear,
+  clearedCount,
+  selectedCount,
+  pending = false,
+  pendingAction = null,
   mobile = false,
 }: {
   onClear: () => void;
+  onUnclear: () => void;
+  clearedCount: number;
+  selectedCount: number;
+  pending?: boolean;
+  pendingAction?: "clear" | "unclear" | null;
   mobile?: boolean;
 }) {
   const buttonClass = mobile
-    ? "flex-1 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold transition"
-    : "whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition";
+    ? "flex-1 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold transition disabled:opacity-60"
+    : "whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-60";
+
+  const showClear = clearedCount < selectedCount;
+  const showUnclear = clearedCount > 0;
 
   return (
     <div className={`flex items-center gap-1.5 ${mobile ? "w-full" : "shrink-0"}`}>
-      <button type="button" onClick={onClear} className={`${buttonClass} bg-positive/10 text-positive hover:bg-positive/20`}>Clear</button>
+      {showClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={pending}
+          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-positive/10 text-positive hover:bg-positive/20`}
+        >
+          {pending && pendingAction === "clear" ? <Spinner /> : null}
+          {pending && pendingAction === "clear" ? "Clearing…" : "Clear"}
+        </button>
+      ) : null}
+      {showUnclear ? (
+        <button
+          type="button"
+          onClick={onUnclear}
+          disabled={pending}
+          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-black/5 text-muted hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20`}
+        >
+          {pending && pendingAction === "unclear" ? <Spinner /> : null}
+          {pending && pendingAction === "unclear" ? "Unclearing…" : "Unclear"}
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+// Inline "working" indicator for the batch buttons — the batch runs one
+// server action per selected row, so without this the button looked dead for
+// several seconds on a big selection.
+function Spinner() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden className="animate-spin">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
   );
 }
 

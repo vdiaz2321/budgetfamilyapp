@@ -936,12 +936,10 @@ function BalanceGrid({
   const toggle = (section: string) =>
     setCollapsed((c) => ({ ...c, [section]: !c[section] }));
 
-  const [collapsedAccounts, setCollapsedAccounts] = useSessionCollapse(
-    "networth-grid-accounts-v2",
-    () => Object.fromEntries(rows.filter((r) => r.hasChildren && r.id).map((r) => [r.id!, true])),
-  );
-  const toggleAccount = (id: string) =>
-    setCollapsedAccounts((c) => ({ ...c, [id]: !c[id] }));
+  // Bucket rows are always shown. The old per-account chevron was a 9px hit
+  // target sitting between the drag handle and the name — on a phone or tablet
+  // it was near-impossible to hit without either starting a drag or firing the
+  // name's chart filter, so the rows just stay expanded instead.
 
   // Per-section, per-month subtotal — top-level rows only, so bucket rows
   // aren't double-counted.
@@ -1245,9 +1243,7 @@ function BalanceGrid({
                   </tr>
                   {isOpen
                     ? g.rows
-                        .filter((r) => !r.parentId || !collapsedAccounts[r.parentId])
                         .map((r, ri) => {
-                          const accountOpen = !r.id || !collapsedAccounts[r.id];
                           const dropKey = r.accountId
                             ? `account:${r.accountId}`
                             : r.bucketId
@@ -1268,7 +1264,7 @@ function BalanceGrid({
                                   r.hasChildren
                                     ? "p-0"
                                     : r.indent
-                                      ? "py-2 pl-9 text-[0.8125rem] sm:text-[0.9375rem]"
+                                      ? "px-4 py-2 text-[0.8125rem] sm:text-[0.9375rem]"
                                       : "px-4 py-2"
                                 } ${nameCls(r)}`}
                               >
@@ -1280,22 +1276,6 @@ function BalanceGrid({
                                         onMouseDown={() => startAccountDrag(g.section, r.accountId!)}
                                       />
                                     ) : null}
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleAccount(r.id!)}
-                                      aria-expanded={accountOpen}
-                                      aria-label={accountOpen ? "Collapse buckets" : "Show buckets"}
-                                      className="flex shrink-0 items-center rounded p-0.5 text-muted transition hover:bg-background/60"
-                                    >
-                                      <svg
-                                        width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                        strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"
-                                        className={`shrink-0 transition-transform ${accountOpen ? "rotate-90" : ""}`}
-                                        aria-hidden
-                                      >
-                                        <path d="M9 6l6 6-6 6" />
-                                      </svg>
-                                    </button>
                                     {r.accountId ? (
                                       <button
                                         type="button"
@@ -1641,7 +1621,9 @@ function MonthlyAnalytics({
   year: string;
 }) {
   const [showChanges, setShowChanges] = useState(false);
-  const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: true }));
+  // Starts expanded on a fresh login; sessionStorage carries whatever the user
+  // last set while they're still moving around the app.
+  const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: false }));
   const collapsed = !!monthlyState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setMonthlyState((s) => ({ v: fn(!!s.v) }));
 
@@ -1692,7 +1674,9 @@ function MonthlyAnalytics({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+      {/* Wraps on mobile: expanded by default now, the year picker + Show
+          Details would otherwise squeeze the title into three lines. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5">
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
@@ -1704,7 +1688,7 @@ function MonthlyAnalytics({
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="text-sm font-semibold sm:text-base">Monthly Net Worth</h2>
+          <h2 className="whitespace-nowrap text-sm font-semibold sm:text-base">Monthly Net Worth</h2>
         </button>
         {!collapsed && (
           <div className="flex items-center gap-2">

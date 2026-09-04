@@ -152,9 +152,11 @@ export function TrendChart({
           {/* X axis labels — selected period gets the dark pill */}
           <div className="mt-2 flex gap-1">
             {buckets.map((b) => (
-              <span key={b.key} className="flex flex-1 justify-center">
+              // min-w-0 so a long label ("September 2026") truncates instead
+              // of forcing the row — and the page — wider than the phone.
+              <span key={b.key} className="flex min-w-0 flex-1 justify-center">
                 <span
-                  className={`truncate rounded-md px-1.5 py-0.5 text-[10px] ${
+                  className={`max-w-full truncate rounded-md px-1.5 py-0.5 text-[10px] ${
                     b.selected
                       ? "bg-foreground font-semibold text-background"
                       : "text-muted"

@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToDisplay, centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
   addAccount,
@@ -313,6 +314,9 @@ type Props = {
   nonCardAccounts?: NonCardAccount[];
   // [current, prev, prev2] as YYYY-MM-01 — powers the three balance columns.
   historyMonths: [string, string, string];
+  // Payments made TO cards — feeds the read-only "Card payments" report at
+  // the bottom of the Credit Cards section. Never used for balances.
+  cardPayments?: CardPayment[];
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -505,9 +509,11 @@ export function AccountsBoard({
   currency,
   nonCardAccounts = [],
   historyMonths,
+  cardPayments = [],
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const creditCards = accounts.filter((a) => a.kind === "credit_card");
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
   // filtering DOES NOT extend to the Credit Card Rewards section below —
@@ -933,6 +939,31 @@ export function AccountsBoard({
             />
           );
         })}
+        {/* Rewards activity and Card payments are their own cards, not a tail
+            welded onto the Credit Cards card — they're separate reports and
+            each collapses on its own. */}
+        {creditCards.length > 0 ? (
+          <>
+            <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <CardPaymentsLedger
+                payments={cardPayments}
+                cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
+                sourceNames={Object.fromEntries(nonCardAccounts.map((a) => [a.id, a.name]))}
+                currency={currency}
+                storageKey="accounts-card-payments-open"
+                showChart={false}
+              />
+            </div>
+            <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <RewardsActivityLedger
+                entries={creditCards
+                  .flatMap((card) => card.rewardActivities.map((a) => ({ ...a, cardName: card.name })))
+                  .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn))}
+                currency={currency}
+              />
+            </div>
+          </>
+        ) : null}
       </div>
       {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} /> : null}
       {transferOpen ? (
@@ -1515,7 +1546,6 @@ function CreditCardSection({
                   {renderCards(otherCards)}
                 </section>
               ) : null}
-              <RewardsActivityLedger entries={rewardActivityEntries} currency={currency} />
             </div>
           ) : (() => {
             const groups = localAccounts.reduce<{ bank: string; cards: AccountData[] }[]>((acc, a) => {
@@ -1606,16 +1636,34 @@ function RewardsActivityLedger({
   const activeEntries = entries.filter((entry) => !entry.archivedAt);
   const archivedEntries = entries.filter((entry) => entry.archivedAt);
   const visibleEntries = showArchived ? archivedEntries : activeEntries;
+  // Starts collapsed on a fresh login — it sits below Card payments and is
+  // reference data, not something to scan on every visit; sessionStorage still
+  // carries whatever it was last set to while moving around the app.
+  const [openState, setOpenState] = useSessionCollapse("accounts-rewards-activity-open", () => ({ open: false }));
+  const open = openState.open;
 
   return (
-    <section className="border-t-2 border-foreground/25 bg-brand-soft/[0.06]">
+    <section>
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-        <div>
-          <h3 className="text-sm font-bold">Rewards activity</h3>
-          <p className="text-xs text-muted">Every points redemption, hotel-credit use, and booked free night.</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setOpenState((s) => ({ ...s, open: !s.open }))}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          <svg
+            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden
+            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+          >
+            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="min-w-0">
+            <span className="block text-sm font-bold">Rewards activity</span>
+            <span className="block text-xs text-muted">Every points redemption, hotel-credit use, and booked free night.</span>
+          </span>
+        </button>
         <div className="flex shrink-0 items-center gap-2">
-          {archivedEntries.length > 0 ? (
+          {open && archivedEntries.length > 0 ? (
             <button
               type="button"
               onClick={() => setShowArchived((value) => !value)}
@@ -1627,7 +1675,7 @@ function RewardsActivityLedger({
           <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">{activeEntries.length} active</span>
         </div>
       </div>
-      {visibleEntries.length === 0 ? (
+      {!open ? null : visibleEntries.length === 0 ? (
         <p className="px-4 py-4 text-sm text-muted">{showArchived ? "No archived rewards activity." : "No rewards activity yet. Open a card and choose “Log rewards activity” to create the first entry."}</p>
       ) : (
         <ul className="divide-y divide-line bg-background/70">
