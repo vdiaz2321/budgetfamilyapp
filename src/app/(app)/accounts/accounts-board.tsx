@@ -7,6 +7,8 @@ import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToDisplay, centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
+import type { PointsSuggestion } from "@/lib/points-value";
+import { PointsValueModal, type PointsValueRow } from "./points-value-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
   addAccount,
@@ -318,6 +320,9 @@ type Props = {
   // Payments made TO cards — feeds the read-only "Card payments" report at
   // the bottom of the Credit Cards section. Never used for balances.
   cardPayments?: CardPayment[];
+  // What each card's points have really been worth, measured off the Travel
+  // Log. Feeds the "Points values" dialog on the rewards section.
+  pointsSuggestions?: PointsSuggestion[];
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -511,6 +516,7 @@ export function AccountsBoard({
   nonCardAccounts = [],
   historyMonths,
   cardPayments = [],
+  pointsSuggestions = [],
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -937,6 +943,7 @@ export function AccountsBoard({
               allBuckets={accounts.flatMap((a) => a.buckets)}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
+              pointsSuggestions={pointsSuggestions}
             />
           );
         })}
@@ -990,6 +997,7 @@ function CreditCardSection({
   allBuckets,
   open,
   onToggle,
+  pointsSuggestions,
 }: {
   section: Section;
   accounts: AccountData[];
@@ -999,6 +1007,7 @@ function CreditCardSection({
   allBuckets: BucketData[];
   open: boolean;
   onToggle: () => void;
+  pointsSuggestions: PointsSuggestion[];
 }) {
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
@@ -1008,6 +1017,7 @@ function CreditCardSection({
     setLocalAccounts(accounts);
   }, [accounts]);
   const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
+  const [pointsValueOpen, setPointsValueOpen] = useState(false);
   const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
   const [showOnlyOwedCards, setShowOnlyOwedCards] = useState(false);
   const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
@@ -1219,6 +1229,23 @@ function CreditCardSection({
         const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
         return sum + pts + (d.freeNightCreditCents ?? 0);
       }, 0);
+  // Cards whose stored valuation is missing or disagrees with what the stays
+  // actually redeemed at. `worthRows` covers every card holding points so the
+  // dialog can show the before/after on the section total.
+  const suggestionByAccount = new Map(pointsSuggestions.map((s) => [s.accountId, s]));
+  const pointsValueRows: PointsValueRow[] = rewardCards
+    .filter((a) => (a.cardDetails?.currentPoints ?? 0) > 0)
+    .map((a) => ({
+      accountId: a.id,
+      cardName: a.name,
+      currentPoints: a.cardDetails?.currentPoints ?? 0,
+      storedMicros: a.cardDetails?.pointsValueMicros ?? null,
+      suggestion: suggestionByAccount.get(a.id) ?? null,
+    }));
+  const staleValueCount = pointsValueRows.filter(
+    (r) => r.suggestion && r.suggestion.micros !== (r.storedMicros ?? 0),
+  ).length;
+
   const travelRedeemable = redeemableForCategory("travel");
   const hotelRedeemable = redeemableForCategory("hotel");
   return (
@@ -1261,12 +1288,25 @@ function CreditCardSection({
                 </button>
               );
             })()}
+            {pointsValueRows.some((r) => r.suggestion) ? (
+              <button
+                type="button"
+                onClick={() => setPointsValueOpen(true)}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                Points values
+                {staleValueCount > 0 ? (
+                  <span className="rounded-full bg-black/5 px-1.5 text-[10px] tabular-nums text-muted dark:bg-white/10">
+                    {staleValueCount} to update
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
             <a
               href="https://www.dailydrop.com/calculator"
               target="_blank"
               rel="noreferrer"
               className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
-              title="Open the Daily Drop cents-per-point calculator"
             >
               <span className="sm:hidden">Calculator</span>
               <span className="hidden sm:inline">Points value calculator</span>
@@ -1664,6 +1704,14 @@ function CreditCardSection({
           })()}
         </div>
       ) : null}
+
+      {pointsValueOpen ? (
+        <PointsValueModal
+          rows={pointsValueRows}
+          currency={currency}
+          onClose={() => setPointsValueOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -1704,7 +1752,7 @@ function MetricCell({
   if (omit) return <span aria-hidden className="hidden min-[420px]:block" />;
   return (
     <span className={`min-w-0 text-center ${empty ? "hidden min-[420px]:block" : "block"}`}>
-      <span className="block text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       <span className="block truncate text-[12px] leading-tight">
         {empty ? <span className="text-muted/60">&mdash;</span> : children}
       </span>
@@ -2304,11 +2352,11 @@ function StatTile({
   const base = `rounded-lg px-2 py-2 text-center ring-1 ${active ? `${t.activeBg} ${t.ring}` : "bg-background ring-line"}`;
   const inner = (
     <>
-      <div className={`text-[9px] sm:text-[9px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
+      <div className={`text-[10px] sm:text-[10px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
       <div className={`mt-0.5 text-sm font-bold tabular-nums sm:text-sm ${t.value}`}>{value}</div>
       {sub ? (
         <div
-          className={`mt-0.5 text-[9px] font-medium tabular-nums ${subColor ? "" : t.label}`}
+          className={`mt-0.5 text-[10px] font-medium tabular-nums ${subColor ? "" : t.label}`}
           style={subColor ? { color: subColor } : undefined}
         >
           {sub}
@@ -2390,7 +2438,6 @@ function EditCreditCardForm({
           <button
             type="button"
             onClick={onDone}
-            title="Close editor"
             aria-label="Close editor"
             className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-slate-100 hover:text-foreground dark:hover:bg-slate-800"
           >
@@ -3843,7 +3890,6 @@ function DerivedBalance({
   if (muted) {
     return (
       <div
-        title="No snapshot for this month yet — edit a bucket below to fill it in"
         className="justify-self-end inline-flex items-center gap-0 py-1"
       >
         <span className="text-sm">—</span>
@@ -3852,7 +3898,6 @@ function DerivedBalance({
   }
   return (
     <div
-      title="Sum of this account's buckets — edit the buckets below to change it"
       className="justify-self-end inline-flex items-center gap-0 py-1"
     >
       <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
@@ -4372,7 +4417,6 @@ function EditAccountForm({
             name="holder"
             defaultValue={account.holder ?? ""}
             placeholder="Holder"
-            title="Whose account? (e.g. V, J, Joint)"
             className="w-20 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
           <input
@@ -4421,7 +4465,6 @@ function EditAccountForm({
             <select
               name="bankGroup"
               defaultValue={account.bankGroup ?? "spending"}
-              title="Net Worth splits long-term Savings from everyday Bank Accounts"
               className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="spending">Checking</option>
@@ -4516,7 +4559,7 @@ function GripHandle({ onMouseDown, size = "md" }: { onMouseDown: () => void; siz
         e.preventDefault();
         onMouseDown();
       }}
-      title="Drag to reorder"
+      aria-label="Drag to reorder"
       className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
     >
       <svg width={px} height={px} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>

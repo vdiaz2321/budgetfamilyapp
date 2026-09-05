@@ -43,13 +43,3 @@ export function isLiabilityKind(kind: string): boolean {
 export function debtCountsInNetWorth(debtKind: string | null | undefined): boolean {
   return !isDebtExcludedFromNetWorth(debtKind);
 }
-
-/**
- * Does an account balance contribute to Net Worth as an asset?
- *
- * Liability-kind accounts never do — their debt is carried by the `debts`
- * table. Kids' accounts are tracked but excluded from household totals.
- */
-export function accountCountsAsAsset(kind: string, isKidsAccount: boolean): boolean {
-  return !isKidsAccount && !isLiabilityKind(kind);
-}

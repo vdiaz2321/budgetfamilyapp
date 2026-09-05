@@ -60,6 +60,16 @@ const MORE_LINKS: { href: string; label: string; icon: React.ReactNode }[] = [
     icon: <path d="M3 17l6-6 4 4 8-8M21 7v6M21 7h-6" />,
   },
   {
+    href: "/annual",
+    label: "Annual Overview",
+    icon: (
+      <>
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M8 3v4M16 3v4M3 11h18" />
+      </>
+    ),
+  },
+  {
     href: "/insights",
     label: "Insights",
     icon: <path d="M3 3v18h18M8 15v3M13 10v8M18 6v12" />,
@@ -172,7 +182,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
           >
             <Icon>{tab.icon}</Icon>
             {tab.href === "/transactions" && badge ? (
-              <span className="absolute right-6 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
+              <span className="absolute right-6 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[10px] font-semibold text-black">
                 {badge}
               </span>
             ) : null}
@@ -205,7 +215,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
           </Icon>
           <span>More</span>
           {moreBadge ? (
-            <span className="absolute right-4 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
+            <span className="absolute right-4 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[10px] font-semibold text-black">
               {moreBadge}
             </span>
           ) : null}
@@ -232,7 +242,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
                   <Icon>{link.icon}</Icon>
                   <span className="flex-1">{link.label}</span>
                   {badge ? (
-                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[9px] font-semibold text-black">
+                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-200 px-1 text-[10px] font-semibold text-black">
                       {badge}
                     </span>
                   ) : null}

@@ -1,9 +1,11 @@
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, hasPropertyAsset, PROPERTY_KIND } from "@/lib/net-worth";
+import { adoptClosedProjectionYears } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
+import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
 import { throwIfAny } from "@/lib/supabase-result";
 
 export const metadata = { title: "Net Worth · Capitall" };
@@ -15,6 +17,15 @@ const LIABILITY_KINDS: readonly string[] = SHARED_LIABILITY_KINDS;
 
 export default async function NetworthPage() {
   const { supabase, household } = await getSessionContext();
+
+  // The twelve complete months behind us. September's half-month of spending
+  // would drag the yearly figure down if it were included.
+  const fiToMonth = currentMonthFirst();
+  const fiFromMonth = (() => {
+    const [y, m] = fiToMonth.split("-").map(Number);
+    const d = new Date(y, m - 1 - 12, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  })();
 
   // Refresh this month's snapshot on every visit — this is what freezes prior
   // months into history even if no balance was edited after a month rollover.
@@ -29,6 +40,13 @@ export default async function NetworthPage() {
     { data: subRows, error: subRowsError },
     historyRows,
     { data: debtRows, error: debtRowsError },
+    { data: planRow, error: planError },
+    { data: flowRows, error: flowError },
+    { data: balanceRows, error: balanceError },
+    { data: catRows, error: catError },
+    { data: projectionRowsInitial, error: projectionError },
+    { data: gainRows, error: gainError },
+    { data: liveContribRows, error: liveContribError },
   ] = await Promise.all([
     // Every snapshot ever taken — this page IS the history view, so none of
     // these can be date-bounded. They grow by one row per account/bucket/debt
@@ -94,8 +112,49 @@ export default async function NetworthPage() {
       .from("debts")
       .select("subcategory_id, debt_kind")
       .eq("household_id", household.id),
+    // ---- Financial independence inputs.
+    supabase
+      .from("retirement_plan")
+      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, include_cash")
+      .eq("household_id", household.id)
+      .maybeSingle(),
+    // A year of actual living costs and actual saving, straight from the
+    // register — the two numbers the projection turns on, and the two people
+    // most often guess wrong about themselves.
+    supabase
+      .from("v_monthly_actuals")
+      .select("month, category_id, actual_cents")
+      .eq("household_id", household.id),
+    supabase
+      .from("accounts")
+      .select("id, kind, is_kids_account, active, current_balance_cents")
+      .eq("household_id", household.id),
+    supabase
+      .from("categories")
+      .select("id, kind")
+      .eq("household_id", household.id),
+    // The year-by-year plan Victor has kept since 2018.
+    supabase
+      .from("networth_projection")
+      .select("year, age, boy_cents, income_cents, taxes_cents, spending_cents, growth_cents, eoy_cents")
+      .eq("household_id", household.id)
+      .order("year"),
+    // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
+    // measured. Kept separate from contributions: one is money you added, the
+    // other is money the market added.
+    supabase
+      .from("investment_years")
+      .select("account_id, bucket_id, year, contributed_cents, accrued_cents")
+      .eq("household_id", household.id),
+    // Contributions as the register sees them. Invest / Savings prefers these
+    // over a typed seed while a year is still open, and this page has to agree
+    // with it or the same money reads as two different numbers.
+    supabase
+      .from("v_investment_contributions")
+      .select("account_id, bucket_id, year, net_contribution_cents")
+      .eq("household_id", household.id),
   ]);
-  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError });
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError });
 
   // Once a property carries the home's value, the mortgage against it counts
   // as the liability it is — before that it stays out (lib/net-worth.ts).
@@ -354,6 +413,171 @@ export default async function NetworthPage() {
     }),
   }));
 
+  // ---- What the FI projection is measured from.
+  //
+  // Spending and saving come from the same monthly actuals the Budget and
+  // Annual pages read, so the three pages can never disagree about what a year
+  // of this household costs. Categories are matched by kind, not by name.
+  let projectionRows = projectionRowsInitial;
+  const catKind = new Map((catRows ?? []).map((c) => [c.id, c.kind as string]));
+  let fiSpendCents = 0;
+  let fiContributionCents = 0;
+  // What actually went into savings and investments each calendar year — the
+  // Invest/Savings side of the ledger, which is what the projection's
+  // "saved / invested" line should be measured against.
+  const savedByYear = new Map<number, number>();
+  const spentByYear = new Map<number, number>();
+  const earnedByYear = new Map<number, number>();
+  const bump = (map: Map<number, number>, year: number, cents: number) =>
+    map.set(year, (map.get(year) ?? 0) + cents);
+  // How much of each year the register actually covers. A year with one
+  // categorised month would otherwise report $142 of spending as if it were
+  // the whole year.
+  const monthsByYear = new Map<number, Set<string>>();
+
+  for (const row of flowRows ?? []) {
+    const kind = row.category_id ? catKind.get(row.category_id) : null;
+    const cents = Math.abs(row.actual_cents ?? 0);
+    const yr = Number(row.month.slice(0, 4));
+    const inFiWindow = row.month >= fiFromMonth && row.month < fiToMonth;
+    if (kind) {
+      const seen = monthsByYear.get(yr) ?? new Set<string>();
+      seen.add(row.month);
+      monthsByYear.set(yr, seen);
+    }
+
+    if (kind === "bills" || kind === "expenses") {
+      if (inFiWindow) fiSpendCents += cents;
+      bump(spentByYear, yr, cents);
+    } else if (kind === "savings") {
+      if (inFiWindow) fiContributionCents += cents;
+      bump(savedByYear, yr, cents);
+    } else if (kind === "income") {
+      bump(earnedByYear, yr, cents);
+    }
+  }
+
+  // The portfolio: investment accounts the household owns. Cash is offered
+  // separately because a house deposit is not retirement money.
+  let fiInvestedCents = 0;
+  let fiCashCents = 0;
+  for (const a of balanceRows ?? []) {
+    if (a.is_kids_account || a.active === false) continue;
+    const cents = a.current_balance_cents ?? 0;
+    if (a.kind === "investment") fiInvestedCents += cents;
+    else if (a.kind === "savings_bucket" || a.kind === "checking" || a.kind === "cash") {
+      fiCashCents += cents;
+    }
+  }
+
+  // ---- Projection vs actual.
+  //
+  // The actual for a year is the last net worth the app recorded in it, taken
+  // from the very same series the chart plots — so the table and the line can
+  // never tell different stories. The current year is marked in-progress
+  // because its "actual" is only the year so far.
+  const netByYear = new Map<number, number>();
+  for (const point of points) {
+    netByYear.set(Number(point.month.slice(0, 4)), point.net);
+  }
+  const thisYearNum = Number(fiToMonth.slice(0, 4));
+
+  // Contributions and gains, resolved exactly the way Invest / Savings resolves
+  // them — same helper, so the two pages can't drift apart. Kids' accounts are
+  // out, as they are everywhere else in Net Worth.
+  const householdAccountIds = new Set(
+    (balanceRows ?? []).filter((a) => !a.is_kids_account).map((a) => a.id),
+  );
+  const liveBySlot = new Map<string, number>();
+  for (const row of liveContribRows ?? []) {
+    liveBySlot.set(
+      investSlotKey(row.account_id, row.bucket_id ?? null, row.year),
+      row.net_contribution_cents ?? 0,
+    );
+  }
+  const storedBySlot = new Map<string, { contributed: number; accrued: number }>();
+  for (const row of gainRows ?? []) {
+    storedBySlot.set(investSlotKey(row.account_id, row.bucket_id ?? null, row.year), {
+      contributed: row.contributed_cents ?? 0,
+      accrued: row.accrued_cents ?? 0,
+    });
+  }
+
+  const gainsByYear = new Map<number, number>();
+  const investedByYear = new Map<number, number>();
+  const slotKeys = new Set([...liveBySlot.keys(), ...storedBySlot.keys()]);
+  for (const key of slotKeys) {
+    const [accountId, , yearText] = key.split(":");
+    if (!householdAccountIds.has(accountId)) continue;
+    const year = Number(yearText);
+    const stored = storedBySlot.get(key);
+    bump(
+      investedByYear,
+      year,
+      resolveContributedCents({
+        storedCents: stored ? stored.contributed : null,
+        liveCents: liveBySlot.get(key) ?? 0,
+        hasLive: liveBySlot.has(key),
+        isCurrentYear: year === thisYearNum,
+      }),
+    );
+    // Gains are only ever the reviewed year-end figure — there is nothing in
+    // the register to derive them from.
+    bump(gainsByYear, year, stored?.accrued ?? 0);
+  }
+  // A finished year stops being a forecast: once the register covers it and
+  // its gains are in, the plan takes the measured figures and every later year
+  // is rebuilt on them. Runs on load, like the snapshot capture above, and
+  // writes nothing once a year has already been adopted.
+  const measuredByYear = new Map<
+    number,
+    { income: number | null; spending: number | null; gains: number | null; months: number }
+  >();
+  for (const year of new Set([...spentByYear.keys(), ...earnedByYear.keys(), ...gainsByYear.keys()])) {
+    measuredByYear.set(year, {
+      income: earnedByYear.get(year) ?? null,
+      spending: spentByYear.get(year) ?? null,
+      gains: gainsByYear.get(year) ?? null,
+      months: monthsByYear.get(year)?.size ?? 0,
+    });
+  }
+  const adoptedYears = await adoptClosedProjectionYears(
+    supabase,
+    household.id,
+    thisYearNum,
+    measuredByYear,
+  );
+  if (adoptedYears.length > 0) {
+    // The rows just changed underneath us; read them again so the table shows
+    // what was adopted rather than what it replaced.
+    const refreshed = await supabase
+      .from("networth_projection")
+      .select("year, age, boy_cents, income_cents, taxes_cents, spending_cents, growth_cents, eoy_cents")
+      .eq("household_id", household.id)
+      .order("year");
+    if (refreshed.data) projectionRows = refreshed.data;
+  }
+
+
+  const projectionYears = (projectionRows ?? []).map((r) => ({
+    year: r.year,
+    age: r.age ?? null,
+    boyCents: r.boy_cents ?? 0,
+    incomeCents: r.income_cents ?? 0,
+    taxesCents: r.taxes_cents ?? 0,
+    spendingCents: r.spending_cents ?? 0,
+    growthCents: r.growth_cents ?? 0,
+    eoyCents: r.eoy_cents ?? 0,
+    actualCents: netByYear.get(r.year) ?? null,
+    actualSavedCents: savedByYear.get(r.year) ?? null,
+    actualIncomeCents: earnedByYear.get(r.year) ?? null,
+    actualSpendingCents: spentByYear.get(r.year) ?? null,
+    actualMonths: monthsByYear.get(r.year)?.size ?? 0,
+    actualGainsCents: gainsByYear.get(r.year) ?? null,
+    actualInvestedCents: investedByYear.get(r.year) ?? null,
+    inProgress: r.year === thisYearNum,
+  }));
+
   return (
     <NetworthBoard
       points={points}
@@ -361,6 +585,26 @@ export default async function NetworthPage() {
       gridRows={displayRows}
       currency={household.currency}
       lockedFromMonth={currentMonthFirst()}
+      fiPlan={{
+        birthYear: planRow?.birth_year ?? null,
+        targetRetireYear: planRow?.target_retire_year ?? null,
+        annualSpendCents: planRow?.annual_spend_cents ?? null,
+        annualContributionCents: planRow?.annual_contribution_cents ?? null,
+        realReturnPct: planRow?.real_return_pct == null ? 5 : Number(planRow.real_return_pct),
+        withdrawalRatePct:
+          planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
+        includeCash: planRow?.include_cash ?? false,
+      }}
+      fiMeasured={{
+        investedCents: fiInvestedCents,
+        cashCents: fiCashCents,
+        spendCents: fiSpendCents,
+        contributionCents: fiContributionCents,
+        fromMonth: fiFromMonth.slice(0, 7),
+        toMonth: fiToMonth.slice(0, 7),
+      }}
+      thisYear={thisYearNum}
+      projectionYears={projectionYears}
     />
   );
 }

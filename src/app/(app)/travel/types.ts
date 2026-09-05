@@ -21,19 +21,24 @@ export type TravelStay = {
   pocketCostCents: number;
   pocketPaidWith: PocketPaidWith;
   remarks: string | null;
+  // Set when the booking fell through. A cancelled stay stays in the archive
+  // but is left out of every total, chart and tally.
+  cancelledAt: string | null;
   // Set when the stay's points were deducted from a card's balance. Its
   // presence is what locks the points fields against later editing.
   rewardActivityId: string | null;
 };
 
-export type PocketPaidWith = "cash" | "points" | "credit" | "tbd";
+export type PocketPaidWith = "card" | "points" | "credit";
 
 export const POCKET_PAID_LABELS: Record<PocketPaidWith, string> = {
-  cash: "Cash",
+  card: "Credit card",
   points: "Points",
   credit: "Hotel credit",
-  tbd: "TBD",
 };
+
+// One row of the managed "Booked thru / Brand" list.
+export type TravelBrand = { id: string; name: string };
 
 // Cards available to book against, in the stay form's dropdown.
 export type TravelCard = {
@@ -56,10 +61,30 @@ export function savedCents(stay: TravelStay): number {
   return stay.hotelCostCents - stay.pocketCostCents;
 }
 
-// Cash value of the points spent on a stay, using the rate recorded with it.
+/**
+ * Dollars-per-point on a stay, in micros.
+ *
+ * The sheet's column E was a formula — hotel cost ÷ points — and a few rows
+ * never got it filled in. Rather than showing a dash and dropping those points
+ * out of every total, the same division is done here when the rate is missing
+ * but both halves of it are present. A stay that cost points but has no hotel
+ * cost still has nothing to divide, so it stays blank.
+ */
+export function effectivePointsValueMicros(stay: TravelStay): number | null {
+  if (stay.pointsValueMicros) return stay.pointsValueMicros;
+  if (stay.pointsCost > 0 && stay.hotelCostCents > 0) {
+    // cents / points = dollars-per-point ÷ 100 → ×10,000 gives micros.
+    return Math.round((stay.hotelCostCents / stay.pointsCost) * 10_000);
+  }
+  return null;
+}
+
+// Cash value of the points spent on a stay, using the rate recorded with it —
+// or the one implied by what the room would have cost.
 export function pointsValueCents(stay: TravelStay): number {
-  if (!stay.pointsCost || !stay.pointsValueMicros) return 0;
-  return Math.round((stay.pointsCost * stay.pointsValueMicros) / 10_000);
+  const micros = effectivePointsValueMicros(stay);
+  if (!stay.pointsCost || !micros) return 0;
+  return Math.round((stay.pointsCost * micros) / 10_000);
 }
 
 export function stayYear(stay: TravelStay): string {

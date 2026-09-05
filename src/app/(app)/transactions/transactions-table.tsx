@@ -233,6 +233,9 @@ export function TransactionsTable({
   const outflowTotal = filtered
     .filter((t) => t.kind !== "income" && !t.movementType)
     .reduce((sum, t) => sum + t.amountCents, 0);
+  // Received minus spent for the rows in view. Early in the month, before a
+  // payday lands, that is legitimately negative — so it's labelled "Net", not
+  // "Income left", which read as though income had been overspent.
   const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
 
   // The desktop table scrolls inside its own box (see the frozen header
@@ -507,13 +510,13 @@ export function TransactionsTable({
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
             <span className="whitespace-nowrap text-xs text-muted">
-              <span className="font-bold text-foreground">Income Received</span>{" "}
+              <span className="font-bold text-foreground">Received</span>{" "}
               <span className="tabular-nums font-semibold text-positive">{formatMoney(incomeTotal, currency)}</span>
               <span className="mx-1.5">–</span>
-              <span className="font-bold text-foreground">Spent Income</span>{" "}
+              <span className="font-bold text-foreground">Spent</span>{" "}
               <span className="tabular-nums font-semibold text-negative">{formatMoney(outflowTotal, currency)}</span>
               <span className="mx-1.5">–</span>
-              <span className="font-bold text-foreground">Income Left</span>{" "}
+              <span className="font-bold text-foreground">Net</span>{" "}
               <span className={`tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>
                 {formatMoney(incomeLeft, currency)}
               </span>
@@ -542,7 +545,7 @@ export function TransactionsTable({
         <div className="-mx-4 flex items-center justify-between gap-2 bg-positive/5 px-4 py-2 text-[11px] shadow-sm ring-1 ring-black/5 sm:hidden dark:bg-positive/10 dark:ring-white/10">
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Received:</span>{" "}<span className="tabular-nums text-positive font-semibold">{formatMoney(incomeTotal, currency)}</span></span>
           <span className="whitespace-nowrap"><span className="font-bold text-foreground">Spent:</span>{" "}<span className="tabular-nums text-negative font-semibold">{formatMoney(outflowTotal, currency)}</span></span>
-          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Left:</span>{" "}<span className={`font-semibold tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeLeft, currency)}</span></span>
+          <span className="whitespace-nowrap"><span className="font-bold text-foreground">Net:</span>{" "}<span className={`font-semibold tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>{formatMoney(incomeLeft, currency)}</span></span>
         </div>
       )}
 
@@ -575,7 +578,7 @@ export function TransactionsTable({
                 }
               >
                 Date
-                <span className="text-[9px] leading-none">
+                <span className="text-[10px] leading-none">
                   {dateSort === "desc" ? "▼" : "▲"}
                 </span>
               </button>
@@ -827,8 +830,7 @@ function TxLine({
             type="checkbox"
             checked={selected}
             onChange={onSelect}
-            title="Select this transaction"
-            aria-label="Select transaction"
+            aria-label="Select this transaction"
             className="h-4 w-4 rounded accent-[var(--brand)]"
           />
         ) : (
@@ -837,7 +839,6 @@ function TxLine({
             checked={tx.cleared}
             disabled={clearPending}
             onChange={(e) => onToggle(e.target.checked)}
-            title="Cleared — verified against your bank / card app"
             aria-label="Cleared"
             className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
           />
@@ -921,7 +922,6 @@ function TxLine({
         <button
           type="submit"
           disabled={delPending}
-          title="Delete transaction"
           aria-label="Delete transaction"
           className="flex h-5 w-5 items-center justify-center rounded-full text-muted opacity-0 transition hover:bg-negative/10 hover:text-negative group-hover:opacity-100 disabled:opacity-40"
         >

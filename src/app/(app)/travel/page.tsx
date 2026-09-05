@@ -1,18 +1,18 @@
 import { getSessionContext } from "@/lib/auth-context";
 import { throwIfAny } from "@/lib/supabase-result";
 import { TravelBoard } from "./travel-board";
-import type { PocketPaidWith, TravelCard, TravelStay } from "./types";
+import type { PocketPaidWith, TravelBrand, TravelCard, TravelStay } from "./types";
 
 export const metadata = { title: "Travel Log · Capitall" };
 
 export default async function TravelPage() {
   const { supabase, household } = await getSessionContext();
 
-  const [stays, accounts, cardDetails] = await Promise.all([
+  const [stays, accounts, cardDetails, brands] = await Promise.all([
     supabase
       .from("travel_stays")
       .select(
-        "id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, reward_activity_id",
+        "id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, cancelled_at, reward_activity_id",
       )
       .eq("household_id", household.id)
       .order("check_in", { ascending: false }),
@@ -26,11 +26,17 @@ export default async function TravelPage() {
       .from("credit_card_details")
       .select("account_id, current_points, points_value_micros, free_night_credit_cents, free_night_points_limit")
       .eq("household_id", household.id),
+    supabase
+      .from("travel_brands")
+      .select("id, name")
+      .eq("household_id", household.id)
+      .order("name"),
   ]);
   throwIfAny({
     travel_stays: stays.error,
     accounts: accounts.error,
     credit_card_details: cardDetails.error,
+    travel_brands: brands.error,
   });
 
   const detailByAccount = new Map(
@@ -71,12 +77,19 @@ export default async function TravelPage() {
     hotelCreditCents: s.hotel_credit_cents ?? 0,
     hotelCostCents: s.hotel_cost_cents ?? 0,
     pocketCostCents: s.pocket_cost_cents ?? 0,
-    pocketPaidWith: (s.pocket_paid_with ?? "cash") as PocketPaidWith,
+    pocketPaidWith: (s.pocket_paid_with ?? "card") as PocketPaidWith,
     remarks: s.remarks ?? null,
+    cancelledAt: s.cancelled_at ?? null,
     rewardActivityId: s.reward_activity_id ?? null,
   }));
 
   return (
-    <TravelBoard stays={rows} cards={cards} currency={household.currency ?? "$"} />
+    <TravelBoard
+      today={new Date().toISOString().slice(0, 10)}
+      stays={rows}
+      cards={cards}
+      brands={(brands.data ?? []) as TravelBrand[]}
+      currency={household.currency ?? "$"}
+    />
   );
 }

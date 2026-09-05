@@ -34,6 +34,12 @@ type Row = {
   paidThisMonthCents: number;
   interestPaidCents: number;
   escrowCents: number;
+  termMonths: number | null;
+  // A month of interest at this rate, and the level payment that would clear
+  // the balance over the loan's term (escrow included). Both null-safe: a
+  // credit card has no term, so it only ever shows the interest floor.
+  interestOnlyCents: number;
+  requiredPaymentCents: number | null;
   apr: number;
   promoEndsOn: string | null;
   postPromoApr: number | null;
@@ -274,7 +280,7 @@ function DebtCard({ row, color, selected, focus, payoff, months, currency, onCli
   return (
     <button type="button" onClick={onClick} aria-pressed={selected} className={`w-[184px] shrink-0 overflow-hidden rounded-2xl border-2 text-left shadow-sm transition ${selected || focus ? "border-brand" : "border-transparent ring-1 ring-black/5 dark:ring-white/10"}`}>
       <div className={`px-3 py-2 ${color}`}>
-        <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wide text-foreground/70">
+        <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-foreground/70">
           <span>{row.accountKind === "credit_card" ? "Credit card" : humanizeDebtKind(row.debtKind)}</span>
           {focus ? <span className="rounded-full bg-brand px-1.5 py-0.5 text-white">Focus</span> : null}
         </div>
@@ -282,7 +288,22 @@ function DebtCard({ row, color, selected, focus, payoff, months, currency, onCli
       </div>
       <div className="bg-surface px-3 py-3">
         <p className={`text-lg font-bold ${paid ? "text-positive" : ""}`}>{paid ? "Paid off" : payoff ? monthLabel(payoff) : "Beyond projection"}</p>
-        {!paid ? <p className="text-[10px] text-muted">{months.length ? `${months.length} months remaining` : "Increase the payment"}</p> : null}
+        {!paid ? (
+          <p className="text-[10px] text-muted">
+            {months.length ? `${months.length} months remaining` : "Increase the payment"}
+          </p>
+        ) : null}
+        {/* A payment that never clears the balance is not a projection
+            problem, it's a number problem — so say which number. */}
+        {!paid && !payoff ? (
+          <p className="mt-1 text-[10px] font-semibold text-negative">
+            {row.requiredPaymentCents
+              ? `Needs ${formatMoney(row.requiredPaymentCents, currency)}/mo${
+                  row.termMonths ? ` for ${row.termMonths} mo` : ""
+                }`
+              : `Interest alone is ${formatMoney(row.interestOnlyCents, currency)}/mo`}
+          </p>
+        ) : null}
         <div className="mt-2 space-y-1 border-t border-line pt-2">
           <CardRow label="Balance" value={formatMoney(row.balanceCents, currency)} />
           <CardRow label="Paid so far" value={formatMoney(row.paidCents, currency)} />

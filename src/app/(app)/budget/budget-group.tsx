@@ -309,7 +309,7 @@ export function BudgetGroup({
           ) : (
             <>
               {/* Mobile column label — actual noun follows the kind (Spent/Saved/Received/Paid) */}
-              <div className="flex items-center justify-end px-3 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:hidden">
+              <div className="flex items-center justify-end px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">
                 Planned / {ACTUAL_LABEL[group.kind]} &middot; Left
               </div>
 

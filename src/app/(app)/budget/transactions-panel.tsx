@@ -357,7 +357,6 @@ function TxRow({
             <button
               type="submit"
               disabled={pending}
-              title="Delete transaction"
               aria-label="Delete transaction"
               className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative disabled:opacity-40"
             >

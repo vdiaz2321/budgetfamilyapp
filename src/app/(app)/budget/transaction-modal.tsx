@@ -1367,7 +1367,7 @@ function PayeeField({
                 {!isLineItem ? (
                   <button
                     type="button"
-                    title="Remove suggestion"
+                    aria-label="Remove suggestion"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       setDeletedIds((s) => new Set([...s, entry.id]));

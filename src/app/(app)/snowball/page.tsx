@@ -1,5 +1,5 @@
 import { currentMonthFirst } from "@/lib/snapshots";
-import { projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, monthsBetweenKeys } from "@/lib/snowball";
+import { projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, monthsBetweenKeys, amortizingPayment, monthlyInterestCents } from "@/lib/snowball";
 import { TransactionsPanel } from "../budget/transactions-panel";
 import type { AccountOption, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
@@ -30,7 +30,7 @@ export default async function SnowballPage() {
     await Promise.all([
       supabase
         .from("debts")
-        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, post_promo_apr, promo_apr_ends_on, due_day, debt_kind, paid_off_at")
+        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, post_promo_apr, promo_apr_ends_on, due_day, debt_kind, paid_off_at, term_months")
         .eq("household_id", household.id)
         .eq("tracking_enabled", true),
       supabase
@@ -206,6 +206,7 @@ export default async function SnowballPage() {
       paidThisMonthCents: paidThisMonthBySub.get(d.subcategory_id) ?? 0,
       interestPaidCents: d.interest_paid_cents ?? 0,
       escrowCents: d.escrow_cents ?? 0,
+      termMonths: (d.term_months as number | null) ?? null,
       apr: Number(d.apr),
       promoEndsOn: (d.promo_apr_ends_on as string | null) ?? null,
       postPromoApr: d.post_promo_apr == null ? null : Number(d.post_promo_apr),
@@ -409,6 +410,17 @@ export default async function SnowballPage() {
           paidThisMonthCents: r.paidThisMonthCents,
           interestPaidCents: r.interestPaidCents,
           escrowCents: r.escrowCents,
+          termMonths: r.termMonths,
+          // What this debt actually needs each month. `interestOnly` is the
+          // floor a payment has to beat before the balance moves at all;
+          // `required` is the level payment that clears it over its term, which
+          // is the number a lender quotes. Escrow is added back so the figure
+          // matches what leaves the account.
+          interestOnlyCents: monthlyInterestCents(r.balanceCents, r.apr),
+          requiredPaymentCents: (() => {
+            const pi = amortizingPayment(r.balanceCents, r.apr, r.termMonths);
+            return pi == null ? null : pi + r.escrowCents;
+          })(),
           apr: r.apr,
           promoEndsOn: r.promoEndsOn,
           postPromoApr: r.postPromoApr,

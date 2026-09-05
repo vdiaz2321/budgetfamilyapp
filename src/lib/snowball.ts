@@ -63,6 +63,34 @@ export function paymentToClearByPromoEnd(
   return Math.ceil(balanceCents / months);
 }
 
+/**
+ * What one month of interest costs at this rate — the floor a payment has to
+ * clear before a single cent touches the balance.
+ */
+export function monthlyInterestCents(balanceCents: number, annualRatePct: number): number {
+  if (balanceCents <= 0 || annualRatePct <= 0) return 0;
+  return Math.round((balanceCents * (annualRatePct / 100)) / 12);
+}
+
+/**
+ * The level payment that clears `balanceCents` in exactly `termMonths` at
+ * `annualRatePct` — the standard amortisation formula, and the number a lender
+ * quotes. Principal and interest only; escrow is the caller's to add back.
+ *
+ * Returns null when there's no term to amortise over.
+ */
+export function amortizingPayment(
+  balanceCents: number,
+  annualRatePct: number,
+  termMonths: number | null,
+): number | null {
+  if (balanceCents <= 0 || !termMonths || termMonths <= 0) return null;
+  const r = annualRatePct / 100 / 12;
+  if (r <= 0) return Math.ceil(balanceCents / termMonths);
+  const factor = Math.pow(1 + r, termMonths);
+  return Math.ceil((balanceCents * r * factor) / (factor - 1));
+}
+
 export type MonthlyEntry = {
   month: string; // YYYY-MM-01
   paymentCents: number;

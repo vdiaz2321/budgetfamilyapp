@@ -5,6 +5,8 @@ import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money"
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setAccountSnapshot, setBucketSnapshot, upsertNetworthYear } from "./actions";
 import { reorderAccounts, reorderBuckets } from "../accounts/actions";
+import { FiSection, type FiMeasured, type FiPlan } from "./fi-section";
+import { ProjectionSection, type ProjectionYear } from "./projection-section";
 
 export type MonthPoint = {
   month: string; // YYYY-MM-01
@@ -142,14 +144,37 @@ type Props = {
   // First day of the current month, computed on the server. Cells from this
   // month forward are read-only in the grid — they're fed by the Accounts page.
   lockedFromMonth: string;
+  // Where the net worth line is heading, and what it has to reach.
+  fiPlan: FiPlan;
+  fiMeasured: FiMeasured;
+  thisYear: number;
+  projectionYears: ProjectionYear[];
 };
 
-export function NetworthBoard({ points, gridMonths, gridRows, currency, lockedFromMonth }: Props) {
+export function NetworthBoard({
+  points,
+  gridMonths,
+  gridRows,
+  currency,
+  lockedFromMonth,
+  fiPlan,
+  fiMeasured,
+  thisYear,
+  projectionYears,
+}: Props) {
   // One year selection shared by both the summary block and the monthly table.
   const years = [...new Set(points.map((p) => p.month.slice(0, 4)))].sort((a, b) =>
     b.localeCompare(a),
   );
   const [year, setYear] = useState<string>(years[0] ?? "");
+
+  // The projection as a chart series: each year closes in its December, which
+  // is where the plan line meets the month scale the record is drawn on.
+  const planPoints: PlanPoint[] = projectionYears.map((p) => ({
+    month: `${p.year}-12-01`,
+    net: p.eoyCents,
+  }));
+  const [showPlan, setShowPlan] = useState(false);
 
   // Chart open state lifted here so selecting an account can auto-open it.
   const [chartState, setChartState] = useSessionCollapse("networth-chart-open", () => ({ open: true }));
@@ -177,12 +202,16 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency, lockedFr
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
-      <div>
-        <h1 className="text-lg font-bold sm:text-xl">Net Worth</h1>
-        <p className="text-sm text-muted">
-          Assets minus debts, archived monthly from your Accounts and Budget debt balances.
-        </p>
-      </div>
+      <h1 className="text-lg font-bold sm:text-xl">Net Worth</h1>
+
+      {/* Where the line is heading. It sits above the history because the
+          history is the evidence for it, not the other way round. */}
+      <FiSection plan={fiPlan} measured={fiMeasured} currency={currency} thisYear={thisYear} />
+
+      {/* The household's own year-by-year plan, and how the record compares. */}
+      {projectionYears.length > 0 ? (
+        <ProjectionSection years={projectionYears} currency={currency} thisYear={thisYear} />
+      ) : null}
 
       {/* The chart pins to the top of the viewport while you scroll Monthly
           balances, then releases as Net Worth Over Time arrives — sticky
@@ -208,6 +237,9 @@ export function NetworthBoard({ points, gridMonths, gridRows, currency, lockedFr
           onRemoveRow={(row) =>
             setSelectedRows((prev) => prev.filter((r) => gridRowKey(r) !== gridRowKey(row)))
           }
+          plan={planPoints}
+          showPlan={showPlan}
+          onTogglePlan={() => setShowPlan((v) => !v)}
         />
       </div>
 
@@ -270,6 +302,9 @@ function ChartSection({
   onRemoveRow,
   compare,
   onToggleCompare,
+  plan,
+  showPlan,
+  onTogglePlan,
 }: {
   points: MonthPoint[];
   currency: string;
@@ -281,6 +316,9 @@ function ChartSection({
   onRemoveRow: (row: GridRow) => void;
   compare: boolean;
   onToggleCompare: () => void;
+  plan: PlanPoint[];
+  showPlan: boolean;
+  onTogglePlan: () => void;
 }) {
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -301,6 +339,20 @@ function ChartSection({
           </svg>
           <h2 className="text-sm font-semibold sm:text-base">Net Worth Graph Breakdown</h2>
         </button>
+        {plan.length > 0 ? (
+          <button
+            type="button"
+            onClick={onTogglePlan}
+            aria-pressed={showPlan}
+            className={`mr-2 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+              showPlan
+                ? "bg-positive text-white"
+                : "bg-black/5 text-muted hover:text-foreground dark:bg-white/10"
+            }`}
+          >
+            Plan
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onToggleCompare}
@@ -352,16 +404,30 @@ function ChartSection({
         ) : selectedRows.length > 0 ? (
           <AccountChart rows={selectedRows} months={gridMonths} currency={currency} colors={CHART_COLORS} />
         ) : (
-          <NetworthChart points={points} currency={currency} />
+          <NetworthChart points={points} currency={currency} plan={showPlan ? plan : []} />
         )
       ) : null}
     </section>
   );
 }
 
+/** One year of the projection, pinned to the month it closes in. */
+export type PlanPoint = { month: string; net: number };
+
 // Single-series line: 2px brand line, 10% area wash, end dot with surface
 // ring, hairline gridlines, crosshair + tooltip snapping to nearest month.
-function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: string }) {
+// With a plan supplied it becomes two series — the record, and the intention.
+function NetworthChart({
+  points,
+  currency,
+  plan = [],
+}: {
+  points: MonthPoint[];
+  currency: string;
+  // The year-by-year projection, each year's close pinned to its December.
+  // Empty unless the reader asks for it.
+  plan?: PlanPoint[];
+}) {
   const [hover, setHover] = useState<number | null>(null);
 
   const W = 640;
@@ -370,14 +436,45 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
   const iw = W - M.l - M.r;
   const ih = H - M.t - M.b;
 
+  // Both series share one month scale, so a plan year lands above the month it
+  // describes rather than at the same index as an unrelated actual.
+  const monthNo = (m: string) => {
+    const [yy, mm] = m.split("-").map(Number);
+    return yy * 12 + (mm - 1);
+  };
+  const firstNo = monthNo(points[0]?.month ?? "2018-01-01");
+  const lastActualNo = monthNo(points.at(-1)?.month ?? "2018-01-01");
+  const lastNo = plan.length > 0 ? Math.max(lastActualNo, monthNo(plan.at(-1)!.month)) : lastActualNo;
+  const span = Math.max(1, lastNo - firstNo);
+
   const nets = points.map((p) => p.net);
-  const ticks = makeTicks(Math.min(0, ...nets), Math.max(0, ...nets));
+  const planNets = plan.map((p) => p.net);
+  const ticks = makeTicks(
+    Math.min(0, ...nets, ...planNets),
+    Math.max(0, ...nets, ...planNets),
+  );
   const yMin = ticks[0];
   const yMax = ticks[ticks.length - 1];
 
+  const xAt = (month: string) => M.l + ((monthNo(month) - firstNo) / span) * iw;
   const x = (i: number) =>
-    M.l + (points.length === 1 ? iw / 2 : (i / (points.length - 1)) * iw);
+    points.length === 1 ? M.l + iw / 2 : xAt(points[i].month);
   const y = (v: number) => M.t + ih - ((v - yMin) / (yMax - yMin)) * ih;
+
+  // The plan line is drawn across every year it covers — the gap over the years
+  // already lived is the whole point of showing it.
+  // Six-ish year marks across whatever span is on screen.
+  const firstYear = Number((points[0]?.month ?? "2018-01-01").slice(0, 4));
+  const lastYear = Number((plan.at(-1)?.month ?? points.at(-1)?.month ?? "2018-01-01").slice(0, 4));
+  const yearStep = Math.max(1, Math.ceil((lastYear - firstYear) / 6));
+  const axisYears: number[] = [];
+  for (let yr = firstYear; yr <= lastYear; yr += yearStep) axisYears.push(yr);
+  if (axisYears.at(-1) !== lastYear) axisYears.push(lastYear);
+
+  const planPath =
+    plan.length > 1
+      ? plan.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(p.month)},${y(p.net)}`).join(" ")
+      : null;
 
   const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(p.net)}`).join(" ");
   const areaPath =
@@ -389,9 +486,18 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * W;
-    const rel = (px - M.l) / (points.length === 1 ? 1 : iw);
-    const idx = Math.round(rel * (points.length - 1));
-    setHover(Math.max(0, Math.min(points.length - 1, points.length === 1 ? 0 : idx)));
+    // Nearest actual point by x distance: with the plan drawn, the months are
+    // no longer evenly spaced across the full width.
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = Math.abs(x(i) - px);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    setHover(best);
   };
 
   const hovered = hover != null ? points[hover] : null;
@@ -445,6 +551,31 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
         ) : null}
 
         {areaPath ? <path d={areaPath} fill="url(#nw-fill)" /> : null}
+
+        {/* The plan, dashed and behind the record: where the line was meant to
+            go, so the distance from it is the story. */}
+        {planPath ? (
+          <path
+            d={planPath}
+            fill="none"
+            stroke="var(--positive)"
+            strokeWidth="1.75"
+            strokeDasharray="5 4"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            opacity="0.85"
+          />
+        ) : null}
+
+        {/* Where the record ends and the plan takes over. */}
+        {plan.length > 0 && points.length > 1 ? (
+          <line
+            x1={x(points.length - 1)} x2={x(points.length - 1)}
+            y1={M.t} y2={M.t + ih}
+            stroke="var(--muted)" strokeWidth="1" strokeDasharray="2 3" opacity="0.5"
+          />
+        ) : null}
+
         {points.length > 1 ? (
           <path
             d={linePath}
@@ -472,19 +603,36 @@ function NetworthChart({ points, currency }: { points: MonthPoint[]; currency: s
           />
         ) : null}
 
-        {points.map((p, i) =>
-          showXLabel(i) ? (
-            <text
-              key={p.month}
-              x={x(i)} y={H - 8}
-              textAnchor={i === lastIdx ? "end" : i === 0 ? "start" : "middle"}
-              fontSize="9"
-              fill="var(--muted)"
-            >
-              {monthLabel(p.month)}
-            </text>
-          ) : null,
-        )}
+        {/* With the plan drawn the record occupies only the first third of the
+            width, so month labels bunch up against each other. Across a
+            multi-decade span the axis wants years, evenly spaced over the whole
+            domain, not one label per data point. */}
+        {plan.length > 0
+          ? axisYears.map((yr, i) => (
+              <text
+                key={yr}
+                x={xAt(`${yr}-01-01`)}
+                y={H - 8}
+                textAnchor={i === 0 ? "start" : i === axisYears.length - 1 ? "end" : "middle"}
+                fontSize="9"
+                fill="var(--muted)"
+              >
+                {yr}
+              </text>
+            ))
+          : points.map((p, i) =>
+              showXLabel(i) ? (
+                <text
+                  key={p.month}
+                  x={x(i)} y={H - 8}
+                  textAnchor={i === lastIdx ? "end" : i === 0 ? "start" : "middle"}
+                  fontSize="9"
+                  fill="var(--muted)"
+                >
+                  {monthLabel(p.month)}
+                </text>
+              ) : null,
+            )}
       </svg>
 
       {hovered != null && hover != null ? (
@@ -1330,7 +1478,7 @@ function BalanceGrid({
                                   <>
                                     {r.name}
                                     {r.linked ? (
-                                      <span className="ml-1.5 rounded bg-brand-soft px-1 py-0.5 text-[9px] font-semibold uppercase text-brand">
+                                      <span className="ml-1.5 rounded bg-brand-soft px-1 py-0.5 text-[10px] font-semibold uppercase text-brand">
                                         linked
                                       </span>
                                     ) : null}
@@ -1737,7 +1885,7 @@ function MonthlyAnalytics({
               <th className="px-1.5 pt-1.5 text-center" rowSpan={2}>Actual NW</th>
               <th className="px-1.5 pt-1.5 text-center" rowSpan={2}>Debt Ratio</th>
             </tr>
-            <tr className="border-b border-line text-[9px] font-medium uppercase tracking-wide text-muted">
+            <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
               {METRICS.map((m) => (
                 <Fragment key={m.key}>
                   <th className="border-l border-line px-1.5 pb-1.5 text-center">Current</th>

@@ -881,7 +881,7 @@ function RowActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
         type="button"
         disabled={pending}
         onClick={() => start(onDelete)}
-        title="Delete"
+        aria-label="Delete"
         className="rounded-md p-1 text-negative hover:bg-negative/10 disabled:opacity-60"
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>

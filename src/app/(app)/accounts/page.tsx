@@ -3,6 +3,7 @@ import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } fr
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
+import { suggestPointsValues } from "@/lib/points-value";
 import { throwIfAny } from "@/lib/supabase-result";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
@@ -37,6 +38,7 @@ export default async function AccountsPage() {
     { data: bktSnapshotRows, error: bktSnapshotRowsError },
     { data: debtSnapshotRows, error: debtSnapshotRowsError },
     { data: cardPaymentRows, error: cardPaymentRowsError },
+    { data: stayRows, error: staysError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -100,8 +102,15 @@ export default async function AccountsPage() {
       .eq("household_id", household.id)
       .not("paid_to_account_id", "is", null)
       .order("occurred_on", { ascending: false }),
+    // What the points actually redeemed at, so a card's valuation can be
+    // measured instead of guessed. Cancelled stays never happened.
+    supabase
+      .from("travel_stays")
+      .select("account_id, brand, points_cost, points_value_micros, hotel_cost_cents")
+      .eq("household_id", household.id)
+      .is("cancelled_at", null),
   ]);
-  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError, cardPaymentRows: cardPaymentRowsError });
+  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError, cardPaymentRows: cardPaymentRowsError, travelStays: staysError });
 
   // Keep the Accounts page usable before the user applies the new SQL in
   // Supabase. The existing rewards columns remain fully supported.
@@ -334,9 +343,35 @@ export default async function AccountsPage() {
       memo: t.memo ?? null,
     }));
 
+  // What each card's points have really been worth, measured off the Travel
+  // Log. Cards with no evidence get no suggestion.
+  const pointsSuggestions = suggestPointsValues(
+    accounts
+      .filter((a) => a.kind === "credit_card" && a.cardDetails)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        currentPoints: a.cardDetails?.currentPoints ?? 0,
+        pointsValueMicros: a.cardDetails?.pointsValueMicros ?? null,
+      })),
+    (stayRows ?? []).map((s) => ({
+      accountId: s.account_id ?? null,
+      brand: s.brand ?? null,
+      pointsCost: s.points_cost ?? 0,
+      // Same fallback the Travel Log shows: when the rate wasn't typed in,
+      // the room's cash rate divided by the points is the rate.
+      pointsValueMicros:
+        s.points_value_micros ??
+        ((s.points_cost ?? 0) > 0 && (s.hotel_cost_cents ?? 0) > 0
+          ? Math.round(((s.hotel_cost_cents as number) / (s.points_cost as number)) * 10_000)
+          : null),
+    })),
+  );
+
   return (
     <AccountsBoard
       accounts={accounts}
+      pointsSuggestions={pointsSuggestions}
       budgetDebts={budgetDebts}
       currency={household.currency}
       nonCardAccounts={nonCardAccounts}

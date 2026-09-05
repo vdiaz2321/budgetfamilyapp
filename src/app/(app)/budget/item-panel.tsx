@@ -455,7 +455,6 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
       <button
         type="button"
         onClick={() => setEditing(true)}
-        title="Click to rename"
         className="min-w-0 flex-1 truncate rounded px-1 -mx-1 text-left text-lg font-bold text-white hover:bg-white/10"
       >
         {name}
@@ -714,7 +713,7 @@ function TxRow({
         type="button"
         onClick={() => onEdit(t)}
         className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left text-xs"
-        title="Edit transaction"
+        aria-label="Edit transaction"
       >
         <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
         <span className="min-w-0 flex-1 truncate">
@@ -727,7 +726,7 @@ function TxRow({
       </button>
       <button
         type="button"
-        title="Delete transaction"
+        aria-label="Delete transaction"
         disabled={delPending}
         onClick={() => {
           const fd = new FormData();
@@ -1115,7 +1114,6 @@ function DebtForm({
           name="promoAprEndsOn"
           type="date"
           defaultValue={d.promoAprEndsOn ?? ""}
-          title="If you signed up for an intro 0% offer, set when it ends so you know before real interest kicks in."
         />
         {accountOptions.length > 0 ? (
           <label className="block">
@@ -1236,7 +1234,6 @@ function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: R
             type="date"
             value={targetDate}
             onChange={(e) => { setTargetDate(e.target.value); recompute(goal, savingsStart, e.target.value); }}
-            title="Set this to see whether your Monthly amount is on pace to hit the Goal by then."
           />
           <Labeled label="Start" name="start" type="number" step="0.01" value={savingsStart}
             onChange={(e) => { setSavingsStart(e.target.value); recompute(goal, e.target.value, targetDate); }} />

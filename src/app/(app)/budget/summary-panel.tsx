@@ -134,7 +134,6 @@ export function SummaryPanel({ groups, currency }: Props) {
         <button
           type="button"
           onClick={() => setMode((m) => (m === "spent" ? "remaining" : "spent"))}
-          title="Switch Spent / Remaining"
           className="flex items-center gap-0.5 text-xs text-muted hover:text-foreground"
         >
           {modeLabel} by category

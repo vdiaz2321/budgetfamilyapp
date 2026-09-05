@@ -198,7 +198,7 @@ export function SubscriptionsSummaryCard({
                   <SummaryMetric label="Total Combined Annual" value={formatMoney(annualizedTotal, currency)} />
                 </div>
               )}
-              <div className={`grid items-center gap-3 border-b border-line px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted ${ROW_COLS}`}>
+              <div className={`grid items-center gap-3 border-b border-line px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted ${ROW_COLS}`}>
                 <span className="w-3" aria-hidden />
                 <span>Name</span>
                 <span className="text-center">Plan</span>
@@ -324,7 +324,7 @@ export function SubscriptionsSummaryCard({
 function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 px-3 py-2 text-center">
-      <p className="truncate text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
       <p className="mt-0.5 truncate text-sm font-bold tabular-nums text-foreground">{value}</p>
     </div>
   );
@@ -527,7 +527,7 @@ export function IrregularBillsSummaryCard({
             </div>
           ) : (
             <div className="divide-y divide-line">
-              <div className="hidden grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_minmax(0,1.2fr)] items-center gap-3 bg-background/40 px-4 py-1.5 text-[9px] font-semibold uppercase tracking-wide text-muted sm:grid">
+              <div className="hidden grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_minmax(0,1.2fr)] items-center gap-3 bg-background/40 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted sm:grid">
                 <span className="w-3" aria-hidden />
                 <span>Item</span>
                 <span className="text-right">Planned</span>

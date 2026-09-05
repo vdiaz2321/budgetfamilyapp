@@ -4,19 +4,22 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
-import { deleteTravelStay, saveTravelStay } from "./actions";
-import { POCKET_PAID_LABELS, type PocketPaidWith, type TravelCard, type TravelStay } from "./types";
+import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
+import { BrandPicker } from "./brand-picker";
+import type { TravelBrand, TravelCard, TravelStay } from "./types";
 
 const NO_CARD = "";
 
 export function StayModal({
   stay,
   cards,
+  brands,
   currency,
   onClose,
 }: {
   stay: TravelStay | null;
   cards: TravelCard[];
+  brands: TravelBrand[];
   currency: string;
   onClose: () => void;
 }) {
@@ -25,14 +28,18 @@ export function StayModal({
   const [error, setError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState(stay?.accountId ?? NO_CARD);
   const [holder, setHolder] = useState(stay?.holder ?? "");
+  const [brand, setBrand] = useState(stay?.brand ?? "");
   const [points, setPoints] = useState(stay?.pointsCost ? String(stay.pointsCost) : "");
   const [pointsValue, setPointsValue] = useState(
     stay?.pointsValueMicros ? String(stay.pointsValueMicros / 1_000_000) : "",
   );
-  const [hotelCredit, setHotelCredit] = useState(centsToDisplay(stay?.hotelCreditCents ?? 0));
+  // A zero reads as a real number you have to clear before typing, so an
+  // unset amount stays blank and only a saved non-zero value is filled in.
+  const money = (cents: number | undefined) => (cents ? centsToDisplay(cents) : "");
+  const [hotelCredit, setHotelCredit] = useState(money(stay?.hotelCreditCents));
   // Live totals so the saving is visible while typing, not only after saving.
-  const [hotelCost, setHotelCost] = useState(centsToDisplay(stay?.hotelCostCents ?? 0));
-  const [pocketCost, setPocketCost] = useState(centsToDisplay(stay?.pocketCostCents ?? 0));
+  const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
+  const [pocketCost, setPocketCost] = useState(money(stay?.pocketCostCents));
 
   const card = cards.find((c) => c.id === accountId) ?? null;
 
@@ -48,16 +55,22 @@ export function StayModal({
       setPointsValue(String(next.pointsValueMicros / 1_000_000));
     }
   }
-  // The points on an existing stay have already been taken off the card's
-  // balance. Reversing a redemption is not this form's job, so the points and
-  // the card are read-only once saved.
-  const pointsLocked = Boolean(stay?.rewardActivityId);
-  const creditAvailable = card?.freeNightCreditCents ?? 0;
   const pointsTyped = Number(points) || 0;
   const overAllotment =
     card?.freeNightPointsLimit && pointsTyped > card.freeNightPointsLimit
       ? pointsTyped - card.freeNightPointsLimit
       : 0;
+  // What saving will move on the linked card: the difference between what the
+  // stay already draws and what the form now says. Negative = comes off the
+  // card, positive = handed back.
+  const creditTyped = Math.round((Number(hotelCredit.replace(/[$,\s]/g, "")) || 0) * 100);
+  const alreadyDrawn = stay && !stay.cancelledAt && stay.accountId === accountId
+    ? { points: stay.pointsCost, credit: stay.hotelCreditCents }
+    : { points: 0, credit: 0 };
+  const draw = card
+    ? { points: pointsTyped - alreadyDrawn.points, credit: creditTyped - alreadyDrawn.credit }
+    : null;
+
   const saved =
     Math.round((Number(hotelCost.replace(/[$,\s]/g, "")) || 0) * 100) -
     Math.round((Number(pocketCost.replace(/[$,\s]/g, "")) || 0) * 100);
@@ -79,69 +92,53 @@ export function StayModal({
         className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
       >
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
+        {stay?.cancelledAt ? (
+          <p className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
+            Cancelled booking — kept in the archive, left out of every total.
+          </p>
+        ) : null}
 
-        <Field label="Hotel / apartment" className="sm:col-span-2">
+        <Field label="Hotel / Apartment Name">
           <input
             name="propertyName"
             defaultValue={stay?.propertyName ?? ""}
-            placeholder="Hilton Frankfurt Gravenbruch"
             className={inputClass}
           />
         </Field>
-
-        <Field label="Check-in date">
-          <input type="date" name="checkIn" defaultValue={stay?.checkIn ?? ""} className={inputClass} />
+        <Field label="City, State/Country">
+          <input name="city" defaultValue={stay?.city ?? ""} className={inputClass} />
         </Field>
+
         <Field label="Reservation made">
           <input type="date" name="reservedOn" defaultValue={stay?.reservedOn ?? ""} className={inputClass} />
+        </Field>
+        <Field label="Check-in date">
+          <input type="date" name="checkIn" defaultValue={stay?.checkIn ?? ""} className={inputClass} />
         </Field>
 
         <Field label="Nights">
           <input type="number" name="nights" min="1" step="1" defaultValue={stay?.nights ?? 1} className={inputClass} />
         </Field>
-        <Field label="Guests">
-          <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} placeholder="5" className={inputClass} />
+        <Field label="Total pax">
+          <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={inputClass} />
         </Field>
 
-        <Field label="City">
-          <input name="city" defaultValue={stay?.city ?? ""} placeholder="Frankfurt, GM" className={inputClass} />
+        <Field label="Booked thru / Brand">
+          <BrandPicker brands={brands} value={brand} onChange={setBrand} />
         </Field>
-        <Field label="Brand">
-          <input name="brand" defaultValue={stay?.brand ?? ""} placeholder="Hilton" className={inputClass} />
-        </Field>
-
-        <Field label="Booked through">
-          <input name="bookingChannel" defaultValue={stay?.bookingChannel ?? ""} placeholder="Booking.com / direct" className={inputClass} />
-        </Field>
-        <Field label="Card owner">
-          <input
-            name="holder"
-            value={holder}
-            onChange={(e) => setHolder(e.target.value)}
-            placeholder="Vic"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field
-          label="Card used"
-          // What the card has left is spelled out in the strip below, so the
-          // hint only carries the case the strip can't: a frozen redemption.
-          hint={pointsLocked ? "Locked — points already deducted" : undefined}
-        >
+        {/* What the card has left is spelled out in the strip below. */}
+        <Field label="Card used">
           <select
             name="accountId"
             value={accountId}
-            disabled={pointsLocked}
             onChange={(e) => pickCard(e.target.value)}
-            className={`${inputClass} disabled:opacity-60`}
+            className={inputClass}
           >
             <option value={NO_CARD}>Not linked to a card</option>
             {cards.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-          {pointsLocked ? <input type="hidden" name="accountId" value={stay?.accountId ?? ""} /> : null}
           {/* What this card still has to spend, the moment you pick it. */}
           {card ? (
             <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-semibold">
@@ -162,13 +159,18 @@ export function StayModal({
           ) : null}
         </Field>
         <Field label="Card name (if not linked)">
-          <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} placeholder="Sapphire" className={inputClass} />
+          <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} className={inputClass} />
+        </Field>
+        <Field label="Card owner">
+          <input
+            name="holder"
+            value={holder}
+            onChange={(e) => setHolder(e.target.value)}
+            className={inputClass}
+          />
         </Field>
 
-        <Field
-          label="Points cost"
-          hint={pointsLocked ? "Locked after saving" : accountId ? "Comes off this card's balance" : "No card linked — nothing is deducted"}
-        >
+        <Field label="Points cost">
           <input
             type="number"
             name="pointsCost"
@@ -176,9 +178,7 @@ export function StayModal({
             step="1"
             value={points}
             onChange={(e) => setPoints(e.target.value)}
-            disabled={pointsLocked}
-            placeholder="35000"
-            className={`${inputClass} disabled:opacity-60`}
+            className={inputClass}
           />
           {/* Whether the night fits inside the card's yearly certificate. */}
           {overAllotment > 0 ? (
@@ -188,17 +188,16 @@ export function StayModal({
             </span>
           ) : null}
         </Field>
-        <Field label="Value per point" hint="Dollars, e.g. 0.006">
+        <Field label="Value per point">
           <input
             name="pointsValue"
             value={pointsValue}
             onChange={(e) => setPointsValue(e.target.value)}
-            placeholder="0.006"
             className={inputClass}
           />
         </Field>
 
-        <Field label={`Cash rate (${currencySymbol(currency)})`} hint="What the room would have cost">
+        <Field label={`Hotel cost (${currencySymbol(currency)})`}>
           <input
             name="hotelCost"
             value={hotelCost}
@@ -207,7 +206,7 @@ export function StayModal({
             className={inputClass}
           />
         </Field>
-        <Field label={`Out of pocket (${currencySymbol(currency)})`} hint="What actually left the wallet">
+        <Field label={`Pocket cost (${currencySymbol(currency)})`}>
           <input
             name="pocketCost"
             value={pocketCost}
@@ -217,42 +216,18 @@ export function StayModal({
           />
         </Field>
 
-        <Field label="Out of pocket paid with">
-          <select name="pocketPaidWith" defaultValue={stay?.pocketPaidWith ?? "cash"} className={inputClass}>
-            {(Object.keys(POCKET_PAID_LABELS) as PocketPaidWith[]).map((k) => (
-              <option key={k} value={k}>{POCKET_PAID_LABELS[k]}</option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label={`Hotel credit used (${currencySymbol(currency)})`}
-          hint={
-            pointsLocked
-              ? "Locked after saving"
-              : card
-                ? creditAvailable > 0
-                  ? `${formatMoney(creditAvailable, currency)} available — comes off this card`
-                  : "This card has no night credit left"
-                : undefined
-          }
-        >
+        <Field label={`Hotel credit used (${currencySymbol(currency)})`}>
           <input
-            name={pointsLocked ? "hotelCreditLocked" : "hotelCredit"}
+            name="hotelCredit"
             value={hotelCredit}
             onChange={(e) => setHotelCredit(e.target.value)}
-            disabled={pointsLocked}
             inputMode="decimal"
-            className={`${inputClass} disabled:opacity-60`}
+            className={inputClass}
           />
-          {/* Disabled inputs don't post, and the update path writes this column
-              on every save — without this the stored credit would blank out. */}
-          {pointsLocked ? (
-            <input type="hidden" name="hotelCredit" value={centsToDisplay(stay?.hotelCreditCents ?? 0)} />
-          ) : null}
         </Field>
 
         <Field label="Remarks" className="sm:col-span-2">
-          <input name="remarks" defaultValue={stay?.remarks ?? ""} placeholder="5 x pax / breakfast / $200 credit" className={inputClass} />
+          <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
         </Field>
 
         <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
@@ -260,7 +235,26 @@ export function StayModal({
             Saved on this stay{" "}
             <span className="font-bold tabular-nums text-positive">{formatMoney(saved, currency)}</span>
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* A booking that falls through is cancelled, not deleted: it keeps
+                its place in the archive and drops out of every total. */}
+            {stay ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => start(async () => {
+                  const result = await setTravelStayCancelled(stay.id, !stay.cancelledAt);
+                  if (result?.error) setError(result.error);
+                  else {
+                    router.refresh();
+                    onClose();
+                  }
+                })}
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                {stay.cancelledAt ? "Restore booking" : "Cancel booking"}
+              </button>
+            ) : null}
             {stay ? (
               <button
                 type="button"
@@ -290,9 +284,16 @@ export function StayModal({
           </div>
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
-        {stay?.rewardActivityId ? (
+        {draw && (draw.points !== 0 || draw.credit !== 0) ? (
           <p className="sm:col-span-2 text-[11px] text-muted">
-            Deleting this stay leaves the points redemption on the card&apos;s rewards ledger — the points were really spent.
+            Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
+            {[
+              draw.points ? `${Math.abs(draw.points).toLocaleString()} pts` : null,
+              draw.credit ? `${formatMoney(Math.abs(draw.credit), currency)} night credit` : null,
+            ]
+              .filter(Boolean)
+              .join(" and ")}{" "}
+            {draw.points < 0 || draw.credit < 0 ? "to" : "from"} {card?.name} on Accounts.
           </p>
         ) : null}
       </form>
@@ -305,12 +306,10 @@ const inputClass =
 
 function Field({
   label,
-  hint,
   className,
   children,
 }: {
   label: string;
-  hint?: string;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -318,7 +317,6 @@ function Field({
     <label className={`block ${className ?? ""}`}>
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
-      {hint ? <span className="mt-0.5 block text-[10px] text-muted">{hint}</span> : null}
     </label>
   );
 }

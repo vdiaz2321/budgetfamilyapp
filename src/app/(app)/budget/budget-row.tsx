@@ -85,7 +85,7 @@ type Props = {
 
 function DueAccountIndicator({ dueDay, compact = false }: { dueDay: number; compact?: boolean }) {
   return (
-    <span className="shrink-0 whitespace-nowrap rounded-full bg-black/5 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-muted ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+    <span className="shrink-0 whitespace-nowrap rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
       {compact ? `D${dueDay}` : `Due ${dueDay}`} · linked
     </span>
   );
@@ -224,7 +224,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           data-row-click-ignore
-          title="Drag to reorder"
+          aria-label="Drag to reorder"
           className="-ml-1 hidden shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing sm:flex"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
@@ -253,7 +253,6 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         {autoPlanned ?? row.autoPlanned ? (
           <span
             className="px-1 py-0.5 text-right text-xs text-muted tabular-nums"
-            title="Auto-calculated from subscriptions / irregular bills"
           >
             {formatMoney(row.plannedCents, currency)}
           </span>
@@ -487,7 +486,6 @@ function PlannedInput({
           setFocused(false);
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
-        title="Type a value or calculation, for example $1200 + 75 - 30"
         className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}

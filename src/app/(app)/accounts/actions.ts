@@ -1166,3 +1166,36 @@ export async function updateBucketTaxTreatment(formData: FormData) {
   revalidatePath("/invest");
   return { error: null };
 }
+
+// ---- Points valuations measured from the Travel Log.
+//
+// A card's points_value_micros used to be a number typed in once and left to
+// rot; on most cards it was never typed at all, so those points showed as
+// worth $0. This writes the rate the stays actually redeemed at. Nothing else
+// on the card is touched — points balances and credits are the reward ledger's
+// job.
+export async function applyPointsValues(
+  values: Array<{ accountId: string; micros: number }>,
+) {
+  const { supabase, householdId } = await requireHousehold();
+  if (values.length === 0) return { error: null, updated: 0 };
+
+  let updated = 0;
+  for (const { accountId, micros } of values) {
+    if (!accountId || !Number.isFinite(micros) || micros <= 0) continue;
+    const { error } = await supabase
+      .from("credit_card_details")
+      .update({ points_value_micros: Math.round(micros) })
+      .eq("account_id", accountId)
+      .eq("household_id", householdId);
+    if (error) {
+      console.error("[applyPointsValues]", error);
+      return { error: `Couldn't update that card's points value — ${error.message}` };
+    }
+    updated += 1;
+  }
+
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
+  return { error: null, updated };
+}
