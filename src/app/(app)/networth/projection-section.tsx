@@ -5,14 +5,18 @@ import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoney } from "@/lib/money";
-import { fillProjectionForward, saveProjectionYear } from "./actions";
+import {
+  appendProjectionYears,
+  fillProjectionForward,
+  saveProjectionYear,
+  seedProjection,
+} from "./actions";
 
 export type ProjectionYear = {
   year: number;
   age: number | null;
   boyCents: number;
   incomeCents: number;
-  taxesCents: number;
   spendingCents: number;
   growthCents: number;
   eoyCents: number;
@@ -46,14 +50,26 @@ const TOLERANCE = 0.02;
 // progress is exempt — it is legitimately partial, and says so.
 const MIN_MONTHS_FOR_ACTUALS = 6;
 
+/** What a first projection would be built from, all measured from the
+ *  register over the last twelve complete months. */
+export type ProjectionSeed = {
+  boyCents: number;
+  incomeCents: number;
+  spendingCents: number;
+  fromMonth: string;
+  toMonth: string;
+};
+
 export function ProjectionSection({
   years,
   currency,
   thisYear,
+  seed,
 }: {
   years: ProjectionYear[];
   currency: string;
   thisYear: number;
+  seed: ProjectionSeed;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: false }));
@@ -72,7 +88,7 @@ export function ProjectionSection({
   // closes, the actual stands on its own and this disappears.
   const forecastFor = (y: ProjectionYear): number | null => {
     if (y.year !== thisYear || y.actualCents == null) return null;
-    const estSaved = y.incomeCents - y.taxesCents - y.spendingCents;
+    const estSaved = y.incomeCents - y.spendingCents;
     const savedLeft = Math.max(0, estSaved - (y.actualSavedCents ?? 0));
     const gainsLeft = Math.max(0, y.growthCents - (y.actualGainsCents ?? 0));
     return y.actualCents + savedLeft + gainsLeft;
@@ -80,6 +96,20 @@ export function ProjectionSection({
   const forecast = current ? forecastFor(current) : null;
   const gap = current?.actualCents != null ? current.actualCents - current.eoyCents : null;
   const last = years.at(-1) ?? null;
+
+  // Tacks five more years onto the end, carrying the last planned year
+  // forward. No confirm: it only ever adds years that were not there, so
+  // there is nothing to lose by pressing it.
+  function addYears() {
+    start(async () => {
+      const result = await appendProjectionYears(5);
+      if (result?.error) setError(result.error);
+      else {
+        setError(null);
+        router.refresh();
+      }
+    });
+  }
 
   function refill() {
     if (
@@ -97,6 +127,10 @@ export function ProjectionSection({
         router.refresh();
       }
     });
+  }
+
+  if (years.length === 0) {
+    return <ProjectionEmpty seed={seed} currency={currency} thisYear={thisYear} />;
   }
 
   return (
@@ -120,7 +154,7 @@ export function ProjectionSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">Projection vs actual</span>
+          <span className="text-sm font-bold">NW Projections</span>
         </button>
 
         <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -200,13 +234,13 @@ export function ProjectionSection({
                         {formatMoney(y.spendingCents, currency)}
                         <Actual cents={y.actualSpendingCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
-                      {/* The plan's saving for the year — income less taxes and
+                      {/* The plan's saving for the year — income less
                           spending — with what actually reached savings and
                           investments underneath it. */}
                       <td className="px-3 py-2 text-center tabular-nums">
                         <span style={{ color: "var(--viz-savings)" }}>
                           {formatMoney(
-                            y.incomeCents - y.taxesCents - y.spendingCents,
+                            y.incomeCents - y.spendingCents,
                             currency,
                           )}
                         </span>
@@ -279,14 +313,24 @@ export function ProjectionSection({
             <p className="text-[11px] text-muted">
               Actuals come from your recorded net worth history — nothing here edits them.
             </p>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={refill}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
-            >
-              {pending ? "Rebuilding…" : `Rebuild ${thisYear + 1} onward`}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={pending}
+                onClick={addYears}
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
+              >
+                {pending ? "Working…" : `Add 5 years${last ? ` (through ${last.year + 5})` : ""}`}
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={refill}
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
+              >
+                {pending ? "Rebuilding…" : `Rebuild ${thisYear + 1} onward`}
+              </button>
+            </div>
           </div>
           {error ? (
             <p className="px-4 pb-3 text-sm font-medium text-negative sm:px-6">{error}</p>
@@ -338,16 +382,35 @@ function YearModal({
   // happens rather than discovered afterwards.
   const [preview, setPreview] = useState(false);
 
-  // The three fields are one equation — saved = income − taxes − spending — so
-  // whichever one you type into, the others stay true. Victor thinks in
-  // "I plan to put away $50k", so that has to be typeable directly, not only
-  // reachable by working backwards through spending.
+  // How far the estimate turned out to be off, as one number. The per-field
+  // arrows say what moved; this says whether the year as a whole came out
+  // ahead of the plan or behind it, which is the only reason to look.
+  //
+  // It is the change to what the year ADDS to net worth — saved plus gains —
+  // so an income miss cancelled by an equal spending miss correctly reads as
+  // no miss at all.
+  const plannedAddCents = row.incomeCents - row.spendingCents + row.growthCents;
+  const actualAddCents =
+    (measured.income ?? row.incomeCents) -
+    (measured.spending ?? row.spendingCents) +
+    (measured.gains ?? row.growthCents);
+  const missCents = actualAddCents - plannedAddCents;
+
+  // Income and spending are the only two figures stored; what the year saves
+  // is the difference between them and is shown, not typed. It used to be
+  // typeable and back-solved onto spending, which meant the same number could
+  // be reached two ways and neither box said which one it was.
   const [income, setIncome] = useState(centsToDisplay(row.incomeCents));
   const [spending, setSpending] = useState(centsToDisplay(row.spendingCents));
   const [gains, setGains] = useState(centsToDisplay(row.growthCents));
   const incomeCents = displayToCents(income);
   const spendingCents = displayToCents(spending);
-  const savedCents = incomeCents - row.taxesCents - spendingCents;
+  const savedCents = incomeCents - spendingCents;
+  // What Save would land this year on, from what is typed right now — the same
+  // equation the server re-chains with. It read the STORED closing balance
+  // before, so a box labelled "Predicted" answered with the figure you were in
+  // the middle of replacing.
+  const predictedEoyCents = row.boyCents + savedCents + displayToCents(gains);
   const changes = [
     { name: "income", label: "Income", from: row.incomeCents, to: measured.income },
     { name: "spending", label: "Spending", from: row.spendingCents, to: measured.spending },
@@ -380,12 +443,15 @@ function YearModal({
       >
         <input type="hidden" name="year" value={row.year} />
         <input type="hidden" name="boy" value={centsToDisplay(row.boyCents)} />
-        <input type="hidden" name="taxes" value={centsToDisplay(row.taxesCents)} />
 
         <Field label="Age">
           <input name="age" inputMode="numeric" defaultValue={row.age ?? ""} className={inputClass} />
         </Field>
-        <Field label="Opening balance">
+        <Field
+          label="Opening balance"
+          // The earliest year has no year before it to inherit from.
+          hint={isFirst ? "Where the projection starts." : `Closing balance of ${row.year - 1}.`}
+        >
           <input
             value={centsToDisplay(row.boyCents)}
             readOnly={!isFirst}
@@ -412,14 +478,12 @@ function YearModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Saved / invested">
+        <Field label="Saved / invested" hint="Auto-calculated from Income & Spending.">
           <input
-            inputMode="decimal"
             value={centsToDisplay(savedCents)}
-            // Typing a target here moves spending, since income is the fixed
-            // half of the pair most years.
-            onChange={(e) => setSpending(centsToDisplay(incomeCents - row.taxesCents - displayToCents(e.target.value)))}
-            className={inputClass}
+            readOnly
+            disabled
+            className={`${inputClass} opacity-60`}
           />
         </Field>
         <Field label="Est. gains">
@@ -471,7 +535,7 @@ function YearModal({
           <p className={row.actualCents != null ? "sm:text-right" : ""}>
             <span className="text-muted">Predicted EOY net worth: </span>
             <span className="font-semibold text-foreground">
-              {formatMoney(row.eoyCents, currency)}
+              {formatMoney(predictedEoyCents, currency)}
             </span>
           </p>
         </div>
@@ -492,9 +556,25 @@ function YearModal({
                 </li>
               ))}
             </ul>
+            <p className="mt-1.5 border-t border-line pt-1.5 text-xs tabular-nums">
+              <span className="text-muted">
+                {row.inProgress ? `${row.year} so far vs your estimate: ` : "You were off by: "}
+              </span>
+              <span
+                className={`font-semibold ${missCents >= 0 ? "text-positive" : "text-negative"}`}
+              >
+                {missCents >= 0 ? "+" : "−"}
+                {formatMoney(Math.abs(missCents), currency)}
+              </span>
+              <span className="text-muted">
+                {" "}
+                {missCents >= 0 ? "better than planned" : "short of plan"}
+              </span>
+            </p>
             <p className="mt-1 text-[11px] text-muted">
-              Nothing is saved until you press Save year, and every later year is
-              recomputed when you do.
+              {row.inProgress
+                ? `A part-year total will always look short — ${row.year} is not finished. Nothing is saved until you press Save year, and every later year is recomputed when you do.`
+                : "Nothing is saved until you press Save year, and every later year is recomputed when you do."}
             </p>
             <div className="mt-2 flex gap-2">
               <button
@@ -532,10 +612,93 @@ function YearModal({
           >
             {pending ? "Saving…" : "Save year"}
           </button>
+          <p className="w-full text-right text-[11px] text-muted">
+            What you change here carries into {row.year + 1} and every year after.
+          </p>
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
     </ModalShell>
+  );
+}
+
+// Nothing planned yet. This is the only place a projection can be started, so
+// it has to do more than say "no data": it shows the twelve months the register
+// already has and offers to turn them into a first draft.
+function ProjectionEmpty({
+  seed,
+  currency,
+  thisYear,
+}: {
+  seed: ProjectionSeed;
+  currency: string;
+  thisYear: number;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const savedCents = seed.incomeCents - seed.spendingCents;
+
+  return (
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="px-4 py-3 sm:px-6">
+        <p className="text-sm font-bold">NW Projections</p>
+        <p className="mt-1 text-xs text-muted">
+          Where your net worth is heading, year by year, and how each year turns
+          out against the plan. Start it from what you have already recorded —
+          every figure stays editable, and changing a year carries the change
+          forward.
+        </p>
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <SeedTile label="Starting balance" value={formatMoney(seed.boyCents, currency)} sub="net worth today" />
+          <SeedTile label="Income / yr" value={formatMoney(seed.incomeCents, currency)} sub="last 12 months" />
+          <SeedTile label="Spending / yr" value={formatMoney(seed.spendingCents, currency)} sub="last 12 months" />
+          <SeedTile
+            label="Saved / invested"
+            value={formatMoney(savedCents, currency)}
+            sub="income − spending"
+          />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+          <p className="text-[11px] text-muted">
+            Measured from {seed.fromMonth} to {seed.toMonth}. Creates {thisYear}–
+            {thisYear + 24}.
+          </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              start(async () => {
+                setError(null);
+                const result = await seedProjection({
+                  boyCents: seed.boyCents,
+                  incomeCents: seed.incomeCents,
+                  spendingCents: seed.spendingCents,
+                });
+                if (result?.error) setError(result.error);
+                else router.refresh();
+              })
+            }
+            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+          >
+            {pending ? "Starting…" : "Start my projection"}
+          </button>
+        </div>
+        {error ? <p className="mt-2 text-sm font-medium text-negative">{error}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function SeedTile({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-sm font-bold tabular-nums">{value}</p>
+      <p className="text-[10px] text-muted">{sub}</p>
+    </div>
   );
 }
 
@@ -594,13 +757,25 @@ function Recorded({
 const inputClass =
   "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  /** Where the number comes from, when the box does not hold a figure of its
+   *  own. Shown under the input, because a field that is calculated or locked
+   *  has to say so on the screen — not on hover, which mobile never gets. */
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block">
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
         {label}
       </span>
       {children}
+      {hint ? <span className="mt-0.5 block text-[10px] text-muted">{hint}</span> : null}
     </label>
   );
 }

@@ -127,9 +127,16 @@ export type CardDetails = {
   promoAprEndsOn: string | null;
 };
 
+// The three a user can log by hand. Refunds are never typed — they are
+// written by the Travel Log when a stay is edited down, cancelled or deleted.
+export type RewardLogType =
+  | "points_redemption"
+  | "hotel_credit_redemption"
+  | "free_night_booking";
+
 export type RewardActivity = {
   id: string;
-  type: "points_redemption" | "hotel_credit_redemption" | "free_night_booking";
+  type: RewardLogType | "reward_refund";
   occurredOn: string;
   pointsDelta: number;
   hotelCreditDeltaCents: number;
@@ -1772,6 +1779,7 @@ function RewardsActivityLedger({
     points_redemption: "Points used",
     hotel_credit_redemption: "Hotel credit used",
     free_night_booking: "Free night booked",
+    reward_refund: "Returned to card",
   };
   const activeEntries = entries.filter((entry) => !entry.archivedAt);
   const archivedEntries = entries.filter((entry) => entry.archivedAt);
@@ -1824,8 +1832,8 @@ function RewardsActivityLedger({
               <span className="text-muted tabular-nums">{entry.occurredOn}</span>
               <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
               <span className="min-w-0 text-muted">{labels[entry.type]}{entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}{entry.note ? ` · ${entry.note}` : ""}</span>
-              <span className="whitespace-nowrap font-semibold text-negative tabular-nums">
-                {entry.pointsDelta ? `${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
+              <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.type === "reward_refund" ? "text-positive" : "text-negative"}`}>
+                {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
               </span>
               <RewardActivityArchiveButton entry={entry} />
             </li>
@@ -2156,7 +2164,7 @@ function RewardActivityForm({
   onDone: () => void;
 }) {
   const router = useRouter();
-  const [activityType, setActivityType] = useState<RewardActivity["type"]>("points_redemption");
+  const [activityType, setActivityType] = useState<RewardLogType>("points_redemption");
   // Controlled so the allotment line under it can react as you type.
   const [freeNightPoints, setFreeNightPoints] = useState("");
   const [pending, start] = useTransition();
@@ -2167,6 +2175,7 @@ function RewardActivityForm({
     points_redemption: "Points used",
     hotel_credit_redemption: "Hotel credit used",
     free_night_booking: "Free night booked",
+    reward_refund: "Returned to card",
   };
 
   return (
@@ -2195,7 +2204,7 @@ function RewardActivityForm({
         <input type="hidden" name="accountId" value={card.id} />
         <label className="block">
           <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Activity</span>
-          <select name="activityType" value={activityType} onChange={(e) => setActivityType(e.target.value as RewardActivity["type"])} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+          <select name="activityType" value={activityType} onChange={(e) => setActivityType(e.target.value as RewardLogType)} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
             <option value="points_redemption">Points redemption</option>
             <option value="hotel_credit_redemption">Hotel credit used</option>
             <option value="free_night_booking">Free night booked</option>
@@ -2275,7 +2284,7 @@ function RewardActivityForm({
             {card.rewardActivities.slice(0, 5).map((activity) => (
               <li key={activity.id} className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate">{labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
-                <span className="shrink-0 font-semibold text-negative">{activity.pointsDelta ? `${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoney(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
+                <span className={`shrink-0 font-semibold ${activity.type === "reward_refund" ? "text-positive" : "text-negative"}`}>{activity.pointsDelta ? `${activity.pointsDelta > 0 ? "+" : ""}${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoney(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
               </li>
             ))}
           </ul>

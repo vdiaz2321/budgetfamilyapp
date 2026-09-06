@@ -6,7 +6,7 @@ import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { setAccountSnapshot, setBucketSnapshot, upsertNetworthYear } from "./actions";
 import { reorderAccounts, reorderBuckets } from "../accounts/actions";
 import { FiSection, type FiMeasured, type FiPlan } from "./fi-section";
-import { ProjectionSection, type ProjectionYear } from "./projection-section";
+import { ProjectionSection, type ProjectionSeed, type ProjectionYear } from "./projection-section";
 
 export type MonthPoint = {
   month: string; // YYYY-MM-01
@@ -149,6 +149,7 @@ type Props = {
   fiMeasured: FiMeasured;
   thisYear: number;
   projectionYears: ProjectionYear[];
+  projectionSeed: ProjectionSeed;
 };
 
 export function NetworthBoard({
@@ -161,6 +162,7 @@ export function NetworthBoard({
   fiMeasured,
   thisYear,
   projectionYears,
+  projectionSeed,
 }: Props) {
   // One year selection shared by both the summary block and the monthly table.
   const years = [...new Set(points.map((p) => p.month.slice(0, 4)))].sort((a, b) =>
@@ -206,24 +208,30 @@ export function NetworthBoard({
 
       {/* Where the line is heading. It sits above the history because the
           history is the evidence for it, not the other way round. */}
-      <FiSection plan={fiPlan} measured={fiMeasured} currency={currency} thisYear={thisYear} />
+      <FiSection
+        plan={fiPlan}
+        measured={fiMeasured}
+        currency={currency}
+        thisYear={thisYear}
+        projection={projectionYears}
+      />
 
-      {/* The household's own year-by-year plan, and how the record compares. */}
-      {projectionYears.length > 0 ? (
-        <ProjectionSection years={projectionYears} currency={currency} thisYear={thisYear} />
-      ) : null}
+      {/* The household's own year-by-year plan, and how the record compares.
+          Rendered even with no years yet — that empty case is the only place
+          a projection can be started from. */}
+      <ProjectionSection
+        years={projectionYears}
+        currency={currency}
+        thisYear={thisYear}
+        seed={projectionSeed}
+      />
 
-      {/* The chart pins to the top of the viewport while you scroll Monthly
-          balances, then releases as Net Worth Over Time arrives — sticky
-          positioning is scoped to its parent, so the wrapper's last child is
-          what un-pins it. The wrapper deliberately stops before Net Worth
-          Over Time: a pinned card can't help but have the following content
-          pass underneath it, so including that section left its header and
-          top rows hidden behind the chart the whole way down.
-          Desktop only: on a phone the chart is a third of the screen, so
-          pinning it would leave almost nothing to read the tables in. */}
-      <div className="space-y-4 md:relative">
-      <div data-nw-pinned-chart className="md:sticky md:top-0 md:z-30">
+      {/* The chart used to pin to the top of the viewport while you scrolled
+          the tables below it. It scrolls away with everything else now: a card
+          that floats over the page takes a third of the screen with it, and
+          every section that passed underneath had to be read around it. */}
+      <div className="space-y-4">
+      <div>
         <ChartSection
           points={points}
           currency={currency}
@@ -243,7 +251,7 @@ export function NetworthBoard({
         />
       </div>
 
-      {/* Monthly balances by account — the sheet's per-account grid */}
+      {/* Monthly Actual Balances by account — the sheet's per-account grid */}
       {gridRows.length > 0 ? (
         <BalanceGrid
           months={gridMonths}
@@ -1196,15 +1204,10 @@ function BalanceGrid({
     let frame = 0;
     const sync = () => {
       frame = 0;
-      // On desktop the chart card pins to the top of the viewport, so "the top
-      // of the viewport" is really the chart's bottom edge — parking the
-      // header at 0 would hide it underneath. On mobile the chart isn't
-      // pinned, so its bottom is above the viewport and this falls back to 0.
-      const chart = document.querySelector("[data-nw-pinned-chart]");
-      const chartBottom = chart ? chart.getBoundingClientRect().bottom : 0;
-      const anchor = Math.max(0, chartBottom);
+      // Nothing floats above the page any more, so the header parks at the
+      // viewport's own top edge.
       const top = box.getBoundingClientRect().top;
-      box.style.setProperty("--grid-sticky-top", `${Math.max(0, anchor - top)}px`);
+      box.style.setProperty("--grid-sticky-top", `${Math.max(0, -top)}px`);
     };
     const onScroll = () => {
       if (frame) return;
@@ -1237,7 +1240,7 @@ function BalanceGrid({
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
-          <h2 className="text-sm font-semibold sm:text-base">Monthly balances</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Monthly Actual Balances</h2>
         </button>
         {gridYears.length > 0 ? (
           <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />

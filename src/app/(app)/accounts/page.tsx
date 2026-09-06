@@ -1,5 +1,5 @@
 import { currentMonthFirst } from "@/lib/snapshots";
-import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails } from "./accounts-board";
+import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type RewardActivity } from "./accounts-board";
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
@@ -162,7 +162,7 @@ export default async function AccountsPage() {
     const items = rewardActivitiesByAccount.get(activity.account_id) ?? [];
     items.push({
       id: activity.id,
-      type: activity.activity_type as "points_redemption" | "hotel_credit_redemption" | "free_night_booking",
+      type: activity.activity_type as RewardActivity["type"],
       occurredOn: activity.occurred_on,
       pointsDelta: activity.points_delta ?? 0,
       hotelCreditDeltaCents: activity.hotel_credit_delta_cents ?? 0,

@@ -136,7 +136,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, taxes_cents, spending_cents, growth_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -272,7 +272,7 @@ export default async function NetworthPage() {
     };
   });
 
-  // ---- Monthly balances grid (per-account era only) ----
+  // ---- Monthly Actual Balances grid (per-account era only) ----
   // The detailed accounts×months grid only spans months that actually have
   // per-account snapshots. Pre-per-account history shows in the analytics table,
   // not here (there's no account-level detail to show).
@@ -422,6 +422,10 @@ export default async function NetworthPage() {
   const catKind = new Map((catRows ?? []).map((c) => [c.id, c.kind as string]));
   let fiSpendCents = 0;
   let fiContributionCents = 0;
+  // Income over the same twelve months. Needed to seed a first projection —
+  // the grid's equation is saved = income − spending, so it wants the top
+  // line, not just what was left over.
+  let fiIncomeCents = 0;
   // What actually went into savings and investments each calendar year — the
   // Invest/Savings side of the ledger, which is what the projection's
   // "saved / invested" line should be measured against.
@@ -453,6 +457,7 @@ export default async function NetworthPage() {
       if (inFiWindow) fiContributionCents += cents;
       bump(savedByYear, yr, cents);
     } else if (kind === "income") {
+      if (inFiWindow) fiIncomeCents += cents;
       bump(earnedByYear, yr, cents);
     }
   }
@@ -470,7 +475,7 @@ export default async function NetworthPage() {
     }
   }
 
-  // ---- Projection vs actual.
+  // ---- NW Projections.
   //
   // The actual for a year is the last net worth the app recorded in it, taken
   // from the very same series the chart plots — so the table and the line can
@@ -552,7 +557,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, taxes_cents, spending_cents, growth_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -564,7 +569,6 @@ export default async function NetworthPage() {
     age: r.age ?? null,
     boyCents: r.boy_cents ?? 0,
     incomeCents: r.income_cents ?? 0,
-    taxesCents: r.taxes_cents ?? 0,
     spendingCents: r.spending_cents ?? 0,
     growthCents: r.growth_cents ?? 0,
     eoyCents: r.eoy_cents ?? 0,
@@ -605,6 +609,14 @@ export default async function NetworthPage() {
       }}
       thisYear={thisYearNum}
       projectionYears={projectionYears}
+      projectionSeed={{
+        // Where the plan starts: net worth as it stands today.
+        boyCents: points.at(-1)?.net ?? 0,
+        incomeCents: fiIncomeCents,
+        spendingCents: fiSpendCents,
+        fromMonth: fiFromMonth.slice(0, 7),
+        toMonth: fiToMonth.slice(0, 7),
+      }}
     />
   );
 }

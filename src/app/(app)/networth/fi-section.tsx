@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, formatMoney } from "@/lib/money";
-import { ageInYear, projectFi } from "@/lib/retirement";
+import { ageInYear, projectFi, type FiScheduleYear } from "@/lib/retirement";
 import { saveRetirementPlan } from "./actions";
 
 export type FiPlan = {
@@ -32,16 +32,29 @@ export type FiMeasured = {
   toMonth: string;
 };
 
+/** The projection grid's own rows, as far as this section needs them. */
+export type FiProjectionYear = {
+  year: number;
+  incomeCents: number;
+  spendingCents: number;
+  /** The plan's closing net worth for that year — the grid's "Planned EOY". */
+  eoyCents: number;
+};
+
 export function FiSection({
   plan,
   measured,
   currency,
   thisYear,
+  projection,
 }: {
   plan: FiPlan;
   measured: FiMeasured;
   currency: string;
   thisYear: number;
+  /** Victor's year-by-year plan. When it has future years, they drive the
+   *  spending and saving this section projects with. */
+  projection: FiProjectionYear[];
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-fi", () => ({ open: false }));
@@ -51,22 +64,62 @@ export function FiSection({
   const [editing, setEditing] = useState(false);
 
   const portfolioCents = measured.investedCents + (plan.includeCash ? measured.cashCents : 0);
-  const spendCents = plan.annualSpendCents ?? measured.spendCents;
-  const contributionCents = plan.annualContributionCents ?? measured.contributionCents;
+
+  // The projection grid, read as today's money — which is what it holds. The
+  // rows are typed by hand in round figures ($90k while the kids are home,
+  // $45k once they aren't), not as inflated future dollars, so they go into
+  // this section as they are. Discounting them would read a plan for a $45k
+  // retirement as a plan for a $20k one and hand back an FI date years too
+  // early.
+  const schedule = useMemo<FiScheduleYear[]>(() => {
+    // An explicit spending override means "ignore what you measured and what
+    // I planned, use this" — it has to beat the grid too, or it can't be used
+    // to answer a what-if.
+    if (plan.annualSpendCents != null) return [];
+    return projection
+      .filter((p) => p.year >= thisYear)
+      .map((p) => ({
+        year: p.year,
+        spendCents: p.spendingCents,
+        // What the plan puts away that year: income less spending.
+        contributionCents: Math.max(0, p.incomeCents - p.spendingCents),
+      }));
+  }, [projection, thisYear, plan.annualSpendCents]);
+
+  const usingGrid = schedule.length > 0;
+
+  // The tiles keep showing a single representative figure. With a grid driving
+  // things that is this year's planned number, not a forty-year average.
+  const thisYearPlan = schedule.find((y) => y.year === thisYear) ?? null;
+  const spendCents =
+    plan.annualSpendCents ?? thisYearPlan?.spendCents ?? measured.spendCents;
+  const contributionCents =
+    plan.annualContributionCents ?? thisYearPlan?.contributionCents ?? measured.contributionCents;
 
   const fi = useMemo(
     () =>
       projectFi(
         {
           portfolioCents,
-          annualContributionCents: contributionCents,
-          annualSpendCents: spendCents,
+          annualContributionCents: plan.annualContributionCents ?? measured.contributionCents,
+          annualSpendCents: plan.annualSpendCents ?? measured.spendCents,
           realReturnPct: plan.realReturnPct,
           withdrawalRatePct: plan.withdrawalRatePct,
+          schedule,
         },
         thisYear,
       ),
-    [portfolioCents, contributionCents, spendCents, plan.realReturnPct, plan.withdrawalRatePct, thisYear],
+    [
+      portfolioCents,
+      plan.annualContributionCents,
+      plan.annualSpendCents,
+      measured.contributionCents,
+      measured.spendCents,
+      plan.realReturnPct,
+      plan.withdrawalRatePct,
+      schedule,
+      thisYear,
+    ],
   );
 
   const fiAge = ageInYear(plan.birthYear, fi.fiYear ?? thisYear);
@@ -96,7 +149,18 @@ export function FiSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">Financial independence</span>
+          <span className="text-sm font-bold">FI Projections</span>
+        </button>
+
+        {/* Sat at the very bottom of the panel before, which meant scrolling
+            past the whole chart to change the numbers the chart is drawn
+            from. */}
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="mr-auto rounded-md px-2.5 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+        >
+          Assumptions
         </button>
 
         <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -134,12 +198,24 @@ export function FiSection({
             <Tile
               label="Spending / yr"
               value={formatMoney(spendCents, currency)}
-              sub={plan.annualSpendCents == null ? "last 12 months" : "you set this"}
+              sub={
+                plan.annualSpendCents != null
+                  ? "you set this"
+                  : usingGrid
+                    ? `${thisYear} plan`
+                    : "last 12 months"
+              }
             />
             <Tile
-              label="Adding / yr"
+              label="Invest/Saving / yr"
               value={formatMoney(contributionCents, currency)}
-              sub={plan.annualContributionCents == null ? "last 12 months" : "you set this"}
+              sub={
+                plan.annualContributionCents != null
+                  ? "you set this"
+                  : usingGrid
+                    ? `${thisYear} plan`
+                    : "last 12 months"
+              }
             />
             <Tile
               label="Supports today"
@@ -149,8 +225,9 @@ export function FiSection({
           </div>
 
           <p className="mt-3 text-xs text-muted">
-            At a {plan.realReturnPct}% real return, {formatMoney(contributionCents, currency)} added
-            a year covers {formatMoney(spendCents, currency)} of spending
+            At a {plan.realReturnPct}% real return, this
+            {usingGrid ? " plan" : ` ${formatMoney(contributionCents, currency)} a year`}
+            {usingGrid ? " reaches FI" : " covers your spending"}
             {fi.fiYear ? (
               <>
                 {" "}
@@ -163,6 +240,7 @@ export function FiSection({
             )}{" "}
             Every figure is in today&rsquo;s money.
           </p>
+
 
           {atTarget ? (
             <p className="mt-1 text-xs text-muted">
@@ -188,20 +266,14 @@ export function FiSection({
             </p>
           ) : null}
 
-          <FiChart fi={fi} currency={currency} />
+          <FiChart
+            fi={fi}
+            birthYear={plan.birthYear}
+            targetRetireYear={plan.targetRetireYear}
+            projection={projection}
+            currency={currency}
+          />
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-            <p className="text-[11px] text-muted">
-              Measured from {measured.fromMonth} to {measured.toMonth}.
-            </p>
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-            >
-              Assumptions
-            </button>
-          </div>
         </div>
       ) : null}
 
@@ -217,58 +289,273 @@ export function FiSection({
   );
 }
 
+// Compact money for an axis: $1.1M, $850K. Full precision belongs in the
+// figures above the chart, not stacked down its side.
+function axisMoney(cents: number): string {
+  const dollars = cents / 100;
+  if (Math.abs(dollars) >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(dollars) >= 1_000) return `$${Math.round(dollars / 1_000)}K`;
+  return `$${Math.round(dollars)}`;
+}
+
+// A round number to hang a gridline on — 1, 2, 2.5 or 5 times a power of ten,
+// so the axis reads $500K and $1.0M rather than $437K and $874K.
+function niceStep(rough: number): number {
+  const pow = Math.pow(10, Math.floor(Math.log10(Math.max(1, rough))));
+  const n = rough / pow;
+  // Rounds DOWN to the nice value. Rounding up overshoots: aiming for three
+  // gridlines on a $1.77M chart asks for $589K, and the next nice number above
+  // that is $1M — one lonely line instead of three.
+  const mult = n >= 5 ? 5 : n >= 2.5 ? 2.5 : n >= 2 ? 2 : 1;
+  return mult * pow;
+}
+
 // The climb to the FI line, one bar a year. A plain bar chart because the
 // question is "when does this cross the line", and a line crossing a line is
 // harder to read than a bar reaching one.
+//
+// The bars alone only ever said "it goes up". What makes them readable is the
+// money scale down the side, the age under each year, a marker on the year the
+// colour changes, and — because a chart you can only look at is a chart you
+// have to leave to get numbers from — a bar you can press to read that year's
+// income, spending, saving and planned close without scrolling to the table.
 function FiChart({
   fi,
+  birthYear,
+  targetRetireYear,
+  projection,
   currency,
 }: {
   fi: ReturnType<typeof projectFi>;
+  birthYear: number | null;
+  targetRetireYear: number | null;
+  projection: FiProjectionYear[];
   currency: string;
 }) {
-  if (fi.years.length === 0) return null;
-  const max = Math.max(fi.fiNumberCents, ...fi.years.map((y) => y.endCents));
-  // Every year is a bar, but only a few get a label or the axis turns to mush.
-  const labelEvery = Math.max(1, Math.ceil(fi.years.length / 8));
+  const count = fi.years.length;
+  const fiIndex = fi.years.findIndex((y) => y.independent);
+  // Opens on the year the plan crosses, so the readout is populated on arrival
+  // and its purpose is obvious without a line of text telling you to click.
+  const [picked, setPicked] = useState<number | null>(null);
+
+  if (count === 0) return null;
+
+  // Only the bars are drawn, so only the bars set the scale.
+  const max = Math.max(1, ...fi.years.map((y) => y.endCents));
+
+  // Two or three gridlines: enough to size a bar by eye, few enough to stay
+  // out of the way of the bars themselves.
+  const step = niceStep(max / 3);
+  const gridlines: number[] = [];
+  for (let v = step; v <= max; v += step) gridlines.push(v);
+
+  // Full four-digit years, so the axis reads 2027 rather than '27. They no
+  // longer live in a per-bar span — a 4-digit label is wider than a bar once
+  // the projection runs past ~20 years, so each one is positioned over its bar
+  // and allowed to spill across its neighbours. Six of them is what fits at
+  // mobile width without the labels touching.
+  const labelEvery = Math.max(1, Math.ceil(count / 6));
+  const targetIndex =
+    targetRetireYear == null ? -1 : fi.years.findIndex((y) => y.year === targetRetireYear);
+
+  // The crossing year and the two ends are named first — they carry the
+  // meaning. The every-nth rhythm then fills the gaps, but only where it
+  // clears the labels already placed; two four-digit years a bar apart run
+  // into each other.
+  const minGap = Math.max(2, Math.ceil(count / 8));
+  const anchors = [0, count - 1, ...(fiIndex >= 0 ? [fiIndex] : [])];
+  const labelled = new Set<number>(anchors);
+  for (let i = 0; i < count; i += labelEvery) {
+    if ([...labelled].every((placed) => Math.abs(placed - i) >= minGap)) labelled.add(i);
+  }
+
+  const centreOf = (i: number) => ((i + 0.5) / count) * 100;
+  const fiRow = fiIndex >= 0 ? fi.years[fiIndex] : null;
+  const targetRow = targetIndex >= 0 ? fi.years[targetIndex] : null;
+
+  const selectedIndex = picked ?? (fiIndex >= 0 ? fiIndex : count - 1);
+  const selected = fi.years[selectedIndex] ?? null;
+  const selectedPlan = selected
+    ? projection.find((p) => p.year === selected.year) ?? null
+    : null;
 
   return (
     <div className="mt-4">
-      <div className="relative h-32">
-        {/* The FI line itself, with the number on it. */}
-        <div
-          className="absolute inset-x-0 border-t border-dashed"
-          style={{
-            bottom: `${(fi.fiNumberCents / max) * 100}%`,
-            borderColor: "var(--positive)",
-          }}
-        >
-          {/* Left-aligned: the right-hand end of the line is exactly where the
-              bars that cross it live, and the label sat on top of them. */}
-          <span className="absolute -top-4 left-0 rounded bg-surface/90 px-1 text-[10px] font-semibold text-positive">
-            FI {formatMoney(fi.fiNumberCents, currency)}
-          </span>
-        </div>
-        <div className="flex h-full items-end gap-[2px]">
-          {fi.years.map((y) => (
+      {/* The plot area is its own box so every percentage below — gridlines,
+          bars, markers — is measured against the same width. The axis gutter
+          sits outside it, so no bar can end up under a number. */}
+      <div className="flex items-stretch gap-1.5">
+        <div className="relative w-9 shrink-0">
+          {gridlines.map((v) => (
             <span
-              key={y.year}
-              className="flex-1 rounded-t-[2px]"
-              style={{
-                height: `${Math.max(1, (y.endCents / max) * 100)}%`,
-                backgroundColor: y.independent ? "var(--positive)" : "var(--viz-spending)",
-              }}
-            />
+              key={v}
+              className="absolute right-0 -translate-y-1/2 text-[10px] tabular-nums text-muted"
+              style={{ bottom: `${(v / max) * 100}%` }}
+            >
+              {axisMoney(v)}
+            </span>
           ))}
         </div>
+
+        <div className="relative h-40 min-w-0 flex-1">
+          {gridlines.map((v) => (
+            <span
+              key={v}
+              className="pointer-events-none absolute inset-x-0 border-t border-dashed"
+              style={{ bottom: `${(v / max) * 100}%`, borderColor: "var(--viz-grid)" }}
+            />
+          ))}
+
+          <div className="relative flex h-full items-end gap-[2px]">
+            {fi.years.map((y, i) => (
+              <button
+                key={y.year}
+                type="button"
+                onClick={() => setPicked(i)}
+                aria-label={`${y.year}: ${formatMoney(y.endCents, currency)}`}
+                aria-pressed={i === selectedIndex}
+                className="group flex h-full flex-1 cursor-pointer items-end rounded-t-[2px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                <span
+                  className="w-full rounded-t-[2px] transition-opacity group-hover:opacity-80"
+                  style={{
+                    height: `${Math.max(1, (y.endCents / max) * 100)}%`,
+                    backgroundColor: y.independent ? "var(--positive)" : "var(--viz-spending)",
+                    outline: i === selectedIndex ? "2px solid var(--foreground)" : undefined,
+                    outlineOffset: i === selectedIndex ? "1px" : undefined,
+                  }}
+                />
+              </button>
+            ))}
+          </div>
+
+          {/* The year the colour changes, named. Without this the reader has
+              to count bars against the axis to work out which year went
+              green, which is the one thing this chart exists to say. */}
+          {fiRow ? (
+            <span
+              className="pointer-events-none absolute bottom-0 top-0 border-l border-dashed"
+              style={{ left: `${centreOf(fiIndex)}%`, borderColor: "var(--positive)" }}
+            >
+              <span
+                className={`absolute top-0 whitespace-nowrap rounded bg-surface/90 px-1 text-[10px] font-semibold text-positive ${
+                  fiIndex > count / 2 ? "right-1" : "left-1"
+                }`}
+              >
+                FI {fiRow.year}
+                {birthYear ? ` · age ${fiRow.year - birthYear}` : ""} · {axisMoney(fiRow.endCents)}
+              </span>
+            </span>
+          ) : null}
+
+          {/* Only when a target retirement year is actually set. */}
+          {targetRow ? (
+            <span
+              className="pointer-events-none absolute bottom-0 top-0 border-l border-dashed opacity-70"
+              style={{ left: `${centreOf(targetIndex)}%`, borderColor: "var(--foreground)" }}
+            >
+              <span
+                className={`absolute top-5 whitespace-nowrap rounded bg-surface/90 px-1 text-[10px] font-semibold ${
+                  targetIndex > count / 2 ? "right-1" : "left-1"
+                }`}
+              >
+                Target {targetRow.year}
+                {birthYear ? ` · age ${targetRow.year - birthYear}` : ""}
+              </span>
+            </span>
+          ) : null}
+        </div>
       </div>
-      <div className="mt-1 flex gap-[2px]">
-        {fi.years.map((y, i) => (
-          <span key={y.year} className="flex-1 text-center text-[10px] tabular-nums text-muted">
-            {i % labelEvery === 0 ? `'${String(y.year).slice(2)}` : ""}
-          </span>
-        ))}
+
+      {/* Year on top, age under it — the two ways anyone actually asks the
+          question ("what year?" / "how old will I be?"). */}
+      <div className="flex gap-1.5">
+        <span className="w-9 shrink-0" />
+        <div className="relative mt-1 h-7 min-w-0 flex-1">
+          {fi.years.map((y, i) => {
+            if (!labelled.has(i)) return null;
+            const first = i === 0;
+            const last = i === count - 1;
+            return (
+              <span
+                key={y.year}
+                className="absolute top-0 flex flex-col items-center text-[10px] tabular-nums leading-tight text-muted"
+                style={
+                  first
+                    ? { left: 0 }
+                    : last
+                      ? { right: 0 }
+                      : { left: `${centreOf(i)}%`, transform: "translateX(-50%)" }
+                }
+              >
+                <span>{y.year}</span>
+                {birthYear ? (
+                  <span className="text-[9px] opacity-70">age {y.year - birthYear}</span>
+                ) : null}
+              </span>
+            );
+          })}
+        </div>
       </div>
+
+      {/* The selected year, in full. Income, spending and the planned close
+          come from the NW Projections grid — the same figures that table
+          shows, so this answers the question without the scroll. */}
+      {selected ? (
+        <div className="mt-2 rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+            {selected.year}
+            {birthYear ? ` · age ${selected.year - birthYear}` : ""}
+            {selected.independent ? " · past the FI number" : ""}
+          </p>
+          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-5">
+            <Readout label="Income" value={selectedPlan ? formatMoney(selectedPlan.incomeCents, currency) : "—"} />
+            <Readout label="Spending" value={selectedPlan ? formatMoney(selectedPlan.spendingCents, currency) : "—"} />
+            <Readout
+              label="Saved"
+              value={
+                selectedPlan
+                  ? formatMoney(selectedPlan.incomeCents - selectedPlan.spendingCents, currency)
+                  : "—"
+              }
+            />
+            <Readout
+              label="Planned EOY"
+              value={selectedPlan ? formatMoney(selectedPlan.eoyCents, currency) : "—"}
+            />
+            <Readout label="Portfolio" value={formatMoney(selected.endCents, currency)} />
+          </div>
+        </div>
+      ) : null}
+
+      {/* What the two bar colours mean. The chart has no hover state on
+          purpose — the colours have to say it on their own. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted">
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-2 w-2.5 rounded-[1px]"
+            style={{ backgroundColor: "var(--viz-spending)" }}
+          />
+          Portfolio at year end — still short of the FI number
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-2 w-2.5 rounded-[1px]"
+            style={{ backgroundColor: "var(--positive)" }}
+          />
+          {fi.fiYear ? `Reach FI — ${fi.fiYear} onward` : "Reach FI"}
+        </span>
+        <span className="text-muted">Press a bar for that year&rsquo;s figures.</span>
+      </div>
+    </div>
+  );
+}
+
+function Readout({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] text-muted">{label}</p>
+      <p className="truncate text-xs font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
@@ -346,7 +633,7 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Adding / yr — blank uses the last 12 months">
+        <Field label="Invest/Saving / yr — blank uses the last 12 months">
           <input
             name="annualContribution"
             inputMode="decimal"
@@ -428,7 +715,7 @@ function Figure({
 
 function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
-    <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+    <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
       <p className="text-sm font-bold tabular-nums">{value}</p>
       <p className="text-[10px] text-muted">{sub}</p>

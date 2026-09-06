@@ -303,14 +303,14 @@ export async function saveRetirementPlan(formData: FormData) {
 // Editing one year has to move every year after it: the sheet's whole point is
 // that this year's ending balance is next year's opening one. So a save writes
 // the edited row and then walks the chain forward, recomputing
-//   EOY = BOY + income - taxes - spending + growth
+//   EOY = BOY + income - spending + growth
 // and carrying each EOY into the next year's BOY. Years before the edit are
 // left exactly as they are — history doesn't move because a future guess did.
 type ProjectionRow = {
   year: number;
+  age: number | null;
   boy_cents: number;
   income_cents: number;
-  taxes_cents: number;
   spending_cents: number;
   growth_cents: number;
   eoy_cents: number;
@@ -323,27 +323,191 @@ async function rebuildProjectionChain(
 ) {
   const { data: rows, error } = await supabase
     .from("networth_projection")
-    .select("year, boy_cents, income_cents, taxes_cents, spending_cents, growth_cents, eoy_cents")
+    .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
     .eq("household_id", householdId)
     .gte("year", fromYear)
     .order("year");
   if (error) throw new Error(`Could not read the projection: ${error.message}`);
 
+  // Walk the chain in memory first, then write once. This used to UPDATE each
+  // changed year on its own, which was fine while an edit moved two or three
+  // rows — but a change now carries forward, so editing 2026 moves every year
+  // to 2047 and that was twenty-one sequential round trips to the database.
+  // One batched upsert instead of N serial writes.
+  const stamp = new Date().toISOString();
+  const changed: Array<Record<string, unknown>> = [];
   let carry: number | null = null;
+
   for (const row of (rows ?? []) as ProjectionRow[]) {
     const boy: number = carry ?? row.boy_cents;
-    const eoy: number =
-      boy + row.income_cents - row.taxes_cents - row.spending_cents + row.growth_cents;
+    const eoy: number = boy + row.income_cents - row.spending_cents + row.growth_cents;
     if (boy !== row.boy_cents || eoy !== row.eoy_cents) {
-      const { error: upErr } = await supabase
-        .from("networth_projection")
-        .update({ boy_cents: boy, eoy_cents: eoy, updated_at: new Date().toISOString() })
-        .eq("household_id", householdId)
-        .eq("year", row.year);
-      if (upErr) throw new Error(`Could not update ${row.year}: ${upErr.message}`);
+      // Every column is sent, not just the two that moved: on the insert half
+      // of an upsert the omitted ones would fall back to their defaults and
+      // quietly zero a year's income.
+      changed.push({
+        household_id: householdId,
+        year: row.year,
+        age: row.age,
+        boy_cents: boy,
+        income_cents: row.income_cents,
+        spending_cents: row.spending_cents,
+        growth_cents: row.growth_cents,
+        eoy_cents: eoy,
+        updated_at: stamp,
+      });
     }
     carry = eoy;
   }
+
+  if (changed.length === 0) return;
+
+  const { error: upErr } = await supabase
+    .from("networth_projection")
+    .upsert(changed, { onConflict: "household_id,year" });
+  if (upErr) throw new Error(`Could not update the projection: ${upErr.message}`);
+}
+
+// ---- Starting a projection from nothing.
+//
+// Until now a row could only be created by editing one that already existed,
+// so a household with no projection had no way to get its first year — the
+// section simply never appeared. This seeds twenty-five years from what the
+// register already knows about the last twelve months, which is a far better
+// first draft than an empty grid: every figure is the household's own, and
+// every one of them is editable afterwards.
+//
+// Income and spending are held flat across all twenty-five years on purpose.
+// The grid is in today's money and a change carries forward, so a flat start
+// is the honest one — the user bends it where their life actually bends.
+const SEED_YEARS = 25;
+
+export async function seedProjection(seed: {
+  boyCents: number;
+  incomeCents: number;
+  spendingCents: number;
+}) {
+  const { supabase, householdId } = await requireHousehold();
+
+  // Never over an existing plan: this only ever creates a first draft.
+  const { count, error: countError } = await supabase
+    .from("networth_projection")
+    .select("year", { count: "exact", head: true })
+    .eq("household_id", householdId);
+  if (countError) {
+    console.error("[seedProjection:count]", countError);
+    return { error: `Couldn't read the projection — ${countError.message}` };
+  }
+  if ((count ?? 0) > 0) {
+    return { error: "You already have a projection — edit a year instead." };
+  }
+
+  const { data: plan } = await supabase
+    .from("retirement_plan")
+    .select("birth_year")
+    .eq("household_id", householdId)
+    .maybeSingle();
+  const birthYear = plan?.birth_year ?? null;
+
+  const income = Math.max(0, Math.round(seed.incomeCents));
+  const spending = Math.max(0, Math.round(seed.spendingCents));
+  const thisYear = new Date().getFullYear();
+  const stamp = new Date().toISOString();
+
+  // Gains start at zero rather than a guess: the return the household will
+  // actually get is the one thing the register cannot measure, and a made-up
+  // number here would quietly become "the plan".
+  const rows: Array<Record<string, unknown>> = [];
+  let carry = Math.round(seed.boyCents);
+  for (let i = 0; i < SEED_YEARS; i++) {
+    const year = thisYear + i;
+    const eoy = carry + income - spending;
+    rows.push({
+      household_id: householdId,
+      year,
+      age: birthYear ? year - birthYear : null,
+      boy_cents: carry,
+      income_cents: income,
+      spending_cents: spending,
+      growth_cents: 0,
+      eoy_cents: eoy,
+      updated_at: stamp,
+    });
+    carry = eoy;
+  }
+
+  const { error } = await supabase.from("networth_projection").insert(rows);
+  if (error) {
+    console.error("[seedProjection]", error);
+    return { error: `Couldn't start the projection — ${error.message}` };
+  }
+
+  revalidatePath("/networth");
+  return { error: null, years: rows.length };
+}
+
+// ---- Extending a projection that already exists.
+//
+// A grid that stops at its last year is a grid that can only ever be corrected,
+// never lengthened — and nothing else in the app added a year, so a projection
+// was permanently whatever length it was created at. This appends more years
+// on the end, carrying the last planned year's figures forward, which is the
+// same "this is the new normal until you say otherwise" rule a mid-grid edit
+// already follows.
+const APPEND_YEARS = 5;
+
+export async function appendProjectionYears(count: number = APPEND_YEARS) {
+  const { supabase, householdId } = await requireHousehold();
+
+  const years = Math.min(25, Math.max(1, Math.trunc(count) || APPEND_YEARS));
+
+  const last = unwrap(
+    await supabase
+      .from("networth_projection")
+      .select("year, age, income_cents, spending_cents, growth_cents, eoy_cents")
+      .eq("household_id", householdId)
+      .order("year", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    "networth_projection",
+  );
+  if (!last) {
+    return { error: "There's no projection to extend yet." };
+  }
+  if (last.year + years > 2200) {
+    return { error: "That runs past the end of the calendar this app keeps." };
+  }
+
+  const stamp = new Date().toISOString();
+  const rows: Array<Record<string, unknown>> = [];
+  let carry = last.eoy_cents;
+
+  for (let i = 1; i <= years; i++) {
+    const year = last.year + i;
+    const eoy = carry + last.income_cents - last.spending_cents + last.growth_cents;
+    rows.push({
+      household_id: householdId,
+      year,
+      // Ages keep counting from the last year that had one.
+      age: last.age == null ? null : last.age + i,
+      boy_cents: carry,
+      income_cents: last.income_cents,
+      spending_cents: last.spending_cents,
+      growth_cents: last.growth_cents,
+      eoy_cents: eoy,
+      updated_at: stamp,
+    });
+    carry = eoy;
+  }
+
+  const { error } = await supabase.from("networth_projection").insert(rows);
+  if (error) {
+    console.error("[appendProjectionYears]", error);
+    return { error: `Couldn't add those years — ${error.message}` };
+  }
+
+  revalidatePath("/networth");
+  return { error: null, added: rows.length, through: last.year + years };
 }
 
 export async function saveProjectionYear(formData: FormData) {
@@ -357,6 +521,22 @@ export async function saveProjectionYear(formData: FormData) {
   const ageRaw = String(formData.get("age") ?? "").trim();
   const age = ageRaw ? Number(ageRaw) : null;
 
+  const income = cents("income");
+  const spending = cents("spending");
+  const growth = cents("growth");
+
+  // What the year held before this save, so the carry-forward below can tell
+  // which figures were actually typed and which were merely resubmitted.
+  const prev = unwrap(
+    await supabase
+      .from("networth_projection")
+      .select("income_cents, spending_cents, growth_cents")
+      .eq("household_id", householdId)
+      .eq("year", year)
+      .maybeSingle(),
+    "networth_projection",
+  );
+
   const { error } = await supabase.from("networth_projection").upsert(
     {
       household_id: householdId,
@@ -365,10 +545,9 @@ export async function saveProjectionYear(formData: FormData) {
       // BOY is only editable on the very first year; every later year inherits
       // it from the year before when the chain is rebuilt.
       boy_cents: cents("boy"),
-      income_cents: cents("income"),
-      taxes_cents: cents("taxes"),
-      spending_cents: cents("spending"),
-      growth_cents: cents("growth"),
+      income_cents: income,
+      spending_cents: spending,
+      growth_cents: growth,
       eoy_cents: 0,
       updated_at: new Date().toISOString(),
     },
@@ -377,6 +556,33 @@ export async function saveProjectionYear(formData: FormData) {
   if (error) {
     console.error("[saveProjectionYear]", error);
     return { error: `Couldn't save ${year} — ${error.message}` };
+  }
+
+  // ---- Carry the change forward.
+  //
+  // Editing one year is almost never a statement about that year alone: a
+  // raise, or the kids moving out, is the new normal until something else
+  // changes. So a figure you actually changed is written into every later year
+  // as well, and the twenty rows behind it stop being twenty clicks.
+  //
+  // Only the figures that CHANGED travel. Retyping income while editing
+  // spending must not overwrite twenty years of income, so each column is
+  // compared against what the row held a moment ago and left alone if equal.
+  const carry: Record<string, number> = {};
+  if (!prev || prev.income_cents !== income) carry.income_cents = income;
+  if (!prev || prev.spending_cents !== spending) carry.spending_cents = spending;
+  if (!prev || prev.growth_cents !== growth) carry.growth_cents = growth;
+
+  if (Object.keys(carry).length > 0) {
+    const { error: carryError } = await supabase
+      .from("networth_projection")
+      .update({ ...carry, updated_at: new Date().toISOString() })
+      .eq("household_id", householdId)
+      .gt("year", year);
+    if (carryError) {
+      console.error("[saveProjectionYear:carry]", carryError);
+      return { error: `Saved ${year}, but couldn't carry it forward — ${carryError.message}` };
+    }
   }
 
   try {
@@ -405,7 +611,7 @@ export async function fillProjectionForward(fromYear: number) {
       .maybeSingle(),
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, taxes_cents, spending_cents")
+      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
       .eq("household_id", householdId)
       .order("year"),
   ]);
@@ -419,15 +625,35 @@ export async function fillProjectionForward(fromYear: number) {
   const inflationPct = Number(plan?.personal_inflation_pct ?? 4);
   const incomePct = Number(plan?.income_growth_pct ?? 2.5);
 
+  // The year you fill forward FROM is the anchor: its own figures are left
+  // exactly as typed, and the chain starts from the balance they actually
+  // land on. Recomputing its growth here (as this used to) produced a
+  // closing balance that disagreed with the row's own stored EOY, so the
+  // grid showed year N ending on one number and year N+1 opening on another.
+  const baseEoy =
+    base.boy_cents + base.income_cents - base.spending_cents + base.growth_cents;
+
   let income = base.income_cents;
   let spending = base.spending_cents;
-  let carry = base.boy_cents;
-  {
-    const growth = Math.round((carry * returnPct) / 100);
-    carry = carry + base.income_cents - base.taxes_cents - base.spending_cents + growth;
-  }
+  let carry = baseEoy;
 
   const updates: Array<Record<string, unknown>> = [];
+
+  // Only if the anchor's stored EOY drifted from its own columns.
+  if (base.eoy_cents !== baseEoy) {
+    updates.push({
+      household_id: householdId,
+      year: base.year,
+      age: base.age,
+      boy_cents: base.boy_cents,
+      income_cents: base.income_cents,
+      spending_cents: base.spending_cents,
+      growth_cents: base.growth_cents,
+      eoy_cents: baseEoy,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
   for (const row of all.filter((r) => r.year > fromYear)) {
     income = Math.round(income * (1 + incomePct / 100));
     spending = Math.round(spending * (1 + inflationPct / 100));
@@ -439,7 +665,6 @@ export async function fillProjectionForward(fromYear: number) {
       age: row.age,
       boy_cents: carry,
       income_cents: income,
-      taxes_cents: 0,
       spending_cents: spending,
       growth_cents: growth,
       eoy_cents: eoy,
