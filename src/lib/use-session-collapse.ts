@@ -76,3 +76,18 @@ export function usePersistentCollapse(
 
   return [state, setState];
 }
+
+// Wipes every session-scoped UI toggle (collapse panels, picked years) so the
+// next login starts from each panel's own default — FI Projections collapsed,
+// and so on. Call it from every sign-out path: sessionStorage survives a
+// same-tab logout/login, so without this the next user in that tab inherits
+// the previous one's open panels. localStorage-backed state
+// (usePersistentCollapse) is deliberately left alone — it's meant to outlive
+// the session.
+export function clearSessionUiState() {
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    // sessionStorage unavailable — nothing was persisted to clear.
+  }
+}

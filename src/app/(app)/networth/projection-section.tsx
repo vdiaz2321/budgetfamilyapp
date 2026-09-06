@@ -78,6 +78,7 @@ export function ProjectionSection({
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
   const [editing, setEditing] = useState<ProjectionYear | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -97,33 +98,46 @@ export function ProjectionSection({
   const gap = current?.actualCents != null ? current.actualCents - current.eoyCents : null;
   const last = years.at(-1) ?? null;
 
+  // Both footer buttons rewrite years in one press, so each asks first — in
+  // an in-app dialog rather than window.confirm(), which some browsers and
+  // every embedded/preview frame silently answer "cancel" for. That is what
+  // made "Rebuild … onward" look dead: the click fired, the dialog never
+  // appeared, and the handler returned before touching anything.
+  const [confirming, setConfirming] = useState<"add" | "refill" | null>(null);
+
   // Tacks five more years onto the end, carrying the last planned year
-  // forward. No confirm: it only ever adds years that were not there, so
-  // there is nothing to lose by pressing it.
+  // forward.
   function addYears() {
+    setConfirming(null);
     start(async () => {
       const result = await appendProjectionYears(5);
-      if (result?.error) setError(result.error);
-      else {
+      if (result?.error) {
+        setError(result.error);
+        setNotice(null);
+      } else {
         setError(null);
+        setNotice(last ? `Added 5 years — the plan now runs to ${last.year + 5}.` : "Added 5 years.");
         router.refresh();
       }
     });
   }
 
   function refill() {
-    if (
-      !window.confirm(
-        `Rebuild every year after ${thisYear} from the assumptions? Hand-entered figures for those years will be replaced.`,
-      )
-    ) {
-      return;
-    }
+    setConfirming(null);
     start(async () => {
       const result = await fillProjectionForward(thisYear);
-      if (result?.error) setError(result.error);
-      else {
+      if (result?.error) {
+        setError(result.error);
+        setNotice(null);
+      } else {
         setError(null);
+        // A rebuild that changes nothing still has to say so, or it reads as
+        // a dead button.
+        setNotice(
+          result?.updated
+            ? `Rebuilt ${result.updated} ${result.updated === 1 ? "year" : "years"} from the assumptions.`
+            : `Nothing to rebuild — ${thisYear + 1} onward already matches the assumptions.`,
+        );
         router.refresh();
       }
     });
@@ -157,7 +171,10 @@ export function ProjectionSection({
           <span className="text-sm font-bold">NW Projections</span>
         </button>
 
-        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        {/* ml-auto, not just the row's justify-between: once the figures wrap
+            onto their own line they start a fresh line and would sit hard
+            left. This keeps them against the right edge either way. */}
+        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 sm:ml-auto sm:justify-end">
           {current ? (
             <Figure
               label={`${thisYear} plan`}
@@ -192,10 +209,14 @@ export function ProjectionSection({
 
       {open ? (
         <>
-          <div className="overflow-x-auto">
+          {/* The grid scrolls in its own box so thirty years of projection
+              don't push the rest of the page down — and sticky only works
+              against a bounded height, which is what gives the header row
+              somewhere to freeze. */}
+          <div className="max-h-[70vh] overflow-auto">
             <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+              <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
+                <tr className="text-[10px] uppercase tracking-wide text-muted">
                   <th className="px-3 py-2 text-center font-semibold">Year</th>
                   <th className="px-3 py-2 text-center font-semibold">Age</th>
                   <th className="px-3 py-2 text-center font-semibold">Income</th>
@@ -203,7 +224,7 @@ export function ProjectionSection({
                   <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Saved / invested</th>
                   <th className="px-3 py-2 text-center font-semibold">Planned EOY</th>
                   <th className="px-3 py-2 text-center font-semibold">Actual</th>
-                  <th className="px-3 py-2 text-center font-semibold">Difference</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Actual Diff</th>
                 </tr>
               </thead>
               <tbody>
@@ -283,7 +304,9 @@ export function ProjectionSection({
                           <>
                             {formatMoney(y.actualCents, currency)}
                             {y.inProgress ? (
-                              <span className="ml-1 text-[10px] text-muted">so far</span>
+                              <span className="block text-[10px] font-normal text-muted">
+                                Actual so far
+                              </span>
                             ) : null}
                           </>
                         )}
@@ -309,15 +332,12 @@ export function ProjectionSection({
             </table>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-3 sm:px-6">
-            <p className="text-[11px] text-muted">
-              Actuals come from your recorded net worth history — nothing here edits them.
-            </p>
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3 sm:px-6">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 disabled={pending}
-                onClick={addYears}
+                onClick={() => setConfirming("add")}
                 className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
               >
                 {pending ? "Working…" : `Add 5 years${last ? ` (through ${last.year + 5})` : ""}`}
@@ -325,7 +345,7 @@ export function ProjectionSection({
               <button
                 type="button"
                 disabled={pending}
-                onClick={refill}
+                onClick={() => setConfirming("refill")}
                 className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
               >
                 {pending ? "Rebuilding…" : `Rebuild ${thisYear + 1} onward`}
@@ -335,7 +355,27 @@ export function ProjectionSection({
           {error ? (
             <p className="px-4 pb-3 text-sm font-medium text-negative sm:px-6">{error}</p>
           ) : null}
+          {!error && notice ? (
+            <p className="px-4 pb-3 text-sm font-medium text-muted sm:px-6">{notice}</p>
+          ) : null}
         </>
+      ) : null}
+
+      {confirming ? (
+        <ConfirmModal
+          title={confirming === "add" ? "Add 5 years?" : `Rebuild ${thisYear + 1} onward?`}
+          body={
+            confirming === "add"
+              ? last
+                ? `This extends the plan through ${last.year + 5}, carrying ${last.year}'s income and spending forward. Nothing already in the grid changes, and the new years can be edited afterwards.`
+                : "This adds 5 more years to the end of the plan. Nothing already in the grid changes."
+              : `Every year after ${thisYear} is recomputed from your assumptions — return, inflation and income growth. Hand-entered figures for those years will be replaced. ${thisYear} and earlier are left alone.`
+          }
+          confirmLabel={confirming === "add" ? "Add 5 years" : "Rebuild"}
+          destructive={confirming === "refill"}
+          onConfirm={confirming === "add" ? addYears : refill}
+          onClose={() => setConfirming(null)}
+        />
       ) : null}
 
       {editing ? (
@@ -347,6 +387,50 @@ export function ProjectionSection({
         />
       ) : null}
     </section>
+  );
+}
+
+function ConfirmModal({
+  title,
+  body,
+  confirmLabel,
+  destructive,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <ModalShell title={title} onClose={onClose} className="sm:max-w-md">
+      {/* On phones this is a bottom sheet, so the action row has to clear the
+          home indicator. */}
+      <div className="px-5 pt-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:pb-4">
+        <p className="text-sm text-muted">{body}</p>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold text-white transition ${
+              destructive ? "bg-negative hover:opacity-90" : "bg-brand hover:opacity-90"
+            }`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -411,6 +495,33 @@ function YearModal({
   // before, so a box labelled "Predicted" answered with the figure you were in
   // the middle of replacing.
   const predictedEoyCents = row.boyCents + savedCents + displayToCents(gains);
+
+  // Planned EOY is arithmetic, not a stored column: opening balance + saved +
+  // gains. Typing into it therefore has to land on one of those, and gains is
+  // the only honest target — opening balance is last year's close, and income
+  // and spending are figures you mean literally. So the box back-solves gains
+  // and says so, rather than quietly redistributing across several fields the
+  // way the old typeable "Saved" box did.
+  //
+  // While the box is being typed in it holds its own text (a half-typed
+  // "37" isn't an EOY yet); it goes back to mirroring the equation on blur, or
+  // as soon as another field moves the number.
+  // Actual against what the boxes say right now — same 2% on-track tolerance
+  // the grid's Actual Diff column uses, so the two can't disagree.
+  const liveDiffCents = row.actualCents == null ? null : row.actualCents - predictedEoyCents;
+  const liveDiffWithin =
+    liveDiffCents != null && Math.abs(liveDiffCents) <= Math.abs(predictedEoyCents) * TOLERANCE;
+
+  const [eoyDraft, setEoyDraft] = useState<string | null>(null);
+  // Gains can't go below zero (the server clamps them too), so this is the
+  // lowest EOY reachable without changing income or spending.
+  const floorEoyCents = row.boyCents + savedCents;
+  const eoyBelowFloor = eoyDraft != null && displayToCents(eoyDraft) < floorEoyCents;
+
+  function editEoy(text: string) {
+    setEoyDraft(text);
+    setGains(centsToDisplay(Math.max(0, displayToCents(text) - floorEoyCents)));
+  }
   const changes = [
     { name: "income", label: "Income", from: row.incomeCents, to: measured.income },
     { name: "spending", label: "Spending", from: row.spendingCents, to: measured.spending },
@@ -427,7 +538,7 @@ function YearModal({
   }
 
   return (
-    <ModalShell title={`${row.year} projection`} onClose={onClose}>
+    <ModalShell title={`Year: ${row.year} EOY Net Worth`} onClose={onClose}>
       <form
         action={(formData) =>
           start(async () => {
@@ -447,11 +558,10 @@ function YearModal({
         <Field label="Age">
           <input name="age" inputMode="numeric" defaultValue={row.age ?? ""} className={inputClass} />
         </Field>
-        <Field
-          label="Opening balance"
-          // The earliest year has no year before it to inherit from.
-          hint={isFirst ? "Where the projection starts." : `Closing balance of ${row.year - 1}.`}
-        >
+        {/* The year goes in the label rather than a hint underneath — the
+            footnote said the same thing in smaller type. The earliest year has
+            no year before it to inherit from. */}
+        <Field label={isFirst ? "Opening balance (start)" : `Opening balance of ${row.year - 1}`}>
           <input
             value={centsToDisplay(row.boyCents)}
             readOnly={!isFirst}
@@ -465,7 +575,10 @@ function YearModal({
             name="income"
             inputMode="decimal"
             value={income}
-            onChange={(e) => setIncome(e.target.value)}
+            onChange={(e) => {
+              setIncome(e.target.value);
+              setEoyDraft(null);
+            }}
             className={inputClass}
           />
         </Field>
@@ -474,7 +587,10 @@ function YearModal({
             name="spending"
             inputMode="decimal"
             value={spending}
-            onChange={(e) => setSpending(e.target.value)}
+            onChange={(e) => {
+              setSpending(e.target.value);
+              setEoyDraft(null);
+            }}
             className={inputClass}
           />
         </Field>
@@ -491,7 +607,27 @@ function YearModal({
             name="growth"
             inputMode="decimal"
             value={gains}
-            onChange={(e) => setGains(e.target.value)}
+            onChange={(e) => {
+              setGains(e.target.value);
+              setEoyDraft(null);
+            }}
+            className={inputClass}
+          />
+        </Field>
+        <Field
+          label="Planned EOY"
+          hint={
+            eoyBelowFloor
+              ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoney(floorEoyCents, currency)}.`
+              : "Typing here sets Est. gains to match."
+          }
+          hintTone={eoyBelowFloor ? "text-negative" : undefined}
+        >
+          <input
+            inputMode="decimal"
+            value={eoyDraft ?? centsToDisplay(predictedEoyCents)}
+            onChange={(e) => editEoy(e.target.value)}
+            onBlur={() => setEoyDraft(null)}
             className={inputClass}
           />
         </Field>
@@ -521,22 +657,42 @@ function YearModal({
           </div>
         </div>
 
-        <div className="sm:col-span-2 grid grid-cols-1 gap-1 text-xs sm:grid-cols-2">
-          {row.actualCents != null ? (
-            <p>
-              <span className="text-muted">
-                {row.inProgress ? "Actual net worth so far: " : "Actual net worth: "}
-              </span>
-              <span className="font-semibold text-foreground">
-                {formatMoney(row.actualCents, currency)}
-              </span>
-            </p>
-          ) : null}
-          <p className={row.actualCents != null ? "sm:text-right" : ""}>
-            <span className="text-muted">Predicted EOY net worth: </span>
+        {/* Plan, measured, and the gap between them — read left to right, and
+            measured against what is typed right now rather than what is
+            stored, so the difference moves with the fields above. */}
+        <div className="sm:col-span-2 grid grid-cols-1 gap-1 text-xs sm:grid-cols-3">
+          <p>
+            <span className="text-muted">Proj EOY Net Worth: </span>
             <span className="font-semibold text-foreground">
               {formatMoney(predictedEoyCents, currency)}
             </span>
+          </p>
+          <p className="sm:text-center">
+            <span className="text-muted">
+              {row.inProgress ? "Actual net worth so far: " : "Actual net worth: "}
+            </span>
+            <span className="font-semibold text-foreground">
+              {row.actualCents == null ? "—" : formatMoney(row.actualCents, currency)}
+            </span>
+          </p>
+          <p className="sm:text-right">
+            <span className="text-muted">Actual Diff: </span>
+            {liveDiffCents == null ? (
+              <span className="font-semibold text-foreground">—</span>
+            ) : (
+              <span
+                className={`font-semibold ${
+                  liveDiffWithin
+                    ? "text-muted"
+                    : liveDiffCents >= 0
+                      ? "text-positive"
+                      : "text-negative"
+                }`}
+              >
+                {liveDiffCents >= 0 ? "+" : "−"}
+                {formatMoney(Math.abs(liveDiffCents), currency)}
+              </span>
+            )}
           </p>
         </div>
 
@@ -612,9 +768,6 @@ function YearModal({
           >
             {pending ? "Saving…" : "Save year"}
           </button>
-          <p className="w-full text-right text-[11px] text-muted">
-            What you change here carries into {row.year + 1} and every year after.
-          </p>
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
@@ -760,6 +913,7 @@ const inputClass =
 function Field({
   label,
   hint,
+  hintTone,
   children,
 }: {
   label: string;
@@ -767,6 +921,9 @@ function Field({
    *  own. Shown under the input, because a field that is calculated or locked
    *  has to say so on the screen — not on hover, which mobile never gets. */
   hint?: string;
+  /** Overrides the hint colour when it is reporting a limit rather than
+   *  explaining the field. */
+  hintTone?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -775,7 +932,9 @@ function Field({
         {label}
       </span>
       {children}
-      {hint ? <span className="mt-0.5 block text-[10px] text-muted">{hint}</span> : null}
+      {hint ? (
+        <span className={`mt-0.5 block text-[10px] ${hintTone ?? "text-muted"}`}>{hint}</span>
+      ) : null}
     </label>
   );
 }

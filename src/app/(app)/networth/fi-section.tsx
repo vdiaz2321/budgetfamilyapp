@@ -148,7 +148,7 @@ export function FiSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">FI Projections</span>
+          <span className="text-sm font-bold">NW / FI Projections</span>
         </button>
 
         {/* Sat at the very bottom of the panel before, which meant scrolling
@@ -569,7 +569,7 @@ function FiChart({
 
 function Readout({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 text-center">
       <p className="text-[10px] text-muted">{label}</p>
       <p className="truncate text-xs font-semibold tabular-nums">{value}</p>
     </div>

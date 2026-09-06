@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { clearSessionUiState } from "@/lib/use-session-collapse";
 import ThemeToggle from "@/app/theme-toggle";
 
 type Props = {
@@ -61,7 +62,8 @@ export function ProfileMenu({ userEmail, displayName, avatarUrl, compact = false
   const signOut = () =>
     start(async () => {
       const supabase = createClient();
-      window.sessionStorage.removeItem("debt-payments-open");
+      // Every session-scoped panel toggle goes, so the next login starts collapsed.
+      clearSessionUiState();
       await supabase.auth.signOut();
       router.replace("/login");
       router.refresh();

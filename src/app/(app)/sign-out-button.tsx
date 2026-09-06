@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { clearSessionUiState } from "@/lib/use-session-collapse";
 
 export function SignOutButton({ iconOnly = false }: { iconOnly?: boolean }) {
   const router = useRouter();
@@ -12,7 +13,7 @@ export function SignOutButton({ iconOnly = false }: { iconOnly?: boolean }) {
     start(async () => {
       const supabase = createClient();
       // Clear all collapse state so the next login starts with everything collapsed.
-      window.sessionStorage.clear();
+      clearSessionUiState();
       await supabase.auth.signOut();
       router.replace("/login");
       router.refresh();
