@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -88,11 +88,10 @@ export function FiSection({
 
   const usingGrid = schedule.length > 0;
 
-  // The tiles keep showing a single representative figure. With a grid driving
-  // things that is this year's planned number, not a forty-year average.
+  // One representative figure for the sentence under the header. With a grid
+  // driving things that is this year's planned number, not a forty-year
+  // average.
   const thisYearPlan = schedule.find((y) => y.year === thisYear) ?? null;
-  const spendCents =
-    plan.annualSpendCents ?? thisYearPlan?.spendCents ?? measured.spendCents;
   const contributionCents =
     plan.annualContributionCents ?? thisYearPlan?.contributionCents ?? measured.contributionCents;
 
@@ -164,6 +163,14 @@ export function FiSection({
         </button>
 
         <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          {/* The two "today" facts live up here rather than in the body: they
+              describe where he stands now, so they'd read as competing with
+              the chart's per-year readout if they sat beside it. */}
+          <Figure
+            label="Portfolio today"
+            value={formatMoney(portfolioCents, currency)}
+            tone="text-foreground"
+          />
           <Figure
             label="FI number"
             value={formatMoney(fi.fiNumberCents, currency)}
@@ -174,6 +181,11 @@ export function FiSection({
             value={`${Math.round(fi.progress * 100)}%`}
             tone=""
             style={{ color: "var(--viz-savings)" }}
+          />
+          <Figure
+            label="Supports today"
+            value={`${formatMoney(fi.sustainableSpendCents, currency)}/yr`}
+            tone="text-foreground"
           />
           <Figure
             label={fi.fiYear ? "Independent in" : "Independent"}
@@ -189,42 +201,7 @@ export function FiSection({
 
       {open ? (
         <div className="border-t border-line px-4 py-4 sm:px-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Tile
-              label="Portfolio today"
-              value={formatMoney(portfolioCents, currency)}
-              sub={plan.includeCash ? "investments + cash" : "investments only"}
-            />
-            <Tile
-              label="Spending / yr"
-              value={formatMoney(spendCents, currency)}
-              sub={
-                plan.annualSpendCents != null
-                  ? "you set this"
-                  : usingGrid
-                    ? `${thisYear} plan`
-                    : "last 12 months"
-              }
-            />
-            <Tile
-              label="Invest/Saving / yr"
-              value={formatMoney(contributionCents, currency)}
-              sub={
-                plan.annualContributionCents != null
-                  ? "you set this"
-                  : usingGrid
-                    ? `${thisYear} plan`
-                    : "last 12 months"
-              }
-            />
-            <Tile
-              label="Supports today"
-              value={`${formatMoney(fi.sustainableSpendCents, currency)}/yr`}
-              sub={`at ${plan.withdrawalRatePct}%`}
-            />
-          </div>
-
-          <p className="mt-3 text-xs text-muted">
+          <p className="text-xs text-muted">
             At a {plan.realReturnPct}% real return, this
             {usingGrid ? " plan" : ` ${formatMoney(contributionCents, currency)} a year`}
             {usingGrid ? " reaches FI" : " covers your spending"}
@@ -268,6 +245,7 @@ export function FiSection({
 
           <FiChart
             fi={fi}
+            thisYear={thisYear}
             birthYear={plan.birthYear}
             targetRetireYear={plan.targetRetireYear}
             projection={projection}
@@ -319,14 +297,18 @@ function niceStep(rough: number): number {
 // colour changes, and — because a chart you can only look at is a chart you
 // have to leave to get numbers from — a bar you can press to read that year's
 // income, spending, saving and planned close without scrolling to the table.
+const PICKED_YEAR_KEY = "fi-chart:picked-year";
+
 function FiChart({
   fi,
+  thisYear,
   birthYear,
   targetRetireYear,
   projection,
   currency,
 }: {
   fi: ReturnType<typeof projectFi>;
+  thisYear: number;
   birthYear: number | null;
   targetRetireYear: number | null;
   projection: FiProjectionYear[];
@@ -334,9 +316,37 @@ function FiChart({
 }) {
   const count = fi.years.length;
   const fiIndex = fi.years.findIndex((y) => y.independent);
-  // Opens on the year the plan crosses, so the readout is populated on arrival
-  // and its purpose is obvious without a line of text telling you to click.
-  const [picked, setPicked] = useState<number | null>(null);
+  // Opens on the current year — that is the row he is living in, so the
+  // readout answers "where am I now" before he touches anything. A bar he
+  // presses afterwards is remembered for the rest of the session (same rule as
+  // the collapse panels: survives navigating around the app, resets on a fresh
+  // login back to this year). The YEAR is stored, not the index, so the
+  // selection still lands on the right bar after the plan is edited.
+  const [pickedYear, setPickedYear] = useState<number | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(PICKED_YEAR_KEY);
+      // Client-only hydration: the first render uses the server-safe default
+      // (this year) so there is no mismatch.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setPickedYear(Number(saved));
+    } catch {
+      // sessionStorage unavailable (private mode) — stays on this year.
+    }
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      if (pickedYear == null) window.sessionStorage.removeItem(PICKED_YEAR_KEY);
+      else window.sessionStorage.setItem(PICKED_YEAR_KEY, String(pickedYear));
+    } catch {
+      // sessionStorage unavailable — the selection just won't persist.
+    }
+  }, [pickedYear, hydrated]);
 
   if (count === 0) return null;
 
@@ -373,7 +383,13 @@ function FiChart({
   const fiRow = fiIndex >= 0 ? fi.years[fiIndex] : null;
   const targetRow = targetIndex >= 0 ? fi.years[targetIndex] : null;
 
-  const selectedIndex = picked ?? (fiIndex >= 0 ? fiIndex : count - 1);
+  // The remembered year, else where he stands now. The projection's first bar
+  // is next year end — this year has no bar — so "now" means the earliest bar
+  // that hasn't already passed, and the last bar only if the whole chart has.
+  const pickedIndex = pickedYear == null ? -1 : fi.years.findIndex((y) => y.year === pickedYear);
+  const nowIndex = fi.years.findIndex((y) => y.year >= thisYear);
+  const selectedIndex =
+    pickedIndex >= 0 ? pickedIndex : nowIndex >= 0 ? nowIndex : count - 1;
   const selected = fi.years[selectedIndex] ?? null;
   const selectedPlan = selected
     ? projection.find((p) => p.year === selected.year) ?? null
@@ -411,7 +427,7 @@ function FiChart({
               <button
                 key={y.year}
                 type="button"
-                onClick={() => setPicked(i)}
+                onClick={() => setPickedYear(y.year)}
                 aria-label={`${y.year}: ${formatMoney(y.endCents, currency)}`}
                 aria-pressed={i === selectedIndex}
                 className="group flex h-full flex-1 cursor-pointer items-end rounded-t-[2px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
@@ -713,12 +729,3 @@ function Figure({
   );
 }
 
-function Tile({ label, value, sub }: { label: string; value: string; sub: string }) {
-  return (
-    <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
-      <p className="text-sm font-bold tabular-nums">{value}</p>
-      <p className="text-[10px] text-muted">{sub}</p>
-    </div>
-  );
-}
