@@ -292,7 +292,12 @@ export function ItemPanel({
         </button>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <InlineNameEdit subId={row.subId} name={row.name} />
+            {/* Keyed by the item so opening a different row remounts the
+                editor. Without it the editor stayed open across the switch,
+                still holding the previous item's text in an uncontrolled
+                input — and its blur-to-save would then rename the item that
+                had just been opened. */}
+            <InlineNameEdit key={row.subId} subId={row.subId} name={row.name} />
             <p className="mt-0.5 text-[11px] text-white/90 tabular-nums">
               {formatMoney(row.spentCents, currency)} {verb} of{" "}
               {formatMoney(row.plannedCents, currency)}

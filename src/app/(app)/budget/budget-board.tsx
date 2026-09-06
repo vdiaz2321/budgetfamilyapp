@@ -1086,10 +1086,16 @@ function CategoryProgressCard({
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
         <span className="whitespace-nowrap text-[11px] text-muted">{label}</span>
-        <span className="ml-auto whitespace-nowrap text-[11px] tabular-nums sm:text-xs">
-          <span className="font-semibold text-foreground">{formatMoney(planned, currency)}</span>
-          <span className="text-muted"> / {actualLabel} </span>
-          <span className={`font-semibold ${actualColorClass}`}>{formatMoney(actual, currency)}</span>
+        {/* The planned figure and the "/ Spent $x" pair each hold together,
+            but the line may break between them. Holding the whole thing on one
+            line clipped it against the card's edge whenever the summary panel
+            squeezed this column — the amounts were wider than the card. */}
+        <span className="ml-auto text-[11px] tabular-nums sm:text-xs">
+          <span className="whitespace-nowrap font-semibold text-foreground">{formatMoney(planned, currency)}</span>{" "}
+          <span className="whitespace-nowrap">
+            <span className="text-muted">/ {actualLabel} </span>
+            <span className={`font-semibold ${actualColorClass}`}>{formatMoney(actual, currency)}</span>
+          </span>
         </span>
       </div>
       <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">

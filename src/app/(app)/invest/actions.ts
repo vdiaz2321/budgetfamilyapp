@@ -79,7 +79,7 @@ export async function setInvestmentYear(formData: FormData) {
   // we select first, then update (by id) or insert.
   let existingQuery = supabase
     .from("investment_years")
-    .select("id, contributed_cents, accrued_cents, est_contribute_cents, start_cents, end_cents")
+    .select("id, contributed_cents, accrued_cents, accrued_manual, est_contribute_cents, start_cents, end_cents")
     .eq("household_id", householdId)
     .eq("account_id", accountId)
     .eq("year", year);
@@ -96,6 +96,11 @@ export async function setInvestmentYear(formData: FormData) {
     contributed_cents:
       field === "contributed" ? valueCents : existing?.contributed_cents ?? 0,
     accrued_cents: field === "accrued" ? valueCents : existing?.accrued_cents ?? 0,
+    // Typing a gains figure pins it — the automatic end − start − contributions
+    // maths stops overwriting that year. Clearing it back to 0 hands the cell
+    // back to the automatic number.
+    accrued_manual:
+      field === "accrued" ? valueCents !== 0 : existing?.accrued_manual ?? false,
     est_contribute_cents: existing?.est_contribute_cents ?? 0,
     start_cents: field === "start" ? valueCents : (existing?.start_cents ?? null),
     end_cents: field === "end" ? valueCents : (existing?.end_cents ?? null),

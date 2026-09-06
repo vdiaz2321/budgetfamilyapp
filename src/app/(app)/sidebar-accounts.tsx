@@ -78,11 +78,12 @@ export function SidebarAccounts({ groups }: Props) {
         >
           <p className="text-[15px] font-bold uppercase tracking-wide text-slate-300">Net Worth</p>
           <span className="flex items-center gap-2">
-            {expanded ? (
-              <p className={`text-[15px] font-bold tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
-                {formatWhole(netWorthCents)}
-              </p>
-            ) : null}
+            {/* Shown collapsed as well as open: collapsing is meant to put the
+                account list away, not the one number the section exists to
+                report — every other collapsible in the app keeps its total. */}
+            <p className={`text-[15px] font-bold tabular-nums ${netWorthCents < 0 ? "text-red-400" : "text-green-400"}`}>
+              {formatWhole(netWorthCents)}
+            </p>
             <svg
               width="12"
               height="12"

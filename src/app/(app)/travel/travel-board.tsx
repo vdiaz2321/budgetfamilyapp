@@ -768,7 +768,10 @@ export function TravelBoard({
                 <tbody>
                   {cardTally.map(([name, row]) => (
                     <tr key={name} className="border-b border-line/60 last:border-0">
-                      <td className={`px-3 py-2 text-center font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
+                      {/* One line, even on a phone: the table already scrolls
+                          sideways, and wrapping broke "1002 Hilton Aspire Amex
+                          V" into four stacked words per row. */}
+                      <td className={`whitespace-nowrap px-3 py-2 text-center font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
                         {name}
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>

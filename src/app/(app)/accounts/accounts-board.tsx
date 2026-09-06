@@ -1263,7 +1263,11 @@ function CreditCardSection({
             <button
               type="button"
               onClick={onToggle}
-              className="min-w-0 flex-1 text-left"
+              // Keeps its own row until there is real width for the chips
+              // beside it. Sharing the line squeezed the title to one word per
+              // line on a phone, where the overflowing words then ran under
+              // the chips, and to three cramped lines on a narrow desktop.
+              className="w-full min-w-0 text-left lg:w-auto lg:flex-1"
               aria-expanded={open}
             >
               <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>

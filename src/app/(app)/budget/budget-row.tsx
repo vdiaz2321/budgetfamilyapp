@@ -139,11 +139,11 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         if (target.closest("button, input, form, select, textarea, [data-row-click-ignore]")) return;
         onSelect();
       }}
-      className={`group relative flex flex-col gap-1.5 px-3 py-2 sm:grid sm:grid-cols-12 sm:items-center sm:gap-2 ${compact ? "sm:py-1" : "sm:py-1.5"} ${baseClass}`}
+      className={`group relative flex flex-col gap-1.5 px-3 py-2 @md:grid @md:grid-cols-12 @md:items-center @md:gap-2 ${compact ? "@md:py-1" : "@md:py-1.5"} ${baseClass}`}
     >
       {/* Mobile row: the progress stripe spans Category + Planned only, so it
           stops before the Spent value instead of stretching across the row. */}
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-1.5 sm:hidden">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-x-1.5 @md:hidden">
         <button
           type="button"
           onClick={onSelect}
@@ -220,12 +220,12 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       </div>
 
       {/* Desktop name cell */}
-      <div className="hidden min-w-0 items-center gap-1.5 sm:col-span-4 sm:flex">
+      <div className="hidden min-w-0 items-center gap-1.5 @md:col-span-4 @md:flex">
         <span
           onMouseDown={(e) => { e.preventDefault(); onDragStart(); }}
           data-row-click-ignore
           aria-label="Drag to reorder"
-          className="-ml-1 hidden shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing sm:flex"
+          className="-ml-1 hidden shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing @md:flex"
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <path d="M4 6h16M4 12h16M4 18h16" />
@@ -246,7 +246,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
 
       {/* Desktop: Planned — read-only when auto-derived */}
       <div
-        className="hidden sm:col-span-2 sm:flex sm:justify-end"
+        className="hidden @md:col-span-2 @md:flex @md:justify-end"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -272,7 +272,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden sm:col-span-2 sm:block sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
+        className={`hidden @md:col-span-2 @md:block @md:text-right @md:text-xs @md:font-semibold @md:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
         title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
       >
         {formatMoney(row.spentCents, currency)}
@@ -282,7 +282,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden sm:col-span-2 sm:text-right sm:text-xs sm:font-semibold sm:tabular-nums ${overBudget ? "sm:flex sm:justify-end" : "sm:block"}`}
+        className={`hidden @md:col-span-2 @md:text-right @md:text-xs @md:font-semibold @md:tabular-nums ${overBudget ? "@md:flex @md:justify-end" : "@md:block"}`}
         title={overBudget ? `Overspent by ${formatMoney(Math.abs(remaining), currency)}` : undefined}
       >
         {overBudget ? (
@@ -298,13 +298,13 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className="hidden sm:col-span-2 sm:block sm:text-center sm:tabular-nums"
+        className="hidden @md:col-span-2 @md:block @md:text-center @md:tabular-nums"
       >
         <span className={`block text-xs font-semibold ${pctClass}`}>{displayPct}%</span>
       </button>
 
       {detailsExpanded ? (
-        <div className="hidden sm:col-span-6 sm:block sm:pb-0.5 sm:pl-6 sm:pr-2">
+        <div className="hidden @md:col-span-6 @md:block @md:pb-0.5 @md:pl-6 @md:pr-2">
           <div
             className="relative h-1.5 w-full overflow-hidden rounded-sm bg-[#eee9df] dark:bg-white/10"
             aria-label={`Current month progress: ${displayPct}%`}

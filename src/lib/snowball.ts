@@ -14,6 +14,11 @@ export type DebtInput = {
   // null means "rate unknown" and the projection keeps using `apr`.
   promoEndsOn?: string | null; // YYYY-MM-DD
   postPromoApr?: number | null; // percent
+  // What has already gone to this debt in the projection's FIRST month. A
+  // logged payment has already come off `balanceCents`, so charging the full
+  // scheduled amount again in that month pays the debt twice and reports a
+  // payoff date a month early. Later months are unaffected.
+  paidThisMonthCents?: number;
 };
 
 // The APR actually in force during a given projection month. Months are
@@ -178,6 +183,18 @@ export function projectSnowball(
         if (paidOff.has(id)) extraPool += Math.max(0, byId.get(id)!.minCents);
       }
     }
+    // The shared extra is one pot of money, so the first month can only offer
+    // what is left of it. Anything already paid beyond a debt's own minimum
+    // came out of that same pot — without this the projection re-spends this
+    // month's money and reports a payoff earlier than the plan can deliver.
+    if (i === 0) {
+      let alreadySpentFromPool = 0;
+      for (const id of order) {
+        const d = byId.get(id)!;
+        alreadySpentFromPool += Math.max(0, (d.paidThisMonthCents ?? 0) - Math.max(0, d.minCents));
+      }
+      extraPool = Math.max(0, extraPool - alreadySpentFromPool);
+    }
 
     const focusId = order.find((id) => !paidOff.has(id));
     for (const id of order) {
@@ -188,7 +205,14 @@ export function projectSnowball(
       const effectiveApr = aprForMonth(debt, month);
       const interest = Math.max(0, startingBalance * effectiveApr / 100 / 12);
       const amountDue = startingBalance + interest;
-      const scheduled = Math.max(0, debt.minCents) + (id === focusId ? extraPool : 0);
+      // Month 0 only: whatever was already paid this month is deducted, since
+      // the opening balance already reflects it. A debt whose payment is
+      // fully made simply sits out its first month.
+      const alreadyPaid = i === 0 ? Math.max(0, debt.paidThisMonthCents ?? 0) : 0;
+      const scheduled = Math.max(
+        0,
+        Math.max(0, debt.minCents) + (id === focusId ? extraPool : 0) - alreadyPaid,
+      );
       const payment = Math.min(scheduled, amountDue);
       const principal = payment - interest;
       const newBalance = Math.max(0, amountDue - payment);

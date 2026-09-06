@@ -152,13 +152,17 @@ export function BudgetGroup({
   const subtotalOverspent = (group.kind === "bills" || group.kind === "expenses") && remainingTotal < 0;
 
   return (
-    <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
+    // @container: the two headers below swap on the width of THIS card, not
+    // the window. With the sidebar open on a narrow laptop the card is only
+    // ~300px wide while the viewport is past `sm`, so the 12-column header
+    // rendered anyway and its three money tiles collided at ~47px each.
+    <section className="@container relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
       {/* Consolidated header: chevron + dot + name + sources chip on the left;
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}
       {/* Mobile header — flex layout */}
       <div
-        className="flex cursor-pointer items-center gap-2 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 sm:hidden"
+        className="flex cursor-pointer items-center gap-2 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 @md:hidden"
         onClick={onToggle}
       >
         <button
@@ -179,7 +183,7 @@ export function BudgetGroup({
           <span className="font-semibold">{group.name}</span>
           <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
             {countLabel}
-            <span className="hidden sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
+            <span className="hidden @md:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
         <CategoryGroupMenu group={group} />
@@ -206,7 +210,7 @@ export function BudgetGroup({
 
       {/* Desktop header — 12-col grid aligned with rows below */}
       <div
-        className="group/header hidden cursor-pointer grid-cols-12 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 sm:grid"
+        className="group/header hidden cursor-pointer grid-cols-12 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 @md:grid"
         onClick={onToggle}
       >
         <div className="col-span-5 flex min-w-0 items-center gap-2.5">
@@ -228,7 +232,7 @@ export function BudgetGroup({
             <span className="font-semibold">{group.name}</span>
             <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
               {countLabel}
-              <span className="sm:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
+              <span className="@md:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
             </span>
           </button>
           <button
@@ -309,12 +313,12 @@ export function BudgetGroup({
           ) : (
             <>
               {/* Mobile column label — actual noun follows the kind (Spent/Saved/Received/Paid) */}
-              <div className="flex items-center justify-end px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">
-                Planned / {ACTUAL_LABEL[group.kind]} &middot; Left
+              <div className="flex items-center justify-end px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted @md:hidden">
+                Planned / {ACTUAL_LABEL[group.kind]}{" · "}Left
               </div>
 
               {/* Column-label strip — desktop only, must line up with BudgetRow */}
-              <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1.5" : "py-2"} text-[11px] font-bold uppercase tracking-wide text-muted sm:grid`}>
+              <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1.5" : "py-2"} text-[11px] font-bold uppercase tracking-wide text-muted @md:grid`}>
                 <div className="col-span-5 pl-6 sm:col-span-4">{nameColumnLabel}</div>
                 <div className="col-span-2 text-right">Planned</div>
                 <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
@@ -333,14 +337,14 @@ export function BudgetGroup({
                   const remaining = planned - spent;
                   return (
                     <>
-                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[13px] font-bold uppercase tracking-wide text-brand sm:grid dark:bg-brand-soft/20">
+                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[13px] font-bold uppercase tracking-wide text-brand @md:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
                         <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
                         <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
                         <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{progressLabel(group.kind, spent, planned)}</div>
                       </div>
-                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand sm:hidden dark:bg-brand-soft/20">
+                      <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand @md:hidden dark:bg-brand-soft/20">
                         <span className="truncate">{label}</span>
                         <span className="ml-auto text-xs tabular-nums">
                           <span className="text-muted">{formatMoney(planned, currency)} / </span>
@@ -387,7 +391,7 @@ export function BudgetGroup({
                   the list, where you're done reading it, and the header you'd
                   otherwise have to scroll back up to is far above. */}
               <div
-                className="flex cursor-pointer items-center gap-2 border-t border-line bg-background/50 px-3 py-2 sm:hidden"
+                className="flex cursor-pointer items-center gap-2 border-t border-line bg-background/50 px-3 py-2 @md:hidden"
                 onClick={onToggle}
               >
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
@@ -415,7 +419,7 @@ export function BudgetGroup({
 
               {/* Desktop subtotal: 12-col grid matching row layout */}
               <div
-                className={`hidden cursor-pointer grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 hover:bg-brand-soft/30 sm:grid ${compact ? "py-2" : "py-2.5"}`}
+                className={`hidden cursor-pointer grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 hover:bg-brand-soft/30 @md:grid ${compact ? "py-2" : "py-2.5"}`}
                 onClick={onToggle}
               >
                 <div className="col-span-5 flex items-center gap-2 pl-6 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-4">

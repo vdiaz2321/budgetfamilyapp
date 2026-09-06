@@ -20,8 +20,12 @@ export type YearCell = {
   year: number;
   startBalanceCents: number | null;
   endBalanceCents: number | null;
+  /** The 31-December close. Null until the year actually ends. */
+  closeBalanceCents: number | null;
   contributedCents: number;
   accruedCents: number;
+  /** Gains was typed by hand, so the automatic maths leaves it alone. */
+  accruedManual?: boolean;
   stored: boolean;
   /** Contributed came from the transaction ledger, so it can't be typed over. */
   contribFromLedger?: boolean;
@@ -105,20 +109,32 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   let accrued = parent?.accruedCents ?? 0;
   let start = parent?.startBalanceCents ?? null;
   let end = parent?.endBalanceCents ?? null;
+  let close = parent?.closeBalanceCents ?? null;
+  let manual = !!parent?.accruedManual;
   for (const b of a.buckets) {
     const c = b.cells[year];
     if (!c) continue;
     contributed += c.contributedCents;
     accrued += c.accruedCents;
+    if (c.accruedManual) manual = true;
     if (c.startBalanceCents != null) start = (start ?? 0) + c.startBalanceCents;
     if (c.endBalanceCents != null) end = (end ?? 0) + c.endBalanceCents;
+    if (c.closeBalanceCents != null) close = (close ?? 0) + c.closeBalanceCents;
   }
+  // Gains for the whole account is worked out from the account's own opening,
+  // close and contributions — not by adding up its parts. A split account can
+  // open on the account slot and close on its buckets (TSP, split mid-2026),
+  // and summing the parts there would report zero growth.
+  if (!manual && start != null && end != null) accrued = end - start - contributed;
+
   return {
     year,
     startBalanceCents: start,
     endBalanceCents: end,
+    closeBalanceCents: close,
     contributedCents: contributed,
     accruedCents: accrued,
+    accruedManual: manual,
     stored: !!(parent?.stored ?? false),
   };
 }
@@ -1214,6 +1230,8 @@ function PerfTable({
   let effStartAny = false;
   let endSum = 0;
   let endAny = false;
+  let closeSum = 0;
+  let closeAny = false;
   let contribSum = 0;
   let accruedSum = 0;
   for (const a of accounts) {
@@ -1222,6 +1240,7 @@ function PerfTable({
     const eff = c.startBalanceCents ?? effectiveCell(a, year - 1).endBalanceCents ?? null;
     if (eff != null) { effStartSum += eff; effStartAny = true; }
     if (c.endBalanceCents != null) { endSum += c.endBalanceCents; endAny = true; }
+    if (c.closeBalanceCents != null) { closeSum += c.closeBalanceCents; closeAny = true; }
     contribSum += c.contributedCents;
     accruedSum += c.accruedCents;
   }
@@ -1235,11 +1254,6 @@ function PerfTable({
 
   // Hide "Start" column when every account has a null/zero start for the year — reduces noise.
   const showStart = startAny && startSum > 0;
-  // Whether any Contrib cell in this year is summed from transactions. Drives
-  // the note under the table that explains why those cells don't accept typing.
-  const anyLedgerContrib = accounts.some(
-    (a) => a.cells[year]?.contribFromLedger || a.buckets.some((b) => b.cells[year]?.contribFromLedger),
-  );
   const zeroCls = "text-muted/50";
 
   if (accounts.length === 0) return null;
@@ -1261,6 +1275,7 @@ function PerfTable({
         </svg>
         <h2 className="flex flex-1 items-center gap-2 text-sm font-bold">
           {title}
+          <span className="rounded bg-black/5 px-1.5 py-0.5 text-xs font-semibold text-muted dark:bg-white/10">{year}</span>
           <span className="text-xs font-normal text-muted">{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0)} account{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0) === 1 ? "" : "s"}</span>
         </h2>
         {collapsed && (
@@ -1279,10 +1294,11 @@ function PerfTable({
           <thead>
             <tr className="text-[11px] font-medium text-muted">
               <th className="px-4 py-2 text-left">Account</th>
-              {showStart ? <th className="px-3 py-2 text-left">Start</th> : null}
+              {showStart ? <th className="px-3 py-2 text-center">Start</th> : null}
               <th className="px-3 py-2 text-center">Contrib</th>
-              <th className="px-3 py-2 text-center">Gains</th>
               <th className="px-3 py-2 text-center">Current</th>
+              <th className="px-3 py-2 text-center">Gains</th>
+              <th className="px-3 py-2 text-center">EOY</th>
               <th className="px-4 py-2 text-center">Gain vs contrib</th>
             </tr>
           </thead>
@@ -1358,7 +1374,9 @@ function PerfTable({
                             {eff.startBalanceCents == null ? "—" : formatMoney(eff.startBalanceCents, currency)}
                           </span>
                         ) : (
-                          <EditCell accountId={a.id} year={year} field="start" cents={parentCell?.startBalanceCents ?? 0} placeholder={parentCell?.startBalanceCents == null} currency={currency} tone={(parentCell?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"} />
+                          <span className={`block text-center text-sm tabular-nums ${(parentCell?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
+                            {parentCell?.startBalanceCents == null ? "—" : formatMoney(parentCell.startBalanceCents, currency)}
+                          </span>
                         )}
                       </td>
                     ) : null}
@@ -1368,10 +1386,22 @@ function PerfTable({
                           {formatMoney(eff.contributedCents, currency)}
                         </span>
                       ) : (
-                        <LedgerCell cents={parentCell?.contributedCents ?? 0} currency={currency} live={parentCell?.contribFromLedger} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                        <LedgerCell cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                       )}
                     </td>
                     <td className="px-1 py-1">
+                      {hasBuckets ? (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                          {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
+                        </span>
+                      ) : (
+                        <span className={`block text-center text-sm tabular-nums font-medium ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                          {parentCell?.endBalanceCents == null ? "—" : formatMoney(parentCell.endBalanceCents, currency)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="relative px-1 py-1">
+                      {eff.accruedManual ? <PinnedMark /> : null}
                       {hasBuckets ? (
                         <span className={`block text-center text-sm tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
@@ -1381,13 +1411,9 @@ function PerfTable({
                       )}
                     </td>
                     <td className="px-1 py-1">
-                      {hasBuckets ? (
-                        <span className={`block text-center text-sm tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
-                          {eff.endBalanceCents == null ? "—" : formatMoney(eff.endBalanceCents, currency)}
-                        </span>
-                      ) : (
-                        <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
-                      )}
+                      <span className={`block text-center text-sm tabular-nums ${eff.closeBalanceCents == null ? zeroCls : "text-muted"}`}>
+                        {eff.closeBalanceCents == null ? "—" : formatMoney(eff.closeBalanceCents, currency)}
+                      </span>
                     </td>
                     <td className={`px-4 py-2 text-center tabular-nums ${ret == null ? zeroCls : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : zeroCls}`}>
                       {ret == null ? "—" : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
@@ -1403,17 +1429,26 @@ function PerfTable({
                           <td className="px-4 py-1 pl-10 text-muted italic">Account (unallocated / seed)</td>
                           {showStart ? (
                             <td className="px-1 py-1">
-                              <EditCell accountId={a.id} year={year} field="start" cents={parentCell?.startBalanceCents ?? 0} placeholder={parentCell?.startBalanceCents == null} currency={currency} tone={(parentCell?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"} />
+                              <span className={`block text-center text-sm tabular-nums ${(parentCell?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
+                                {parentCell?.startBalanceCents == null ? "—" : formatMoney(parentCell.startBalanceCents, currency)}
+                              </span>
                             </td>
                           ) : null}
                           <td className="px-1 py-1">
-                            <LedgerCell cents={parentCell?.contributedCents ?? 0} currency={currency} live={parentCell?.contribFromLedger} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                            <LedgerCell cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
+                          </td>
+                          <td className="px-1 py-1">
+                            <span className={`block text-center text-sm tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                              {parentCell?.endBalanceCents == null ? "—" : formatMoney(parentCell.endBalanceCents, currency)}
+                            </span>
                           </td>
                           <td className="px-1 py-1">
                             <EditCell accountId={a.id} year={year} field="accrued" cents={parentCell?.accruedCents ?? 0} currency={currency} tone={(parentCell?.accruedCents ?? 0) === 0 ? zeroCls : (parentCell?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
                           </td>
                           <td className="px-1 py-1">
-                            <EditCell accountId={a.id} year={year} field="end" cents={parentCell?.endBalanceCents ?? 0} placeholder={parentCell?.endBalanceCents == null} currency={currency} tone={(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""} />
+                            <span className={`block text-center text-sm tabular-nums ${parentCell?.closeBalanceCents == null ? zeroCls : "text-muted"}`}>
+                              {parentCell?.closeBalanceCents == null ? "—" : formatMoney(parentCell.closeBalanceCents, currency)}
+                            </span>
                           </td>
                           <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
                         </tr>
@@ -1427,18 +1462,26 @@ function PerfTable({
                             </td>
                             {showStart ? (
                               <td className="px-1 py-1">
-                                <EditCell accountId={a.id} bucketId={b.id} year={year} field="start" cents={bc?.startBalanceCents ?? 0} placeholder={bc?.startBalanceCents == null} currency={currency} tone={(bc?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"} />
+                                <span className={`block text-center text-sm tabular-nums ${(bc?.startBalanceCents ?? 0) === 0 ? zeroCls : "text-muted"}`}>
+                                  {bc?.startBalanceCents == null ? "—" : formatMoney(bc.startBalanceCents, currency)}
+                                </span>
                               </td>
                             ) : null}
                             <td className="px-1 py-1">
-                              <LedgerCell cents={bc?.contributedCents ?? 0} currency={currency} live={bc?.contribFromLedger} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
-                            </td>
-                            <td className="px-1 py-1">
-                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
+                              <LedgerCell cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
                             <td className="px-1 py-1">
                               <span className={`block text-center text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents == null ? "—" : formatMoney(bc.endBalanceCents, currency)}
+                              </span>
+                            </td>
+                            <td className="relative px-1 py-1">
+                              {bc?.accruedManual ? <PinnedMark /> : null}
+                              <EditCell accountId={a.id} bucketId={b.id} year={year} field="accrued" cents={bc?.accruedCents ?? 0} currency={currency} tone={(bc?.accruedCents ?? 0) === 0 ? zeroCls : (bc?.accruedCents ?? 0) > 0 ? "text-[color:var(--viz-bills)]" : "text-negative"} />
+                            </td>
+                            <td className="px-1 py-1">
+                              <span className={`block text-center text-sm tabular-nums ${bc?.closeBalanceCents == null ? zeroCls : "text-muted"}`}>
+                                {bc?.closeBalanceCents == null ? "—" : formatMoney(bc.closeBalanceCents, currency)}
                               </span>
                             </td>
                             <td className="px-4 py-1 text-center tabular-nums text-muted">—</td>
@@ -1460,14 +1503,17 @@ function PerfTable({
                 </td>
               ) : null}
               <td className={`px-3 py-2 text-center tabular-nums ${contribSum === 0 ? zeroCls : ""}`}>{formatMoney(contribSum, currency)}</td>
+              <td className={`px-3 py-2 text-center tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
+                {endAny ? formatMoney(endSum, currency) : "—"}
+              </td>
               <td
                 className={`px-3 py-2 text-center tabular-nums ${accruedSum === 0 ? zeroCls : ""}`}
                 style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}
               >
                 {formatMoney(accruedSum, currency)}
               </td>
-              <td className={`px-3 py-2 text-center tabular-nums font-medium ${endAny ? "" : zeroCls}`}>
-                {endAny ? formatMoney(endSum, currency) : "—"}
+              <td className={`px-3 py-2 text-center tabular-nums ${closeAny ? "text-muted" : zeroCls}`}>
+                {closeAny ? formatMoney(closeSum, currency) : "—"}
               </td>
               <td className={`px-4 py-2 text-center tabular-nums ${totalReturn == null ? zeroCls : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : zeroCls}`}>
                 {totalReturn == null ? "—" : `${totalReturn > 0 ? "+" : ""}${formatMoney(totalReturn, currency)}`}
@@ -1476,14 +1522,8 @@ function PerfTable({
           </tfoot>
         </table>
         <p className="border-t border-line/60 px-4 py-2 text-[11px] text-muted">
-          Contrib is read-only — contributions come from transactions. Add or edit a transaction against the fund (or
-          the fund its goal points at on Budget) and this column follows.
-          {anyLedgerContrib ? (
-            <>
-              {" "}A <span className="rounded bg-black/5 px-1 font-medium dark:bg-white/10">ledger</span> tag means
-              {` that figure is being summed from ${year} transactions right now; untagged figures are stored values from a closed year or a CSV import.`}
-            </>
-          ) : null}
+          Start (1 Jan), Current and EOY (31 Dec) come from the Accounts page; Contrib comes from your transactions.
+          Gains = Current − Start − Contrib. Type in a Gains cell to set your own; ✎ marks those.
         </p>
       </div>}
     </section>
@@ -1499,26 +1539,18 @@ function PerfTable({
  * `resolveContributedCents` returns the ledger sum and ignores whatever
  * investment_years holds, so an input here would accept a value, save it, and
  * show the old number back, reading as a dropped edit.
- *
- * `live` marks the figures that have transactions behind them right now; the
- * rest are stored values from a closed year or a CSV import.
  */
 function LedgerCell({
   cents,
   currency,
-  live,
   tone,
 }: {
   cents: number;
   currency: string;
-  live?: boolean;
   tone?: string;
 }) {
   return (
     <span className={`flex items-center justify-center gap-1 px-1 text-center text-sm tabular-nums ${tone ?? ""}`}>
-      {live ? (
-        <span className="rounded bg-black/5 px-1 text-[10px] font-medium text-muted dark:bg-white/10">ledger</span>
-      ) : null}
       {formatMoney(cents, currency)}
     </span>
   );
@@ -1527,6 +1559,19 @@ function LedgerCell({
 // Editable contributed / gain cell — reads like text, saves on blur. Editing a
 // cell writes an investment_years row, which "locks in" that account+year
 // (stored value then wins over live derivation).
+/**
+ * Marks a Gains cell the user typed over, so the automatic figure and the
+ * hand-set one can be told apart at a glance. Not a tooltip — the note under
+ * the table says what it means.
+ */
+function PinnedMark() {
+  return (
+    <span aria-label="typed by hand" className="pointer-events-none absolute right-1 top-0 text-[10px] leading-none text-muted">
+      ✎
+    </span>
+  );
+}
+
 function EditCell({
   accountId,
   bucketId,
@@ -1575,16 +1620,21 @@ function EditCell({
         // Sized from the digits (tabular-nums makes 1ch one digit) rather than
         // the `size` attribute, whose per-character estimate runs wide and left
         // a gap between the "$" and the number.
+        // The 0.6ch tail is breathing room: without it the calc lands a
+        // fraction short and the browser clips the final digit.
         style={{
           width: `calc(${(initial || "0.00").replace(/[^0-9]/g, "").length}ch + ${
             (initial || "0.00").length - (initial || "0.00").replace(/[^0-9]/g, "").length
-          } * 0.42ch)`,
+          } * 0.42ch + 0.6ch)`,
         }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-center text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
+        // Left-aligned inside its own box so the digits sit against the "$".
+        // The form centres the pair, so the cell still reads centred; centring
+        // the text as well pushed the number away from the symbol.
+        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-left text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1594,6 +1644,20 @@ function EditCell({
 
 // Secondary view: each account's contributed vs. gain across every year, so the
 // "keep investing here?" trend is visible at a glance.
+/**
+ * The group's 31-December close for a year — null when not one account in the
+ * group has closed that year yet, so the row reads "—" rather than $0.00.
+ */
+function sumClose(accounts: InvestAccount[], year: number): number | null {
+  let total = 0;
+  let any = false;
+  for (const a of accounts) {
+    const c = effectiveCell(a, year).closeBalanceCents;
+    if (c != null) { total += c; any = true; }
+  }
+  return any ? total : null;
+}
+
 function YearByYear({
   accounts,
   years,
@@ -1653,13 +1717,14 @@ function YearByYear({
                     Investments
                   </span>
                 </td>
-                <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain</td>
+                <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain + EOY</td>
                 {desc.map((y) => {
                   const contrib = mine.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                   const gain = mine.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
+                  const eoy = sumClose(mine, y);
                   return (
                     <td key={y} className="bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
-                      <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>
+                      <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>{" / "}<span>{eoy == null ? "—" : formatMoney(eoy, currency)}</span>
                     </td>
                   );
                 })}
@@ -1682,13 +1747,14 @@ function YearByYear({
                       Kids Funding
                     </span>
                   </td>
-                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain</td>
+                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain + EOY</td>
                   {desc.map((y) => {
                     const contrib = kids.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                     const gain = kids.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
+                    const eoy = sumClose(kids, y);
                     return (
                       <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
-                        <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>
+                        <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>{" / "}<span>{eoy == null ? "—" : formatMoney(eoy, currency)}</span>
                       </td>
                     );
                   })}
@@ -1734,7 +1800,7 @@ function YByAccountRows({
   return (
     <>
       <tr className="border-t border-line/70">
-        <td rowSpan={2} className="px-4 py-2 align-top font-medium">
+        <td rowSpan={3} className="px-4 py-2 align-top font-medium">
           <span className="flex items-center gap-1.5">
             {hasBuckets ? (
               <button
@@ -1783,11 +1849,22 @@ function YByAccountRows({
           );
         })}
       </tr>
+      <tr>
+        <td className="px-3 py-1.5 text-muted">EOY</td>
+        {desc.map((y) => {
+          const close = effectiveCell(account, y).closeBalanceCents;
+          return (
+            <td key={y} className="px-3 py-1.5 text-center tabular-nums text-muted">
+              {close == null ? "—" : formatMoney(close, currency)}
+            </td>
+          );
+        })}
+      </tr>
       {hasBuckets && open
         ? account.buckets.map((b) => (
             <Fragment key={b.id}>
               <tr className="border-t border-line/40 bg-background/30">
-                <td rowSpan={2} className="px-4 py-1.5 pl-10 align-top text-sm text-muted">↳ {b.name}</td>
+                <td rowSpan={3} className="px-4 py-1.5 pl-10 align-top text-sm text-muted">↳ {b.name}</td>
                 <td className="px-3 py-1 text-sm text-muted">Contributed</td>
                 {desc.map((y) => (
                   <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
@@ -1802,6 +1879,17 @@ function YByAccountRows({
                   return (
                     <td key={y} className={`px-3 py-1 text-center text-sm tabular-nums ${gainTone(g)}`}>
                       <EditCell accountId={account.id} bucketId={b.id} year={y} field="accrued" cents={g} currency={currency} tone={gainTone(g)} />
+                    </td>
+                  );
+                })}
+              </tr>
+              <tr className="bg-background/30">
+                <td className="px-3 py-1 text-sm text-muted">EOY</td>
+                {desc.map((y) => {
+                  const close = b.cells[y]?.closeBalanceCents ?? null;
+                  return (
+                    <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
+                      {close == null ? "—" : formatMoney(close, currency)}
                     </td>
                   );
                 })}

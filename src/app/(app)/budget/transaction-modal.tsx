@@ -394,7 +394,12 @@ export function TransactionModal({
         />
       )}
 
-      <div className="flex max-h-[92dvh] min-h-0 w-full flex-1 flex-col overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl dark:ring-white/10">
+      {/* The sheet is pinned to the top of a phone screen, so the notch and
+          status bar sit over its first row — the Income/Expense toggle began
+          22px down. The inset lives on this outer, non-scrolling box so it
+          can't scroll away with the fields; the desktop dialog is centred and
+          needs none of it. */}
+      <div className="flex max-h-[92dvh] min-h-0 w-full flex-1 flex-col overflow-hidden bg-surface pt-[max(env(safe-area-inset-top),1.75rem)] shadow-sm ring-1 ring-black/5 sm:h-auto sm:max-h-[85vh] sm:flex-none sm:rounded-2xl sm:pt-0 dark:ring-white/10">
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {/* Tabs: same simple two-way (Income / Expense) in both add and edit.
               Picking a subcategory in the dropdown below is what pins the true

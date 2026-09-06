@@ -251,6 +251,7 @@ export default async function SnowballPage() {
       apr: r.apr,
       promoEndsOn: r.promoEndsOn,
       postPromoApr: r.postPromoApr,
+      paidThisMonthCents: r.paidThisMonthCents,
     })),
     0,     // no shared extra — each debt's own scheduled amount is baked into minCents above
     month,
@@ -279,6 +280,7 @@ export default async function SnowballPage() {
       apr: r.apr,
       promoEndsOn: r.promoEndsOn,
       postPromoApr: r.postPromoApr,
+      paidThisMonthCents: r.paidThisMonthCents,
     })),
     classicExtraForMonth,
     month,
@@ -325,6 +327,7 @@ export default async function SnowballPage() {
       apr: r.apr,
       promoEndsOn: r.promoEndsOn,
       postPromoApr: r.postPromoApr,
+      paidThisMonthCents: r.paidThisMonthCents,
     })),
     classicExtraForMonth,
     month,

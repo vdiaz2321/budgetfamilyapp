@@ -188,8 +188,11 @@ function Stat({
         {formatMoney(value, currency)}
       </p>
       {subtitle ? (
+        // Wraps rather than runs on: "1.3% of income remaining" is wider than
+        // a fifth of the row, and holding it on one line pushed the whole hero
+        // grid past the page edge — with nothing to scroll it back into view.
         <p
-          className={`mt-0.5 whitespace-nowrap text-xs font-semibold ${
+          className={`mt-0.5 text-xs font-semibold ${
             subtitleTone ?? (subtitleColor ? "" : "text-foreground")
           }`}
           style={subtitleColor ? { color: subtitleColor } : undefined}

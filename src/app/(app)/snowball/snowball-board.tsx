@@ -544,7 +544,7 @@ function paymentForTargetMonth(row: Row, startMonth: string, targetMonth: string
   if (!targetMonths || targetMonths < 1) return Math.max(row.minCents, row.plannedCents);
   const paysByTarget = (paymentCents: number) => {
     const projection = projectSnowball(
-      [{ id: row.subId, balanceCents: row.balanceCents, minCents: paymentCents, apr: row.apr }],
+      [{ id: row.subId, balanceCents: row.balanceCents, minCents: paymentCents, apr: row.apr, paidThisMonthCents: row.paidThisMonthCents }],
       0,
       startMonth,
       targetMonths,
@@ -617,6 +617,10 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
     apr: row.apr,
     promoEndsOn: row.promoEndsOn,
     postPromoApr: row.postPromoApr,
+    // This month's payment is already off the balance — same rule the page's
+    // own projection uses, or the simulator lands a month earlier than the
+    // card it was opened from.
+    paidThisMonthCents: row.paidThisMonthCents,
   };
   const baselineResult = useMemo(() => projectSnowball(
     [{ id: row.subId, balanceCents: row.balanceCents, minCents: baselinePayment, ...rateSchedule }],

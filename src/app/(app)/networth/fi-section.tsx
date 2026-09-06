@@ -37,7 +37,7 @@ export type FiProjectionYear = {
   year: number;
   incomeCents: number;
   spendingCents: number;
-  /** The plan's closing net worth for that year — the grid's "Planned EOY". */
+  /** The plan's closing net worth for that year — the grid's "Proj EOY NW". */
   eoyCents: number;
 };
 
@@ -221,7 +221,7 @@ export function FiSection({
 
           {atTarget ? (
             <p className="mt-1 text-xs text-muted">
-              By your target of{" "}
+              By your retirement year of{" "}
               <span className="font-semibold text-foreground">{plan.targetRetireYear}</span> the
               portfolio reaches{" "}
               <span className="font-semibold text-foreground">
@@ -362,21 +362,25 @@ function FiChart({
   // Full four-digit years, so the axis reads 2027 rather than '27. They no
   // longer live in a per-bar span — a 4-digit label is wider than a bar once
   // the projection runs past ~20 years, so each one is positioned over its bar
-  // and allowed to spill across its neighbours. Six of them is what fits at
-  // mobile width without the labels touching.
-  const labelEvery = Math.max(1, Math.ceil(count / 6));
+  // and allowed to spill across its neighbours.
   const targetIndex =
     targetRetireYear == null ? -1 : fi.years.findIndex((y) => y.year === targetRetireYear);
 
-  // The crossing year and the two ends are named first — they carry the
-  // meaning. The every-nth rhythm then fills the gaps, but only where it
-  // clears the labels already placed; two four-digit years a bar apart run
-  // into each other.
-  const minGap = Math.max(2, Math.ceil(count / 8));
-  const anchors = [0, count - 1, ...(fiIndex >= 0 ? [fiIndex] : [])];
-  const labelled = new Set<number>(anchors);
-  for (let i = 0; i < count; i += labelEvery) {
-    if ([...labelled].every((placed) => Math.abs(placed - i) >= minGap)) labelled.add(i);
+  // Decade-friendly rhythm: the two ends are named first, then every year
+  // divisible by 5 — an axis that reads 2030 / 2035 / 2040 is the one people
+  // actually navigate by. A five-multiple is dropped where it would collide
+  // with a label already placed; two four-digit years a bar apart run into
+  // each other. Past ~40 bars the fives get too tight, so it steps to tens.
+  const minGap = Math.max(4, Math.ceil(count / 8));
+  const yearEvery = count > 40 ? 10 : 5;
+  const labelled = new Set<number>();
+  fi.years.forEach((y, i) => {
+    if (y.year % yearEvery === 0) labelled.add(i);
+  });
+  // The two ends round the axis off, but only where they don't crowd a
+  // five — the rhythm is what's being read, not the endpoints.
+  for (const end of [0, count - 1]) {
+    if ([...labelled].every((placed) => Math.abs(placed - end) >= minGap)) labelled.add(end);
   }
 
   const centreOf = (i: number) => ((i + 0.5) / count) * 100;
@@ -475,7 +479,7 @@ function FiChart({
                   targetIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
-                Target {targetRow.year}
+                Retire {targetRow.year}
                 {birthYear ? ` · age ${targetRow.year - birthYear}` : ""}
               </span>
             </span>
@@ -495,7 +499,7 @@ function FiChart({
             return (
               <span
                 key={y.year}
-                className="absolute top-0 flex flex-col items-center text-[10px] tabular-nums leading-tight text-muted"
+                className="absolute top-0 flex flex-col items-center whitespace-nowrap text-[10px] tabular-nums leading-tight text-muted"
                 style={
                   first
                     ? { left: 0 }
@@ -525,10 +529,10 @@ function FiChart({
             {selected.independent ? " · past the FI number" : ""}
           </p>
           <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-5">
-            <Readout label="Income" value={selectedPlan ? formatMoney(selectedPlan.incomeCents, currency) : "—"} />
-            <Readout label="Spending" value={selectedPlan ? formatMoney(selectedPlan.spendingCents, currency) : "—"} />
+            <Readout label="Proj Income" value={selectedPlan ? formatMoney(selectedPlan.incomeCents, currency) : "—"} />
+            <Readout label="Proj Spending" value={selectedPlan ? formatMoney(selectedPlan.spendingCents, currency) : "—"} />
             <Readout
-              label="Saved"
+              label="Proj Saved"
               value={
                 selectedPlan
                   ? formatMoney(selectedPlan.incomeCents - selectedPlan.spendingCents, currency)
@@ -536,10 +540,10 @@ function FiChart({
               }
             />
             <Readout
-              label="Planned EOY"
+              label="Proj EOY NW"
               value={selectedPlan ? formatMoney(selectedPlan.eoyCents, currency) : "—"}
             />
-            <Readout label="Portfolio" value={formatMoney(selected.endCents, currency)} />
+            <Readout label="Proj Portfolio" value={formatMoney(selected.endCents, currency)} />
           </div>
         </div>
       ) : null}
@@ -614,7 +618,7 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Target retirement year">
+        <Field label="Retirement Year">
           <input
             name="targetRetireYear"
             inputMode="numeric"

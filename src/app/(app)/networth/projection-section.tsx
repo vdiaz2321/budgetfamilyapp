@@ -7,7 +7,6 @@ import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoney } from "@/lib/money";
 import {
   appendProjectionYears,
-  fillProjectionForward,
   saveProjectionYear,
   seedProjection,
 } from "./actions";
@@ -98,12 +97,10 @@ export function ProjectionSection({
   const gap = current?.actualCents != null ? current.actualCents - current.eoyCents : null;
   const last = years.at(-1) ?? null;
 
-  // Both footer buttons rewrite years in one press, so each asks first — in
-  // an in-app dialog rather than window.confirm(), which some browsers and
-  // every embedded/preview frame silently answer "cancel" for. That is what
-  // made "Rebuild … onward" look dead: the click fired, the dialog never
-  // appeared, and the handler returned before touching anything.
-  const [confirming, setConfirming] = useState<"add" | "refill" | null>(null);
+  // Adding years rewrites the grid in one press, so it asks first — in an
+  // in-app dialog rather than window.confirm(), which some browsers and every
+  // embedded/preview frame silently answer "cancel" for.
+  const [confirming, setConfirming] = useState<"add" | null>(null);
 
   // Tacks five more years onto the end, carrying the last planned year
   // forward.
@@ -117,27 +114,6 @@ export function ProjectionSection({
       } else {
         setError(null);
         setNotice(last ? `Added 5 years — the plan now runs to ${last.year + 5}.` : "Added 5 years.");
-        router.refresh();
-      }
-    });
-  }
-
-  function refill() {
-    setConfirming(null);
-    start(async () => {
-      const result = await fillProjectionForward(thisYear);
-      if (result?.error) {
-        setError(result.error);
-        setNotice(null);
-      } else {
-        setError(null);
-        // A rebuild that changes nothing still has to say so, or it reads as
-        // a dead button.
-        setNotice(
-          result?.updated
-            ? `Rebuilt ${result.updated} ${result.updated === 1 ? "year" : "years"} from the assumptions.`
-            : `Nothing to rebuild — ${thisYear + 1} onward already matches the assumptions.`,
-        );
         router.refresh();
       }
     });
@@ -222,7 +198,7 @@ export function ProjectionSection({
                   <th className="px-3 py-2 text-center font-semibold">Income</th>
                   <th className="px-3 py-2 text-center font-semibold">Spending</th>
                   <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Saved / invested</th>
-                  <th className="px-3 py-2 text-center font-semibold">Planned EOY</th>
+                  <th className="px-3 py-2 text-center font-semibold">Proj EOY NW</th>
                   <th className="px-3 py-2 text-center font-semibold">Actual</th>
                   <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Actual Diff</th>
                 </tr>
@@ -342,14 +318,6 @@ export function ProjectionSection({
               >
                 {pending ? "Working…" : `Add 5 years${last ? ` (through ${last.year + 5})` : ""}`}
               </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => setConfirming("refill")}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
-              >
-                {pending ? "Rebuilding…" : `Rebuild ${thisYear + 1} onward`}
-              </button>
             </div>
           </div>
           {error ? (
@@ -363,17 +331,14 @@ export function ProjectionSection({
 
       {confirming ? (
         <ConfirmModal
-          title={confirming === "add" ? "Add 5 years?" : `Rebuild ${thisYear + 1} onward?`}
+          title="Add 5 years?"
           body={
-            confirming === "add"
-              ? last
-                ? `This extends the plan through ${last.year + 5}, carrying ${last.year}'s income and spending forward. Nothing already in the grid changes, and the new years can be edited afterwards.`
-                : "This adds 5 more years to the end of the plan. Nothing already in the grid changes."
-              : `Every year after ${thisYear} is recomputed from your assumptions — return, inflation and income growth. Hand-entered figures for those years will be replaced. ${thisYear} and earlier are left alone.`
+            last
+              ? `This extends the plan through ${last.year + 5}, carrying ${last.year}'s income and spending forward. Nothing already in the grid changes, and the new years can be edited afterwards.`
+              : "This adds 5 more years to the end of the plan. Nothing already in the grid changes."
           }
-          confirmLabel={confirming === "add" ? "Add 5 years" : "Rebuild"}
-          destructive={confirming === "refill"}
-          onConfirm={confirming === "add" ? addYears : refill}
+          confirmLabel="Add 5 years"
+          onConfirm={addYears}
           onClose={() => setConfirming(null)}
         />
       ) : null}
@@ -594,50 +559,55 @@ function YearModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Saved / invested" hint="Auto-calculated from Income & Spending.">
-          <input
-            value={centsToDisplay(savedCents)}
-            readOnly
-            disabled
-            className={`${inputClass} opacity-60`}
-          />
-        </Field>
-        <Field label="Est. gains">
-          <input
-            name="growth"
-            inputMode="decimal"
-            value={gains}
-            onChange={(e) => {
-              setGains(e.target.value);
-              setEoyDraft(null);
-            }}
-            className={inputClass}
-          />
-        </Field>
-        <Field
-          label="Planned EOY"
-          hint={
-            eoyBelowFloor
-              ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoney(floorEoyCents, currency)}.`
-              : "Typing here sets Est. gains to match."
-          }
-          hintTone={eoyBelowFloor ? "text-negative" : undefined}
-        >
-          <input
-            inputMode="decimal"
-            value={eoyDraft ?? centsToDisplay(predictedEoyCents)}
-            onChange={(e) => editEoy(e.target.value)}
-            onBlur={() => setEoyDraft(null)}
-            className={inputClass}
-          />
-        </Field>
+        {/* Saved, gains and the close read left to right as one sentence,
+            so they share a row of their own — three narrow boxes fit where two
+            wide ones wasted the space. */}
+        <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="Saved / invested" hint="Auto-calculated from Income & Spending.">
+            <input
+              value={centsToDisplay(savedCents)}
+              readOnly
+              disabled
+              className={`${inputClass} opacity-60`}
+            />
+          </Field>
+          <Field label="Est. gains">
+            <input
+              name="growth"
+              inputMode="decimal"
+              value={gains}
+              onChange={(e) => {
+                setGains(e.target.value);
+                setEoyDraft(null);
+              }}
+              className={inputClass}
+            />
+          </Field>
+          <Field
+            label="Proj EOY NW"
+            hint={
+              eoyBelowFloor
+                ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoney(floorEoyCents, currency)}.`
+                : "Typing here sets Est. gains to match."
+            }
+            hintTone={eoyBelowFloor ? "text-negative" : undefined}
+          >
+            <input
+              inputMode="decimal"
+              value={eoyDraft ?? centsToDisplay(predictedEoyCents)}
+              onChange={(e) => editEoy(e.target.value)}
+              onBlur={() => setEoyDraft(null)}
+              className={inputClass}
+            />
+          </Field>
+        </div>
 
         {/* What the rest of the app recorded for this year — the figures to
             copy in at year end, shown where they are needed rather than on
             another page. */}
         <div className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 dark:bg-white/10">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-            {row.year} {row.inProgress ? "so far" : "actual"} · from your other pages
+            {row.year}: {row.inProgress ? "so far" : "actual"} from other pages
           </p>
           <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
             <Recorded label="Income" cents={measured.income} currency={currency} from="Transactions" />
@@ -662,7 +632,7 @@ function YearModal({
             stored, so the difference moves with the fields above. */}
         <div className="sm:col-span-2 grid grid-cols-1 gap-1 text-xs sm:grid-cols-3">
           <p>
-            <span className="text-muted">Proj EOY Net Worth: </span>
+            <span className="text-muted">Proj EOY NW: </span>
             <span className="font-semibold text-foreground">
               {formatMoney(predictedEoyCents, currency)}
             </span>

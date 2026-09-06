@@ -142,7 +142,7 @@ export default async function InvestPage({
       .eq("month", monthKey),
     supabase
       .from("investment_years")
-      .select("account_id, bucket_id, year, contributed_cents, accrued_cents, start_cents, end_cents")
+      .select("account_id, bucket_id, year, contributed_cents, accrued_cents, accrued_manual, start_cents, end_cents")
       .eq("household_id", household.id),
     savingsSubIds.length
       ? supabase
@@ -247,10 +247,57 @@ export default async function InvestPage({
   // year). Snapshots come ordered by month, so a later row overwrites an
   // earlier one for the same account+year.
   const endBalance = new Map<string, number>(); // key `${accountId}:${year}`
+  // December only — the frozen close of a finished year. `endBalance` above
+  // accepts the latest month recorded, which for the year in progress is just
+  // "now"; the Close column has to mean 31 December or nothing.
+  const decBalance = new Map<string, number>();
+  // The earliest month recorded in a year. Used once, for the first year of
+  // history: 2026 has no December 2025 to open from, so January 2026 stands in.
+  const firstBalance = new Map<string, number>();
+  const firstMonth = new Map<string, string>();
   for (const s of accSnaps ?? []) {
     if (!investIds.has(s.account_id)) continue;
     const year = Number(s.month.slice(0, 4));
-    endBalance.set(`${s.account_id}:${year}`, s.balance_cents);
+    const key = `${s.account_id}:${year}`;
+    endBalance.set(key, s.balance_cents);
+    if (!firstBalance.has(key)) {
+      firstBalance.set(key, s.balance_cents);
+      firstMonth.set(key, s.month.slice(5, 7));
+    }
+    if (s.month.slice(5, 7) === "12") decBalance.set(key, s.balance_cents);
+  }
+  // Buckets keep their own monthly snapshots, so a split account (TSP, Fidelity,
+  // Crypto) opens and closes each of its parts on real recorded balances rather
+  // than a share of the whole.
+  const bucketAccountId = new Map<string, string>();
+  for (const b of bucketRows ?? []) bucketAccountId.set(b.id, b.account_id);
+  for (const s of bucketSnaps ?? []) {
+    const accountId = bucketAccountId.get(s.bucket_id);
+    if (!accountId || !investIds.has(accountId)) continue;
+    const year = Number(s.month.slice(0, 4));
+    const key = `${s.bucket_id}:${year}`;
+    endBalance.set(key, s.balance_cents);
+    if (!firstBalance.has(key)) {
+      firstBalance.set(key, s.balance_cents);
+      firstMonth.set(key, s.month.slice(5, 7));
+    }
+    if (s.month.slice(5, 7) === "12") decBalance.set(key, s.balance_cents);
+  }
+
+  /**
+   * What a slot was worth on 1 January of `year`: last December's close. The
+   * first year of history has nothing before it, so the earliest month we
+   * recorded that year stands in — for 2026 that is January 2026.
+   */
+  function openingCents(slotId: string, year: number): number | null {
+    const prior = decBalance.get(`${slotId}:${year - 1}`) ?? endBalance.get(`${slotId}:${year - 1}`);
+    if (prior != null) return prior;
+    // Only January stands in. A slot whose first record is, say, August was
+    // created mid-year — TSP's buckets, split out of the account in 2026 — and
+    // treating August as the opening would count every contribution made
+    // before it as a loss.
+    const key = `${slotId}:${year}`;
+    return firstMonth.get(key) === "01" ? firstBalance.get(key) ?? null : null;
   }
 
   // Live-derived net contributions per (account, bucket, year).
@@ -265,13 +312,20 @@ export default async function InvestPage({
   // Stored/reviewed rows.
   const storedBy = new Map<
     string,
-    { contributed: number; accrued: number; start: number | null; end: number | null }
+    {
+      contributed: number;
+      accrued: number;
+      accruedManual: boolean;
+      start: number | null;
+      end: number | null;
+    }
   >();
   for (const r of yearRows ?? []) {
     const key = investSlotKey(r.account_id, r.bucket_id ?? null, r.year);
     storedBy.set(key, {
       contributed: r.contributed_cents ?? 0,
       accrued: r.accrued_cents ?? 0,
+      accruedManual: !!(r as { accrued_manual?: boolean | null }).accrued_manual,
       start: r.start_cents ?? null,
       end: r.end_cents ?? null,
     });
@@ -294,6 +348,8 @@ export default async function InvestPage({
     bucketKey: string,
     year: number,
     fallbackEnd: number | null,
+    /** Snapshot slot this cell reads balances from — null when it has none. */
+    snapshotId: string | null,
   ): YearCell {
     const key = investSlotKey(accountId, bucketKey === "_" ? null : bucketKey, year);
     const stored = storedBy.get(key);
@@ -309,22 +365,32 @@ export default async function InvestPage({
       isCurrentYear: year === nowYear,
     });
 
-    const start = stored?.start ?? null;
+    // Start comes off the Accounts page — last December's close — unless a
+    // figure was typed into the cell, which always wins.
+    const autoStart = snapshotId ? openingCents(snapshotId, year) : null;
+    const start = stored?.start ?? autoStart;
     const end = stored?.end ?? fallbackEnd;
+    // 31 December, and only 31 December. Null all year until the year closes.
+    // A stored 0 is not a close — it is the account-level slot of a split
+    // account, held at zero so its buckets aren't counted twice.
+    const storedClose = stored?.end != null && stored.end !== 0 ? stored.end : null;
+    const close = storedClose ?? (snapshotId ? decBalance.get(`${snapshotId}:${year}`) ?? null : null);
 
-    let accrued: number;
-    if (stored) {
-      accrued = stored.accrued;
-    } else {
-      accrued = start != null && end != null ? end - start - contributed : 0;
-    }
+    // Growth is what the balance did beyond the money paid in:
+    //   (what it's worth now) − (what it opened at) − (what was added).
+    // A hand-typed figure pins the cell and this is skipped.
+    const autoAccrued =
+      start != null && end != null ? end - start - contributed : 0;
+    const accrued = stored?.accruedManual ? stored.accrued : autoAccrued;
 
     return {
       year,
       startBalanceCents: start,
       endBalanceCents: end,
+      closeBalanceCents: close,
       contributedCents: contributed,
       accruedCents: accrued,
+      accruedManual: !!stored?.accruedManual,
       stored: !!stored,
       // True when `contributed` was summed from the transaction ledger rather
       // than read from investment_years. Typing over such a cell writes a row
@@ -340,11 +406,26 @@ export default async function InvestPage({
     // Bucket rows carry their own cells. Fallback end for the current year =
     // bucket's live balance (buckets don't have per-month snapshots today, so
     // the current balance is the best-available "now" number).
+    // A split account opens the year through its buckets only when all of them
+    // were around at the start of it. When one wasn't, the whole account opens
+    // on its own snapshot instead, held on the account-level slot — otherwise
+    // half the account would open at zero.
+    const bucketsOpenYear = new Set<number>();
+    for (const year of years) {
+      if (
+        acctBuckets.length > 0 &&
+        acctBuckets.every((b) => openingCents(b.id, year) != null)
+      ) {
+        bucketsOpenYear.add(year);
+      }
+    }
+
     const buckets: BucketRow[] = acctBuckets.map((b) => {
       const cells: Record<number, YearCell> = {};
       for (const year of years) {
-        const fallbackEnd = year === nowYear ? b.balanceCents : null;
-        cells[year] = buildCell(a.id, b.id, year, fallbackEnd);
+        const fallbackEnd =
+          year === nowYear ? b.balanceCents : endBalance.get(`${b.id}:${year}`) ?? null;
+        cells[year] = buildCell(a.id, b.id, year, fallbackEnd, bucketsOpenYear.has(year) ? b.id : null);
       }
       return {
         id: b.id,
@@ -371,7 +452,16 @@ export default async function InvestPage({
     const cells: Record<number, YearCell> = {};
     for (const year of years) {
       const fallbackEnd = acctBuckets.length > 0 ? null : endBalance.get(`${a.id}:${year}`) ?? null;
-      cells[year] = buildCell(a.id, "_", year, fallbackEnd);
+      // Same reason the snapshot fallback is skipped: a bucketed account's
+      // balance lives in its buckets, so reading the whole-account snapshot
+      // here would count that money twice.
+      cells[year] = buildCell(
+        a.id,
+        "_",
+        year,
+        fallbackEnd,
+        acctBuckets.length > 0 && bucketsOpenYear.has(year) ? null : a.id,
+      );
     }
 
     return {
@@ -545,7 +635,21 @@ export default async function InvestPage({
       monthlyCents: g.monthly_contribution_cents ?? 0,
     });
   }
-  const cashRows: CashReserveRow[] = (bucketRows ?? [])
+  // A savings account can also carry its goal directly, with no bucket in
+  // between — that is how the bucketless accounts below get a target.
+  const goalByAccountId = new Map<string, { goalCents: number; monthlyCents: number }>();
+  for (const s of savingsSubs) {
+    const linkedAccountId = (s as { linked_account_id?: string | null }).linked_account_id;
+    if (!linkedAccountId || s.linked_bucket_id) continue;
+    const g = (savingsGoals ?? []).find((x) => x.subcategory_id === s.id);
+    if (!g) continue;
+    goalByAccountId.set(linkedAccountId, {
+      goalCents: g.goal_cents ?? 0,
+      monthlyCents: g.monthly_contribution_cents ?? 0,
+    });
+  }
+  const bucketedAccountIds = new Set((bucketRows ?? []).map((b) => b.account_id));
+  const bucketFundRows: CashReserveRow[] = (bucketRows ?? [])
     .filter((b) => reserveAccountIds.has(b.account_id))
     .map((b) => {
       const goal = goalByBucketId.get(b.id) ?? null;
@@ -559,8 +663,32 @@ export default async function InvestPage({
         goalCents: goal ? goal.goalCents : null,
         plannedMonthlyCents: goal ? goal.monthlyCents : null,
       };
-    })
-    .sort((a, b) => b.balanceCents - a.balanceCents);
+    });
+  // A reserve account with no buckets IS the fund — Ally Bank and Wallet$ hold
+  // their money at the account level. Listing only buckets dropped them from
+  // the panel and from its total, while Accounts kept counting them, so the
+  // two pages disagreed by exactly those balances.
+  const accountFundRows: CashReserveRow[] = allAccounts
+    .filter(
+      (a) =>
+        reserveAccountIds.has(a.id) &&
+        !bucketedAccountIds.has(a.id) &&
+        (a.current_balance_cents ?? 0) !== 0,
+    )
+    .map((a) => {
+      const goal = goalByAccountId.get(a.id) ?? null;
+      return {
+        id: a.id,
+        name: a.name,
+        balanceCents: a.current_balance_cents ?? 0,
+        isEmergencyFund: /emergency/i.test(a.name ?? ""),
+        goalCents: goal ? goal.goalCents : null,
+        plannedMonthlyCents: goal ? goal.monthlyCents : null,
+      };
+    });
+  const cashRows: CashReserveRow[] = [...bucketFundRows, ...accountFundRows].sort(
+    (a, b) => b.balanceCents - a.balanceCents,
+  );
   const cashReserves: CashReservesData = {
     rows: cashRows,
     totalCents: cashRows.reduce((s, r) => s + r.balanceCents, 0),

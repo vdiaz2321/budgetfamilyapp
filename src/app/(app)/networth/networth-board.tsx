@@ -1638,8 +1638,12 @@ function SummaryBlock({
     const last = r.cell(cols[cols.length - 1]);
     return first == null || last == null ? null : last - first;
   };
+  // The percentage keeps its sign here, because the row directly above it
+  // ("Change (+/-)") shows one: a month that fell $806.29 read as a flat
+  // "0.22%" next to "−$806.29", which looks like growth at a glance.
+  const signedPct = (p: number) => `${p < 0 ? "−" : ""}${(Math.abs(p) * 100).toFixed(2)}%`;
   const fmt = (r: Row, v: number | null) =>
-    v == null ? "—" : r.pct ? pctLabel(v) : formatMoney(v, currency);
+    v == null ? "—" : r.pct ? signedPct(v) : formatMoney(v, currency);
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">

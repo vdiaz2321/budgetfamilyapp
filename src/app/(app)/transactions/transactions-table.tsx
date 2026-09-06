@@ -142,6 +142,11 @@ export function TransactionsTable({
     if (nextFrom) params.set("from", nextFrom);
     if (nextTo) params.set("to", nextTo);
     router.push(params.toString() ? `/transactions?${params}` : "/transactions");
+    // The rows are fetched on the server from these search params, and the
+    // client router serves this route from its cache — so without the refresh
+    // the URL changes to an all-time range while the table keeps showing the
+    // month it already had.
+    router.refresh();
   }
 
   function clearRange() {
@@ -149,6 +154,7 @@ export function TransactionsTable({
     setToDate("");
     setSearchOpen(false);
     router.push(`/transactions?month=${month.key}`);
+    router.refresh();
   }
 
   const accountName = new Map(accountOptions.map((a) => [a.id, a.name]));
@@ -235,8 +241,10 @@ export function TransactionsTable({
     .reduce((sum, t) => sum + t.amountCents, 0);
   // Received minus spent for the rows in view. Early in the month, before a
   // payday lands, that is legitimately negative — so it's labelled "Net", not
-  // "Income left", which read as though income had been overspent.
-  const incomeLeft = searchTerms.length > 0 ? 0 : incomeTotal - outflowTotal;
+  // "Income left", which read as though income had been overspent. A search
+  // used to force this to zero while Received and Spent kept reporting the
+  // matches, which read as a wrong total rather than as a withheld one.
+  const incomeLeft = incomeTotal - outflowTotal;
 
   // The desktop table scrolls inside its own box (see the frozen header
   // below), so the window barely moves — the toolbar has to react to THAT

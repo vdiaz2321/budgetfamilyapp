@@ -156,13 +156,18 @@ export function TrendChart({
               // of forcing the row — and the page — wider than the phone.
               <span key={b.key} className="flex min-w-0 flex-1 justify-center">
                 <span
-                  className={`max-w-full truncate rounded-md px-1.5 py-0.5 text-[10px] ${
+                  className={`max-w-full truncate rounded-md px-0.5 py-0.5 text-[10px] sm:px-1.5 ${
                     b.selected
                       ? "bg-foreground font-semibold text-background"
                       : "text-muted"
                   }`}
                 >
-                  {b.label}
+                  {/* The year suffix is the first thing to go on a phone:
+                      twelve buckets leave ~3 characters each, so "Jan '26"
+                      truncated to "J…" — and Jan, Jun and Jul all read the
+                      same. The period picker above already names the year. */}
+                  <span className="sm:hidden">{b.label.replace(/\s'\d{2}$/, "")}</span>
+                  <span className="hidden sm:inline">{b.label}</span>
                 </span>
               </span>
             ))}
