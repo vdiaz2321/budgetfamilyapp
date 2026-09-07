@@ -15,24 +15,31 @@ export function StayModal({
   cards,
   brands,
   currency,
+  defaultAccountId,
   onClose,
 }: {
   stay: TravelStay | null;
   cards: TravelCard[];
   brands: TravelBrand[];
   currency: string;
+  // Opened from a card's own panel on Accounts, the card is already known —
+  // it starts selected, with the same fill-in a manual pick would do.
+  defaultAccountId?: string;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [accountId, setAccountId] = useState(stay?.accountId ?? NO_CARD);
-  const [holder, setHolder] = useState(stay?.holder ?? "");
+  const [accountId, setAccountId] = useState(stay?.accountId ?? defaultAccountId ?? NO_CARD);
+  const preset = defaultAccountId ? cards.find((c) => c.id === defaultAccountId) ?? null : null;
+  const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
   const [brand, setBrand] = useState(stay?.brand ?? "");
   const [points, setPoints] = useState(stay?.pointsCost ? String(stay.pointsCost) : "");
-  const [pointsValue, setPointsValue] = useState(
-    stay?.pointsValueMicros ? String(stay.pointsValueMicros / 1_000_000) : "",
-  );
+  const [pointsValue, setPointsValue] = useState(() => {
+    if (stay?.pointsValueMicros) return String(stay.pointsValueMicros / 1_000_000);
+    if (!stay && preset?.pointsValueMicros) return String(preset.pointsValueMicros / 1_000_000);
+    return "";
+  });
   // A zero reads as a real number you have to clear before typing, so an
   // unset amount stays blank and only a saved non-zero value is filled in.
   const money = (cents: number | undefined) => (cents ? centsToDisplay(cents) : "");

@@ -1203,6 +1203,10 @@ function SummaryHeroCard({
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
               {formatMoney(outflowPlanned, currency)}
             </p>
+            {/* Rollover pill + Roll-in stack directly under this figure —
+                they're both about the previous month's plan, so they read as
+                a continuation of Planned Budget rather than card chrome. */}
+            <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left to Budget</p>
@@ -1240,12 +1244,6 @@ function SummaryHeroCard({
             )}
           </div>
         </div>
-
-        {/* Rollover + Roll-in used to sit in a full-width strip under the
-            card; pulled up under the figures so they fill the space the left
-            column was leaving empty. Spans the whole 2-col stat block rather
-            than living in one cell, so the pills don't wrap on mobile. */}
-        <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
         </div>
 
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:mt-0 md:grid-cols-1 md:content-start">
@@ -1346,6 +1344,13 @@ function dueItemDateLabel(date: string) {
   return target.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+// "August 2026" -> "Aug". The hero card's rollover pill and Roll-in button
+// share the left column with + Assign to an item, so both labels use the
+// 3-letter month to keep the row on one line instead of wrapping.
+function shortMonth(label: string) {
+  return label.replace(/\s+\d{4}$/, "").slice(0, 3);
+}
+
 function RolloverControl({
   rollover,
   monthFirstOfMonth,
@@ -1370,12 +1375,12 @@ function RolloverControl({
   if (enabled) return null;
 
   const amount = formatMoney(Math.max(0, availableCents), currency);
-  const prevMonthName = prevMonthLabel.replace(/\s+\d{4}$/, "");
+  const prevMonthName = shortMonth(prevMonthLabel);
   const rolloverPillContent = (
     <>
       <span className="size-1.5 rounded-full bg-positive" aria-hidden />
-      <span className="text-[11px] font-semibold opacity-80">Rollover {prevMonthName}:</span>
-      <span className="text-[11px] font-bold tabular-nums">{amount}</span>
+      <span className="whitespace-nowrap text-[10px] font-semibold opacity-80 sm:text-[11px]">Rollover {prevMonthName}:</span>
+      <span className="whitespace-nowrap text-[10px] font-bold tabular-nums sm:text-[11px]">{amount}</span>
     </>
   );
 
@@ -1422,7 +1427,7 @@ function RolloverControl({
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-positive/25 bg-positive/10 px-2.5 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-positive/25 bg-positive/10 px-2 py-1 text-positive shadow-[inset_0_1px_0_rgb(255_255_255/0.35)] transition hover:border-positive/40 hover:bg-positive/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-positive disabled:cursor-wait disabled:opacity-60 sm:gap-1.5 sm:px-2.5"
             aria-label={`Rollover ${prevMonthName}: ${amount}`}
           >
             {pending ? "Rolling over…" : rolloverPillContent}
@@ -1459,7 +1464,7 @@ function RolloverFooter({
   return (
     // Renders inline inside the hero's left column, so no strip chrome — just
     // the rollover pill and the Roll-in / Undo action on one wrapping row.
-    <div className="mt-3 flex flex-wrap items-center gap-2 md:mt-auto md:pt-4">
+    <div className="mt-1.5 flex flex-col items-start gap-1.5">
           <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
           {snapshot ? (
             <button
@@ -1472,9 +1477,9 @@ function RolloverFooter({
                   setSnapshot(null);
                 });
               }}
-              className="rounded-full border border-line bg-surface px-3 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
+              className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
             >
-              {undoPending ? "Undoing…" : `↩ Undo roll-in from ${prevMonthLabel}`}
+              {undoPending ? "Undoing…" : `↩ Undo ${shortMonth(prevMonthLabel)} plan roll-in`}
             </button>
           ) : (
             <form
@@ -1489,9 +1494,9 @@ function RolloverFooter({
               <button
                 type="submit"
                 disabled={copyPending}
-                className="rounded-full border border-line bg-surface px-3 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
+                className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
               >
-                {copyPending ? "Copying…" : `↓ Roll in ${prevMonthLabel} planned`}
+                {copyPending ? "Copying…" : `↓ Roll in ${shortMonth(prevMonthLabel)} plan`}
               </button>
             </form>
           )}

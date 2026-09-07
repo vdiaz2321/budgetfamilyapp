@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useHideOnScroll } from "@/lib/use-hide-on-scroll";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { deleteTransaction, listPayees, toggleCleared, updateTransactionAmount } from "../budget/actions";
@@ -246,26 +245,17 @@ export function TransactionsTable({
   // matches, which read as a wrong total rather than as a withheld one.
   const incomeLeft = incomeTotal - outflowTotal;
 
-  // The desktop table scrolls inside its own box (see the frozen header
-  // below), so the window barely moves — the toolbar has to react to THAT
-  // scroller, not the page, or it would never hide on a mouse wheel.
   const tableScrollRef = useRef<HTMLDivElement>(null);
-  const headerHidden = useHideOnScroll({ inner: tableScrollRef });
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden">
-      {/* Phone-only auto-hide: scrolling further down slides the month picker
-          and the toolbar away so the list gets the screen; scrolling back up
-          brings them straight back. Desktop keeps it in view the whole time
-          (md:translate-y-0, and no collapsing margin) — the filters, the range
-          and the totals line are all read while scrolling the register, and
-          giving their height back to the table is not worth losing them. */}
-      <div
-        className={`sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-3 backdrop-blur-sm transition-[transform,margin-top] duration-200 ease-out md:static md:mx-0 md:translate-y-0 md:px-0 ${
-          headerHidden ? "-translate-y-full" : "translate-y-0"
-        }`}
-      >
-      <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-0">
+      {/* Frozen on every width. This used to slide away on phones when you
+          scrolled down; Victor reads the month, the filters, the range and
+          the totals line while scrolling the register, so the header stays
+          pinned instead of trading itself for a few rows. The top padding
+          clears the status bar / notch when it pins at the viewport top. */}
+      <div className="sticky top-0 z-20 -mx-4 space-y-4 bg-background/95 px-4 pb-1 pt-[max(env(safe-area-inset-top),0.75rem)] backdrop-blur-sm md:static md:mx-0 md:px-0 md:pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 pr-8 sm:pr-1">
         {hasRange ? (
           <span className="text-2xl font-bold tracking-tight text-foreground">
             Custom range
@@ -277,14 +267,14 @@ export function TransactionsTable({
           <button
             type="button"
             onClick={exportCsv}
-            className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-muted ring-1 ring-black/20 transition hover:bg-brand-soft hover:text-brand sm:inline-block dark:ring-white/20"
+            className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-muted ring-1 ring-inset ring-black/20 transition hover:bg-brand-soft hover:text-brand sm:inline-block dark:ring-white/20"
           >
             Export CSV
           </button>
           <button
             type="button"
             onClick={() => setImportOpen(true)}
-            className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-brand ring-1 ring-brand transition hover:bg-brand-soft sm:inline-block"
+            className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-brand ring-1 ring-inset ring-brand transition hover:bg-brand-soft sm:inline-block"
           >
             Import CSV
           </button>

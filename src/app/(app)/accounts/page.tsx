@@ -5,6 +5,7 @@ import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
 import { suggestPointsValues } from "@/lib/points-value";
 import { throwIfAny } from "@/lib/supabase-result";
+import type { TravelBrand } from "../travel/types";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
 function monthsBefore(firstOfMonth: string, n: number): string {
@@ -39,6 +40,7 @@ export default async function AccountsPage() {
     { data: debtSnapshotRows, error: debtSnapshotRowsError },
     { data: cardPaymentRows, error: cardPaymentRowsError },
     { data: stayRows, error: staysError },
+    { data: travelBrandRows, error: travelBrandsError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -66,7 +68,7 @@ export default async function AccountsPage() {
       .eq("household_id", household.id),
     supabase
       .from("credit_card_reward_activities")
-      .select("id, account_id, activity_type, occurred_on, points_delta, hotel_credit_delta_cents, booked_on, note, archived_at")
+      .select("id, account_id, activity_type, occurred_on, points_delta, hotel_credit_delta_cents, booked_on, note")
       .eq("household_id", household.id)
       .order("occurred_on", { ascending: false })
       .order("created_at", { ascending: false }),
@@ -109,8 +111,15 @@ export default async function AccountsPage() {
       .select("account_id, brand, points_cost, points_value_micros, hotel_cost_cents")
       .eq("household_id", household.id)
       .is("cancelled_at", null),
+    // The "Booked thru / Brand" list. A stay booked from a card's own panel
+    // uses the same Add stay form as /travel, so it needs the same brands.
+    supabase
+      .from("travel_brands")
+      .select("id, name")
+      .eq("household_id", household.id)
+      .order("name"),
   ]);
-  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError, cardPaymentRows: cardPaymentRowsError, travelStays: staysError });
+  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError, cardPaymentRows: cardPaymentRowsError, travelStays: staysError, travelBrands: travelBrandsError });
 
   // Keep the Accounts page usable before the user applies the new SQL in
   // Supabase. The existing rewards columns remain fully supported.
@@ -168,7 +177,6 @@ export default async function AccountsPage() {
       hotelCreditDeltaCents: activity.hotel_credit_delta_cents ?? 0,
       bookedOn: activity.booked_on ?? null,
       note: activity.note ?? null,
-      archivedAt: activity.archived_at ?? null,
     });
     rewardActivitiesByAccount.set(activity.account_id, items);
   }
@@ -377,6 +385,7 @@ export default async function AccountsPage() {
       nonCardAccounts={nonCardAccounts}
       historyMonths={[currentMonth, prevMonth, prev2Month]}
       cardPayments={cardPayments}
+      travelBrands={(travelBrandRows ?? []) as TravelBrand[]}
     />
   );
 }

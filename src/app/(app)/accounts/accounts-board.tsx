@@ -10,6 +10,8 @@ import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments
 import type { PointsSuggestion } from "@/lib/points-value";
 import { PointsValueModal, type PointsValueRow } from "./points-value-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { StayModal } from "../travel/stay-modal";
+import type { TravelBrand, TravelCard } from "../travel/types";
 import {
   addAccount,
   addCreditCardWithDetails,
@@ -18,7 +20,7 @@ import {
   deleteAccount,
   deleteBucket,
   logCreditCardRewardActivity,
-  setCreditCardRewardActivityArchived,
+  deleteCreditCardRewardActivity,
   payCard,
   transferBetweenAccounts,
   reorderAccounts,
@@ -127,10 +129,13 @@ export type CardDetails = {
   promoAprEndsOn: string | null;
 };
 
-// The three a user can log by hand. Refunds are never typed — they are
-// written by the Travel Log when a stay is edited down, cancelled or deleted.
+// What a user can log by hand: points out (a redemption) and points in (what
+// everyday spending earned). Hotel credit and free nights are logged on the
+// stay itself; refunds are written by the Travel Log when a stay is edited
+// down, cancelled or deleted.
 export type RewardLogType =
   | "points_redemption"
+  | "points_earned"
   | "hotel_credit_redemption"
   | "free_night_booking";
 
@@ -142,7 +147,6 @@ export type RewardActivity = {
   hotelCreditDeltaCents: number;
   bookedOn: string | null;
   note: string | null;
-  archivedAt: string | null;
 };
 
 export type AccountData = {
@@ -330,7 +334,28 @@ type Props = {
   // What each card's points have really been worth, measured off the Travel
   // Log. Feeds the "Points values" dialog on the rewards section.
   pointsSuggestions?: PointsSuggestion[];
+  // The Travel Log's brand list. A stay booked from a card's rewards panel
+  // opens the very same Add stay form /travel uses, so it needs the brands.
+  travelBrands?: TravelBrand[];
 };
+
+// Everything the shared Add stay modal needs, made available to the card
+// panels without threading it through four levels of props. The cards are
+// derived from the accounts this board already has.
+const TravelStayContext = React.createContext<{ cards: TravelCard[]; brands: TravelBrand[] }>({
+  cards: [],
+  brands: [],
+});
+
+// Clicking a row in the Rewards activity ledger jumps to that card's own
+// rewards log instead of leaving you to scroll the card list hunting for it.
+// The panel that owns the card watches this id, opens itself and scrolls into
+// view; the section above it clears whatever filter might be hiding the card.
+const RewardFocusContext = React.createContext<{
+  focusCardId: string | null;
+  requestFocus: (cardId: string) => void;
+  clearFocus: () => void;
+}>({ focusCardId: null, requestFocus: () => {}, clearFocus: () => {} });
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
  *  can't drift apart in labelling or option order. */
@@ -524,10 +549,27 @@ export function AccountsBoard({
   historyMonths,
   cardPayments = [],
   pointsSuggestions = [],
+  travelBrands = [],
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [focusCardId, setFocusCardId] = useState<string | null>(null);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
+  // The card list the shared Add stay form offers. Same shape /travel builds,
+  // read off the card details this page already loaded — a closed card is
+  // still bookable-against only in the sense that its old stays reference it,
+  // so it is left out of a NEW booking's dropdown.
+  const travelCards: TravelCard[] = creditCards
+    .filter((c) => !c.dateClosed)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      holder: c.holder ?? null,
+      currentPoints: c.cardDetails?.currentPoints ?? 0,
+      pointsValueMicros: c.cardDetails?.pointsValueMicros ?? null,
+      freeNightCreditCents: c.cardDetails?.freeNightCreditCents ?? null,
+      freeNightPointsLimit: c.cardDetails?.freeNightPointsLimit ?? null,
+    }));
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
   // filtering DOES NOT extend to the Credit Card Rewards section below —
@@ -785,6 +827,23 @@ export function AccountsBoard({
 
   return (
     <SubtypeOptionsContext.Provider value={knownSubtypes}>
+    <TravelStayContext.Provider value={{ cards: travelCards, brands: travelBrands }}>
+    <RewardFocusContext.Provider
+      value={{
+        focusCardId,
+        requestFocus: (cardId) => {
+          // A collapsed section never renders the panel, so the click would
+          // do nothing at all — open whichever one holds this card first.
+          const card = accounts.find((a) => a.id === cardId);
+          if (card) {
+            const section = SECTIONS.find((sec) => sec.match(card));
+            if (section) setCollapsed((c) => ({ ...c, [section.key]: false }));
+          }
+          setFocusCardId(cardId);
+        },
+        clearFocus: () => setFocusCardId(null),
+      }}
+    >
     <div className="mx-auto w-full max-w-5xl space-y-4">
       {/* Title + period picker in one row, right-aligned like Insights.
           Subtitle removed at Victor's request. */}
@@ -972,7 +1031,7 @@ export function AccountsBoard({
             <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
               <RewardsActivityLedger
                 entries={creditCards
-                  .flatMap((card) => card.rewardActivities.map((a) => ({ ...a, cardName: card.name })))
+                  .flatMap((card) => card.rewardActivities.map((a) => ({ ...a, cardName: card.name, cardId: card.id })))
                   .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn))}
                 currency={currency}
               />
@@ -989,6 +1048,8 @@ export function AccountsBoard({
         />
       ) : null}
       </div>
+    </RewardFocusContext.Provider>
+    </TravelStayContext.Provider>
     </SubtypeOptionsContext.Provider>
   );
 }
@@ -1024,6 +1085,7 @@ function CreditCardSection({
     setLocalAccounts(accounts);
   }, [accounts]);
   const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
+  const { focusCardId } = React.useContext(RewardFocusContext);
   const [pointsValueOpen, setPointsValueOpen] = useState(false);
   const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
   const [showOnlyOwedCards, setShowOnlyOwedCards] = useState(false);
@@ -1125,23 +1187,30 @@ function CreditCardSection({
   const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
   const holderFilterFn = (a: AccountData) => !holderFilter || (a.holder ?? "") === holderFilter;
   const nightFilter = (a: AccountData) => !showOnlyUnbookedNights || hasUnbookedNight(a);
+  // A card jumped to from the Rewards activity ledger is always shown, whatever
+  // the section is filtered down to — otherwise the card the click is aiming at
+  // is filtered out, its panel never mounts, and the click looks broken.
+  const isFocused = (a: AccountData) => a.id === focusCardId;
   const passesFilters = (a: AccountData) =>
-    feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && nightFilter(a);
+    isFocused(a)
+    || (feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && nightFilter(a));
   // Per-category "contributes to Redeemable" filters — scoped to their own
   // section so clicking Travel Redeemable doesn't empty the Hotel list.
   const travelCards = localAccounts.filter((a) =>
     a.cardDetails?.rewardsCategory === "travel"
     && passesFilters(a)
-    && (!showOnlyTravelRedeem || hasRedeemableIn(a, "travel")),
+    && (isFocused(a) || !showOnlyTravelRedeem || hasRedeemableIn(a, "travel")),
   );
   const hotelCards = localAccounts.filter((a) =>
     a.cardDetails?.rewardsCategory === "hotel"
     && passesFilters(a)
-    && (!showOnlyHotelRedeem || hasRedeemableIn(a, "hotel")),
+    && (isFocused(a) || !showOnlyHotelRedeem || hasRedeemableIn(a, "hotel")),
   );
   const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
-  const hideTravelColumn = showOnlyHotelRedeem || categoryFilter === "hotel";
-  const hideHotelColumn = showOnlyTravelRedeem || categoryFilter === "travel";
+  const focusedCard = focusCardId ? localAccounts.find((a) => a.id === focusCardId) ?? null : null;
+  const focusedCategory = focusedCard?.cardDetails?.rewardsCategory ?? (focusedCard ? "other" : null);
+  const hideTravelColumn = (showOnlyHotelRedeem || categoryFilter === "hotel") && focusedCategory !== "travel";
+  const hideHotelColumn = (showOnlyTravelRedeem || categoryFilter === "travel") && focusedCategory !== "hotel";
   // Each rewards group collapses on its own header, persisted for the session
   // like the other collapsibles on this page. Undefined means open.
   const [groupOpen, setGroupOpen] = useSessionCollapse(
@@ -1150,9 +1219,10 @@ function CreditCardSection({
   );
   const toggleGroup = (key: string) =>
     setGroupOpen((state) => ({ ...state, [key]: state[key] === false }));
-  const travelOpen = groupOpen.travel !== false;
-  const hotelOpen = groupOpen.hotel !== false;
-  const otherOpen = groupOpen.other !== false;
+
+  const travelOpen = groupOpen.travel !== false || focusedCategory === "travel";
+  const hotelOpen = groupOpen.hotel !== false || focusedCategory === "hotel";
+  const otherOpen = groupOpen.other !== false || focusedCategory === "other";
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const renderCards = (cards: AccountData[]) => (
@@ -1656,7 +1726,9 @@ function CreditCardSection({
             return (
               <div className="divide-y divide-line">
                 {groups.map((group) => {
-                  const collapsed = collapsedBanks.has(group.bank);
+                  const collapsed =
+                    collapsedBanks.has(group.bank)
+                    && !group.cards.some((c) => c.id === focusCardId);
                   const isBankDragOver = dragOverBank === group.bank;
                   return (
                     <div
@@ -1775,23 +1847,29 @@ function RewardsActivityLedger({
   entries,
   currency,
 }: {
-  entries: Array<RewardActivity & { cardName: string }>;
+  entries: Array<RewardActivity & { cardName: string; cardId: string }>;
   currency: string;
 }) {
-  const [showArchived, setShowArchived] = useState(false);
   const labels: Record<RewardActivity["type"], string> = {
     points_redemption: "Points used",
+    points_earned: "Points earned",
     hotel_credit_redemption: "Hotel credit used",
     free_night_booking: "Free night booked",
     reward_refund: "Returned to card",
   };
-  const activeEntries = entries.filter((entry) => !entry.archivedAt);
-  const archivedEntries = entries.filter((entry) => entry.archivedAt);
-  const visibleEntries = showArchived ? archivedEntries : activeEntries;
+  // Default to this year: the ledger is a running log and the rows worth
+  // seeing on arrival are the ones from the year being lived. Older years are
+  // one pick away, and "All" is still there for the whole history.
+  const thisYear = String(new Date().getFullYear());
+  const years = [...new Set([thisYear, ...entries.map((e) => e.occurredOn.slice(0, 4))])].sort().reverse();
+  const [yearState, setYear] = useState<string>(thisYear);
+  const year = yearState === "all" || years.includes(yearState) ? yearState : thisYear;
+  const visibleEntries = year === "all" ? entries : entries.filter((e) => e.occurredOn.slice(0, 4) === year);
   // Starts collapsed on a fresh login — it sits below Card payments and is
   // reference data, not something to scan on every visit; sessionStorage still
   // carries whatever it was last set to while moving around the app.
   const [openState, setOpenState] = useSessionCollapse("accounts-rewards-activity-open", () => ({ open: false }));
+  const { requestFocus } = React.useContext(RewardFocusContext);
   const open = openState.open;
 
   return (
@@ -1811,35 +1889,53 @@ function RewardsActivityLedger({
           </svg>
           <span className="min-w-0">
             <span className="block text-sm font-bold">Rewards activity</span>
-            <span className="block text-xs text-muted">Every points redemption, hotel-credit use, and booked free night.</span>
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
-          {open && archivedEntries.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setShowArchived((value) => !value)}
-              className={`rounded-md border px-2 py-1 text-xs font-semibold transition ${showArchived ? "border-brand/40 bg-brand-soft text-brand" : "border-line bg-background text-muted hover:text-foreground dark:bg-slate-950"}`}
-            >
-              {showArchived ? "Back to activity" : `Archived ${archivedEntries.length}`}
-            </button>
-          ) : null}
-          <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">{activeEntries.length} active</span>
+          <select
+            aria-label="Year"
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+            <option value="all">All years</option>
+          </select>
+          <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">
+            {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"}
+          </span>
         </div>
       </div>
       {!open ? null : visibleEntries.length === 0 ? (
-        <p className="px-4 py-4 text-sm text-muted">{showArchived ? "No archived rewards activity." : "No rewards activity yet. Open a card and choose “Log rewards activity” to create the first entry."}</p>
+        <p className="px-4 py-4 text-sm text-muted">
+          {entries.length === 0
+            ? "No rewards activity yet. Open a card and choose “Rewards log” to create the first entry."
+            : `No rewards activity in ${year}.`}
+        </p>
       ) : (
         <ul className="divide-y divide-line bg-background/70">
           {visibleEntries.map((entry) => (
-            <li key={entry.id} className={`grid grid-cols-[4.75rem_minmax(0,1fr)_auto_auto] items-center gap-2 px-4 py-2.5 text-xs sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] ${entry.archivedAt ? "opacity-65" : ""}`}>
-              <span className="text-muted tabular-nums">{entry.occurredOn}</span>
-              <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
-              <span className="min-w-0 text-muted">{labels[entry.type]}{entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}{entry.note ? ` · ${entry.note}` : ""}</span>
-              <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.type === "reward_refund" ? "text-positive" : "text-negative"}`}>
-                {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
-              </span>
-              <RewardActivityArchiveButton entry={entry} />
+            <li key={entry.id} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto_auto] items-center gap-2 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] dark:hover:bg-white/[0.04]">
+              {/* The row is the way back to the card that made the entry:
+                  clicking it opens that card's rewards log and scrolls to it,
+                  instead of leaving you to hunt for the card by hand. Only the
+                  reading cells are the button — Delete keeps its own hit
+                  area, and a <button> can't nest inside another one. */}
+              <button
+                type="button"
+                onClick={() => requestFocus(entry.cardId)}
+                className="col-span-4 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_auto] items-center gap-2 text-left sm:col-span-4 sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto] sm:contents"
+              >
+                <span className="text-muted tabular-nums">{entry.occurredOn}</span>
+                <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
+                <span className="min-w-0 truncate text-muted">{labels[entry.type]}{entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}{entry.note ? ` · ${entry.note}` : ""}</span>
+                <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
+                  {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
+                </span>
+              </button>
+              <RewardActivityRowActions entry={entry} />
             </li>
           ))}
         </ul>
@@ -1848,22 +1944,76 @@ function RewardsActivityLedger({
   );
 }
 
-function RewardActivityArchiveButton({ entry }: { entry: RewardActivity }) {
-  const [pending, startTransition] = useTransition();
-  const archive = !entry.archivedAt;
+// Delete undoes an entry outright — the AFTER DELETE trigger hands back
+// whatever the row took. There used to be an Archive button beside it that
+// only set a hidden flag and moved nothing; Victor had it removed once Delete
+// existed ("delete is enough"), since a ledger you can correct doesn't also
+// need a way to hide a wrong row.
+function RewardActivityRowActions({ entry, compact = false }: { entry: RewardActivity; compact?: boolean }) {
+  const [deletePending, startDelete] = useTransition();
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   return (
-    <form action={(formData) => startTransition(async () => { await setCreditCardRewardActivityArchived(formData); })}>
-      <input type="hidden" name="activityId" value={entry.id} />
-      <input type="hidden" name="archived" value={String(archive)} />
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-muted transition hover:border-brand/40 hover:text-foreground disabled:opacity-50 dark:bg-slate-950"
-        title={archive ? "Archive this activity" : "Restore this activity"}
-      >
-        {pending ? "…" : archive ? "Archive" : "Restore"}
-      </button>
-    </form>
+    // In the bottom ledger this sits in a 4-column grid below sm, where it is
+    // the 5th child: it has to span all four columns or it lands in the narrow
+    // first one and the buttons get clipped off the edge. In the card panel's
+    // own recent list the row is a plain flex, so no spanning is wanted.
+    <div
+      className={`flex flex-col items-end gap-1 ${
+        compact
+          // Confirming adds two wider buttons; on a phone they only fit if
+          // they take the whole line instead of squeezing the entry's label
+          // down to "Points …".
+          ? confirming ? "w-full sm:w-auto" : ""
+          : "col-span-4 sm:col-span-1"
+      }`}
+    >
+      <div className="flex items-center gap-1">
+        {confirming ? (
+          <>
+            <form
+              action={(formData) =>
+                startDelete(async () => {
+                  setError(null);
+                  const result = await deleteCreditCardRewardActivity(formData);
+                  if (result?.error) setError(result.error);
+                  else setConfirming(false);
+                })
+              }
+            >
+              <input type="hidden" name="activityId" value={entry.id} />
+              <button
+                type="submit"
+                disabled={deletePending}
+                aria-busy={deletePending}
+                className="cursor-pointer rounded-md bg-negative px-2 py-1 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-80"
+              >
+                {deletePending ? "Deleting…" : "Delete & give back"}
+              </button>
+            </form>
+            {deletePending ? null : (
+              <button
+                type="button"
+                onClick={() => { setConfirming(false); setError(null); }}
+                className="cursor-pointer px-1 text-[11px] font-medium text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            )}
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-slate-950 dark:hover:bg-negative/20"
+          >
+            Delete
+          </button>
+        )}
+      </div>
+      {error ? <span className="max-w-[18rem] text-right text-[11px] font-medium text-negative">{error}</span> : null}
+    </div>
   );
 }
 
@@ -1886,10 +2036,23 @@ function CreditCardPanel({
   onDragStart?: () => void;
   isDragOver?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expandedState, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [loggingRewards, setLoggingRewards] = useState(false);
+  const [loggingRewardsState, setLoggingRewards] = useState(false);
+  // Arriving from a click on a Rewards activity row. Open-ness is DERIVED from
+  // the focus rather than pushed into state by an effect — the effect only
+  // scrolls, which is the one thing state can't express. Closing the panel or
+  // the log clears the focus, so it never props itself back open.
+  const { focusCardId, clearFocus } = React.useContext(RewardFocusContext);
+  const focused = focusCardId === card.id;
+  const expanded = expandedState || focused;
+  const loggingRewards = loggingRewardsState || focused;
+  const rowRef = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    if (!focused) return;
+    rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focused]);
   const [closePending, startClose] = useTransition();
   const [reopenPending, startReopen] = useTransition();
 
@@ -1915,6 +2078,7 @@ function CreditCardPanel({
 
   return (
     <li
+      ref={rowRef}
       data-drop-key={`credit-card:${card.id}`}
       className={`${expanded ? "bg-background/60" : "hover:bg-background/40"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
@@ -1927,15 +2091,16 @@ function CreditCardPanel({
         ) : null}
       <button
         type="button"
-        onClick={() => setExpanded((v) => {
-          const next = !v;
+        onClick={() => {
+          const next = !expanded;
+          setExpanded(next);
           if (!next) {
             setEditing(false);
             setPaying(false);
             setLoggingRewards(false);
+            clearFocus();
           }
-          return next;
-        })}
+        }}
         className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
         aria-expanded={expanded}
       >
@@ -2149,7 +2314,7 @@ function CreditCardPanel({
             <RewardActivityForm
               card={card}
               currency={currency}
-              onDone={() => setLoggingRewards(false)}
+              onDone={() => { setLoggingRewards(false); clearFocus(); }}
             />
           ) : null}
         </div>
@@ -2168,15 +2333,23 @@ function RewardActivityForm({
   onDone: () => void;
 }) {
   const router = useRouter();
-  const [activityType, setActivityType] = useState<RewardLogType>("points_redemption");
-  // Controlled so the allotment line under it can react as you type.
-  const [freeNightPoints, setFreeNightPoints] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // A hotel stay is not a ledger line — it has a city, nights, pax, a cash
+  // rate. It opens the SAME Add stay form the Travel Log uses, pre-selected
+  // to this card, rather than a second half-sized copy of it that filled in
+  // 8 of the stay's 16 fields and left the rest blank.
+  const [stayOpen, setStayOpen] = useState(false);
+  // Points move both ways: everyday spending earns them, redemptions spend
+  // them. Earning used to have no entry at all — the balance was typed over
+  // in the card's edit form, which left no record of where it came from.
+  const [direction, setDirection] = useState<"used" | "earned" | "returned">("used");
+  const [points, setPoints] = useState("");
+  const travel = React.useContext(TravelStayContext);
   const d = card.cardDetails;
-  const today = new Date().toISOString().slice(0, 10);
   const labels: Record<RewardActivity["type"], string> = {
     points_redemption: "Points used",
+    points_earned: "Points earned",
     hotel_credit_redemption: "Hotel credit used",
     free_night_booking: "Free night booked",
     reward_refund: "Returned to card",
@@ -2186,11 +2359,50 @@ function RewardActivityForm({
     <section className="rounded-lg border-2 border-brand/25 bg-brand-soft/10 p-3">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h4 className="text-sm font-semibold">Log rewards activity</h4>
-          <p className="text-xs text-muted">The ledger keeps this card&apos;s balances and Booked date up to date automatically.</p>
+          <h4 className="text-sm font-semibold">
+            {direction === "used"
+              ? "Log points used"
+              : direction === "earned"
+                ? "Log points earned"
+                : "Log points returned to the card"}
+          </h4>
         </div>
         <button type="button" onClick={onDone} className="text-xs font-medium text-muted hover:text-foreground">Cancel</button>
       </div>
+
+      {/* Points on a hotel card go to flights and gift cards as often as they
+          go to rooms, so the ledger form below stays for the redemptions that
+          are only a balance change. A redemption that IS a stay — points, a
+          free night, or the hotel credit — belongs in the Travel Log with its
+          city, nights, pax and cash rate, and this opens that form directly.
+          Either way the points come off this card through the same ledger. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-background px-3 py-2 ring-1 ring-line">
+        <button
+          type="button"
+          onClick={() => setStayOpen(true)}
+          className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
+        >
+          Book a stay
+        </button>
+        <p className="min-w-0 flex-1 text-xs text-muted">
+          Click here to log Hotel Stays and transfers to Travel Log page.
+        </p>
+      </div>
+
+      {stayOpen ? (
+        <StayModal
+          stay={null}
+          cards={travel.cards}
+          brands={travel.brands}
+          currency={currency}
+          defaultAccountId={card.id}
+          // Closing the stay form returns to the rewards log, whether the
+          // stay was saved or cancelled — it never tears the panel down.
+          // StayModal already calls router.refresh() on a successful save, so
+          // the card's points and Booked date are up to date behind it.
+          onClose={() => setStayOpen(false)}
+        />
+      ) : null}
       <form
         action={(formData) => start(async () => {
           setError(null);
@@ -2206,78 +2418,81 @@ function RewardActivityForm({
         className="grid grid-cols-1 gap-2 sm:grid-cols-2"
       >
         <input type="hidden" name="accountId" value={card.id} />
-        <label className="block">
-          <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Activity</span>
-          <select name="activityType" value={activityType} onChange={(e) => setActivityType(e.target.value as RewardLogType)} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-            <option value="points_redemption">Points redemption</option>
-            <option value="hotel_credit_redemption">Hotel credit used</option>
-            <option value="free_night_booking">Free night booked</option>
-          </select>
-        </label>
-        <LabeledInput label="Activity date" name="occurredOn" type="date" defaultValue={today} />
-        {/* Keyed: the free-night branch below renders a controlled input under
-            the same name, and without distinct keys React reuses this node and
-            warns about an uncontrolled input becoming controlled. */}
-        {activityType === "points_redemption" ? (
-          <LabeledInput key="points-redeemed" label={`Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`} name="pointsUsed" type="number" min="1" step="1" placeholder="0" />
-        ) : null}
-        {activityType === "hotel_credit_redemption" ? (
-          <LabeledInput label={`Hotel credit used · ${d?.freeNightCreditCents ? formatMoney(d.freeNightCreditCents, currency) : formatMoney(0, currency)} available`} name="hotelCreditUsed" type="number" min="0.01" step="0.01" prefix={currencySymbol(currency)} placeholder="0" />
-        ) : null}
-        {/* A booked free night is a reservation: the hotel name and what it
-            cost in points are what make the entry mean anything a year later,
-            and they carry straight through to the Travel Log. */}
-        {activityType === "free_night_booking" ? (
-          <>
-            <label className="block sm:col-span-2">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Hotel / apartment booked</span>
-              <input
-                name="hotelName"
-                placeholder="Hilton Frankfurt Gravenbruch"
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-            </label>
-            <label key="free-night-points" className="block sm:col-span-2">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                Points cost · {(d?.currentPoints ?? 0).toLocaleString()} available
-              </span>
-              <input
-                name="pointsUsed"
-                type="number"
-                min="0"
-                step="1"
-                value={freeNightPoints}
-                onChange={(e) => setFreeNightPoints(e.target.value)}
-                placeholder="0"
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              />
-              {/* Whether the night fits inside the card's yearly certificate. */}
-              {d?.freeNightPointsLimit ? (
-                <span
-                  className={`mt-0.5 block text-[10px] font-medium ${
-                    Number(freeNightPoints) > d.freeNightPointsLimit ? "text-negative" : "text-muted"
-                  }`}
-                >
-                  {Number(freeNightPoints) > d.freeNightPointsLimit
-                    ? `${(Number(freeNightPoints) - d.freeNightPointsLimit).toLocaleString()} pts over the ${d.freeNightPointsLimit.toLocaleString()} allotted — you pay the difference`
-                    : `${(Number(freeNightPoints) || 0).toLocaleString()} of ${d.freeNightPointsLimit.toLocaleString()} allotted pts used`}
-                </span>
-              ) : null}
-            </label>
-          </>
-        ) : null}
-        <LabeledInput label={activityType === "free_night_booking" ? "Booked / check-in date" : "Booked / check-in date (optional)"} name="bookedOn" type="date" defaultValue={activityType === "free_night_booking" ? today : ""} />
+        {/* Hotel credit is NOT here. It is spent ON a stay, and the Add stay
+            form has its own "Hotel credit used" field drawing from the same
+            ledger — offering both would let one credit be logged twice. */}
+        <input
+          type="hidden"
+          name="activityType"
+          value={
+            direction === "used"
+              ? "points_redemption"
+              : direction === "earned"
+                ? "points_earned"
+                : "reward_refund"
+          }
+        />
+        <div className="sm:col-span-2">
+          <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Direction</span>
+          <div className="inline-flex rounded-md ring-1 ring-line">
+            {(["used", "earned", "returned"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={direction === option}
+                onClick={() => setDirection(option)}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  direction === option
+                    ? "text-white"
+                    : "text-foreground hover:bg-black/5 dark:hover:bg-white/10"
+                }`}
+                style={
+                  direction === option
+                    ? {
+                        backgroundColor:
+                          option === "used" ? "var(--viz-debt)" : "var(--positive)",
+                      }
+                    : undefined
+                }
+              >
+                {option === "used" ? "Points used" : option === "earned" ? "Points earned" : "Returned to card"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* No default date: an entry is logged after the fact as often as on
+            the day, and a pre-filled today gets saved by accident. Left blank
+            the server answers with "Enter a valid activity date." */}
+        <LabeledInput label="Activity date" name="occurredOn" type="date" defaultValue="" />
+        <LabeledInput
+          label={
+            direction === "used"
+              ? `Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`
+              : direction === "earned"
+                ? `Points earned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
+                : `Points returned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
+          }
+          name="pointsUsed"
+          type="number"
+          min="1"
+          step="1"
+          placeholder="0"
+          value={points}
+          onChange={(e) => setPoints(e.target.value)}
+        />
         <div className="sm:col-span-2">
           <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Note (optional)</label>
           <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
         </div>
-        <div className="sm:col-span-2 flex items-center justify-between gap-3 pt-1">
-          <p className="text-xs text-muted">
-            {activityType === "free_night_booking"
-              ? "Booked nights also land in the Travel Log, where the cash rate and savings go."
-              : `${labels[activityType]} will be added to this card's activity log.`}
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
+          <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
+          <p className="min-w-0 flex-1 text-xs text-muted">
+            {direction === "used"
+              ? "Points used come off this card's balance."
+              : direction === "earned"
+                ? "Points earned are added to this card's balance."
+                : "A partial refund on a redemption — the points go back on this card."}
           </p>
-          <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
@@ -2286,9 +2501,14 @@ function RewardActivityForm({
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Recent rewards activity</p>
           <ul className="space-y-1 text-xs">
             {card.rewardActivities.slice(0, 5).map((activity) => (
-              <li key={activity.id} className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate">{labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
-                <span className={`shrink-0 font-semibold ${activity.type === "reward_refund" ? "text-positive" : "text-negative"}`}>{activity.pointsDelta ? `${activity.pointsDelta > 0 ? "+" : ""}${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoney(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
+              // Delete lives on the row you are already looking at. It used
+              // to exist only in the Rewards activity ledger at the bottom of
+              // the page, so fixing a wrong entry meant scrolling away from
+              // the card that made it and finding the row again.
+              <li key={activity.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                <span className="min-w-0 flex-1 truncate">{labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
+                <span className={`shrink-0 font-semibold ${activity.pointsDelta > 0 || activity.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>{activity.pointsDelta ? `${activity.pointsDelta > 0 ? "+" : ""}${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoney(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
+                <RewardActivityRowActions entry={activity} compact />
               </li>
             ))}
           </ul>
@@ -2624,7 +2844,13 @@ function LabeledInput({
 
   if (isDate) {
     return (
-      <label className="block" onClick={(e) => e.preventDefault()}>
+      // A <div>, not a <label>: the label wrapper needed an onClick
+      // preventDefault to stop it re-forwarding the click to the input, and
+      // that same preventDefault also cancelled the browser's own "open the
+      // date picker" default — so clicking the field did nothing. Plain div +
+      // explicit showPicker() means a click anywhere in the field opens the
+      // calendar, including on the value text rather than only the icon.
+      <div className="block">
         <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
           {label}
         </span>
@@ -2634,7 +2860,17 @@ function LabeledInput({
             ref={dateRef}
             value={dateVal}
             onChange={(e) => setDateVal(e.target.value)}
-            className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            onClick={() => {
+              // showPicker throws if the browser doesn't support it or the
+              // call isn't tied to a user gesture; the native click-the-icon
+              // path still works in that case.
+              try {
+                dateRef.current?.showPicker?.();
+              } catch {
+                /* no-op */
+              }
+            }}
+            className="w-full cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
           {dateVal ? (
             <button
@@ -2648,7 +2884,7 @@ function LabeledInput({
           ) : null}
         </div>
         {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
-      </label>
+      </div>
     );
   }
 

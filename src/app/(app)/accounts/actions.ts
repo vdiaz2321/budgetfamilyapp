@@ -727,21 +727,30 @@ export async function logCreditCardRewardActivity(formData: FormData) {
   const accountId = String(formData.get("accountId") ?? "");
   const activityType = String(formData.get("activityType") ?? "");
   const occurredOn = String(formData.get("occurredOn") ?? "").trim();
-  const bookedOn = String(formData.get("bookedOn") ?? "").trim();
   const note = String(formData.get("note") ?? "").trim() || null;
   const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
-  if (!accountId || !["points_redemption", "hotel_credit_redemption", "free_night_booking"].includes(activityType)) {
+  // Points only, in either direction: spending earns them, redemptions spend
+  // them. Anything spent ON a stay — the room's points AND the hotel credit —
+  // goes through the Travel Log's own form (saveTravelStay), which records the
+  // room rate, nights and city too and draws from the same reward ledger.
+  // Accepting hotel credit here as well would let one credit be logged twice.
+  // Three hand-logged shapes, all points-only: spent, earned by spending, and
+  // handed back (a partial refund on a redemption — an airline returning half
+  // the miles, say). The last two both ADD, so they share a code path.
+  const returning = activityType === "reward_refund";
+  const adding = activityType === "points_earned" || returning;
+  if (!accountId || (activityType !== "points_redemption" && !adding)) {
     return { error: "Choose a valid reward activity." };
   }
-  if (!isDate(occurredOn) || (bookedOn && !isDate(bookedOn))) {
+  if (!isDate(occurredOn)) {
     return { error: "Enter a valid activity date." };
   }
 
   const details = unwrap(
     await supabase
       .from("credit_card_details")
-      .select("current_points, free_night_credit_cents, points_value_micros")
+      .select("current_points")
       .eq("account_id", accountId)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -749,89 +758,86 @@ export async function logCreditCardRewardActivity(formData: FormData) {
   );
   if (!details) return { error: "Card details were not found." };
 
-  const pointsUsed = Math.max(0, Math.trunc(Number(String(formData.get("pointsUsed") ?? "0").replace(/,/g, "")) || 0));
-  const hotelCreditUsedCents = Math.max(0, displayToCents(String(formData.get("hotelCreditUsed") ?? "0")));
-  // A free night booked with points spends them like any other redemption, so
-  // both types draw down the same balance. The card's yearly allotment is a
-  // cap the form warns about, not a second pool of points.
-  const spendsPoints = activityType === "points_redemption" || activityType === "free_night_booking";
-  if (activityType === "points_redemption" && pointsUsed <= 0) return { error: "Enter the points you used." };
-  if (activityType === "hotel_credit_redemption" && hotelCreditUsedCents <= 0) return { error: "Enter the hotel credit you used." };
-  if (spendsPoints && pointsUsed > (details.current_points ?? 0)) return { error: "That is more points than this card currently has." };
-  if (activityType === "hotel_credit_redemption" && hotelCreditUsedCents > (details.free_night_credit_cents ?? 0)) return { error: "That is more hotel credit than this card currently has." };
+  const points = Math.max(0, Math.trunc(Number(String(formData.get("pointsUsed") ?? "0").replace(/,/g, "")) || 0));
+  if (points <= 0) {
+    return {
+      error: returning
+        ? "Enter the points that were returned."
+        : adding
+          ? "Enter the points you earned."
+          : "Enter the points you used.",
+    };
+  }
+  // A card can't spend more than it holds. Adding has no such ceiling.
+  if (!adding && points > (details.current_points ?? 0)) {
+    return { error: "That is more points than this card currently has." };
+  }
 
-  const { data: activity, error } = await supabase
+  const { error } = await supabase
     .from("credit_card_reward_activities")
     .insert({
       household_id: householdId,
       account_id: accountId,
-      activity_type: activityType,
+      activity_type: returning ? "reward_refund" : adding ? "points_earned" : "points_redemption",
       occurred_on: occurredOn,
-      points_delta: spendsPoints ? -pointsUsed : 0,
-      hotel_credit_delta_cents: activityType === "hotel_credit_redemption" ? -hotelCreditUsedCents : 0,
-      booked_on: bookedOn || (activityType === "free_night_booking" ? occurredOn : null),
+      points_delta: adding ? points : -points,
+      hotel_credit_delta_cents: 0,
+      // Never set from here. The trigger copies booked_on onto the card's
+      // benefit_used_on — the free-night certificate's "BOOKED" date — so a
+      // flight redemption carrying a date would mark that year's anniversary
+      // night as used. Only a stay sets it, through syncRewardLedger.
+      booked_on: null,
       note,
-    })
-    .select("id")
-    .single();
+    });
   if (error) {
     console.error("[logCreditCardRewardActivity]", error);
     return { error: "Couldn't log that reward activity — " + error.message };
   }
 
-  // A booked night with a property name is a reservation, so it also belongs
-  // in the travel log. One entry, both places — the log is never a second
-  // thing to remember to fill in.
-  const propertyName = String(formData.get("hotelName") ?? "").trim();
-  if (activityType === "free_night_booking" && propertyName) {
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("name, holder")
-      .eq("id", accountId)
-      .eq("household_id", householdId)
-      .maybeSingle();
-    const { error: stayError } = await supabase.from("travel_stays").insert({
-      household_id: householdId,
-      account_id: accountId,
-      card_label: account?.name ?? null,
-      holder: account?.holder ?? null,
-      property_name: propertyName,
-      reserved_on: occurredOn,
-      check_in: bookedOn || occurredOn,
-      points_cost: pointsUsed,
-      points_value_micros: details.points_value_micros ?? null,
-      hotel_credit_cents: activityType === "free_night_booking" ? 0 : hotelCreditUsedCents,
-      reward_activity_id: activity.id,
-      remarks: note,
-    });
-    if (stayError) {
-      console.error("[logCreditCardRewardActivity:stay]", stayError);
-      return { error: `Points were logged, but the travel log entry failed — ${stayError.message}` };
-    }
-  }
   revalidate();
   revalidatePath("/travel");
   return { error: null };
 }
 
-// Archiving only changes ledger visibility. It never reverses a redemption or
-// alters the card's points/credit balance; restoring brings the entry back.
-export async function setCreditCardRewardActivityArchived(formData: FormData) {
+// Undo a ledger entry outright. The AFTER DELETE trigger
+// (20260907140000) hands back whatever the row took, so a mistyped redemption
+// can be removed instead of being papered over by retyping Current points.
+//
+// An entry that belongs to a travel stay is NOT deletable here: the stay holds
+// its reward_activity_id and would be left pointing at nothing while still
+// claiming the points. Those are undone by editing or deleting the stay, which
+// posts its own compensating entry through syncRewardLedger.
+export async function deleteCreditCardRewardActivity(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const activityId = String(formData.get("activityId") ?? "");
-  const archived = String(formData.get("archived") ?? "") === "true";
   if (!activityId) return { error: "Reward activity was not found." };
+
+  const stay = unwrap(
+    await supabase
+      .from("travel_stays")
+      .select("id, property_name")
+      .eq("household_id", householdId)
+      .eq("reward_activity_id", activityId)
+      .maybeSingle(),
+    "travel_stays",
+  );
+  if (stay) {
+    return {
+      error: `That entry belongs to the stay "${stay.property_name}" — edit or delete it in the Travel Log and the points come back with it.`,
+    };
+  }
 
   const { error } = await supabase
     .from("credit_card_reward_activities")
-    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .delete()
     .eq("id", activityId)
     .eq("household_id", householdId);
   if (error) {
-    console.error("[setCreditCardRewardActivityArchived]", error);
-    return { error: `Couldn't ${archived ? "archive" : "restore"} that activity — ${error.message}` };
+    console.error("[deleteCreditCardRewardActivity]", error);
+    return { error: `Couldn't delete that activity — ${error.message}` };
   }
   revalidate();
+  revalidatePath("/travel");
   return { error: null };
 }
 
