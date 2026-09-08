@@ -1,42 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import React, { useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
-import { centsToDisplay, centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
-import type { PointsSuggestion } from "@/lib/points-value";
-import { PointsValueModal, type PointsValueRow } from "./points-value-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { StayModal } from "../travel/stay-modal";
-import type { TravelBrand, TravelCard } from "../travel/types";
+import { GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
 import {
   addAccount,
   addCreditCardWithDetails,
   addBucket,
-  closeCard,
   deleteAccount,
   deleteBucket,
-  logCreditCardRewardActivity,
-  deleteCreditCardRewardActivity,
-  payCard,
   transferBetweenAccounts,
   reorderAccounts,
   reorderBuckets,
-  reopenCard,
   updateAccount,
   updateBalance,
   updateBucket,
   updateBucketBalance,
-  upsertCardDetails,
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
 import { isDebtExcludedFromNetWorth, hasPropertyAsset } from "@/lib/net-worth";
 import { PeriodPicker } from "../insights/insights-period-picker";
 import { currentPeriodKey, periodLabel, priorKey, type Granularity } from "../insights/period";
+import {
+  CREDIT_SECTIONS,
+  type AccountData,
+  type BucketData,
+  type BudgetDebt,
+  type CardDetails,
+  type NonCardAccount,
+  type RewardActivity,
+  type Section,
+} from "./types";
+
+// Re-exported so importers (page.tsx) keep one import site for the board and
+// the shapes it takes.
+export type { AccountData, BucketData, BudgetDebt, CardDetails, NonCardAccount, RewardActivity };
 
 // Resolve a period key to the "YYYY-MM-01" account_snapshots.month whose
 // balance represents that period's end. Returns null when the period IS
@@ -72,165 +76,6 @@ function maskAccountNumber(accountNumber: string | null): string | null {
   return lastFour ? `•••• ${lastFour}` : null;
 }
 
-function externalCardUrl(value: string): string {
-  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
-}
-
-export type BucketData = {
-  id: string;
-  accountId: string;
-  name: string;
-  balanceCents: number;
-  // Its own Checking/Savings tag — accounts with a mix of both (e.g. a
-  // "Checking" bucket and a "Savings" bucket under one bank account) no
-  // longer have to force the whole account into one type.
-  bankGroup: "savings" | "spending" | null;
-  taxTreatment: string | null;
-  // Which contribution limit governs this bucket, and whose money it is. Both
-  // live on the bucket as well as the account because one brokerage can hold a
-  // Roth for each spouse alongside a taxable bucket.
-  retirementKind: string | null;
-  holder: string | null;
-  // Every recorded month of bucket_snapshots, keyed "YYYY-MM-01" (a missing
-  // month = never recorded). Lets a bucket row follow the header's period
-  // picker instead of being pinned to the last three months.
-  balancesByMonth: Record<string, number>;
-};
-
-export type CardDetails = {
-  rewardsCategory: "travel" | "hotel" | null;
-  rewardsProgram: string | null;
-  pointsValueMicros: number | null;
-  five24Countable: boolean;
-  bank: string | null;
-  authUser: string | null;
-  charging: string | null;
-  bonusInfo: string | null;
-  bonusSpendCents: number | null;
-  bonusSpendDeadline: string | null;
-  bonusEarned: boolean;
-  currentPoints: number;
-  feesPaidCents: number;
-  freeNightCreditCents: number | null;
-  freeNightExpiresOn: string | null;
-  freeNightPointsLimit: number | null;
-  benefitUsedOn: string | null;
-  spendingLimitCents: number | null;
-  remarks: string | null;
-  isRevolvingDebt: boolean;
-  debtSubcategoryId: string | null;
-  cardUrl: string | null;
-  benefitCadence: string | null;
-  payoffBalanceCents: number;
-  payoffMinimumCents: number;
-  payoffPlannedCents: number;
-  payoffApr: number;
-  payoffDueDay: number | null;
-  promoAprEndsOn: string | null;
-};
-
-// What a user can log by hand: points out (a redemption) and points in (what
-// everyday spending earned). Hotel credit and free nights are logged on the
-// stay itself; refunds are written by the Travel Log when a stay is edited
-// down, cancelled or deleted.
-export type RewardLogType =
-  | "points_redemption"
-  | "points_earned"
-  | "hotel_credit_redemption"
-  | "free_night_booking";
-
-export type RewardActivity = {
-  id: string;
-  type: RewardLogType | "reward_refund";
-  occurredOn: string;
-  pointsDelta: number;
-  hotelCreditDeltaCents: number;
-  bookedOn: string | null;
-  note: string | null;
-};
-
-export type AccountData = {
-  id: string;
-  name: string;
-  kind: string; // account_kind enum value
-  subtype: string | null; // free-text label, e.g. "Roth IRA", "Trump Account", "UTMA"
-  holder: string | null;
-  institution: string | null;
-  accountNumber: string | null;
-  ownership: "sole" | "joint";
-  debtTrackingMode: "budget" | "account";
-  active: boolean;
-  isKidsAccount: boolean;
-  bankGroup: "savings" | "spending" | null;
-  taxTreatment: string | null;
-  retirementKind: string | null;
-  balanceCents: number;
-  annualFeeCents: number | null;
-  feeWaived: boolean;
-  dateOpened: string | null;
-  dateClosed: string | null;
-  // Credit-card only. Auto-computed on the server for CCs.
-  cardDetails?: CardDetails | null;
-  rewardActivities: RewardActivity[];
-  owedCents?: number;
-  monthSpendCents?: number;
-  // Prior-month account_snapshots (null = never recorded yet for that month).
-  // For bucketed accounts these are derived server-side from bucket_snapshots.
-  prevMonthCents: number | null;
-  prev2MonthCents: number | null;
-  // Every snapshot the server has for this account, keyed by "YYYY-MM-01".
-  // Lets the header's period picker resolve the section total to a chosen
-  // historical month/quarter/year without another round trip.
-  balancesByMonth?: Record<string, number>;
-  buckets: BucketData[];
-};
-
-// Non-CC accounts, passed in for the Pay Card modal's "From" dropdown.
-export type NonCardAccount = {
-  id: string;
-  name: string;
-  kind: string;
-  hasBuckets: boolean;
-};
-
-
-// A debt from the Budget Debt group — shown here read-only (Budget is the
-// single source of truth for debts).
-export type BudgetDebt = {
-  subcategoryId: string;
-  name: string;
-  balanceCents: number;
-  prevMonthCents: number | null;
-  prev2MonthCents: number | null;
-  // Every snapshot recorded for this debt subcategory, keyed by "YYYY-MM-01".
-  // Powers the header period picker's Debts / Net Worth totals + deltas.
-  balancesByMonth?: Record<string, number>;
-  debtKind: string | null;
-  accountId: string | null;
-};
-
-// The plan's account types, mapped onto the account_kind enum. debt_loan is
-// legacy/managed from Budget → shown only if rows exist. Kids Funding is its
-// own group by the is_kids_account flag, not by kind — it can hold checking,
-// savings, or investment accounts (Fidelity, Capital One, a Trump Account…).
-type Section = {
-  key: string;
-  label: string;
-  dot: string;
-  liability: boolean;
-  // Which accounts belong here.
-  match: (a: AccountData) => boolean;
-  // Sub-kind choices offered by the add form (label per kind).
-  kindLabels: Record<string, string>;
-  fixedKind?: string;
-  // Free-text "Type" field (e.g. Retirement, Roth IRA, 529, Trump Account).
-  offerSubtype?: boolean;
-  // A fixed Type vocabulary for this section, in place of free text.
-  subtypeOptions?: string[];
-  kidsGroup?: boolean;
-  creditCard?: boolean;
-};
-
 const SECTIONS: Section[] = [
   {
     key: "banking",
@@ -249,44 +94,7 @@ const SECTIONS: Section[] = [
     kindLabels: { investment: "Investment" },
     offerSubtype: true,
   },
-  {
-    key: "credit",
-    label: "Credit Cards",
-    dot: "bg-negative",
-    liability: false,
-    match: (a) => a.kind === "credit_card" && !a.dateClosed,
-    kindLabels: { credit_card: "Credit card" },
-    offerSubtype: true,
-    creditCard: true,
-  },
-  {
-    key: "credit_closed",
-    label: `Closed cards · ${new Date().getFullYear()}`,
-    dot: "bg-negative",
-    liability: false,
-    match: (a) => {
-      if (a.kind !== "credit_card" || !a.dateClosed) return false;
-      const closedYear = new Date(a.dateClosed).getFullYear();
-      return closedYear === new Date().getFullYear();
-    },
-    kindLabels: { credit_card: "Credit card" },
-    offerSubtype: true,
-    creditCard: true,
-  },
-  {
-    key: "credit_archived",
-    label: "Closed cards archive",
-    dot: "bg-muted",
-    liability: false,
-    match: (a) => {
-      if (a.kind !== "credit_card" || !a.dateClosed) return false;
-      const closedYear = new Date(a.dateClosed).getFullYear();
-      return closedYear < new Date().getFullYear();
-    },
-    kindLabels: { credit_card: "Credit card" },
-    offerSubtype: true,
-    creditCard: true,
-  },
+  ...CREDIT_SECTIONS,
   {
     key: "property",
     label: "Property",
@@ -331,31 +139,7 @@ type Props = {
   // Payments made TO cards — feeds the read-only "Card payments" report at
   // the bottom of the Credit Cards section. Never used for balances.
   cardPayments?: CardPayment[];
-  // What each card's points have really been worth, measured off the Travel
-  // Log. Feeds the "Points values" dialog on the rewards section.
-  pointsSuggestions?: PointsSuggestion[];
-  // The Travel Log's brand list. A stay booked from a card's rewards panel
-  // opens the very same Add stay form /travel uses, so it needs the brands.
-  travelBrands?: TravelBrand[];
 };
-
-// Everything the shared Add stay modal needs, made available to the card
-// panels without threading it through four levels of props. The cards are
-// derived from the accounts this board already has.
-const TravelStayContext = React.createContext<{ cards: TravelCard[]; brands: TravelBrand[] }>({
-  cards: [],
-  brands: [],
-});
-
-// Clicking a row in the Rewards activity ledger jumps to that card's own
-// rewards log instead of leaving you to scroll the card list hunting for it.
-// The panel that owns the card watches this id, opens itself and scrolls into
-// view; the section above it clears whatever filter might be hiding the card.
-const RewardFocusContext = React.createContext<{
-  focusCardId: string | null;
-  requestFocus: (cardId: string) => void;
-  clearFocus: () => void;
-}>({ focusCardId: null, requestFocus: () => {}, clearFocus: () => {} });
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
  *  can't drift apart in labelling or option order. */
@@ -548,28 +332,10 @@ export function AccountsBoard({
   nonCardAccounts = [],
   historyMonths,
   cardPayments = [],
-  pointsSuggestions = [],
-  travelBrands = [],
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
-  const [focusCardId, setFocusCardId] = useState<string | null>(null);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
-  // The card list the shared Add stay form offers. Same shape /travel builds,
-  // read off the card details this page already loaded — a closed card is
-  // still bookable-against only in the sense that its old stays reference it,
-  // so it is left out of a NEW booking's dropdown.
-  const travelCards: TravelCard[] = creditCards
-    .filter((c) => !c.dateClosed)
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      holder: c.holder ?? null,
-      currentPoints: c.cardDetails?.currentPoints ?? 0,
-      pointsValueMicros: c.cardDetails?.pointsValueMicros ?? null,
-      freeNightCreditCents: c.cardDetails?.freeNightCreditCents ?? null,
-      freeNightPointsLimit: c.cardDetails?.freeNightPointsLimit ?? null,
-    }));
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
   // filtering DOES NOT extend to the Credit Card Rewards section below —
@@ -827,23 +593,6 @@ export function AccountsBoard({
 
   return (
     <SubtypeOptionsContext.Provider value={knownSubtypes}>
-    <TravelStayContext.Provider value={{ cards: travelCards, brands: travelBrands }}>
-    <RewardFocusContext.Provider
-      value={{
-        focusCardId,
-        requestFocus: (cardId) => {
-          // A collapsed section never renders the panel, so the click would
-          // do nothing at all — open whichever one holds this card first.
-          const card = accounts.find((a) => a.id === cardId);
-          if (card) {
-            const section = SECTIONS.find((sec) => sec.match(card));
-            if (section) setCollapsed((c) => ({ ...c, [section.key]: false }));
-          }
-          setFocusCardId(cardId);
-        },
-        clearFocus: () => setFocusCardId(null),
-      }}
-    >
     <div className="mx-auto w-full max-w-5xl space-y-4">
       {/* Title + period picker in one row, right-aligned like Insights.
           Subtitle removed at Victor's request. */}
@@ -999,44 +748,31 @@ export function AccountsBoard({
           const sectionAccounts = accounts.filter((a) => section.match(a));
           if (sectionAccounts.length === 0 && section.key !== "credit") return null;
           return (
-            <CreditCardSection
+            <CreditCardListSection
               key={section.key}
               section={section}
               accounts={sectionAccounts}
-              allCreditCards={accounts.filter((a) => a.kind === "credit_card")}
               currency={currency}
               nonCardAccounts={nonCardAccounts}
               allBuckets={accounts.flatMap((a) => a.buckets)}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
-              pointsSuggestions={pointsSuggestions}
             />
           );
         })}
-        {/* Rewards activity and Card payments are their own cards, not a tail
-            welded onto the Credit Cards card — they're separate reports and
-            each collapses on its own. */}
+        {/* Card payments is its own card, not a tail welded onto the Credit
+            Cards card — a separate report that collapses on its own. */}
         {creditCards.length > 0 ? (
-          <>
-            <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <CardPaymentsLedger
-                payments={cardPayments}
-                cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
-                sourceNames={Object.fromEntries(nonCardAccounts.map((a) => [a.id, a.name]))}
-                currency={currency}
-                storageKey="accounts-card-payments-open"
-                showChart={false}
-              />
-            </div>
-            <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <RewardsActivityLedger
-                entries={creditCards
-                  .flatMap((card) => card.rewardActivities.map((a) => ({ ...a, cardName: card.name, cardId: card.id })))
-                  .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn))}
-                currency={currency}
-              />
-            </div>
-          </>
+          <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+            <CardPaymentsLedger
+              payments={cardPayments}
+              cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
+              sourceNames={Object.fromEntries(nonCardAccounts.map((a) => [a.id, a.name]))}
+              currency={currency}
+              storageKey="accounts-card-payments-open"
+              showChart={false}
+            />
+          </div>
         ) : null}
       </div>
       {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} /> : null}
@@ -1048,1869 +784,160 @@ export function AccountsBoard({
         />
       ) : null}
       </div>
-    </RewardFocusContext.Provider>
-    </TravelStayContext.Provider>
     </SubtypeOptionsContext.Provider>
   );
 }
 
-// ---- Credit Card section: expandable panels, holder grouping, Pay Card modal ----
+// ---- Credit cards on Accounts: what each card owes, and how to pay it.
+//
+// The points, free nights and rewards ledger moved to /travel — this is the
+// money half. A card's balance belongs beside the accounts that pay it.
 
-function CreditCardSection({
+function CreditCardListSection({
   section,
   accounts,
-  allCreditCards,
   currency,
   nonCardAccounts,
   allBuckets,
   open,
   onToggle,
-  pointsSuggestions,
 }: {
   section: Section;
   accounts: AccountData[];
-  allCreditCards: AccountData[];
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
   open: boolean;
   onToggle: () => void;
-  pointsSuggestions: PointsSuggestion[];
 }) {
-  const [reorderError, setReorderError] = useState<string | null>(null);
-  const [, startReorder] = useTransition();
-  const [localAccounts, setLocalAccounts] = useState(accounts);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLocalAccounts(accounts);
-  }, [accounts]);
-  const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
-  const { focusCardId } = React.useContext(RewardFocusContext);
-  const [pointsValueOpen, setPointsValueOpen] = useState(false);
-  const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
-  const [showOnlyOwedCards, setShowOnlyOwedCards] = useState(false);
-  const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
-  const [showOnlyTravelRedeem, setShowOnlyTravelRedeem] = useState(false);
-  const [showOnlyHotelRedeem, setShowOnlyHotelRedeem] = useState(false);
-  // Free-night certificates still on the table: the card grants one, nothing
-  // has been booked against it, and it hasn't run out of time.
-  const [showOnlyUnbookedNights, setShowOnlyUnbookedNights] = useState(false);
-  // Which rewards column the section is showing. Null = both, plus Other.
-  const [categoryFilter, setCategoryFilter] = useState<"travel" | "hotel" | null>(null);
-  // Holder filter — clicking a name (Vic / Johana / …) limits the visible
-  // cards to that holder. Null = all holders.
-  const [holderFilter, setHolderFilter] = useState<string | null>(null);
-  const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
-  const hasOwed = (a: AccountData) => (a.owedCents ?? 0) > 0;
-  const hasPts = (a: AccountData) => (a.cardDetails?.currentPoints ?? 0) > 0;
-  // "Available" is all three: there is a night credit, no stay has been booked
-  // against it (benefitUsedOn is the booking), and its expiry hasn't passed —
-  // an expired certificate is no more spendable than a used one.
-  const sectionToday = new Date().toISOString().slice(0, 10);
-  const hasUnbookedNight = (a: AccountData) => {
-    const d = a.cardDetails;
-    if (!d) return false;
-    if (!d.freeNightCreditCents && !d.freeNightPointsLimit) return false;
-    if (d.benefitUsedOn) return false;
-    if (d.freeNightExpiresOn && d.freeNightExpiresOn < sectionToday) return false;
-    return true;
-  };
-  // A card "contributes" to the Redeemable tile when it's in that rewards
-  // category and has redeemable value (points × micro-value + free-night credit).
-  const hasRedeemableIn = (a: AccountData, cat: "travel" | "hotel") => {
-    const d = a.cardDetails;
-    if (!d || d.rewardsCategory !== cat) return false;
-    const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
-    return pts + (d.freeNightCreditCents ?? 0) > 0;
-  };
-  const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
-    const next = new Set(prev);
-    if (next.has(bank)) next.delete(bank);
-    else next.add(bank);
-    return next;
-  });
-
-  const reorder = (fromId: string, toId: string) => {
-    const fromIdx = localAccounts.findIndex((a) => a.id === fromId);
-    const toIdx = localAccounts.findIndex((a) => a.id === toId);
-    if (fromIdx === -1 || toIdx === -1) return;
-    const next = [...localAccounts];
-    const [moved] = next.splice(fromIdx, 1);
-    next.splice(toIdx, 0, moved);
-    setLocalAccounts(next);
-    const fd = new FormData();
-    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
-    startReorder(async () => {
-      const res = await reorderAccounts(fd);
-      setReorderError(res?.error ?? null);
-    });
-  };
-  const { dragOverId, startDrag } = usePointerReorder("credit-card", reorder);
-
-  // Bank-group order: dragging a bank header moves its whole card block. The
-  // underlying store is still per-account sort_order — we just splice the
-  // block, then persist the flattened order.
-  const bankLabel = (a: AccountData) => {
-    const raw = (a.cardDetails?.bank ?? a.institution ?? a.subtype ?? "Other").trim();
-    if (!raw) return "Other";
-    // Keep institution sections together even when entries use different
-    // capitalization or spacing, while preserving the first card's display.
-    const normalized = raw.replace(/\s+/g, " ").toLowerCase();
-    const existing = localAccounts.find((candidate) => {
-      const candidateRaw = (candidate.cardDetails?.bank ?? candidate.institution ?? candidate.subtype ?? "Other").trim();
-      return candidateRaw.replace(/\s+/g, " ").toLowerCase() === normalized;
-    });
-    return existing
-      ? (existing.cardDetails?.bank ?? existing.institution ?? existing.subtype ?? "Other").trim().replace(/\s+/g, " ")
-      : raw.replace(/\s+/g, " ");
-  };
-  const reorderBank = (fromBank: string, toBank: string) => {
-    if (fromBank === toBank) return;
-    const fromCards = localAccounts.filter((a) => bankLabel(a) === fromBank);
-    const otherCards = localAccounts.filter((a) => bankLabel(a) !== fromBank);
-    const toIdx = otherCards.findIndex((a) => bankLabel(a) === toBank);
-    if (fromCards.length === 0 || toIdx === -1) return;
-    const next = [...otherCards.slice(0, toIdx), ...fromCards, ...otherCards.slice(toIdx)];
-    setLocalAccounts(next);
-    const fd = new FormData();
-    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
-    startReorder(async () => {
-      const res = await reorderAccounts(fd);
-      setReorderError(res?.error ?? null);
-    });
-  };
-  const { dragOverId: dragOverBank, startDrag: startBankDrag } = usePointerReorder("credit-bank", reorderBank);
-  const isArchived = section.key === "credit_archived";
+  const [payCardFor, setPayCardFor] = useState<AccountData | null>(null);
   const isMain = section.key === "credit";
-  const feeFilter = (a: AccountData) => !showOnlyFeeCards || hasActiveFee(a);
-  const owedFilter = (a: AccountData) => !showOnlyOwedCards || hasOwed(a);
-  const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
-  const holderFilterFn = (a: AccountData) => !holderFilter || (a.holder ?? "") === holderFilter;
-  const nightFilter = (a: AccountData) => !showOnlyUnbookedNights || hasUnbookedNight(a);
-  // A card jumped to from the Rewards activity ledger is always shown, whatever
-  // the section is filtered down to — otherwise the card the click is aiming at
-  // is filtered out, its panel never mounts, and the click looks broken.
-  const isFocused = (a: AccountData) => a.id === focusCardId;
-  const passesFilters = (a: AccountData) =>
-    isFocused(a)
-    || (feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && nightFilter(a));
-  // Per-category "contributes to Redeemable" filters — scoped to their own
-  // section so clicking Travel Redeemable doesn't empty the Hotel list.
-  const travelCards = localAccounts.filter((a) =>
-    a.cardDetails?.rewardsCategory === "travel"
-    && passesFilters(a)
-    && (isFocused(a) || !showOnlyTravelRedeem || hasRedeemableIn(a, "travel")),
-  );
-  const hotelCards = localAccounts.filter((a) =>
-    a.cardDetails?.rewardsCategory === "hotel"
-    && passesFilters(a)
-    && (isFocused(a) || !showOnlyHotelRedeem || hasRedeemableIn(a, "hotel")),
-  );
-  const otherCards = localAccounts.filter((a) => !a.cardDetails?.rewardsCategory && passesFilters(a));
-  const focusedCard = focusCardId ? localAccounts.find((a) => a.id === focusCardId) ?? null : null;
-  const focusedCategory = focusedCard?.cardDetails?.rewardsCategory ?? (focusedCard ? "other" : null);
-  const hideTravelColumn = (showOnlyHotelRedeem || categoryFilter === "hotel") && focusedCategory !== "travel";
-  const hideHotelColumn = (showOnlyTravelRedeem || categoryFilter === "travel") && focusedCategory !== "hotel";
-  // Each rewards group collapses on its own header, persisted for the session
-  // like the other collapsibles on this page. Undefined means open.
-  const [groupOpen, setGroupOpen] = useSessionCollapse(
-    "accounts-credit-groups-open",
-    () => ({ travel: true, hotel: true, other: true }),
-  );
-  const toggleGroup = (key: string) =>
-    setGroupOpen((state) => ({ ...state, [key]: state[key] === false }));
+  const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
+  // Cards with a recorded limit only, so an un-entered limit can't make
+  // utilisation look better than it is.
+  const cardsWithLimit = accounts.filter((a) => (a.cardDetails?.spendingLimitCents ?? 0) > 0);
+  const totalLimitCents = cardsWithLimit.reduce((s, a) => s + (a.cardDetails?.spendingLimitCents ?? 0), 0);
+  const owedOnLimited = cardsWithLimit.reduce((s, a) => s + Math.max(0, a.owedCents ?? 0), 0);
+  const utilisationPct = totalLimitCents > 0 ? (owedOnLimited / totalLimitCents) * 100 : null;
 
-  const travelOpen = groupOpen.travel !== false || focusedCategory === "travel";
-  const hotelOpen = groupOpen.hotel !== false || focusedCategory === "hotel";
-  const otherOpen = groupOpen.other !== false || focusedCategory === "other";
-  const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
-  const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
-  const renderCards = (cards: AccountData[]) => (
-    <ul className="divide-y divide-line">
-      {cards.map((a) => (
-        <CreditCardPanel
-          key={a.id}
-          card={a}
-          currency={currency}
-          nonCardAccounts={nonCardAccounts}
-          allBuckets={allBuckets}
-          isArchived={isArchived}
-          onDragStart={() => startDrag(a.id)}
-          isDragOver={dragOverId === a.id}
-        />
-      ))}
-    </ul>
-  );
-
-  // Every headline stat honors the active holder filter so the numbers and
-  // the visible card lists always agree. When no holder is picked this reduces
-  // back to the full-household totals.
-  const holderScoped = <T extends AccountData>(list: T[]) => list.filter(holderFilterFn);
-  const openCards = holderScoped(allCreditCards.filter((a) => !a.dateClosed));
-  const feesPaid = openCards
-    .filter((a) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0)
-    .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
-  const feesWaived = openCards
-    .filter((a) => a.feeWaived && (a.annualFeeCents ?? 0) > 0)
-    .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
-  const feesAll = feesPaid + feesWaived;
-  const totalOwed = holderScoped(accounts).reduce((s, a) => s + (a.owedCents ?? 0), 0);
-  const rewardCards = holderScoped(allCreditCards.filter((a) => a.cardDetails));
-  const totalPoints = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
-  const pointsForCategory = (cat: "travel" | "hotel") =>
-    rewardCards
-      .filter((a) => a.cardDetails?.rewardsCategory === cat)
-      .reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
-  const travelPoints = pointsForCategory("travel");
-  const hotelPoints = pointsForCategory("hotel");
-  // Cash value of the points balance itself, summed with each card's own
-  // cents-per-point — the section-level total of the per-card "Total value"
-  // metric. Free-night credits are excluded here (they show in the Travel /
-  // Hotel redeemable tiles) so this tile answers "what are the points worth".
-  const totalCardValueCents = rewardCards.reduce((sum, a) => {
-    const d = a.cardDetails;
-    if (!d || d.currentPoints <= 0 || !d.pointsValueMicros) return sum;
-    return sum + Math.round((d.currentPoints * d.pointsValueMicros) / 10_000);
-  }, 0);
-  // ---- Credit utilisation: balances owed as a share of total credit limit.
-  // The single biggest lever on a credit score, and computable from limits
-  // already stored per card. Only cards with a recorded limit are counted, so
-  // the figure isn't skewed by cards whose limit hasn't been entered — the
-  // covered-card count is shown alongside so the basis is clear.
-  const cardsWithLimit = holderScoped(openCards).filter(
-    (a) => (a.cardDetails?.spendingLimitCents ?? 0) > 0,
-  );
-  const totalLimitCents = cardsWithLimit.reduce(
-    (s, a) => s + (a.cardDetails?.spendingLimitCents ?? 0),
-    0,
-  );
-  const owedOnLimitedCards = cardsWithLimit.reduce((s, a) => s + Math.max(0, a.owedCents ?? 0), 0);
-  const utilisationPct = totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null;
-  // Compact number formatter tuned so the sub-line's pieces still visibly add
-  // up to the headline value. E.g. 1,025,563 → "1.03M" (not "1.0M"), so
-  // Travel 395k + Hotel 1.03M reads consistent with total 1,420,563.
-  const compactNum = (n: number) => {
-    if (n >= 100_000_000) return `${(n / 1_000_000).toFixed(0)}M`;
-    if (n >= 10_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-    if (n >= 100_000) return `${(n / 1_000).toFixed(0)}k`;
-    if (n >= 10_000) return `${(n / 1_000).toFixed(1)}k`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-    return n.toLocaleString();
-  };
-  const redeemableForCategory = (cat: "travel" | "hotel") =>
-    rewardCards
-      .filter((a) => a.cardDetails?.rewardsCategory === cat)
-      .reduce((sum, a) => {
-        const d = a.cardDetails!;
-        const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
-        return sum + pts + (d.freeNightCreditCents ?? 0);
-      }, 0);
-  // Cards whose stored valuation is missing or disagrees with what the stays
-  // actually redeemed at. `worthRows` covers every card holding points so the
-  // dialog can show the before/after on the section total.
-  const suggestionByAccount = new Map(pointsSuggestions.map((s) => [s.accountId, s]));
-  const pointsValueRows: PointsValueRow[] = rewardCards
-    .filter((a) => (a.cardDetails?.currentPoints ?? 0) > 0)
-    .map((a) => ({
-      accountId: a.id,
-      cardName: a.name,
-      currentPoints: a.cardDetails?.currentPoints ?? 0,
-      storedMicros: a.cardDetails?.pointsValueMicros ?? null,
-      suggestion: suggestionByAccount.get(a.id) ?? null,
-    }));
-  const staleValueCount = pointsValueRows.filter(
-    (r) => r.suggestion && r.suggestion.micros !== (r.storedMicros ?? 0),
-  ).length;
-
-  const travelRedeemable = redeemableForCategory("travel");
-  const hotelRedeemable = redeemableForCategory("hotel");
   return (
-    <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {isMain ? (
-        <div className="px-4 py-4 sm:px-6 sm:py-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={onToggle}
-              // Keeps its own row until there is real width for the chips
-              // beside it. Sharing the line squeezed the title to one word per
-              // line on a phone, where the overflowing words then ran under
-              // the chips, and to three cramped lines on a narrow desktop.
-              className="w-full min-w-0 text-left lg:w-auto lg:flex-1"
-              aria-expanded={open}
+    <section id={isMain ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      {/* Mobile puts the title and chevron on their own row and drops the
+          link + total underneath; below ~400px they cannot share a line
+          without the chip sitting on top of the title. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
+        <button type="button" onClick={onToggle} className="order-1 min-w-0 shrink-0 text-left" aria-expanded={open}>
+          <span className="inline-flex items-center gap-2">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${section.dot}`} aria-hidden />
+            <span className="text-base font-bold sm:text-lg">{section.label}</span>
+          </span>
+        </button>
+        {/* The row itself is the button now, so say so — a card with no visible
+            control needs one line telling you it is one. */}
+        {open && accounts.length > 0 ? (
+          <span className="order-1 min-w-0 flex-1 text-[11px] text-muted">Click on card to make payment</span>
+        ) : null}
+        <div className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:w-auto sm:justify-end">
+        {/* Where the points live now. Named for what it holds, not "see also". */}
+        <Link
+          href="/travel"
+          className="shrink-0 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
+        >
+          Points & rewards →
+        </Link>
+        <span className="shrink-0 text-right">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">Total CC owed</span>
+          <span className="block text-sm font-bold tabular-nums text-negative sm:text-base">
+            {formatMoney(totalOwed, currency)}
+          </span>
+          {utilisationPct != null ? (
+            <span
+              className="block text-[10px] font-semibold tabular-nums"
+              style={{ color: utilisationPct < 30 ? "var(--positive)" : "var(--negative)" }}
             >
-              <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
-            </button>
-            {/* Free nights still available, under the holder filter in force —
-                the count and the list it filters to always agree. It sits in
-                the title row because it is the question this section gets
-                opened to answer, not one more way to narrow a list. */}
-            {(() => {
-              const available = holderScoped(allCreditCards.filter((a) => !a.dateClosed)).filter(hasUnbookedNight);
-              if (available.length === 0) return null;
-              return (
-                <button
-                  type="button"
-                  onClick={() => setShowOnlyUnbookedNights((v) => !v)}
-                  // Its own row on a phone: sharing the title line squeezed
-                  // "Travel & Credit Card Rewards" onto three.
-                  // Outlined like the calculator control beside it, so it
-                  // reads as something to press rather than a label.
-                  className={`order-last w-full shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-semibold transition sm:order-none sm:w-auto ${
-                    showOnlyUnbookedNights
-                      ? "border-transparent text-white"
-                      : "border-black/25 bg-background text-foreground hover:bg-slate-100 dark:border-white/30 dark:hover:bg-slate-800"
-                  }`}
-                  style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                >
-                  Free nights unbooked:{" "}
-                  <span className="tabular-nums">{available.length}</span>
-                </button>
-              );
-            })()}
-            {pointsValueRows.some((r) => r.suggestion) ? (
-              <button
-                type="button"
-                onClick={() => setPointsValueOpen(true)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-              >
-                Points values
-                {staleValueCount > 0 ? (
-                  <span className="rounded-full bg-black/5 px-1.5 text-[10px] tabular-nums text-muted dark:bg-white/10">
-                    {staleValueCount} to update
-                  </span>
-                ) : null}
-              </button>
-            ) : null}
-            <a
-              href="https://www.dailydrop.com/calculator"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
-            >
-              <span className="sm:hidden">Calculator</span>
-              <span className="hidden sm:inline">Points value calculator</span>
-              <span aria-hidden>↗</span>
-            </a>
-            <button
-              type="button"
-              onClick={onToggle}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800"
-              aria-label={open ? "Collapse credit card rewards" : "Expand credit card rewards"}
-            >
-              <svg
-                width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                className={`transition-transform ${open ? "" : "-rotate-90"}`}
-                aria-hidden
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-          </div>
-
-          {(totalPoints > 0 || travelRedeemable > 0 || hotelRedeemable > 0 || feesPaid > 0 || totalOwed > 0) ? (
-            <>
-            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-5">
-              {totalPoints > 0 ? (
-                <StatTile
-                  label="Current Pts"
-                  value={totalPoints.toLocaleString()}
-                  sub={(() => {
-                    const other = Math.max(0, totalPoints - travelPoints - hotelPoints);
-                    const parts: string[] = [];
-                    if (travelPoints > 0) parts.push(`Travel ${compactNum(travelPoints)}`);
-                    if (hotelPoints > 0) parts.push(`Hotel ${compactNum(hotelPoints)}`);
-                    if (other > 0) parts.push(`Other ${compactNum(other)}`);
-                    return parts.length ? parts.join(" · ") : undefined;
-                  })()}
-                  tone="emerald"
-                  onClick={() => setShowOnlyPtsCards((v) => !v)}
-                  active={showOnlyPtsCards}
-                />
-              ) : null}
-              {totalCardValueCents > 0 ? (
-                <StatTile
-                  label="Total Card Value"
-                  value={formatMoney(totalCardValueCents, currency)}
-                  sub="Points only"
-                  tone="emerald"
-                />
-              ) : null}
-              {travelRedeemable > 0 ? (
-                <StatTile
-                  label="Travel Value Redeemable"
-                  value={formatMoney(travelRedeemable, currency)}
-                  tone="sky"
-                  onClick={() => setShowOnlyTravelRedeem((v) => !v)}
-                  active={showOnlyTravelRedeem}
-                />
-              ) : null}
-              {hotelRedeemable > 0 ? (
-                <StatTile
-                  label="Hotel Value Redeemable"
-                  value={formatMoney(hotelRedeemable, currency)}
-                  tone="teal"
-                  onClick={() => setShowOnlyHotelRedeem((v) => !v)}
-                  active={showOnlyHotelRedeem}
-                />
-              ) : null}
-              {totalOwed > 0 ? (
-                <StatTile
-                  label="Total CC Owed"
-                  value={formatMoney(totalOwed, currency)}
-                  sub={
-                    utilisationPct != null
-                      ? `${utilisationPct.toFixed(0)}% of ${formatMoney(totalLimitCents, currency).replace(/\.00$/, "")} limit`
-                      : undefined
-                  }
-                  // Under 30% is the conventional healthy threshold.
-                  subColor={
-                    utilisationPct == null
-                      ? undefined
-                      : utilisationPct < 30
-                        ? "var(--positive)"
-                        : "var(--negative)"
-                  }
-                  tone="rose"
-                  onClick={() => setShowOnlyOwedCards((v) => !v)}
-                  active={showOnlyOwedCards}
-                />
-              ) : null}
-            </div>
-            {/* Fees, holder filter and card counts belong to the open section —
-                collapsing leaves only the headline stat tiles. */}
-            {open ? (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
-              {feesPaid > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setShowOnlyFeeCards((v) => !v)}
-                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"}`}
-                  title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
-                >
-                  Active fees <span className="tabular-nums text-negative">{formatMoney(feesPaid, currency)}/yr</span>
-                </button>
-              ) : null}
-              {feesAll > 0 ? (
-                <span>
-                  Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
-                </span>
-              ) : null}
-              {/* Holder filter — chip per unique cardholder plus an "All" reset.
-                  Clicking narrows every card list (Travel / Hotel / Other) to
-                  that person's cards. */}
-              {(() => {
-                const holders = Array.from(
-                  new Set(
-                    allCreditCards
-                      .map((a) => (a.holder ?? "").trim())
-                      .filter(Boolean),
-                  ),
-                ).sort();
-                if (holders.length < 2) return null;
-                const chip = (active: boolean) =>
-                  `rounded-md px-2 py-1 font-semibold transition ${
-                    active
-                      ? "text-white"
-                      : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
-                  }`;
-                return (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setHolderFilter(null)}
-                      className={chip(holderFilter == null)}
-                      style={holderFilter == null ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                    >
-                      All
-                    </button>
-                    {holders.map((h) => (
-                      <button
-                        key={h}
-                        type="button"
-                        onClick={() =>
-                          setHolderFilter((prev) => (prev === h ? null : h))
-                        }
-                        className={chip(holderFilter === h)}
-                        style={holderFilter === h ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                      >
-                        {h}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
-              {/* The card counts double as the column filter: travel shows the
-                  travel column alone, hotel the hotel one, total puts both
-                  back with Other underneath. */}
-              {(() => {
-                const scoped = holderScoped(accounts);
-                const count = (cat: "travel" | "hotel" | null) =>
-                  cat === null
-                    ? scoped.length
-                    : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
-                // Outlined so all three read as pressable, filled only when
-                // one is actually narrowing the list. "Total" is the resting
-                // state, so a filled pill there said a filter was on when
-                // none was.
-                const countChip = (cat: "travel" | "hotel" | null, label: string) => {
-                  const active = cat !== null && categoryFilter === cat;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => setCategoryFilter(cat)}
-                      className={`rounded-md border px-1.5 py-0.5 transition ${
-                        active
-                          ? "border-transparent text-white"
-                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-slate-800"
-                      }`}
-                      style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                    >
-                      <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
-                        {count(cat)}
-                      </span>{" "}
-                      {label}
-                    </button>
-                  );
-                };
-                return (
-                  <span className="flex items-center gap-1 sm:ml-auto">
-                    {countChip("travel", "travel")}
-                    {countChip("hotel", "hotel")}
-                    {countChip(null, "total")}
-                  </span>
-                );
-              })()}
-            </div>
-            ) : null}
-            </>
-          ) : null}
-        </div>
-      ) : (
-        <div className="flex items-center justify-between gap-2 px-4 py-2.5">
-          <button
-            type="button"
-            onClick={onToggle}
-            className="flex items-center gap-2.5 text-left"
-            aria-expanded={open}
-          >
-            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-            <span className="font-semibold">{section.label}</span>
-            <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
-              {accounts.length} card{accounts.length !== 1 ? "s" : ""}
-            </span>
-            <svg
-              width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-              aria-hidden
-            >
-              <path d="M6 9l6 6 6-6" />
-            </svg>
-          </button>
-          {totalOwed > 0 ? (
-            <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
-              {formatMoney(totalOwed, currency)} owed
+              {utilisationPct.toFixed(0)}% of {formatMoney(totalLimitCents, currency).replace(/\.00$/, "")} limit
             </span>
           ) : null}
+        </span>
         </div>
-      )}
-
-      {open ? (
-        <div className="border-t-2 border-foreground/25">
-          {reorderError ? (
-            <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
-          ) : null}
-          {localAccounts.length === 0 ? (
-            <p className="px-4 py-2.5 text-sm text-muted">
-              {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
-            </p>
-          ) : isMain ? (
-            <div>
-              {/* Travel stacks above Hotel at every width. Side-by-side halves
-                  squeezed each card's badges into a 3-4 line pile; full width
-                  lets the per-card metrics line up in columns left-to-right. */}
-              <div className="grid grid-cols-1 divide-y divide-line">
-                {hideTravelColumn ? null : (
-                <section>
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => toggleGroup("travel")}
-                      aria-expanded={travelOpen}
-                      className="flex flex-1 items-center gap-2 text-left sm:gap-2.5"
-                    >
-                    <GroupChevron open={travelOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
-                      </svg>
-                    </span>
-                    <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
-                    </span>
-                    </button>
-                    <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
-                      {formatMoney(travelOwed, currency)} owed
-                    </span>
-                  </div>
-                  {!travelOpen ? null : travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
-                </section>
-                )}
-                {hideHotelColumn ? null : (
-                <section>
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
-                    <button
-                      type="button"
-                      onClick={() => toggleGroup("hotel")}
-                      aria-expanded={hotelOpen}
-                      className="flex flex-1 items-center gap-2 text-left sm:gap-2.5"
-                    >
-                    <GroupChevron open={hotelOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M3 21V7l7-4v4h11v14" />
-                        <path d="M7 10h.01M11 10h.01M15 14h.01M11 14h.01M7 14h.01M15 18h.01M11 18h.01M7 18h.01" />
-                      </svg>
-                    </span>
-                    <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
-                    </span>
-                    </button>
-                    <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
-                      {formatMoney(hotelOwed, currency)} owed
-                    </span>
-                  </div>
-                  {!hotelOpen ? null : hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-muted">No hotel cards yet.</p>}
-                </section>
-                )}
-              </div>
-              {otherCards.length > 0 && !showOnlyTravelRedeem && !showOnlyHotelRedeem && categoryFilter === null ? (
-                <section className="border-t border-line">
-                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10">
-                    <button
-                      type="button"
-                      onClick={() => toggleGroup("other")}
-                      aria-expanded={otherOpen}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-                    >
-                    <GroupChevron open={otherOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-400">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <rect x="2" y="5" width="20" height="14" rx="2" />
-                        <path d="M2 10h20" />
-                      </svg>
-                    </span>
-                    <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Other Cards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      {otherCards.length} card{otherCards.length !== 1 ? "s" : ""}
-                    </span>
-                    </button>
-                    <span className="ml-auto text-xs text-muted">Choose Travel or Hotel when editing a card.</span>
-                  </div>
-                  {otherOpen ? renderCards(otherCards) : null}
-                </section>
-              ) : null}
-            </div>
-          ) : (() => {
-            const groups = localAccounts.reduce<{ bank: string; cards: AccountData[] }[]>((acc, a) => {
-              const b = bankLabel(a);
-              const existing = acc.find((g) => g.bank === b);
-              if (existing) { existing.cards.push(a); } else { acc.push({ bank: b, cards: [a] }); }
-              return acc;
-            }, []);
-            return (
-              <div className="divide-y divide-line">
-                {groups.map((group) => {
-                  const collapsed =
-                    collapsedBanks.has(group.bank)
-                    && !group.cards.some((c) => c.id === focusCardId);
-                  const isBankDragOver = dragOverBank === group.bank;
-                  return (
-                    <div
-                      key={group.bank}
-                      data-drop-key={`credit-bank:${group.bank}`}
-                      className={isBankDragOver ? "ring-2 ring-inset ring-brand/50" : ""}
-                    >
-                      <div
-                        className={`flex items-center gap-1 pl-2 pr-4 py-1.5 bg-black/[0.04] dark:bg-white/[0.05] ${
-                          isBankDragOver ? "bg-brand-soft/40" : "hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
-                        }`}
-                      >
-                        <GripHandle size="sm" onMouseDown={() => startBankDrag(group.bank)} />
-                        <button
-                          type="button"
-                          onClick={() => toggleBank(group.bank)}
-                          className="flex flex-1 items-center gap-2 text-left"
-                        >
-                          <svg
-                            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
-                            aria-hidden
-                          >
-                            <path d="M6 9l6 6 6-6" />
-                          </svg>
-                          <span className="text-xs font-bold uppercase tracking-wide text-foreground">
-                            {group.bank}
-                          </span>
-                          <span className="text-xs font-medium text-muted">
-                            {group.cards.length} card{group.cards.length !== 1 ? "s" : ""}
-                          </span>
-                        </button>
-                      </div>
-                      {!collapsed && (
-                        <ul className="divide-y divide-line">
-                          {group.cards.map((a) => (
-                            <CreditCardPanel
-                              key={a.id}
-                              card={a}
-                              currency={currency}
-                              nonCardAccounts={nonCardAccounts}
-                              allBuckets={allBuckets}
-                              isArchived={isArchived}
-                              onDragStart={() => startDrag(a.id)}
-                              isDragOver={dragOverId === a.id}
-                            />
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-        </div>
-      ) : null}
-
-      {pointsValueOpen ? (
-        <PointsValueModal
-          rows={pointsValueRows}
-          currency={currency}
-          onClose={() => setPointsValueOpen(false)}
-        />
-      ) : null}
-    </section>
-  );
-}
-
-// One cell of the credit-card metric grid: a small fixed label with the value
-// under it, so the same metric lands at the same x across every card. Empty
-// values print an em dash rather than collapsing the cell.
-// Disclosure caret for the rewards group headers (Travel / Hotel / Other).
-function GroupChevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-      className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-      aria-hidden
-    >
-      <path d="M6 9l6 6 6-6" />
-    </svg>
-  );
-}
-
-function MetricCell({
-  label,
-  children,
-  omit = false,
-}: {
-  label: string;
-  children: React.ReactNode;
-  // `omit` = the metric doesn't apply to this card at all (not just blank):
-  // the cell keeps its grid slot on wide screens so neighbouring cards stay in
-  // register, but shows no label and no dash.
-  omit?: boolean;
-}) {
-  // Empty cells hold the column open from 420px up so the grid stays aligned,
-  // but drop out entirely on a phone, where six dashes per card would triple
-  // the scroll for no information.
-  const empty = children === null || children === undefined || children === false;
-  if (omit) return <span aria-hidden className="hidden min-[420px]:block" />;
-  return (
-    <span className={`min-w-0 text-center ${empty ? "hidden min-[420px]:block" : "block"}`}>
-      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
-      <span className="block truncate text-[12px] leading-tight">
-        {empty ? <span className="text-muted/60">&mdash;</span> : children}
-      </span>
-    </span>
-  );
-}
-
-function RewardsActivityLedger({
-  entries,
-  currency,
-}: {
-  entries: Array<RewardActivity & { cardName: string; cardId: string }>;
-  currency: string;
-}) {
-  const labels: Record<RewardActivity["type"], string> = {
-    points_redemption: "Points used",
-    points_earned: "Points earned",
-    hotel_credit_redemption: "Hotel credit used",
-    free_night_booking: "Free night booked",
-    reward_refund: "Returned to card",
-  };
-  // Default to this year: the ledger is a running log and the rows worth
-  // seeing on arrival are the ones from the year being lived. Older years are
-  // one pick away, and "All" is still there for the whole history.
-  const thisYear = String(new Date().getFullYear());
-  const years = [...new Set([thisYear, ...entries.map((e) => e.occurredOn.slice(0, 4))])].sort().reverse();
-  const [yearState, setYear] = useState<string>(thisYear);
-  const year = yearState === "all" || years.includes(yearState) ? yearState : thisYear;
-  const visibleEntries = year === "all" ? entries : entries.filter((e) => e.occurredOn.slice(0, 4) === year);
-  // Starts collapsed on a fresh login — it sits below Card payments and is
-  // reference data, not something to scan on every visit; sessionStorage still
-  // carries whatever it was last set to while moving around the app.
-  const [openState, setOpenState] = useSessionCollapse("accounts-rewards-activity-open", () => ({ open: false }));
-  const { requestFocus } = React.useContext(RewardFocusContext);
-  const open = openState.open;
-
-  return (
-    <section>
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
         <button
           type="button"
-          onClick={() => setOpenState((s) => ({ ...s, open: !s.open }))}
-          aria-expanded={open}
-          className="flex min-w-0 items-center gap-2 text-left"
+          onClick={onToggle}
+          className="order-2 grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800 sm:order-3"
+          aria-label={open ? `Collapse ${section.label}` : `Expand ${section.label}`}
         >
           <svg
-            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`transition-transform ${open ? "" : "-rotate-90"}`}
+            aria-hidden
           >
-            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M6 9l6 6 6-6" />
           </svg>
-          <span className="min-w-0">
-            <span className="block text-sm font-bold">Rewards activity</span>
-          </span>
         </button>
-        <div className="flex shrink-0 items-center gap-2">
-          <select
-            aria-label="Year"
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-            className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-            <option value="all">All years</option>
-          </select>
-          <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">
-            {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"}
-          </span>
-        </div>
       </div>
-      {!open ? null : visibleEntries.length === 0 ? (
-        <p className="px-4 py-4 text-sm text-muted">
-          {entries.length === 0
-            ? "No rewards activity yet. Open a card and choose “Rewards log” to create the first entry."
-            : `No rewards activity in ${year}.`}
-        </p>
-      ) : (
-        <ul className="divide-y divide-line bg-background/70">
-          {visibleEntries.map((entry) => (
-            <li key={entry.id} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto_auto] items-center gap-2 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] dark:hover:bg-white/[0.04]">
-              {/* The row is the way back to the card that made the entry:
-                  clicking it opens that card's rewards log and scrolls to it,
-                  instead of leaving you to hunt for the card by hand. Only the
-                  reading cells are the button — Delete keeps its own hit
-                  area, and a <button> can't nest inside another one. */}
-              <button
-                type="button"
-                onClick={() => requestFocus(entry.cardId)}
-                className="col-span-4 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_auto] items-center gap-2 text-left sm:col-span-4 sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto] sm:contents"
-              >
-                <span className="text-muted tabular-nums">{entry.occurredOn}</span>
-                <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
-                <span className="min-w-0 truncate text-muted">{labels[entry.type]}{entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}{entry.note ? ` · ${entry.note}` : ""}</span>
-                <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
-                  {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
-                </span>
-              </button>
-              <RewardActivityRowActions entry={entry} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
 
-// Delete undoes an entry outright — the AFTER DELETE trigger hands back
-// whatever the row took. There used to be an Archive button beside it that
-// only set a hidden flag and moved nothing; Victor had it removed once Delete
-// existed ("delete is enough"), since a ledger you can correct doesn't also
-// need a way to hide a wrong row.
-function RewardActivityRowActions({ entry, compact = false }: { entry: RewardActivity; compact?: boolean }) {
-  const [deletePending, startDelete] = useTransition();
-  const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    // In the bottom ledger this sits in a 4-column grid below sm, where it is
-    // the 5th child: it has to span all four columns or it lands in the narrow
-    // first one and the buttons get clipped off the edge. In the card panel's
-    // own recent list the row is a plain flex, so no spanning is wanted.
-    <div
-      className={`flex flex-col items-end gap-1 ${
-        compact
-          // Confirming adds two wider buttons; on a phone they only fit if
-          // they take the whole line instead of squeezing the entry's label
-          // down to "Points …".
-          ? confirming ? "w-full sm:w-auto" : ""
-          : "col-span-4 sm:col-span-1"
-      }`}
-    >
-      <div className="flex items-center gap-1">
-        {confirming ? (
-          <>
-            <form
-              action={(formData) =>
-                startDelete(async () => {
-                  setError(null);
-                  const result = await deleteCreditCardRewardActivity(formData);
-                  if (result?.error) setError(result.error);
-                  else setConfirming(false);
-                })
-              }
-            >
-              <input type="hidden" name="activityId" value={entry.id} />
-              <button
-                type="submit"
-                disabled={deletePending}
-                aria-busy={deletePending}
-                className="cursor-pointer rounded-md bg-negative px-2 py-1 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-80"
-              >
-                {deletePending ? "Deleting…" : "Delete & give back"}
-              </button>
-            </form>
-            {deletePending ? null : (
-              <button
-                type="button"
-                onClick={() => { setConfirming(false); setError(null); }}
-                className="cursor-pointer px-1 text-[11px] font-medium text-muted hover:text-foreground"
-              >
-                Cancel
-              </button>
-            )}
-          </>
+      {open ? (
+        accounts.length === 0 ? (
+          <p className="border-t border-line px-4 py-4 text-xs text-muted sm:px-6">No cards here yet.</p>
         ) : (
-          <button
-            type="button"
-            onClick={() => setConfirming(true)}
-            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-slate-950 dark:hover:bg-negative/20"
-          >
-            Delete
-          </button>
-        )}
-      </div>
-      {error ? <span className="max-w-[18rem] text-right text-[11px] font-medium text-negative">{error}</span> : null}
-    </div>
-  );
-}
-
-// The card row opens a compact action tray first. Editing is an explicit choice,
-// which keeps routine browsing from unexpectedly dropping a long form into view.
-function CreditCardPanel({
-  card,
-  currency,
-  nonCardAccounts,
-  allBuckets,
-  isArchived,
-  onDragStart,
-  isDragOver,
-}: {
-  card: AccountData;
-  currency: string;
-  nonCardAccounts: NonCardAccount[];
-  allBuckets: BucketData[];
-  isArchived: boolean;
-  onDragStart?: () => void;
-  isDragOver?: boolean;
-}) {
-  const [expandedState, setExpanded] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [paying, setPaying] = useState(false);
-  const [loggingRewardsState, setLoggingRewards] = useState(false);
-  // Arriving from a click on a Rewards activity row. Open-ness is DERIVED from
-  // the focus rather than pushed into state by an effect — the effect only
-  // scrolls, which is the one thing state can't express. Closing the panel or
-  // the log clears the focus, so it never props itself back open.
-  const { focusCardId, clearFocus } = React.useContext(RewardFocusContext);
-  const focused = focusCardId === card.id;
-  const expanded = expandedState || focused;
-  const loggingRewards = loggingRewardsState || focused;
-  const rowRef = useRef<HTMLLIElement | null>(null);
-  useEffect(() => {
-    if (!focused) return;
-    rowRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [focused]);
-  const [closePending, startClose] = useTransition();
-  const [reopenPending, startReopen] = useTransition();
-
-  const d = card.cardDetails;
-  const owed = card.owedCents ?? 0;
-
-  // Free-night expiry state for highlighting
-  const today = new Date().toISOString().slice(0, 10);
-  const fnExpires = d?.freeNightExpiresOn ?? null;
-  const fnExpired = fnExpires ? fnExpires < today : false;
-  const fnExpiresColor = fnExpired ? "text-negative font-semibold" : "text-foreground font-semibold";
-  const bank = d?.bank ?? card.institution ?? card.subtype ?? null;
-  // One card showing any reward figure turns the metric grid on for that row;
-  // plain cards (no points, no night credit) keep the single identity line.
-  // "Booked" only means something on a card that carries a free-night / hotel
-  // credit — on a plain points card the column is noise, so it holds its grid
-  // slot but prints nothing.
-  const hasNightCredit = Boolean(d?.freeNightCreditCents || d?.freeNightPointsLimit);
-  const hasMetrics = Boolean(
-    d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit
-      || d.freeNightExpiresOn || d.benefitUsedOn || d.charging),
-  );
-
-  return (
-    <li
-      ref={rowRef}
-      data-drop-key={`credit-card:${card.id}`}
-      className={`${expanded ? "bg-background/60" : "hover:bg-background/40"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
-    >
-      {/* Collapsed row */}
-      <div className="flex items-center">
-        {!isArchived && onDragStart ? (
-          <span className="flex-none pl-2 py-2">
-            <GripHandle onMouseDown={onDragStart} size="sm" />
-          </span>
-        ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          const next = !expanded;
-          setExpanded(next);
-          if (!next) {
-            setEditing(false);
-            setPaying(false);
-            setLoggingRewards(false);
-            clearFocus();
-          }
-        }}
-        className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
-        aria-expanded={expanded}
-      >
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="w-full min-w-0 whitespace-normal break-words text-sm font-semibold leading-tight sm:w-auto sm:truncate">{card.name}</span>
-            {card.holder ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                {card.holder}
-              </span>
-            ) : null}
-            {bank ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700">
-                {bank}
-              </span>
-            ) : null}
-            {/* Authorized user sits right of the bank so the row reads
-                holder -> bank -> who else can charge on it. "AU" stays muted
-                so it doesn't compete with the holder chip. */}
-            {d?.authUser ? (
-              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
-                AU: <span className="text-foreground">{d.authUser}</span>
-              </span>
-            ) : null}
-            {card.dateClosed ? (
-              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
-                Closed {card.dateClosed}
-              </span>
-            ) : null}
-            {d?.isRevolvingDebt ? (
-              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
-                Debt
-              </span>
-            ) : null}
-            {card.annualFeeCents && !card.feeWaived ? (
-              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-negative dark:bg-white/10">
-                ${Math.round(card.annualFeeCents / 100)}/yr
-              </span>
-            ) : null}
-          </span>
-          {hasMetrics ? (
-            /* Excel-style metric row: one labelled cell per column, aligned
-               across every card in the section. Cells stay in place even when
-               a card has no value for them ("—") so the eye can scan down a
-               column instead of re-reading a wrapped badge pile. */
-            <span className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1.5 min-[420px]:grid-cols-3 lg:grid-cols-6">
-              <MetricCell label="Current pts">
-                {d && d.currentPoints > 0 ? (
-                  <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
-                    {d.currentPoints.toLocaleString()}
-                  </span>
-                ) : null}
-              </MetricCell>
-              <MetricCell label="Total value">
-                {d && d.currentPoints > 0 && d.pointsValueMicros ? (
-                  <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
-                    ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}
-                  </span>
-                ) : null}
-              </MetricCell>
-              <MetricCell label="Night credit">
-                {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
-                  <span className="tabular-nums font-bold" style={{ color: "var(--viz-savings)" }}>
-                    {d?.freeNightCreditCents
-                      ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
-                      : `${d.freeNightPointsLimit!.toLocaleString()} pts`}
-                  </span>
-                ) : null}
-              </MetricCell>
-              <MetricCell label="Charging">
-                {d?.charging ? <span className="font-semibold">{d.charging}</span> : null}
-              </MetricCell>
-              <MetricCell label={fnExpired ? "Expired" : "Expires"}>
-                {d?.freeNightExpiresOn ? (
-                  <span className={`tabular-nums ${fnExpiresColor}`}>
-                    {d.freeNightExpiresOn.replace(/-/g, "\u2011")}
-                  </span>
-                ) : null}
-              </MetricCell>
-              <MetricCell label="Booked" omit={!hasNightCredit}>
-                {d?.benefitUsedOn ? (
-                  <span
-                    className={`tabular-nums font-semibold ${
-                      d.benefitUsedOn < today ? "text-negative" : "text-emerald-700 dark:text-emerald-300"
-                    }`}
-                  >
-                    {d.benefitUsedOn.replace(/-/g, "\u2011")}
-                  </span>
-                ) : null}
-              </MetricCell>
-            </span>
-          ) : null}
-        </span>
-        {/* Fixed width, not shrink-to-fit: a variable balance column would give
-            every row a different amount of space for the metric grid, and the
-            columns would zig-zag from card to card instead of lining up. */}
-        <span className={`ml-2 w-20 shrink-0 whitespace-nowrap text-right text-sm font-semibold tabular-nums sm:w-28 ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-muted"}`}>
-          {owed !== 0 ? formatMoney(owed, currency) : "—"}
-        </span>
-        <svg
-          width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`mt-1 shrink-0 text-muted transition-transform ${expanded ? "" : "-rotate-90"}`}
-          aria-hidden
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-      </div>
-
-      {expanded ? (
-        <div className="border-t border-line bg-background">
-          {editing ? (
-            <EditCreditCardForm
-              key={JSON.stringify(card.cardDetails) + card.annualFeeCents + card.dateOpened + card.dateClosed + card.holder + card.name}
-              card={card}
-              onDone={() => setEditing(false)}
-            />
-          ) : (
-          <div className="grid grid-cols-3 items-center gap-1.5 px-3 py-2.5 min-[380px]:grid-cols-5 sm:flex sm:flex-nowrap">
-            {!editing && !paying && !loggingRewards ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setEditing(true)}
-                  className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-black/[0.04] px-1.5 py-1.5 text-[11px] font-medium text-primary hover:bg-black/[0.08] sm:w-auto sm:shrink-0 sm:px-2 dark:bg-white/5 dark:hover:bg-white/10"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                  </svg>
-                  Edit
-                </button>
-                {d?.cardUrl ? (
-                  <a
-                    href={externalCardUrl(d.cardUrl)}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={`Open ${d.cardUrl}`}
-                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-line bg-background px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:border-brand/40 hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
-                  >
-                    <span className="sm:hidden">Site</span><span className="hidden sm:inline">Visit site</span> <span aria-hidden>↗</span>
-                  </a>
-                ) : null}
-                {!isArchived && !card.dateClosed ? (
+          // Tiles, not one 13-row column: at full width a single list left
+          // two-thirds of the card empty and pushed Card payments off the
+          // screen. Ragged last rows are why these are ringed tiles with a
+          // gap rather than a hairline grid. One line per card — name, holder,
+          // owed, Pay; the annual fee lives on /travel with the rest of the
+          // card's detail.
+          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 sm:grid-cols-2 sm:px-6 md:grid-cols-3">
+            {accounts.map((a) => (
+              <li key={a.id}>
+                {/* An open card is the whole row: thirteen Pay pills read as a
+                    field of buttons, and the card is the thing you mean to
+                    press. A closed card keeps the row, minus the action. */}
+                {!a.dateClosed ? (
                   <button
                     type="button"
-                    onClick={() => setLoggingRewards(true)}
-                    className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-brand/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-brand hover:bg-brand-soft/20 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                    onClick={() => setPayCardFor(a)}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left ring-1 ring-line transition hover:bg-black/5 hover:ring-black/25 dark:hover:bg-white/10 dark:hover:ring-white/30"
                   >
-                    <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards log</span>
-                  </button>
-                ) : null}
-                {!isArchived && !card.dateClosed ? (
-                  <button
-                    type="button"
-                    onClick={() => setPaying(true)}
-                    className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-brand px-1.5 py-1.5 text-[11px] font-medium text-white hover:bg-brand-strong sm:w-auto sm:shrink-0 sm:px-2"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <rect x="2" y="6" width="20" height="12" rx="2" />
-                      <circle cx="12" cy="12" r="2.5" />
-                    </svg>
-                    <span className="sm:hidden">Pay</span><span className="hidden sm:inline">{owed > 0 ? "Pay balance" : "Pay card"}</span>
-                  </button>
-                ) : null}
-                {!isArchived && !card.dateClosed ? (
-                  <form action={(fd) => startClose(() => closeCard(fd))} className="col-span-2 min-[380px]:col-span-1 sm:ml-auto sm:shrink-0">
-                    <input type="hidden" name="id" value={card.id} />
-                    <button
-                      type="submit"
-                      disabled={closePending}
-                      className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-negative/10 px-1.5 py-1.5 text-[11px] font-medium text-negative hover:bg-negative/15 disabled:opacity-60 sm:w-auto sm:px-2"
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
+                    {/* Red is for money actually owed. A paid-off card reading
+                        in red made twelve settled cards look like twelve
+                        problems. */}
+                    <span
+                      className={`shrink-0 text-sm font-semibold tabular-nums ${
+                        (a.owedCents ?? 0) > 0 ? "text-negative" : "text-muted"
+                      }`}
                     >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M3 6h18" />
-                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                      </svg>
-                      {closePending ? "Closing…" : <><span className="sm:hidden">Close</span><span className="hidden sm:inline">Close card</span></>}
-                    </button>
-                  </form>
-                ) : null}
-                {(isArchived || card.dateClosed) ? (
-                  <form action={(fd) => startReopen(() => reopenCard(fd))}>
-                    <input type="hidden" name="id" value={card.id} />
-                    <button
-                      type="submit"
-                      disabled={reopenPending}
-                      className="rounded-md bg-brand-soft px-3 py-1.5 text-xs font-semibold text-brand hover:brightness-95 dark:hover:brightness-110 disabled:opacity-60"
-                    >
-                      {reopenPending ? "Reopening…" : "Reopen"}
-                    </button>
-                  </form>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-          )}
-
-          {paying ? (
-            <PayCardModal
-              card={card}
-              currency={currency}
-              nonCardAccounts={nonCardAccounts}
-              allBuckets={allBuckets}
-              onClose={() => setPaying(false)}
-            />
-          ) : null}
-          {loggingRewards ? (
-            <RewardActivityForm
-              card={card}
-              currency={currency}
-              onDone={() => { setLoggingRewards(false); clearFocus(); }}
-            />
-          ) : null}
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-function RewardActivityForm({
-  card,
-  currency,
-  onDone,
-}: {
-  card: AccountData;
-  currency: string;
-  onDone: () => void;
-}) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  // A hotel stay is not a ledger line — it has a city, nights, pax, a cash
-  // rate. It opens the SAME Add stay form the Travel Log uses, pre-selected
-  // to this card, rather than a second half-sized copy of it that filled in
-  // 8 of the stay's 16 fields and left the rest blank.
-  const [stayOpen, setStayOpen] = useState(false);
-  // Points move both ways: everyday spending earns them, redemptions spend
-  // them. Earning used to have no entry at all — the balance was typed over
-  // in the card's edit form, which left no record of where it came from.
-  const [direction, setDirection] = useState<"used" | "earned" | "returned">("used");
-  const [points, setPoints] = useState("");
-  const travel = React.useContext(TravelStayContext);
-  const d = card.cardDetails;
-  const labels: Record<RewardActivity["type"], string> = {
-    points_redemption: "Points used",
-    points_earned: "Points earned",
-    hotel_credit_redemption: "Hotel credit used",
-    free_night_booking: "Free night booked",
-    reward_refund: "Returned to card",
-  };
-
-  return (
-    <section className="rounded-lg border-2 border-brand/25 bg-brand-soft/10 p-3">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold">
-            {direction === "used"
-              ? "Log points used"
-              : direction === "earned"
-                ? "Log points earned"
-                : "Log points returned to the card"}
-          </h4>
-        </div>
-        <button type="button" onClick={onDone} className="text-xs font-medium text-muted hover:text-foreground">Cancel</button>
-      </div>
-
-      {/* Points on a hotel card go to flights and gift cards as often as they
-          go to rooms, so the ledger form below stays for the redemptions that
-          are only a balance change. A redemption that IS a stay — points, a
-          free night, or the hotel credit — belongs in the Travel Log with its
-          city, nights, pax and cash rate, and this opens that form directly.
-          Either way the points come off this card through the same ledger. */}
-      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-background px-3 py-2 ring-1 ring-line">
-        <button
-          type="button"
-          onClick={() => setStayOpen(true)}
-          className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
-        >
-          Book a stay
-        </button>
-        <p className="min-w-0 flex-1 text-xs text-muted">
-          Click here to log Hotel Stays and transfers to Travel Log page.
-        </p>
-      </div>
-
-      {stayOpen ? (
-        <StayModal
-          stay={null}
-          cards={travel.cards}
-          brands={travel.brands}
-          currency={currency}
-          defaultAccountId={card.id}
-          // Closing the stay form returns to the rewards log, whether the
-          // stay was saved or cancelled — it never tears the panel down.
-          // StayModal already calls router.refresh() on a successful save, so
-          // the card's points and Booked date are up to date behind it.
-          onClose={() => setStayOpen(false)}
-        />
-      ) : null}
-      <form
-        action={(formData) => start(async () => {
-          setError(null);
-          const result = await logCreditCardRewardActivity(formData);
-          if (result?.error) setError(result.error);
-          else {
-            // The card's points and Booked date are server-rendered; without
-            // this the row keeps showing the pre-redemption balance.
-            router.refresh();
-            onDone();
-          }
-        })}
-        className="grid grid-cols-1 gap-2 sm:grid-cols-2"
-      >
-        <input type="hidden" name="accountId" value={card.id} />
-        {/* Hotel credit is NOT here. It is spent ON a stay, and the Add stay
-            form has its own "Hotel credit used" field drawing from the same
-            ledger — offering both would let one credit be logged twice. */}
-        <input
-          type="hidden"
-          name="activityType"
-          value={
-            direction === "used"
-              ? "points_redemption"
-              : direction === "earned"
-                ? "points_earned"
-                : "reward_refund"
-          }
-        />
-        <div className="sm:col-span-2">
-          <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Direction</span>
-          <div className="inline-flex rounded-md ring-1 ring-line">
-            {(["used", "earned", "returned"] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-pressed={direction === option}
-                onClick={() => setDirection(option)}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                  direction === option
-                    ? "text-white"
-                    : "text-foreground hover:bg-black/5 dark:hover:bg-white/10"
-                }`}
-                style={
-                  direction === option
-                    ? {
-                        backgroundColor:
-                          option === "used" ? "var(--viz-debt)" : "var(--positive)",
-                      }
-                    : undefined
-                }
-              >
-                {option === "used" ? "Points used" : option === "earned" ? "Points earned" : "Returned to card"}
-              </button>
-            ))}
-          </div>
-        </div>
-        {/* No default date: an entry is logged after the fact as often as on
-            the day, and a pre-filled today gets saved by accident. Left blank
-            the server answers with "Enter a valid activity date." */}
-        <LabeledInput label="Activity date" name="occurredOn" type="date" defaultValue="" />
-        <LabeledInput
-          label={
-            direction === "used"
-              ? `Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`
-              : direction === "earned"
-                ? `Points earned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
-                : `Points returned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
-          }
-          name="pointsUsed"
-          type="number"
-          min="1"
-          step="1"
-          placeholder="0"
-          value={points}
-          onChange={(e) => setPoints(e.target.value)}
-        />
-        <div className="sm:col-span-2">
-          <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Note (optional)</label>
-          <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
-        </div>
-        <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
-          <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
-          <p className="min-w-0 flex-1 text-xs text-muted">
-            {direction === "used"
-              ? "Points used come off this card's balance."
-              : direction === "earned"
-                ? "Points earned are added to this card's balance."
-                : "A partial refund on a redemption — the points go back on this card."}
-          </p>
-        </div>
-        {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
-      </form>
-      {card.rewardActivities.length > 0 ? (
-        <div className="mt-3 border-t border-line pt-2">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Recent rewards activity</p>
-          <ul className="space-y-1 text-xs">
-            {card.rewardActivities.slice(0, 5).map((activity) => (
-              // Delete lives on the row you are already looking at. It used
-              // to exist only in the Rewards activity ledger at the bottom of
-              // the page, so fixing a wrong entry meant scrolling away from
-              // the card that made it and finding the row again.
-              <li key={activity.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                <span className="min-w-0 flex-1 truncate">{labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
-                <span className={`shrink-0 font-semibold ${activity.pointsDelta > 0 || activity.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>{activity.pointsDelta ? `${activity.pointsDelta > 0 ? "+" : ""}${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoney(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
-                <RewardActivityRowActions entry={activity} compact />
+                      {formatMoney(a.owedCents ?? 0, currency)}
+                    </span>
+                  </button>
+                ) : (
+                  <div className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 ring-1 ring-line">
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{a.name}</span>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums text-muted">
+                      {formatMoney(a.owedCents ?? 0, currency)}
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
-        </div>
+        )
+      ) : null}
+
+      {payCardFor ? (
+        <PayCardModal
+          card={payCardFor}
+          currency={currency}
+          nonCardAccounts={nonCardAccounts}
+          allBuckets={allBuckets}
+          onClose={() => setPayCardFor(null)}
+        />
       ) : null}
     </section>
   );
 }
 
-// No amber/orange: stat tiles are a data surface, and those two are
-// off-limits there (see AGENTS.md).
-type StatTone = "emerald" | "sky" | "teal" | "rose" | "slate";
-const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; value: string; activeBg: string }> = {
-  slate: {
-    bg: "bg-slate-500/10",
-    ring: "ring-slate-500/30",
-    label: "text-slate-700 dark:text-slate-400",
-    value: "text-slate-700 dark:text-slate-300",
-    activeBg: "bg-slate-500/25",
-  },
-  emerald: {
-    bg: "bg-emerald-500/10",
-    ring: "ring-emerald-500/30",
-    label: "text-emerald-700 dark:text-emerald-400",
-    value: "text-emerald-700 dark:text-emerald-300",
-    activeBg: "bg-emerald-500/25",
-  },
-  sky: {
-    bg: "bg-sky-500/10",
-    ring: "ring-sky-500/30",
-    label: "text-sky-700 dark:text-sky-400",
-    value: "text-sky-700 dark:text-sky-300",
-    activeBg: "bg-sky-500/25",
-  },
-  teal: {
-    bg: "bg-teal-500/10",
-    ring: "ring-teal-500/30",
-    label: "text-teal-700 dark:text-teal-400",
-    value: "text-teal-700 dark:text-teal-300",
-    activeBg: "bg-teal-500/25",
-  },
-  rose: {
-    bg: "bg-rose-500/10",
-    ring: "ring-rose-500/30",
-    label: "text-rose-700 dark:text-rose-400",
-    value: "text-rose-700 dark:text-rose-300",
-    activeBg: "bg-rose-500/25",
-  },
-};
-
-function StatTile({
-  label,
-  value,
-  sub,
-  subColor,
-  tone,
-  onClick,
-  active,
-  title,
-}: {
-  label: string;
-  value: string;
-  // Optional smaller breakdown line under the value (e.g. "T 300k · H 1.1M").
-  sub?: string;
-  // Overrides the sub-line colour — used where the sub-line carries its own
-  // good/bad meaning (credit utilisation) rather than echoing the tile's tone.
-  subColor?: string;
-  tone: StatTone;
-  onClick?: () => void;
-  active?: boolean;
-  title?: string;
-}) {
-  const t = STAT_TONES[tone];
-  const base = `rounded-lg px-2 py-2 text-center ring-1 ${active ? `${t.activeBg} ${t.ring}` : "bg-background ring-line"}`;
-  const inner = (
-    <>
-      <div className={`text-[10px] sm:text-[10px] font-semibold uppercase tracking-wide ${t.label}`}>{label}</div>
-      <div className={`mt-0.5 text-sm font-bold tabular-nums sm:text-sm ${t.value}`}>{value}</div>
-      {sub ? (
-        <div
-          className={`mt-0.5 text-[10px] font-medium tabular-nums ${subColor ? "" : t.label}`}
-          style={subColor ? { color: subColor } : undefined}
-        >
-          {sub}
-        </div>
-      ) : null}
-    </>
-  );
-  if (onClick) {
-    return (
-      <button type="button" onClick={onClick} title={title} className={`${base} transition hover:brightness-105`}>
-        {inner}
-      </button>
-    );
-  }
-  return <div className={base}>{inner}</div>;
-}
-
-function EditCreditCardForm({
-  card,
-  onDone,
-}: {
-  card: AccountData;
-  onDone: () => void;
-}) {
-  const [savePending, startSave] = useTransition();
-  const [delPending, startDel] = useTransition();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
-  const [migrationWarning, setMigrationWarning] = useState(false);
-  const [activeTab, setActiveTab] = useState<"key" | "basics" | "debt">("key");
-  const d = card.cardDetails;
-
-  const tabBtn = (id: "key" | "basics" | "debt", label: string, mobileLabel: string) => (
-    <button
-      type="button"
-      onClick={() => setActiveTab(id)}
-      className={`h-8 min-w-0 whitespace-nowrap px-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-sm ${
-        activeTab === id
-          ? "text-brand shadow-[inset_0_-2px_0_var(--brand)]"
-          : "text-muted hover:bg-slate-50 hover:text-foreground dark:hover:bg-slate-900"
-      }`}
-      aria-pressed={activeTab === id}
-    >
-      <span className="sm:hidden">{mobileLabel}</span>
-      <span className="hidden sm:inline">{label}</span>
-    </button>
-  );
-
-  return (
-    <div className="bg-background p-3">
-      {/* One form: saves both account-level basics AND rewards details together.
-          All tabs stay mounted (hidden via CSS) so a single Save submits every field. */}
-      <form
-        action={(fd) =>
-          startSave(async () => {
-            setDetailsError(null);
-            setMigrationWarning(false);
-            const [, detailsResult] = await Promise.all([
-              updateAccount(fd),
-              upsertCardDetails(fd),
-            ]);
-            if (detailsResult?.error) { setDetailsError(detailsResult.error); return; }
-            if (detailsResult?.missingMigration) { setMigrationWarning(true); }
-            onDone();
-          })
-        }
-        className="flex flex-col gap-3 [&_input]:!bg-white [&_select]:!bg-white dark:[&_input]:!bg-slate-950 dark:[&_select]:!bg-slate-950"
-      >
-        <input type="hidden" name="id" value={card.id} />
-        <input type="hidden" name="accountId" value={card.id} />
-        <input type="hidden" name="isCreditCard" value="on" />
-        <input type="hidden" name="subtype" value={card.subtype ?? ""} />
-        <input type="hidden" name="active" value={card.active ? "on" : ""} />
-
-        <div className="grid grid-cols-[repeat(3,minmax(0,1fr))_2rem] items-center border-b border-line">
-          {tabBtn("key", "Points & Dates", "Points")}
-          {tabBtn("basics", "Basics & Rewards", "Basics")}
-          {tabBtn("debt", "Debt tracking", "Debt")}
-          <button
-            type="button"
-            onClick={onDone}
-            aria-label="Close editor"
-            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-slate-100 hover:text-foreground dark:hover:bg-slate-800"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Tab 1: Key fields (default) */}
-        <div className={activeTab === "key" ? "" : "hidden"}>
-          <div className="rounded-lg border border-line bg-background/60 p-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-slate-300 [&_select]:bg-white [&_select]:ring-slate-300 dark:[&_input]:bg-slate-950 dark:[&_input]:ring-slate-700 dark:[&_select]:bg-slate-950 dark:[&_select]:ring-slate-700">
-              <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
-              <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-              <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-              <LabeledInput label="Free-night point value" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
-              <LabeledInput label="Booked / check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
-              <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
-              <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
-                <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md px-2 py-1.5 text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-brand">
-                  <option value="monthly">Monthly</option>
-                  <option value="quarterly">Quarterly</option>
-                  <option value="annual">Annual</option>
-                  <option value="anniversary">Card anniversary</option>
-                </select>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {/* Tab 2: Basics & Rewards */}
-        <div className={activeTab === "basics" ? "" : "hidden"}>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
-            <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
-            <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
-            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-              <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-              Fee waived (e.g. military benefit)
-            </label>
-            <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
-            <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
-            <LabeledInput label="Bank" name="bank" defaultValue={d?.bank ?? card.institution ?? card.subtype ?? ""} placeholder="AMEX / Chase / Cap 1" />
-            <label className="block">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span>
-              <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
-                <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
-              </select>
-            </label>
-            <LabeledInput label="Rewards program" name="rewardsProgram" defaultValue={d?.rewardsProgram ?? ""} placeholder="Hilton, Hyatt, Chase UR…" />
-            <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" defaultValue={d?.pointsValueMicros ? (d.pointsValueMicros / 1_000_000).toFixed(4) : ""} placeholder="0.0020" />
-            <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
-            <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
-            <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
-            <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
-            <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted">
-              <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />
-              Bonus earned
-            </label>
-            <div className="sm:col-span-2">
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label>
-              <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" />
-            </div>
-          </div>
-        </div>
-
-        {/* Tab 3: Debt tracking */}
-        <div className={activeTab === "debt" ? "" : "hidden"}>
-          <div className="space-y-3 rounded-lg border-2 border-rose-200 bg-rose-50/60 p-3 dark:border-rose-900/50 dark:bg-rose-950/20">
-            <label className="flex items-start gap-2 text-sm font-semibold text-foreground">
-              <input
-                type="checkbox"
-                name="trackAsPayoffDebt"
-                defaultChecked={d?.isRevolvingDebt ?? false}
-                className="mt-0.5 h-4 w-4 rounded accent-[var(--brand)]"
-              />
-              <span>
-                Track this card as payoff debt
-                <span className="mt-0.5 block text-xs font-normal text-muted">
-                  Off by default. Syncs balance, rate, and payment plan with Budget → Debt/Loans.
-                </span>
-              </span>
-            </label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.55fr)_minmax(0,1.55fr)]">
-              <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
-              <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
-              <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" defaultValue={d?.promoAprEndsOn ?? ""} />
-              <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
-              <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
-              <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
-            </div>
-            <p className="text-[11px] text-muted">
-              APR % should be <span className="font-semibold">0</span> during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.
-            </p>
-          </div>
-        </div>
-
-        {detailsError ? (
-          <p className="text-sm font-medium text-negative">{detailsError}</p>
-        ) : null}
-        {migrationWarning ? (
-          <p className="text-xs text-amber-600 dark:text-amber-400">
-            Saved (most fields). To also save Booked dates and free-night point values, run migration 0026 in Supabase SQL Editor.
-          </p>
-        ) : null}
-
-        <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              disabled={savePending}
-              className="h-8 rounded-md bg-brand px-3 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
-            >
-              {savePending ? "Saving…" : "Save"}
-            </button>
-          </div>
-          {confirmDelete ? (
-            <span className="flex items-center gap-2">
-              <span className="text-xs text-muted">Delete &quot;{card.name}&quot;?</span>
-              <button
-                type="button"
-                disabled={delPending}
-                onClick={() =>
-                  startDel(async () => {
-                    const fd = new FormData();
-                    fd.set("id", card.id);
-                    await deleteAccount(fd);
-                  })
-                }
-                className="text-xs font-bold text-negative hover:underline disabled:opacity-60"
-              >
-                {delPending ? "Deleting…" : "Yes, delete"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(false)}
-                className="text-xs text-muted hover:text-foreground"
-              >
-                Cancel
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(true)}
-              className="h-8 rounded-md px-2.5 text-xs font-medium text-negative hover:bg-negative/10"
-            >
-              Delete card
-            </button>
-          )}
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function LabeledInput({
-  label,
-  prefix,
-  hint,
-  ...inputProps
-}: { label: string; prefix?: string; hint?: React.ReactNode } & React.InputHTMLAttributes<HTMLInputElement>) {
-  const isDate = inputProps.type === "date";
-  const { defaultValue: initialDefaultValue, ...dateInputProps } = inputProps;
-  const [dateVal, setDateVal] = useState(isDate ? (typeof initialDefaultValue === "string" ? initialDefaultValue : "") : "");
-  const dateRef = useRef<HTMLInputElement | null>(null);
-
-  if (isDate) {
-    return (
-      // A <div>, not a <label>: the label wrapper needed an onClick
-      // preventDefault to stop it re-forwarding the click to the input, and
-      // that same preventDefault also cancelled the browser's own "open the
-      // date picker" default — so clicking the field did nothing. Plain div +
-      // explicit showPicker() means a click anywhere in the field opens the
-      // calendar, including on the value text rather than only the icon.
-      <div className="block">
-        <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-          {label}
-        </span>
-        <div className="flex items-center gap-1">
-          <input
-            {...dateInputProps}
-            ref={dateRef}
-            value={dateVal}
-            onChange={(e) => setDateVal(e.target.value)}
-            onClick={() => {
-              // showPicker throws if the browser doesn't support it or the
-              // call isn't tied to a user gesture; the native click-the-icon
-              // path still works in that case.
-              try {
-                dateRef.current?.showPicker?.();
-              } catch {
-                /* no-op */
-              }
-            }}
-            className="w-full cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
-          {dateVal ? (
-            <button
-              type="button"
-              onClick={() => { setDateVal(""); if (dateRef.current) { dateRef.current.value = ""; dateRef.current.dispatchEvent(new Event("change", { bubbles: true })); } }}
-              className="shrink-0 rounded p-1 text-muted hover:text-foreground"
-              aria-label="Clear date"
-            >
-              ✕
-            </button>
-          ) : null}
-        </div>
-        {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
-      </div>
-    );
-  }
-
-  return (
-    <label className="block">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-        {label}
-      </span>
-      {prefix ? (
-        <div className="flex items-center rounded-md ring-1 ring-line focus-within:ring-2 focus-within:ring-brand bg-background">
-          <span className="pl-2 text-sm text-muted select-none">{prefix}</span>
-          <input
-            {...inputProps}
-            className="min-w-0 flex-1 rounded-md bg-background px-1.5 py-1.5 text-sm focus:outline-none"
-          />
-        </div>
-      ) : (
-        <input
-          {...inputProps}
-          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-      )}
-      {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
-    </label>
-  );
-}
 
 // Move money between two of your own accounts. Budget-neutral by design —
 // see `transferBetweenAccounts` for why funding a savings goal stays on the
@@ -3068,152 +1095,6 @@ function TransferModal({
               className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
             >
               {pending ? "Transferring…" : "Transfer"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function PayCardModal({
-  card,
-  currency,
-  nonCardAccounts,
-  allBuckets,
-  onClose,
-}: {
-  card: AccountData;
-  currency: string;
-  nonCardAccounts: NonCardAccount[];
-  allBuckets: BucketData[];
-  onClose: () => void;
-}) {
-  const [pending, start] = useTransition();
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [sourceId, setSourceId] = useState<string>(nonCardAccounts[0]?.id ?? "");
-  const source = nonCardAccounts.find((a) => a.id === sourceId) ?? null;
-  const sourceBuckets = allBuckets.filter((b) => b.accountId === sourceId);
-  // Try to pre-pick a bucket whose name references this card (fuzzy match on
-  // card name words, case-insensitive).
-  const cardWords = card.name.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-  const defaultBucket =
-    source?.hasBuckets
-      ? sourceBuckets.find((b) => cardWords.some((w) => b.name.toLowerCase().includes(w)))?.id ?? ""
-      : "";
-  const [bucketId, setBucketId] = useState(defaultBucket);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm space-y-3 rounded-xl bg-surface p-4 shadow-lg ring-1 ring-black/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold">Pay {card.name}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-        {(card.owedCents ?? 0) > 0 ? (
-          <p className="text-xs text-muted">
-            Currently owed: <span className="font-semibold text-negative">{formatMoney(card.owedCents ?? 0, currency)}</span>
-          </p>
-        ) : null}
-
-        <form
-          action={(fd) =>
-            start(async () => {
-              setErrorMsg(null);
-              const r = await payCard(fd);
-              if (r?.error) setErrorMsg(r.error);
-              else onClose();
-            })
-          }
-          className="space-y-2"
-        >
-          <input type="hidden" name="cardId" value={card.id} />
-          <LabeledInput
-            label="Payment amount"
-            name="amount"
-            type="number"
-            step="0.01"
-            min="0"
-            defaultValue={card.owedCents && card.owedCents > 0 ? centsToDisplay(card.owedCents) : ""}
-            required
-            autoFocus
-          />
-          {card.owedCents && card.owedCents > 0 ? (
-            <p className="text-[10px] text-muted">
-              The full balance is prefilled. Recording this payment will bring the card to {formatMoney(0, currency)} while keeping the imported charges.
-            </p>
-          ) : null}
-          <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
-          <label className="block">
-            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-              From account
-            </span>
-            <select
-              name="sourceAccountId"
-              value={sourceId}
-              onChange={(e) => { setSourceId(e.target.value); setBucketId(""); }}
-              required
-              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              {nonCardAccounts.length === 0 ? (
-                <option value="">No accounts available</option>
-              ) : null}
-              {nonCardAccounts.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </label>
-          {source?.hasBuckets && sourceBuckets.length > 0 ? (
-            <label className="block">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                From bucket
-              </span>
-              <select
-                name="bucketId"
-                value={bucketId}
-                onChange={(e) => setBucketId(e.target.value)}
-                required
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">Choose a bucket…</option>
-                {sourceBuckets.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-              <p className="mt-0.5 text-[10px] text-muted">
-                Required because {source.name} has buckets — the bucket total drives the account total.
-              </p>
-            </label>
-          ) : null}
-          <LabeledInput label="Notes" name="notes" defaultValue={`Payment to ${card.name}`} />
-          {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
-            >
-              {pending ? "Paying…" : "Pay Card"}
             </button>
           </div>
         </form>
@@ -4800,57 +2681,3 @@ function EditPill({ onClick, className, children }: { onClick: () => void; class
   );
 }
 
-function GripHandle({ onMouseDown, size = "md" }: { onMouseDown: () => void; size?: "sm" | "md" }) {
-  const px = size === "sm" ? 11 : 13;
-  return (
-    <span
-      onMouseDown={(e) => {
-        e.preventDefault();
-        onMouseDown();
-      }}
-      aria-label="Drag to reorder"
-      className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
-    >
-      <svg width={px} height={px} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-        <path d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
-    </span>
-  );
-}
-
-// Pointer-based row reordering shared by both drag contexts on this page
-// (accounts within a section, buckets within an account). Rows carry a
-// data-drop-key="<kind>:<id>"; grabbing a handle starts the drag, releasing
-// over another row of the same kind fires onReorder(fromId, toId). Same
-// approach as the Net Worth grid.
-function usePointerReorder(kind: string, onReorder: (fromId: string, toId: string) => void) {
-  const dragId = useRef<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-
-  const keyUnder = (x: number, y: number) => {
-    const el = document.elementFromPoint(x, y) as HTMLElement | null;
-    const rowEl = el?.closest<HTMLElement>("[data-drop-key]");
-    const key = rowEl?.getAttribute("data-drop-key");
-    return key && key.startsWith(`${kind}:`) ? key.slice(kind.length + 1) : null;
-  };
-
-  const startDrag = (id: string) => {
-    dragId.current = id;
-    document.body.style.cursor = "grabbing";
-    const onMove = (e: MouseEvent) => setDragOverId(keyUnder(e.clientX, e.clientY));
-    const onUp = (e: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      document.body.style.cursor = "";
-      setDragOverId(null);
-      const from = dragId.current;
-      dragId.current = null;
-      const to = keyUnder(e.clientX, e.clientY);
-      if (from && to && from !== to) onReorder(from, to);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
-  return { dragOverId, startDrag };
-}

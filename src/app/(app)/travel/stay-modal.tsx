@@ -281,6 +281,16 @@ export function StayModal({
                 Delete
               </button>
             ) : null}
+            {/* Dismisses the form. Distinct from "Cancel booking" above, which
+                cancels the reservation itself. */}
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={pending}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/5"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
               disabled={pending}

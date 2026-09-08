@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
+import { CreditCardRewards } from "./credit-card-rewards";
+import type { CreditCardBoardData } from "@/lib/credit-card-data";
 import { StayModal } from "./stay-modal";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
 import {
@@ -95,12 +97,16 @@ export function TravelBoard({
   brands: brandList,
   currency,
   today,
+  rewards,
 }: {
   stays: TravelStay[];
   cards: TravelCard[];
   brands: TravelBrand[];
   currency: string;
   today: string;
+  // The credit-card rewards board that used to live on /accounts. Sits with
+  // the stays because it answers the same question they do.
+  rewards: CreditCardBoardData;
 }) {
   const [year, setYear] = useState<string>(() => {
     const current = today.slice(0, 4);
@@ -743,6 +749,18 @@ export function TravelBoard({
             </div>
           </Panel>
           </section>
+
+          {/* ---- Travel & Credit Card Rewards: the points that pay for the
+               stays above. Moved here from /accounts — Accounts keeps the
+               plain card list and the Pay Card flow. */}
+          <CreditCardRewards
+            accounts={rewards.cards}
+            currency={currency}
+            nonCardAccounts={rewards.nonCardAccounts}
+            allBuckets={rewards.allBuckets}
+            pointsSuggestions={rewards.pointsSuggestions}
+            travelBrands={rewards.travelBrands}
+          />
 
           {/* ---- The two "who did we stay with" tallies, side by side: the
                same money cut by hotel brand on the left and by the card that

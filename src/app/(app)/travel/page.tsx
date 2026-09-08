@@ -1,4 +1,5 @@
 import { getSessionContext } from "@/lib/auth-context";
+import { loadCreditCardBoardData } from "@/lib/credit-card-data";
 import { throwIfAny } from "@/lib/supabase-result";
 import { TravelBoard } from "./travel-board";
 import type { PocketPaidWith, TravelBrand, TravelCard, TravelStay } from "./types";
@@ -8,7 +9,7 @@ export const metadata = { title: "Travel Log · Capitall" };
 export default async function TravelPage() {
   const { supabase, household } = await getSessionContext();
 
-  const [stays, accounts, cardDetails, brands] = await Promise.all([
+  const [stays, brands, rewards] = await Promise.all([
     supabase
       .from("travel_stays")
       .select(
@@ -17,46 +18,35 @@ export default async function TravelPage() {
       .eq("household_id", household.id)
       .order("check_in", { ascending: false }),
     supabase
-      .from("accounts")
-      .select("id, name, holder, kind, date_closed")
-      .eq("household_id", household.id)
-      .eq("kind", "credit_card")
-      .order("name"),
-    supabase
-      .from("credit_card_details")
-      .select("account_id, current_points, points_value_micros, free_night_credit_cents, free_night_points_limit")
-      .eq("household_id", household.id),
-    supabase
       .from("travel_brands")
       .select("id, name")
       .eq("household_id", household.id)
       .order("name"),
+    // The rewards board below the charts, and the card list the Add stay
+    // form offers — one read for both, and the same one Accounts uses for
+    // its card list, so the two pages can't disagree about a card.
+    loadCreditCardBoardData(supabase, household.id),
   ]);
   throwIfAny({
     travel_stays: stays.error,
-    accounts: accounts.error,
-    credit_card_details: cardDetails.error,
     travel_brands: brands.error,
   });
 
-  const detailByAccount = new Map(
-    (cardDetails.data ?? []).map((d) => [d.account_id, d]),
-  );
   // Closed cards stay selectable only if they already carry a stay — a booking
   // made on a card that has since been closed still belongs in the log.
   const usedAccountIds = new Set(
     (stays.data ?? []).map((s) => s.account_id).filter(Boolean) as string[],
   );
-  const cards: TravelCard[] = (accounts.data ?? [])
-    .filter((a) => !a.date_closed || usedAccountIds.has(a.id))
+  const cards: TravelCard[] = rewards.cards
+    .filter((a) => !a.dateClosed || usedAccountIds.has(a.id))
     .map((a) => ({
       id: a.id,
       name: a.name,
       holder: a.holder ?? null,
-      currentPoints: detailByAccount.get(a.id)?.current_points ?? 0,
-      pointsValueMicros: detailByAccount.get(a.id)?.points_value_micros ?? null,
-      freeNightCreditCents: detailByAccount.get(a.id)?.free_night_credit_cents ?? null,
-      freeNightPointsLimit: detailByAccount.get(a.id)?.free_night_points_limit ?? null,
+      currentPoints: a.cardDetails?.currentPoints ?? 0,
+      pointsValueMicros: a.cardDetails?.pointsValueMicros ?? null,
+      freeNightCreditCents: a.cardDetails?.freeNightCreditCents ?? null,
+      freeNightPointsLimit: a.cardDetails?.freeNightPointsLimit ?? null,
     }));
 
   const rows: TravelStay[] = (stays.data ?? []).map((s) => ({
@@ -90,6 +80,7 @@ export default async function TravelPage() {
       cards={cards}
       brands={(brands.data ?? []) as TravelBrand[]}
       currency={household.currency ?? "$"}
+      rewards={rewards}
     />
   );
 }
