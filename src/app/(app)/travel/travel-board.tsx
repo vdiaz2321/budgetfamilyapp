@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
+import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
 import { StayModal } from "./stay-modal";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
@@ -115,7 +116,13 @@ export function TravelBoard({
   const [openYears, setOpenYears] = useState(true);
   const [openBrands, setOpenBrands] = useState(true);
   const [openCards, setOpenCards] = useState(true);
-  const [openList, setOpenList] = useState(true);
+  // The log starts collapsed on a fresh login — it's the longest section on
+  // the page — but sessionStorage carries whatever you last set for as long as
+  // you're still moving around the app.
+  const [listState, setListState] = useSessionCollapse("travel-reservations-log", () => ({ open: false }));
+  const openList = !!listState.open;
+  const setOpenList = (fn: (v: boolean) => boolean) =>
+    setListState((s) => ({ open: fn(!!s.open) }));
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -180,15 +187,14 @@ export function TravelBoard({
   const byYear = useMemo(() => {
     const map = new Map<
       string,
-      { hotel: number; pocket: number; stays: number; points: number; pointsValue: number }
+      { hotel: number; pocket: number; stays: number; points: number }
     >();
     for (const s of live) {
       const key = stayYear(s);
-      const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0, pointsValue: 0 };
+      const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0 };
       row.hotel += s.hotelCostCents;
       row.pocket += s.pocketCostCents;
       row.points += s.pointsCost;
-      row.pointsValue += pointsValueCents(s);
       row.stays += 1;
       map.set(key, row);
     }
@@ -237,7 +243,14 @@ export function TravelBoard({
   const chartScope =
     year === ALL ? "All years" : `All years · ${year} highlighted`;
 
-  const unlinked = useMemo(() => stays.filter((s) => !s.accountId).length, [stays]);
+  // Only stays that carry a CC Info label and still point at no card — those
+  // are the ones the Link cards modal can actually fix. A stay with no label
+  // at all (paid cash, booked direct) is not "unlinked", there was never a
+  // card to link, and counting those made the badge unclearable.
+  const unlinked = useMemo(
+    () => stays.filter((s) => !s.accountId && s.cardLabel?.trim()).length,
+    [stays],
+  );
 
   // What each real card has actually done for you — only answerable once the
   // labels are linked, which is what the Link cards button is for.
@@ -300,21 +313,25 @@ export function TravelBoard({
   return (
     <div className="space-y-3">
       <header className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-lg font-bold sm:text-xl">Travel Log</h1>
+        {/* The actions sit next to the title rather than pinned to the far
+             right — on a wide screen that put the primary button an entire
+             page away from what it acts on. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-lg font-bold sm:text-xl">Hotel/Lodging Stays Log</h1>
           <div className="flex flex-wrap items-center gap-2">
-            {cardLabels.length > 0 ? (
+            {/* Only worth showing while something still needs linking — with
+                every label pointed at a card there's nothing for it to fix, so
+                it stays out of the way until a new unlinked stay appears. */}
+            {unlinked > 0 ? (
               <button
                 type="button"
                 onClick={() => setLinking(true)}
                 className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
               >
                 Link cards
-                {unlinked > 0 ? (
-                  <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted dark:bg-white/10">
-                    {unlinked} unlinked
-                  </span>
-                ) : null}
+                <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted dark:bg-white/10">
+                  {unlinked} unlinked
+                </span>
               </button>
             ) : null}
             <button
@@ -409,7 +426,7 @@ export function TravelBoard({
           {/* ---- The reservations themselves, with the filters that drive them
                and what the current selection adds up to. */}
           <Panel
-            title="Reservations"
+            title="Hotel Reservations Log"
             meta={
               <HeaderTotals
                 count={`${filtered.length} shown`}
@@ -496,14 +513,13 @@ export function TravelBoard({
                     on each stay — the whole point of redeeming them. */}
                 <Figure
                   label="Points worth"
-                  value={`${formatMoney(shownTotals.pointsValue, currency)}${
-                    shownTotals.points > 0 ? ` · ${centsPerPoint(shownTotals.pointsValue, shownTotals.points)}` : ""
-                  }`}
+                  value={formatMoney(shownTotals.pointsValue, currency)}
                   tone=""
                   style={{ color: "var(--viz-savings)" }}
                 />
                 <span className="text-[11px] text-muted tabular-nums">
-                  {shownTotals.nights} night{shownTotals.nights === 1 ? "" : "s"}
+                  Total in {year === ALL ? "all years" : year}: {shownTotals.nights} Night
+                  {shownTotals.nights === 1 ? "" : "s"}
                   {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
                 </span>
               </div>
@@ -660,26 +676,27 @@ export function TravelBoard({
               <p className="px-4 py-8 text-center text-xs text-muted">No stays match these filters.</p>
             ) : null}
           </Panel>
-          {/* ---- The two charts the sheet kept beside its summary block: what
-               the rooms listed for against what was actually paid, and the
-               saving that gap adds up to each year. Both read every stay, not
-               the filtered set — a one-year filter would leave one column. */}
-          <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-              <h2 className="text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
-              <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
-              <CostBars years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+          {/* ---- The two charts stacked in one column with the table they're
+               drawn from beside them, so the whole year-over-year picture is
+               one screenful. Both charts read every stay, not the filtered set
+               — a one-year filter would leave one column. Below lg the table
+               drops under the charts, where it has the width to breathe. */}
+          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+            <div className="space-y-3">
+              <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
+                <h2 className="text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
+                <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
+                <CostBars years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+              </div>
+              <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
+                <h2 className="text-center text-sm font-bold">Total saved per year</h2>
+                <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
+                <SavedLine years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+              </div>
             </div>
-            <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-              <h2 className="text-center text-sm font-bold">Total saved per year</h2>
-              <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
-              <SavedLine years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
-            </div>
-          </section>
-
           {/* ---- Year-over-year rollup: the sheet's summary block. */}
           <Panel
-            title="Saved by year"
+            title="Total Cost Saved by Year"
             meta={
               <HeaderTotals
                 count={`${byYear.length} year${byYear.length === 1 ? "" : "s"}`}
@@ -692,16 +709,15 @@ export function TravelBoard({
             onToggle={() => setOpenYears((v) => !v)}
           >
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2 text-center font-semibold">Year</th>
-                    <th className="px-3 py-2 text-center font-semibold">Stays</th>
-                    <th className="px-3 py-2 text-center font-semibold">Points</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Points worth</th>
-                    <th className="px-3 py-2 text-center font-semibold">Hotel cost</th>
-                    <th className="px-3 py-2 text-center font-semibold">Pocket cost</th>
-                    <th className="px-3 py-2 text-center font-semibold">Total saved</th>
+                    <th className="px-2 py-2 text-center font-semibold">Year</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total stays</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total pts used</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total hotel cost</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total pocket cost</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total saved</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -710,26 +726,14 @@ export function TravelBoard({
                       key={y}
                       className={`border-b border-line/60 last:border-0 ${year === y ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
                     >
-                      <td className="px-3 py-2 text-center font-semibold tabular-nums">{y}</td>
-                      <td className="px-3 py-2 text-center tabular-nums text-muted">{row.stays}</td>
-                      <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                      <td className="px-2 py-2 text-center font-semibold tabular-nums">{y}</td>
+                      <td className="px-2 py-2 text-center tabular-nums text-muted">{row.stays}</td>
+                      <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {row.points > 0 ? row.points.toLocaleString() : DASH}
                       </td>
-                      <td className="px-3 py-2 text-center tabular-nums">
-                        {row.pointsValue > 0 ? (
-                          <>
-                            {formatMoney(row.pointsValue, currency)}
-                            <span className="ml-1 text-[10px] text-muted">
-                              {centsPerPoint(row.pointsValue, row.points)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-muted">{DASH}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums">{formatMoney(row.hotel, currency)}</td>
-                      <td className="px-3 py-2 text-center tabular-nums text-negative">{formatMoney(row.pocket, currency)}</td>
-                      <td className="px-3 py-2 text-center font-bold tabular-nums text-positive">
+                      <td className="px-2 py-2 text-center tabular-nums">{formatMoney(row.hotel, currency)}</td>
+                      <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoney(row.pocket, currency)}</td>
+                      <td className="px-2 py-2 text-center font-bold tabular-nums text-positive">
                         {formatMoney(row.hotel - row.pocket, currency)}
                       </td>
                     </tr>
@@ -738,74 +742,16 @@ export function TravelBoard({
               </table>
             </div>
           </Panel>
+          </section>
 
-          {/* ---- Stays by card: what each card in Accounts has returned. */}
-          <Panel
-            title="Stays by card"
-            meta={
-              <HeaderTotals
-                count={`${cardTally.length} card${cardTally.length === 1 ? "" : "s"}`}
-                spent={allTotals.spent}
-                saved={allTotals.saved}
-                currency={currency}
-              />
-            }
-            open={openCards}
-            onToggle={() => setOpenCards((v) => !v)}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm">
-                <thead>
-                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2 text-center font-semibold">Card</th>
-                    <th className="px-3 py-2 text-center font-semibold">Stays</th>
-                    <th className="px-3 py-2 text-center font-semibold">Points</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Points worth</th>
-                    <th className="px-3 py-2 text-center font-semibold">Total spent</th>
-                    <th className="px-3 py-2 text-center font-semibold">Total saved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cardTally.map(([name, row]) => (
-                    <tr key={name} className="border-b border-line/60 last:border-0">
-                      {/* One line, even on a phone: the table already scrolls
-                          sideways, and wrapping broke "1002 Hilton Aspire Amex
-                          V" into four stacked words per row. */}
-                      <td className={`whitespace-nowrap px-3 py-2 text-center font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
-                        {name}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>
-                      <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                        {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums">
-                        {row.pointsValue > 0 ? (
-                          <>
-                            {formatMoney(row.pointsValue, currency)}
-                            <span className="ml-1 text-[10px] text-muted">
-                              {centsPerPoint(row.pointsValue, row.points)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-muted">{DASH}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums text-negative">
-                        {formatMoney(row.spent, currency)}
-                      </td>
-                      <td className="px-3 py-2 text-center font-semibold tabular-nums text-positive">
-                        {formatMoney(row.saved, currency)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-
+          {/* ---- The two "who did we stay with" tallies, side by side: the
+               same money cut by hotel brand on the left and by the card that
+               paid on the right. They stack below lg, where half a viewport
+               can't hold either table. */}
+          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
           {/* ---- Stays by brand: the sheet's right-hand tally. */}
           <Panel
-            title="Stays by brand"
+            title="Total Stays by Brand"
             meta={
               <HeaderTotals
                 count={`${brandTally.length} brand${brandTally.length === 1 ? "" : "s"}`}
@@ -821,7 +767,7 @@ export function TravelBoard({
               <table className="w-full min-w-[520px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2 text-center font-semibold">Brand</th>
+                    <th className="px-3 py-2 text-left font-semibold">Brand</th>
                     <th className="px-3 py-2 text-center font-semibold">Stays</th>
                     <th className="px-3 py-2 text-center font-semibold">Points</th>
                     <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Points worth</th>
@@ -832,7 +778,7 @@ export function TravelBoard({
                 <tbody>
                   {brandTally.map(([b, row]) => (
                     <tr key={b} className="border-b border-line/60 last:border-0">
-                      <td className="px-3 py-2 text-center font-semibold">{b}</td>
+                      <td className="px-3 py-2 text-left font-semibold">{b}</td>
                       <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>
                       <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
@@ -861,6 +807,67 @@ export function TravelBoard({
               </table>
             </div>
           </Panel>
+
+          {/* ---- Stays by card: what each card in Accounts has returned. */}
+          <Panel
+            title="Total Stays by Rewards Card"
+            meta={
+              <HeaderTotals
+                count={`${cardTally.length} card${cardTally.length === 1 ? "" : "s"}`}
+                spent={allTotals.spent}
+                saved={allTotals.saved}
+                currency={currency}
+              />
+            }
+            open={openCards}
+            onToggle={() => setOpenCards((v) => !v)}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+                    <th className="px-2 py-2 text-left font-semibold">Card</th>
+                    <th className="px-2 py-2 text-center font-semibold">Stays</th>
+                    <th className="px-2 py-2 text-center font-semibold">Points</th>
+                    <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Points worth</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total spent</th>
+                    <th className="px-2 py-2 text-center font-semibold">Total saved</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cardTally.map(([name, row]) => (
+                    <tr key={name} className="border-b border-line/60 last:border-0">
+                      {/* One line, even on a phone: the table already scrolls
+                          sideways, and wrapping broke "1002 Hilton Aspire Amex
+                          V" into four stacked words per row. */}
+                      <td className={`whitespace-nowrap px-2 py-2 text-left font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
+                        {name}
+                      </td>
+                      <td className="px-2 py-2 text-center tabular-nums">{row.stays}</td>
+                      <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                        {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
+                      </td>
+                      <td className="px-2 py-2 text-center tabular-nums">
+                        {row.pointsValue > 0 ? (
+                          formatMoney(row.pointsValue, currency)
+                        ) : (
+                          <span className="text-muted">{DASH}</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-center tabular-nums text-negative">
+                        {formatMoney(row.spent, currency)}
+                      </td>
+                      <td className="px-2 py-2 text-center font-semibold tabular-nums text-positive">
+                        {formatMoney(row.saved, currency)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+          </section>
+
 
         </>
       )}

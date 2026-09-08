@@ -85,13 +85,7 @@ export function CardLinkModal({
   return (
     <ModalShell title="Link cards" onClose={onClose}>
       <div className="px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
-        <p className="text-xs text-muted">
-          Your imported stays carry the card name you typed in the sheet. Point each
-          one at a real card and the log can report per card. Linking here never
-          touches a card&apos;s points or credit — those stays were paid for long ago.
-        </p>
-
-        <ul className="mt-3 divide-y divide-line">
+        <ul className="divide-y divide-line">
           {rows.map((row) => (
             <li key={row.label} className="grid grid-cols-1 gap-1.5 py-2 sm:grid-cols-2 sm:items-center sm:gap-3">
               <span className="flex items-baseline gap-2">

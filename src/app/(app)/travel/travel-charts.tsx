@@ -93,14 +93,27 @@ export function CostBars({
                   />
                 </div>
 
+                {/* The bar colors identify the rows as swatches, not as text
+                    color — light blue at this size is unreadable on the
+                    surface, so the numbers stay in the foreground color. */}
                 {hover === i ? (
-                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface px-2 py-1 text-[10px] shadow-lg ring-1 ring-line">
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface px-2.5 py-1.5 text-[11px] shadow-lg ring-1 ring-line">
                     <p className="font-bold tabular-nums">{y.year}</p>
-                    <p className="tabular-nums" style={{ color: "var(--viz-spending)" }}>
-                      {formatMoney(y.hotel, currency)} hotel cost
+                    <p className="mt-0.5 flex items-center gap-1.5 tabular-nums">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: "var(--viz-spending)" }}
+                      />
+                      <span className="font-semibold">{formatMoney(y.hotel, currency)}</span>
+                      <span className="text-muted">hotel cost</span>
                     </p>
-                    <p className="tabular-nums" style={{ color: "var(--viz-debt)" }}>
-                      {formatMoney(y.pocket, currency)} pocket cost
+                    <p className="flex items-center gap-1.5 tabular-nums">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-sm"
+                        style={{ backgroundColor: "var(--viz-debt)" }}
+                      />
+                      <span className="font-semibold">{formatMoney(y.pocket, currency)}</span>
+                      <span className="text-muted">pocket cost</span>
                     </p>
                   </div>
                 ) : null}
