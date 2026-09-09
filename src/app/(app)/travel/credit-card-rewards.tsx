@@ -11,8 +11,6 @@
 import { useRouter } from "next/navigation";
 import React, { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
-import type { PointsSuggestion } from "@/lib/points-value";
-import { PointsValueModal, type PointsValueRow } from "../accounts/points-value-modal";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { GripHandle, LabeledInput, PayCardModal, StatTile, usePointerReorder } from "../accounts/shared-ui";
 import {
@@ -70,7 +68,6 @@ const RewardsDataContext = React.createContext<{
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
-  pointsSuggestions: PointsSuggestion[];
   rewardEntries: Array<RewardActivity & { cardName: string; cardId: string }>;
   collapsed: Record<string, boolean>;
   toggleSection: (key: string) => void;
@@ -93,7 +90,6 @@ export function CreditCardRewardsProvider({
   currency,
   nonCardAccounts,
   allBuckets,
-  pointsSuggestions,
   travelBrands,
 }: {
   children: React.ReactNode;
@@ -103,7 +99,6 @@ export function CreditCardRewardsProvider({
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
-  pointsSuggestions: PointsSuggestion[];
   travelBrands: TravelBrand[];
 }) {
   const [focusCardId, setFocusCardId] = useState<string | null>(null);
@@ -156,7 +151,6 @@ export function CreditCardRewardsProvider({
             currency,
             nonCardAccounts,
             allBuckets,
-            pointsSuggestions,
             rewardEntries,
             collapsed,
             toggleSection,
@@ -172,7 +166,7 @@ export function CreditCardRewardsProvider({
 /** The credit-card sections themselves. Sits above the reservations log. */
 export function CreditCardSections() {
   const {
-    accounts, currency, nonCardAccounts, allBuckets, pointsSuggestions, collapsed, toggleSection,
+    accounts, currency, nonCardAccounts, allBuckets, collapsed, toggleSection,
   } = useRewardsData();
   return (
     <div className="space-y-3">
@@ -190,7 +184,6 @@ export function CreditCardSections() {
             allBuckets={allBuckets}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
-            pointsSuggestions={pointsSuggestions}
           />
         );
       })}
@@ -231,7 +224,6 @@ function CreditCardSection({
   allBuckets,
   open,
   onToggle,
-  pointsSuggestions,
 }: {
   section: Section;
   accounts: AccountData[];
@@ -241,7 +233,6 @@ function CreditCardSection({
   allBuckets: BucketData[];
   open: boolean;
   onToggle: () => void;
-  pointsSuggestions: PointsSuggestion[];
 }) {
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
@@ -252,7 +243,6 @@ function CreditCardSection({
   }, [accounts]);
   const [collapsedBanks, setCollapsedBanks] = useState<Set<string>>(new Set());
   const { focusCardId } = React.useContext(RewardFocusContext);
-  const [pointsValueOpen, setPointsValueOpen] = useState(false);
   const [showOnlyFeeCards, setShowOnlyFeeCards] = useState(false);
   const [showOnlyOwedCards, setShowOnlyOwedCards] = useState(false);
   const [showOnlyPtsCards, setShowOnlyPtsCards] = useState(false);
@@ -410,53 +400,10 @@ function CreditCardSection({
     </ul>
   );
 
-  // Every headline stat honors the active holder filter so the numbers and
-  // the visible card lists always agree. When no holder is picked this reduces
-  // back to the full-household totals.
   // Every headline figure and count respects both people-and-bank filters, so
   // the tiles never describe a wider set than the list under them.
   const holderScoped = <T extends AccountData>(list: T[]) =>
     list.filter((a) => holderFilterFn(a) && bankFilterFn(a));
-  const openCards = holderScoped(allCreditCards.filter((a) => !a.dateClosed));
-  const feesPaid = openCards
-    .filter((a) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0)
-    .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
-  const feesWaived = openCards
-    .filter((a) => a.feeWaived && (a.annualFeeCents ?? 0) > 0)
-    .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
-  const feesAll = feesPaid + feesWaived;
-  const totalOwed = holderScoped(accounts).reduce((s, a) => s + (a.owedCents ?? 0), 0);
-  const rewardCards = holderScoped(allCreditCards.filter((a) => a.cardDetails));
-  const totalPoints = rewardCards.reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
-  const pointsForCategory = (cat: "travel" | "hotel") =>
-    rewardCards
-      .filter((a) => a.cardDetails?.rewardsCategory === cat)
-      .reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
-  const travelPoints = pointsForCategory("travel");
-  const hotelPoints = pointsForCategory("hotel");
-  // Cash value of the points balance itself, summed with each card's own
-  // cents-per-point — the section-level total of the per-card "Total value"
-  // metric. Free-night credits are excluded here (they show in the Travel /
-  // Hotel redeemable tiles) so this tile answers "what are the points worth".
-  const totalCardValueCents = rewardCards.reduce((sum, a) => {
-    const d = a.cardDetails;
-    if (!d || d.currentPoints <= 0 || !d.pointsValueMicros) return sum;
-    return sum + Math.round((d.currentPoints * d.pointsValueMicros) / 10_000);
-  }, 0);
-  // ---- Credit utilisation: balances owed as a share of total credit limit.
-  // The single biggest lever on a credit score, and computable from limits
-  // already stored per card. Only cards with a recorded limit are counted, so
-  // the figure isn't skewed by cards whose limit hasn't been entered — the
-  // covered-card count is shown alongside so the basis is clear.
-  const cardsWithLimit = holderScoped(openCards).filter(
-    (a) => (a.cardDetails?.spendingLimitCents ?? 0) > 0,
-  );
-  const totalLimitCents = cardsWithLimit.reduce(
-    (s, a) => s + (a.cardDetails?.spendingLimitCents ?? 0),
-    0,
-  );
-  const owedOnLimitedCards = cardsWithLimit.reduce((s, a) => s + Math.max(0, a.owedCents ?? 0), 0);
-  const utilisationPct = totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null;
   // Compact number formatter tuned so the sub-line's pieces still visibly add
   // up to the headline value. E.g. 1,025,563 → "1.03M" (not "1.0M"), so
   // Travel 395k + Hotel 1.03M reads consistent with total 1,420,563.
@@ -469,33 +416,73 @@ function CreditCardSection({
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
     return n.toLocaleString();
   };
-  const redeemableForCategory = (cat: "travel" | "hotel") =>
-    rewardCards
-      .filter((a) => a.cardDetails?.rewardsCategory === cat)
-      .reduce((sum, a) => {
+  // The same figures computed twice: once over the filtered cards (what the
+  // tiles show) and once over every card (what decides which tiles exist).
+  // Keeping presence on the unfiltered set means picking a bank re-values the
+  // tiles in place — down to $0 where that bank has nothing — instead of
+  // dropping tiles and reflowing the row under the cursor.
+  const computeStats = (scope: <T extends AccountData>(list: T[]) => T[]) => {
+    const open = scope(allCreditCards.filter((a) => !a.dateClosed));
+    const feesPaid = open
+      .filter((a) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0)
+      .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
+    const feesWaived = open
+      .filter((a) => a.feeWaived && (a.annualFeeCents ?? 0) > 0)
+      .reduce((s, a) => s + (a.annualFeeCents ?? 0), 0);
+    const totalOwed = scope(accounts).reduce((s, a) => s + (a.owedCents ?? 0), 0);
+    const rewardCards = scope(allCreditCards.filter((a) => a.cardDetails));
+    const inCategory = (cat: "travel" | "hotel") =>
+      rewardCards.filter((a) => a.cardDetails?.rewardsCategory === cat);
+    const pointsForCategory = (cat: "travel" | "hotel") =>
+      inCategory(cat).reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
+    // Cash value of the points balance itself, summed with each card's own
+    // cents-per-point — the section-level total of the per-card "Total value"
+    // metric. Free-night credits are excluded here (they show in the Travel /
+    // Hotel redeemable tiles) so this tile answers "what are the points worth".
+    const totalCardValueCents = rewardCards.reduce((sum, a) => {
+      const d = a.cardDetails;
+      if (!d || d.currentPoints <= 0 || !d.pointsValueMicros) return sum;
+      return sum + Math.round((d.currentPoints * d.pointsValueMicros) / 10_000);
+    }, 0);
+    const redeemableForCategory = (cat: "travel" | "hotel") =>
+      inCategory(cat).reduce((sum, a) => {
         const d = a.cardDetails!;
         const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
         return sum + pts + (d.freeNightCreditCents ?? 0);
       }, 0);
-  // Cards whose stored valuation is missing or disagrees with what the stays
-  // actually redeemed at. `worthRows` covers every card holding points so the
-  // dialog can show the before/after on the section total.
-  const suggestionByAccount = new Map(pointsSuggestions.map((s) => [s.accountId, s]));
-  const pointsValueRows: PointsValueRow[] = rewardCards
-    .filter((a) => (a.cardDetails?.currentPoints ?? 0) > 0)
-    .map((a) => ({
-      accountId: a.id,
-      cardName: a.name,
-      currentPoints: a.cardDetails?.currentPoints ?? 0,
-      storedMicros: a.cardDetails?.pointsValueMicros ?? null,
-      suggestion: suggestionByAccount.get(a.id) ?? null,
-    }));
-  const staleValueCount = pointsValueRows.filter(
-    (r) => r.suggestion && r.suggestion.micros !== (r.storedMicros ?? 0),
-  ).length;
-
-  const travelRedeemable = redeemableForCategory("travel");
-  const hotelRedeemable = redeemableForCategory("hotel");
+    // ---- Credit utilisation: balances owed as a share of total credit limit.
+    // The single biggest lever on a credit score, and computable from limits
+    // already stored per card. Only cards with a recorded limit are counted, so
+    // the figure isn't skewed by cards whose limit hasn't been entered.
+    const cardsWithLimit = open.filter((a) => (a.cardDetails?.spendingLimitCents ?? 0) > 0);
+    const totalLimitCents = cardsWithLimit.reduce(
+      (s, a) => s + (a.cardDetails?.spendingLimitCents ?? 0),
+      0,
+    );
+    const owedOnLimitedCards = cardsWithLimit.reduce((s, a) => s + Math.max(0, a.owedCents ?? 0), 0);
+    return {
+      openCards: open,
+      feesPaid,
+      feesAll: feesPaid + feesWaived,
+      totalOwed,
+      rewardCards,
+      totalPoints: rewardCards.reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0),
+      travelPoints: pointsForCategory("travel"),
+      hotelPoints: pointsForCategory("hotel"),
+      totalCardValueCents,
+      travelRedeemable: redeemableForCategory("travel"),
+      hotelRedeemable: redeemableForCategory("hotel"),
+      totalLimitCents,
+      utilisationPct: totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null,
+      unbookedNights: open.filter(hasUnbookedNight).length,
+    };
+  };
+  const stats = computeStats(holderScoped);
+  const allStats = computeStats((list) => list);
+  const {
+    openCards, feesPaid, feesAll, totalOwed, totalPoints, travelPoints, hotelPoints,
+    totalCardValueCents, travelRedeemable, hotelRedeemable, totalLimitCents, utilisationPct,
+  } = stats;
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
@@ -518,8 +505,9 @@ function CreditCardSection({
                 the title row because it is the question this section gets
                 opened to answer, not one more way to narrow a list. */}
             {(() => {
-              const available = holderScoped(allCreditCards.filter((a) => !a.dateClosed)).filter(hasUnbookedNight);
-              if (available.length === 0) return null;
+              // Present whenever any card holds one, so the filters re-count
+              // it in place rather than removing it from the title row.
+              if (allStats.unbookedNights === 0) return null;
               return (
                 <button
                   type="button"
@@ -536,24 +524,10 @@ function CreditCardSection({
                   style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
                 >
                   Free nights unbooked:{" "}
-                  <span className="tabular-nums">{available.length}</span>
+                  <span className="tabular-nums">{stats.unbookedNights}</span>
                 </button>
               );
             })()}
-            {pointsValueRows.some((r) => r.suggestion) ? (
-              <button
-                type="button"
-                onClick={() => setPointsValueOpen(true)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-              >
-                Points values
-                {staleValueCount > 0 ? (
-                  <span className="rounded-full bg-black/5 px-1.5 text-[10px] tabular-nums text-muted dark:bg-white/10">
-                    {staleValueCount} to update
-                  </span>
-                ) : null}
-              </button>
-            ) : null}
             <a
               href="https://www.dailydrop.com/calculator"
               target="_blank"
@@ -581,10 +555,13 @@ function CreditCardSection({
             </button>
           </div>
 
-          {(totalPoints > 0 || travelRedeemable > 0 || hotelRedeemable > 0 || feesPaid > 0 || totalOwed > 0) ? (
-            <>
+          {/* The stat tiles describe the *filtered* set, so they can all fall to
+              zero (e.g. one bank whose cards hold no points and owe nothing).
+              Only the grid is gated on that — the filter row below is what
+              clears the filter, so it must never be hidden by it. */}
+          {(allStats.totalPoints > 0 || allStats.travelRedeemable > 0 || allStats.hotelRedeemable > 0 || allStats.feesPaid > 0 || allStats.totalOwed > 0) ? (
             <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-5">
-              {totalPoints > 0 ? (
+              {allStats.totalPoints > 0 ? (
                 <StatTile
                   label="Current Pts"
                   value={totalPoints.toLocaleString()}
@@ -601,7 +578,7 @@ function CreditCardSection({
                   active={showOnlyPtsCards}
                 />
               ) : null}
-              {totalCardValueCents > 0 ? (
+              {allStats.totalCardValueCents > 0 ? (
                 <StatTile
                   label="Total Card Value"
                   value={formatMoney(totalCardValueCents, currency)}
@@ -609,7 +586,7 @@ function CreditCardSection({
                   tone="emerald"
                 />
               ) : null}
-              {travelRedeemable > 0 ? (
+              {allStats.travelRedeemable > 0 ? (
                 <StatTile
                   label="Travel Value Redeemable"
                   value={formatMoney(travelRedeemable, currency)}
@@ -618,7 +595,7 @@ function CreditCardSection({
                   active={showOnlyTravelRedeem}
                 />
               ) : null}
-              {hotelRedeemable > 0 ? (
+              {allStats.hotelRedeemable > 0 ? (
                 <StatTile
                   label="Hotel Value Redeemable"
                   value={formatMoney(hotelRedeemable, currency)}
@@ -627,7 +604,7 @@ function CreditCardSection({
                   active={showOnlyHotelRedeem}
                 />
               ) : null}
-              {totalOwed > 0 ? (
+              {allStats.totalOwed > 0 ? (
                 <StatTile
                   label="Total CC Owed"
                   value={formatMoney(totalOwed, currency)}
@@ -650,11 +627,12 @@ function CreditCardSection({
                 />
               ) : null}
             </div>
-            {/* Fees, holder filter and card counts belong to the open section —
-                collapsing leaves only the headline stat tiles. */}
-            {open ? (
+          ) : null}
+          {/* Fees, holder filter and card counts belong to the open section —
+              collapsing leaves only the headline stat tiles. */}
+          {open ? (
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
-              {feesPaid > 0 ? (
+              {allStats.feesPaid > 0 ? (
                 <button
                   type="button"
                   onClick={() => setShowOnlyFeeCards((v) => !v)}
@@ -664,7 +642,7 @@ function CreditCardSection({
                   Active fees <span className="tabular-nums text-negative">{formatMoney(feesPaid, currency)}/yr</span>
                 </button>
               ) : null}
-              {feesAll > 0 ? (
+              {allStats.feesAll > 0 ? (
                 <span>
                   Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
                 </span>
@@ -776,8 +754,6 @@ function CreditCardSection({
                 );
               })()}
             </div>
-            ) : null}
-            </>
           ) : null}
         </div>
       ) : (
@@ -978,14 +954,6 @@ function CreditCardSection({
             );
           })()}
         </div>
-      ) : null}
-
-      {pointsValueOpen ? (
-        <PointsValueModal
-          rows={pointsValueRows}
-          currency={currency}
-          onClose={() => setPointsValueOpen(false)}
-        />
       ) : null}
     </section>
   );

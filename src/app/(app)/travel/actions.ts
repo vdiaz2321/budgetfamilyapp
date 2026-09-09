@@ -147,6 +147,11 @@ export async function saveTravelStay(formData: FormData) {
   const nights = Math.max(1, int(formData, "nights") || 1);
   const paxRaw = int(formData, "pax");
   const pointsCost = int(formData, "pointsCost");
+  // Points only leave a card when they were actually redeemed. On a stay
+  // recorded to compare against cash, the figure is a what-if and must not
+  // reach the reward ledger.
+  const pointsUsed = formData.get("pointsUsed") === "on" && pointsCost > 0;
+  const pointsDrawn = pointsUsed ? pointsCost : 0;
   const hotelCredit = Math.max(0, displayToCents(String(formData.get("hotelCredit") ?? "0")));
   const pocketCost = Math.max(0, displayToCents(String(formData.get("pocketCost") ?? "0")));
 
@@ -154,7 +159,7 @@ export async function saveTravelStay(formData: FormData) {
   // whatever the numbers say. Money paid means the card; nothing paid means
   // the points or the night credit covered it.
   const pocketPaidWith =
-    pocketCost > 0 ? "card" : pointsCost > 0 ? "points" : hotelCredit > 0 ? "credit" : "card";
+    pocketCost > 0 ? "card" : pointsDrawn > 0 ? "points" : hotelCredit > 0 ? "credit" : "card";
 
   if (!propertyName) return { error: "Enter the hotel or apartment name." };
   if (!isDate(checkIn)) return { error: "Enter a valid check-in date." };
@@ -177,6 +182,7 @@ export async function saveTravelStay(formData: FormData) {
     hotel_cost_cents: Math.max(0, displayToCents(String(formData.get("hotelCost") ?? "0"))),
     pocket_cost_cents: pocketCost,
     points_cost: pointsCost,
+    points_used: pointsUsed,
     pocket_paid_with: pocketPaidWith,
     remarks: text(formData, "remarks"),
     breakfast_included: formData.get("breakfastIncluded") === "on",
@@ -190,7 +196,7 @@ export async function saveTravelStay(formData: FormData) {
     const prev = unwrap(
       await supabase
         .from("travel_stays")
-        .select("account_id, points_cost, hotel_credit_cents, cancelled_at")
+        .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at")
         .eq("id", id)
         .eq("household_id", householdId)
         .maybeSingle(),
@@ -202,13 +208,17 @@ export async function saveTravelStay(formData: FormData) {
     // zero and editing it draws again.
     const before: RewardDraw = prev.cancelled_at
       ? { accountId: prev.account_id, points: 0, credit: 0 }
-      : { accountId: prev.account_id, points: prev.points_cost ?? 0, credit: prev.hotel_credit_cents ?? 0 };
+      : {
+          accountId: prev.account_id,
+          points: prev.points_used ? prev.points_cost ?? 0 : 0,
+          credit: prev.hotel_credit_cents ?? 0,
+        };
 
     const sync = await syncRewardLedger(
       supabase,
       householdId,
       before,
-      { accountId, points: pointsCost, credit: hotelCredit },
+      { accountId, points: pointsDrawn, credit: hotelCredit },
       { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
     );
     if (sync.error) return { error: sync.error };
@@ -232,7 +242,7 @@ export async function saveTravelStay(formData: FormData) {
     supabase,
     householdId,
     { accountId, points: 0, credit: 0 },
-    { accountId, points: pointsCost, credit: hotelCredit },
+    { accountId, points: pointsDrawn, credit: hotelCredit },
     { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
   );
   if (sync.error) return { error: sync.error };
@@ -259,7 +269,7 @@ export async function deleteTravelStay(formData: FormData) {
   const stay = unwrap(
     await supabase
       .from("travel_stays")
-      .select("account_id, points_cost, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on")
+      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -271,7 +281,11 @@ export async function deleteTravelStay(formData: FormData) {
     const sync = await syncRewardLedger(
       supabase,
       householdId,
-      { accountId: stay.account_id, points: stay.points_cost ?? 0, credit: stay.hotel_credit_cents ?? 0 },
+      {
+        accountId: stay.account_id,
+        points: stay.points_used ? stay.points_cost ?? 0 : 0,
+        credit: stay.hotel_credit_cents ?? 0,
+      },
       { accountId: stay.account_id, points: 0, credit: 0 },
       {
         occurredOn: stay.reserved_on ?? stay.check_in,
@@ -345,7 +359,7 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
   const stay = unwrap(
     await supabase
       .from("travel_stays")
-      .select("account_id, points_cost, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on")
+      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -354,7 +368,10 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
   if (!stay) return { error: "That stay was not found." };
   if (Boolean(stay.cancelled_at) === cancelled) return { error: null };
 
-  const drawn = { points: stay.points_cost ?? 0, credit: stay.hotel_credit_cents ?? 0 };
+  const drawn = {
+    points: stay.points_used ? stay.points_cost ?? 0 : 0,
+    credit: stay.hotel_credit_cents ?? 0,
+  };
   const none = { accountId: stay.account_id, points: 0, credit: 0 };
   const full = { accountId: stay.account_id, ...drawn };
 

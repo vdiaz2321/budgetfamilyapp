@@ -15,6 +15,11 @@ export type TravelStay = {
   nights: number;
   pax: number | null;
   pointsCost: number;
+  // Whether those points were actually redeemed. False means the figure is
+  // what the room *would* have cost in points on a stay that was paid in
+  // cash — recorded to compare the two, never counted as spend, and never
+  // deducted from a card's balance.
+  pointsUsed: boolean;
   pointsValueMicros: number | null;
   hotelCreditCents: number;
   hotelCostCents: number;

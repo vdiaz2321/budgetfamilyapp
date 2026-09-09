@@ -56,6 +56,19 @@ function sheetDate(iso: string | null): string {
   return `${Number(d)}-${MONTHS[Number(m) - 1]}-${y.slice(2)}`;
 }
 
+// Points a stay actually spent. A stay carrying a what-if figure (points not
+// used) contributes nothing to any total — that number exists to compare
+// against what was paid in cash, not to be counted as spend.
+function spentPoints(stay: TravelStay): number {
+  return stay.pointsUsed ? stay.pointsCost : 0;
+}
+
+// The cash those redeemed points were worth. Per stay the rate is still shown
+// for a what-if — that is the point of recording one — but no total adds it.
+function spentPointsValue(stay: TravelStay): number {
+  return stay.pointsUsed ? pointsValueCents(stay) : 0;
+}
+
 function money(cents: number, currency: string): string {
   return cents > 0 ? formatMoney(cents, currency) : DASH;
 }
@@ -65,12 +78,6 @@ function money(cents: number, currency: string): string {
 function daysUntil(from: string, to: string): number {
   const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
   return Math.max(0, Math.round(ms / 86_400_000));
-}
-
-// The rate a batch of points actually redeemed at, e.g. "0.55¢/pt".
-function centsPerPoint(valueCents: number, points: number): string {
-  if (!points || !valueCents) return "—";
-  return `${(valueCents / points).toFixed(2)}¢/pt`;
 }
 
 // Column E: what a point was worth on this stay, to three decimals. A rate
@@ -116,12 +123,17 @@ export function TravelBoard({
   const [brand, setBrand] = useState<string>(ALL);
   const [query, setQuery] = useState("");
   const [bfastOnly, setBfastOnly] = useState(false);
+  const [ptsOnly, setPtsOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "checkIn",
     dir: "desc",
   });
   const [openYears, setOpenYears] = useState(true);
   const [openBrands, setOpenBrands] = useState(true);
+  // One period for the two side-by-side tallies (brand and card): they answer
+  // the same question two ways, so reading them against different years was
+  // never what was wanted. Independent of the Reservations filter above them.
+  const [tallyYear, setTallyYear] = useState<string>(ALL);
   const [openCards, setOpenCards] = useState(true);
   // The log starts collapsed on a fresh login — it's the longest section on
   // the page — but sessionStorage carries whatever you last set for as long as
@@ -159,6 +171,7 @@ export function TravelBoard({
       if (year !== ALL && stayYear(s) !== year) return false;
       if (brand !== ALL && s.brand !== brand) return false;
       if (bfastOnly && !s.breakfastIncluded) return false;
+      if (ptsOnly && !s.pointsUsed) return false;
       if (!needle) return true;
       return [s.propertyName, s.city, s.brand, s.cardLabel, s.holder, s.remarks]
         .some((field) => field?.toLowerCase().includes(needle));
@@ -174,7 +187,7 @@ export function TravelBoard({
       }
       return ((av as number) - (bv as number)) * dir;
     });
-  }, [stays, year, brand, bfastOnly, query, sort]);
+  }, [stays, year, brand, bfastOnly, ptsOnly, query, sort]);
 
   // Clicking a column sorts by it; clicking the same one again flips it.
   function sortBy(key: SortKey) {
@@ -197,7 +210,7 @@ export function TravelBoard({
       const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0 };
       row.hotel += s.hotelCostCents;
       row.pocket += s.pocketCostCents;
-      row.points += s.pointsCost;
+      row.points += spentPoints(s);
       row.stays += 1;
       map.set(key, row);
     }
@@ -255,39 +268,66 @@ export function TravelBoard({
     [stays],
   );
 
+
+  // Stays per brand for the period the panel is set to — the sheet's brand
+  // tally, and what a by-brand chart will group on.
+  const tallyStays = useMemo(
+    () => (tallyYear === ALL ? live : live.filter((s) => stayYear(s) === tallyYear)),
+    [live, tallyYear],
+  );
+  const tallyTotals = useMemo(() => {
+    let spent = 0, saved = 0;
+    for (const s of tallyStays) {
+      spent += s.pocketCostCents;
+      saved += savedCents(s);
+    }
+    return { spent, saved };
+  }, [tallyStays]);
+  // One control, in the Brand header, for both tallies: they sit side by side
+  // and are read together, so a second copy on the card panel was the same
+  // switch twice.
+  const tallyPeriod = (
+    <select
+      aria-label="Tally period"
+      value={tallyYear}
+      onChange={(e) => setTallyYear(e.target.value)}
+      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    >
+      <option value={ALL}>All years</option>
+      {years.map((y) => (
+        <option key={y} value={y}>{y}</option>
+      ))}
+    </select>
+  );
+
   // What each real card has actually done for you — only answerable once the
   // labels are linked, which is what the Link cards button is for.
   const cardTally = useMemo(() => {
-    const map = new Map<string, { stays: number; spent: number; saved: number; points: number; pointsValue: number }>();
-    for (const s of live) {
+    const map = new Map<string, { stays: number; spent: number; saved: number; points: number }>();
+    for (const s of tallyStays) {
       const key = (s.accountId ? cardName.get(s.accountId) : null) ?? "Not linked";
-      const row = map.get(key) ?? { stays: 0, spent: 0, saved: 0, points: 0, pointsValue: 0 };
+      const row = map.get(key) ?? { stays: 0, spent: 0, saved: 0, points: 0 };
       row.stays += 1;
       row.spent += s.pocketCostCents;
       row.saved += savedCents(s);
-      row.points += s.pointsCost;
-      row.pointsValue += pointsValueCents(s);
+      row.points += spentPoints(s);
       map.set(key, row);
     }
     return Array.from(map.entries()).sort((a, b) => b[1].stays - a[1].stays || a[0].localeCompare(b[0]));
-  }, [live, cardName]);
-
-  // Stays per brand over every year — the sheet's brand tally, and what a
-  // by-brand chart will group on.
+  }, [tallyStays, cardName]);
   const brandTally = useMemo(() => {
-    const map = new Map<string, { stays: number; spent: number; saved: number; points: number; pointsValue: number }>();
-    for (const s of live) {
+    const map = new Map<string, { stays: number; spent: number; saved: number; points: number }>();
+    for (const s of tallyStays) {
       const key = s.brand?.trim() || "Unbranded";
-      const row = map.get(key) ?? { stays: 0, spent: 0, saved: 0, points: 0, pointsValue: 0 };
+      const row = map.get(key) ?? { stays: 0, spent: 0, saved: 0, points: 0 };
       row.stays += 1;
       row.spent += s.pocketCostCents;
       row.saved += savedCents(s);
-      row.points += s.pointsCost;
-      row.pointsValue += pointsValueCents(s);
+      row.points += spentPoints(s);
       map.set(key, row);
     }
     return Array.from(map.entries()).sort((a, b) => b[1].stays - a[1].stays || a[0].localeCompare(b[0]));
-  }, [live]);
+  }, [tallyStays]);
 
   const allTotals = useMemo(() => {
     let spent = 0, saved = 0;
@@ -306,8 +346,8 @@ export function TravelBoard({
       if (s.cancelledAt) { cancelled += 1; continue; }
       hotel += s.hotelCostCents;
       pocket += s.pocketCostCents;
-      points += s.pointsCost;
-      pointsValue += pointsValueCents(s);
+      points += spentPoints(s);
+      pointsValue += spentPointsValue(s);
       nights += s.nights;
     }
     return { hotel, pocket, points, pointsValue, nights, cancelled, saved: hotel - pocket };
@@ -369,7 +409,6 @@ export function TravelBoard({
           currency={currency}
           nonCardAccounts={rewards.nonCardAccounts}
           allBuckets={rewards.allBuckets}
-          pointsSuggestions={rewards.pointsSuggestions}
           travelBrands={rewards.travelBrands}
         >
           {/* ---- What's still ahead. Sits above the archive because a booking
@@ -492,6 +531,21 @@ export function TravelBoard({
                 >
                   B&apos;fast incl
                 </button>
+                {/* The other half of the points question: show only the stays
+                    that actually redeemed. */}
+                <button
+                  type="button"
+                  onClick={() => setPtsOnly((v) => !v)}
+                  aria-pressed={ptsOnly}
+                  className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
+                    ptsOnly
+                      ? "text-white ring-transparent"
+                      : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                  }`}
+                  style={ptsOnly ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                >
+                  Pts used
+                </button>
                 {brands.length > 0 ? (
                   <select
                     value={brand}
@@ -557,7 +611,7 @@ export function TravelBoard({
                     <SortTh label="Reservation made" col="reservedOn" sort={sort} onSort={sortBy} nowrap />
                     <SortTh label="Check in date" col="checkIn" sort={sort} onSort={sortBy} nowrap />
                     <SortTh label="Hotel name" col="propertyName" sort={sort} onSort={sortBy} />
-                    <SortTh label="Points cost" col="pointsCost" sort={sort} onSort={sortBy} />
+                    <SortTh label="Points used" col="pointsCost" sort={sort} onSort={sortBy} />
                     <SortTh label="Cash value" col="pointsValue" sort={sort} onSort={sortBy} />
                     <SortTh label="Hotel credit" col="hotelCredit" sort={sort} onSort={sortBy} />
                     <SortTh label="Hotel cost" col="hotelCost" sort={sort} onSort={sortBy} />
@@ -591,11 +645,18 @@ export function TravelBoard({
                           </span>
                         ) : null}
                       </td>
+                      {/* Grey and bracketed when the points were never spent:
+                          the figure is what the room would have cost on
+                          points, kept beside what it actually cost in cash. */}
                       <td
-                        className={`px-2 py-2 text-center tabular-nums ${s.pointsCost > 0 ? "" : "text-muted"}`}
-                        style={s.pointsCost > 0 ? { color: "var(--viz-savings)" } : undefined}
+                        className={`px-2 py-2 text-center tabular-nums ${s.pointsCost > 0 && s.pointsUsed ? "" : "text-muted"}`}
+                        style={s.pointsCost > 0 && s.pointsUsed ? { color: "var(--viz-savings)" } : undefined}
                       >
-                        {s.pointsCost > 0 ? s.pointsCost.toLocaleString() : DASH}
+                        {s.pointsCost > 0
+                          ? s.pointsUsed
+                            ? s.pointsCost.toLocaleString()
+                            : `(${s.pointsCost.toLocaleString()})`
+                          : DASH}
                       </td>
                       <td className="px-2 py-2 text-center tabular-nums text-muted">
                         {(() => {
@@ -678,8 +739,13 @@ export function TravelBoard({
                     </div>
                     <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px]">
                       <span>
-                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Points cost</span>
-                        <span className="tabular-nums font-semibold" style={{ color: "var(--viz-savings)" }}>
+                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">
+                          {s.pointsCost > 0 && !s.pointsUsed ? "Pts if used" : "Points used"}
+                        </span>
+                        <span
+                          className={`tabular-nums font-semibold ${s.pointsUsed ? "" : "text-muted"}`}
+                          style={s.pointsCost > 0 && s.pointsUsed ? { color: "var(--viz-savings)" } : undefined}
+                        >
                           {s.pointsCost > 0 ? s.pointsCost.toLocaleString() : "—"}
                         </span>
                       </span>
@@ -788,11 +854,12 @@ export function TravelBoard({
             meta={
               <HeaderTotals
                 count={`${brandTally.length} brand${brandTally.length === 1 ? "" : "s"}`}
-                spent={allTotals.spent}
-                saved={allTotals.saved}
+                spent={tallyTotals.spent}
+                saved={tallyTotals.saved}
                 currency={currency}
               />
             }
+            control={tallyPeriod}
             open={openBrands}
             onToggle={() => setOpenBrands((v) => !v)}
           >
@@ -800,10 +867,9 @@ export function TravelBoard({
               <table className="w-full min-w-[520px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2 text-left font-semibold">Brand</th>
+                    <th className="px-3 py-2 text-center font-semibold">Brand</th>
                     <th className="px-3 py-2 text-center font-semibold">Stays</th>
-                    <th className="px-3 py-2 text-center font-semibold">Points</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Points worth</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Total Pts Used</th>
                     <th className="px-3 py-2 text-center font-semibold">Total spent</th>
                     <th className="px-3 py-2 text-center font-semibold">Total saved</th>
                   </tr>
@@ -815,18 +881,6 @@ export function TravelBoard({
                       <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>
                       <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums">
-                        {row.pointsValue > 0 ? (
-                          <>
-                            {formatMoney(row.pointsValue, currency)}
-                            <span className="ml-1 text-[10px] text-muted">
-                              {centsPerPoint(row.pointsValue, row.points)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-muted">{DASH}</span>
-                        )}
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums text-negative">
                         {formatMoney(row.spent, currency)}
@@ -847,8 +901,8 @@ export function TravelBoard({
             meta={
               <HeaderTotals
                 count={`${cardTally.length} card${cardTally.length === 1 ? "" : "s"}`}
-                spent={allTotals.spent}
-                saved={allTotals.saved}
+                spent={tallyTotals.spent}
+                saved={tallyTotals.saved}
                 currency={currency}
               />
             }
@@ -859,10 +913,9 @@ export function TravelBoard({
               <table className="w-full min-w-[520px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-2 py-2 text-left font-semibold">Card</th>
+                    <th className="px-2 py-2 text-center font-semibold">Card</th>
                     <th className="px-2 py-2 text-center font-semibold">Stays</th>
-                    <th className="px-2 py-2 text-center font-semibold">Points</th>
-                    <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Points worth</th>
+                    <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Total Pts Used</th>
                     <th className="px-2 py-2 text-center font-semibold">Total spent</th>
                     <th className="px-2 py-2 text-center font-semibold">Total saved</th>
                   </tr>
@@ -879,13 +932,6 @@ export function TravelBoard({
                       <td className="px-2 py-2 text-center tabular-nums">{row.stays}</td>
                       <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
-                      </td>
-                      <td className="px-2 py-2 text-center tabular-nums">
-                        {row.pointsValue > 0 ? (
-                          formatMoney(row.pointsValue, currency)
-                        ) : (
-                          <span className="text-muted">{DASH}</span>
-                        )}
                       </td>
                       <td className="px-2 py-2 text-center tabular-nums text-negative">
                         {formatMoney(row.spent, currency)}
@@ -930,23 +976,29 @@ export function TravelBoard({
 function Panel({
   title,
   meta,
+  control,
   open,
   onToggle,
   children,
 }: {
   title: string;
   meta?: React.ReactNode;
+  /** A control that belongs on the header line. It sits beside the collapse
+      button rather than inside it — a select nested in a button can't be
+      opened, and the whole header is the collapse target. */
+  control?: React.ReactNode;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className={`flex items-center ${open ? "border-b border-line" : ""}`}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${open ? "border-b border-line" : ""}`}
+        className={`flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${control ? "pr-2" : ""}`}
       >
         <span className="flex items-center gap-2">
           <svg
@@ -967,6 +1019,8 @@ function Panel({
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{meta}</span>
         ) : null}
       </button>
+      {control ? <div className="shrink-0 pr-4 sm:pr-6">{control}</div> : null}
+      </div>
       {open ? children : null}
     </section>
   );

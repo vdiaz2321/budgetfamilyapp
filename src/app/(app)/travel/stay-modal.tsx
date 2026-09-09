@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
@@ -9,6 +9,11 @@ import { BrandPicker } from "./brand-picker";
 import type { TravelBrand, TravelCard, TravelStay } from "./types";
 
 const NO_CARD = "";
+
+// The rate is read at four decimals and stored at six — see the field's own
+// note in the form below.
+const rateDisplay = (micros: number) => String(Number((micros / 1_000_000).toFixed(4)));
+const rateExact = (micros: number) => String(Number((micros / 1_000_000).toFixed(6)));
 
 export function StayModal({
   stay,
@@ -35,11 +40,19 @@ export function StayModal({
   const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
   const [brand, setBrand] = useState(stay?.brand ?? "");
   const [points, setPoints] = useState(stay?.pointsCost ? String(stay.pointsCost) : "");
-  const [pointsValue, setPointsValue] = useState(() => {
-    if (stay?.pointsValueMicros) return String(stay.pointsValueMicros / 1_000_000);
-    if (!stay && preset?.pointsValueMicros) return String(preset.pointsValueMicros / 1_000_000);
-    return "";
-  });
+  // Whether the points figure is a redemption or a what-if. A new stay that
+  // records points is assumed to have spent them; unticking it turns the
+  // figure into "this is what it would have cost on points".
+  const [pointsUsed, setPointsUsed] = useState(stay ? stay.pointsUsed : true);
+  const storedMicros = stay?.pointsValueMicros ?? (stay ? null : preset?.pointsValueMicros ?? null);
+  const [pointsValue, setPointsValue] = useState(() =>
+    storedMicros ? rateDisplay(storedMicros) : "",
+  );
+  // A rate typed by hand wins over the calculated one and is never overwritten.
+  // A rate that only came from the card's stored valuation is a placeholder:
+  // the room in front of you prices its own points better than the card's
+  // average does.
+  const [rateEdited, setRateEdited] = useState(Boolean(stay?.pointsValueMicros));
   // A zero reads as a real number you have to clear before typing, so an
   // unset amount stays blank and only a saved non-zero value is filled in.
   const money = (cents: number | undefined) => (cents ? centsToDisplay(cents) : "");
@@ -59,10 +72,40 @@ export function StayModal({
     if (!next) return;
     if (!holder.trim() && next.holder) setHolder(next.holder);
     if (!pointsValue.trim() && next.pointsValueMicros) {
-      setPointsValue(String(next.pointsValueMicros / 1_000_000));
+      setPointsValue(rateDisplay(next.pointsValueMicros));
+      setExactRate(rateExact(next.pointsValueMicros));
     }
   }
   const pointsTyped = Number(points) || 0;
+  // What this room prices its points at: cash rate / points. The same sum the
+  // redemption calculators do — it answers "is this a good use of points"
+  // whether or not the points were actually spent.
+  const hotelCentsTyped = Math.round((Number(hotelCost.replace(/[$,\s]/g, "")) || 0) * 100);
+  const impliedMicros =
+    pointsTyped > 0 && hotelCentsTyped > 0
+      ? Math.round((hotelCentsTyped / pointsTyped) * 10_000)
+      : null;
+  // Four decimals is as fine as the rate is ever *read* — $0.0062/pt, i.e.
+  // 0.62¢ — so that is what the field shows. What gets saved keeps the full
+  // six, because the rounding is worth $3.60 on a 78,000-point stay and every
+  // cash value downstream is computed from the stored figure.
+  const microsToField = rateDisplay;
+  const microsToExact = rateExact;
+  useEffect(() => {
+    if (rateEdited || impliedMicros == null) return;
+    setPointsValue(microsToField(impliedMicros));
+    setExactRate(microsToExact(impliedMicros));
+  }, [rateEdited, impliedMicros]);
+  // The sum stays on screen until it has been taken. Once "use it" applies a
+  // figure, the note has said everything it had to say — it comes back only if
+  // the points or the room rate move and there is a new sum to show.
+  const [rateTakenAt, setRateTakenAt] = useState<number | null>(null);
+  const showRateHint = impliedMicros != null && rateTakenAt !== impliedMicros;
+  // The unrounded figure behind a calculated rate. Null once the rate is typed
+  // by hand — then what was typed is exactly what is meant, and is saved as-is.
+  const [exactRate, setExactRate] = useState<string | null>(
+    storedMicros ? rateExact(storedMicros) : null,
+  );
   const overAllotment =
     card?.freeNightPointsLimit && pointsTyped > card.freeNightPointsLimit
       ? pointsTyped - card.freeNightPointsLimit
@@ -71,11 +114,16 @@ export function StayModal({
   // stay already draws and what the form now says. Negative = comes off the
   // card, positive = handed back.
   const creditTyped = Math.round((Number(hotelCredit.replace(/[$,\s]/g, "")) || 0) * 100);
+  // Points the card has actually lent this stay — none of them, on a stay
+  // whose points figure is a what-if, so the preview matches what saving does.
   const alreadyDrawn = stay && !stay.cancelledAt && stay.accountId === accountId
-    ? { points: stay.pointsCost, credit: stay.hotelCreditCents }
+    ? { points: stay.pointsUsed ? stay.pointsCost : 0, credit: stay.hotelCreditCents }
     : { points: 0, credit: 0 };
   const draw = card
-    ? { points: pointsTyped - alreadyDrawn.points, credit: creditTyped - alreadyDrawn.credit }
+    ? {
+        points: (pointsUsed ? pointsTyped : 0) - alreadyDrawn.points,
+        credit: creditTyped - alreadyDrawn.credit,
+      }
     : null;
 
   const saved =
@@ -188,7 +236,7 @@ export function StayModal({
              amounts — so they ride on one line instead of eating five rows
              of the form. Two per row at 375px, where five would be unreadable. */}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
-          <Field label="Points cost">
+          <Field label={pointsUsed ? "Points used" : "Points it would've cost"}>
             <input
               type="number"
               name="pointsCost"
@@ -198,6 +246,20 @@ export function StayModal({
               onChange={(e) => setPoints(e.target.value)}
               className={inputClass}
             />
+            {/* The one switch that says whether those points actually left the
+                card. Unticked, the stay was paid in cash and the figure is
+                only there to compare the two — it never reaches a total or
+                the card's balance. */}
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold">
+              <input
+                type="checkbox"
+                name="pointsUsed"
+                checked={pointsUsed}
+                onChange={(e) => setPointsUsed(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[var(--brand)]"
+              />
+              Pts used
+            </label>
             {/* Whether the night fits inside the card's yearly certificate. */}
             {overAllotment > 0 ? (
               <span className="mt-0.5 block text-[10px] font-medium text-negative">
@@ -206,13 +268,46 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
-          <Field label="Value per point">
+          <Field label={pointsUsed ? "Value per point" : "Value per point (if used)"}>
             <input
-              name="pointsValue"
               value={pointsValue}
-              onChange={(e) => setPointsValue(e.target.value)}
+              onChange={(e) => {
+                setRateEdited(true);
+                setPointsValue(e.target.value);
+                setExactRate(null);
+              }}
               className={inputClass}
             />
+            {/* What actually posts: the rounded display never reaches the row. */}
+            <input type="hidden" name="pointsValue" value={exactRate ?? pointsValue} />
+            {/* The sum spelled out, in the unit the hobby speaks. Shown even
+                once the rate has been typed over, so a hand-entered number can
+                be read against what the room actually prices points at. */}
+            {showRateHint ? (
+              <span className="mt-0.5 block text-[10px] font-medium text-muted">
+                <span style={{ color: "var(--viz-savings)" }}>
+                  {(impliedMicros / 10_000).toFixed(2)}¢/pt
+                </span>{" "}
+                = {formatMoney(hotelCentsTyped, currency)} ÷ {pointsTyped.toLocaleString()} pts
+                {rateEdited && microsToField(impliedMicros) !== pointsValue.trim() ? (
+                  <>
+                    {" · "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRateEdited(false);
+                        setPointsValue(microsToField(impliedMicros));
+                        setExactRate(microsToExact(impliedMicros));
+                        setRateTakenAt(impliedMicros);
+                      }}
+                      className="font-semibold underline"
+                    >
+                      use it
+                    </button>
+                  </>
+                ) : null}
+              </span>
+            ) : null}
           </Field>
 
           <Field label={`Hotel cost (${currencySymbol(currency)})`}>

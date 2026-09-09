@@ -11,7 +11,6 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountData, BucketData, CardDetails, NonCardAccount, RewardActivity } from "@/app/(app)/accounts/types";
-import { suggestPointsValues, type PointsSuggestion } from "@/lib/points-value";
 import { throwIfAny } from "@/lib/supabase-result";
 import type { TravelBrand } from "@/app/(app)/travel/types";
 
@@ -22,7 +21,6 @@ export type CreditCardBoardData = {
   nonCardAccounts: NonCardAccount[];
   /** Buckets on those accounts, for the same modal's "From bucket". */
   allBuckets: BucketData[];
-  pointsSuggestions: PointsSuggestion[];
   travelBrands: TravelBrand[];
 };
 
@@ -34,7 +32,7 @@ export async function loadCreditCardBoardData(
   const now = new Date();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, stayRows, balanceRows, monthRows] =
+  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, balanceRows, monthRows] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -67,13 +65,6 @@ export async function loadCreditCardBoardData(
         .select("id, name")
         .eq("household_id", householdId)
         .order("name"),
-      // What the points actually redeemed at, so a card's valuation can be
-      // measured instead of guessed. Cancelled stays never happened.
-      supabase
-        .from("travel_stays")
-        .select("account_id, brand, points_cost, points_value_micros, hotel_cost_cents")
-        .eq("household_id", householdId)
-        .is("cancelled_at", null),
       // Summed in Postgres, one row per card — the same cost at 900
       // transactions or 900,000, and never silently truncated by the
       // 1000-row response cap.
@@ -94,7 +85,6 @@ export async function loadCreditCardBoardData(
     credit_card_details: cardDetailRows.error,
     debts: debtRows.error,
     travel_brands: brandRows.error,
-    travel_stays: stayRows.error,
     v_card_balances: balanceRows.error,
     v_card_month_spend: monthRows.error,
   });
@@ -217,34 +207,10 @@ export async function loadCreditCardBoardData(
       hasBuckets: bucketAccountIds.has(a.id),
     }));
 
-  const pointsSuggestions = suggestPointsValues(
-    cards
-      .filter((c) => c.cardDetails)
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        currentPoints: c.cardDetails?.currentPoints ?? 0,
-        pointsValueMicros: c.cardDetails?.pointsValueMicros ?? null,
-      })),
-    ((stayRows.data ?? []) as any[]).map((s) => ({
-      accountId: s.account_id ?? null,
-      brand: s.brand ?? null,
-      pointsCost: s.points_cost ?? 0,
-      // Same fallback the Travel Log shows: when the rate wasn't typed in,
-      // the room's cash rate divided by the points is the rate.
-      pointsValueMicros:
-        s.points_value_micros ??
-        ((s.points_cost ?? 0) > 0 && (s.hotel_cost_cents ?? 0) > 0
-          ? Math.round((s.hotel_cost_cents / s.points_cost) * 10_000)
-          : null),
-    })),
-  );
-
   return {
     cards,
     nonCardAccounts,
     allBuckets,
-    pointsSuggestions,
     travelBrands: (brandRows.data ?? []) as TravelBrand[],
   };
 }
