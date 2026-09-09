@@ -116,126 +116,157 @@ export function StayModal({
           <input name="city" defaultValue={stay?.city ?? ""} className={inputClass} />
         </Field>
 
-        <Field label="Reservation made">
-          <input type="date" name="reservedOn" defaultValue={stay?.reservedOn ?? ""} className={inputClass} />
-        </Field>
-        <Field label="Check-in date">
-          <input type="date" name="checkIn" defaultValue={stay?.checkIn ?? ""} className={inputClass} />
-        </Field>
+        {/* The two dates and the two counts on one row — none of the four
+             needs more than a quarter of the form. Two per row at 375px. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4">
+          <Field label="Reservation made">
+            <input type="date" name="reservedOn" defaultValue={stay?.reservedOn ?? ""} className={inputClass} />
+          </Field>
+          <Field label="Check-in date">
+            <input type="date" name="checkIn" defaultValue={stay?.checkIn ?? ""} className={inputClass} />
+          </Field>
+          <Field label="Nights">
+            <input type="number" name="nights" min="1" step="1" defaultValue={stay?.nights ?? 1} className={inputClass} />
+          </Field>
+          <Field label="Total pax">
+            <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={inputClass} />
+          </Field>
+        </div>
 
-        <Field label="Nights">
-          <input type="number" name="nights" min="1" step="1" defaultValue={stay?.nights ?? 1} className={inputClass} />
-        </Field>
-        <Field label="Total pax">
-          <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={inputClass} />
-        </Field>
-
-        <Field label="Booked thru / Brand">
-          <BrandPicker brands={brands} value={brand} onChange={setBrand} />
-        </Field>
-        {/* What the card has left is spelled out in the strip below. */}
-        <Field label="Card used">
-          <select
-            name="accountId"
-            value={accountId}
-            onChange={(e) => pickCard(e.target.value)}
-            className={inputClass}
-          >
-            <option value={NO_CARD}>Not linked to a card</option>
-            {cards.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          {/* What this card still has to spend, the moment you pick it. */}
-          {card ? (
-            <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-semibold">
-              <span style={{ color: "var(--viz-savings)" }}>
-                {card.currentPoints.toLocaleString()} pts
+        {/* How it was booked and on what: the brand, the card, the card's name
+             when it isn't linked, and whose it is. */}
+        <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-4">
+          <Field label="Booked thru / Brand">
+            <BrandPicker brands={brands} value={brand} onChange={setBrand} />
+          </Field>
+          {/* What the card has left is spelled out in the strip below. */}
+          <Field label="Card used">
+            <select
+              name="accountId"
+              value={accountId}
+              onChange={(e) => pickCard(e.target.value)}
+              className={inputClass}
+            >
+              <option value={NO_CARD}>Not linked to a card</option>
+              {cards.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {/* What this card still has to spend, the moment you pick it. */}
+            {card ? (
+              <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-semibold">
+                <span style={{ color: "var(--viz-savings)" }}>
+                  {card.currentPoints.toLocaleString()} pts
+                </span>
+                {card.freeNightCreditCents ? (
+                  <span style={{ color: "var(--viz-bills)" }}>
+                    {formatMoney(card.freeNightCreditCents, currency)} night credit
+                  </span>
+                ) : null}
+                {card.freeNightPointsLimit ? (
+                  <span className="text-muted">
+                    {card.freeNightPointsLimit.toLocaleString()} pt free-night cap
+                  </span>
+                ) : null}
               </span>
-              {card.freeNightCreditCents ? (
-                <span style={{ color: "var(--viz-bills)" }}>
-                  {formatMoney(card.freeNightCreditCents, currency)} night credit
-                </span>
-              ) : null}
-              {card.freeNightPointsLimit ? (
-                <span className="text-muted">
-                  {card.freeNightPointsLimit.toLocaleString()} pt free-night cap
-                </span>
-              ) : null}
+            ) : null}
+          </Field>
+          <Field label="Card name (if not linked)">
+            <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} className={inputClass} />
+          </Field>
+          <Field label="Card owner">
+            <input
+              name="holder"
+              value={holder}
+              onChange={(e) => setHolder(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        {/* The five figures are all short — points, a rate, three money
+             amounts — so they ride on one line instead of eating five rows
+             of the form. Two per row at 375px, where five would be unreadable. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
+          <Field label="Points cost">
+            <input
+              type="number"
+              name="pointsCost"
+              min="0"
+              step="1"
+              value={points}
+              onChange={(e) => setPoints(e.target.value)}
+              className={inputClass}
+            />
+            {/* Whether the night fits inside the card's yearly certificate. */}
+            {overAllotment > 0 ? (
+              <span className="mt-0.5 block text-[10px] font-medium text-negative">
+                {overAllotment.toLocaleString()} pts over the{" "}
+                {card?.freeNightPointsLimit?.toLocaleString()} allotted — you pay the difference
+              </span>
+            ) : null}
+          </Field>
+          <Field label="Value per point">
+            <input
+              name="pointsValue"
+              value={pointsValue}
+              onChange={(e) => setPointsValue(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+
+          <Field label={`Hotel cost (${currencySymbol(currency)})`}>
+            <input
+              name="hotelCost"
+              value={hotelCost}
+              onChange={(e) => setHotelCost(e.target.value)}
+              inputMode="decimal"
+              className={inputClass}
+            />
+          </Field>
+          <Field label={`Pocket cost (${currencySymbol(currency)})`}>
+            <input
+              name="pocketCost"
+              value={pocketCost}
+              onChange={(e) => setPocketCost(e.target.value)}
+              inputMode="decimal"
+              className={inputClass}
+            />
+          </Field>
+
+          <Field label={`Hotel credit used (${currencySymbol(currency)})`}>
+            <input
+              name="hotelCredit"
+              value={hotelCredit}
+              onChange={(e) => setHotelCredit(e.target.value)}
+              inputMode="decimal"
+              className={inputClass}
+            />
+          </Field>
+        </div>
+
+        {/* The flag sits beside the note it used to be written inside — the
+            log's B'fast column and filter read it instead of the text. */}
+        <div className="flex items-end gap-3 sm:col-span-2">
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+            <input
+              type="checkbox"
+              name="breakfastIncluded"
+              defaultChecked={stay?.breakfastIncluded ?? false}
+              className="h-4 w-4 accent-[var(--brand)]"
+            />
+            {/* Two short lines rather than one long one, so the note beside it
+                keeps the width. */}
+            <span>
+              B&apos;fast
+              <br />
+              incl
             </span>
-          ) : null}
-        </Field>
-        <Field label="Card name (if not linked)">
-          <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} className={inputClass} />
-        </Field>
-        <Field label="Card owner">
-          <input
-            name="holder"
-            value={holder}
-            onChange={(e) => setHolder(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Points cost">
-          <input
-            type="number"
-            name="pointsCost"
-            min="0"
-            step="1"
-            value={points}
-            onChange={(e) => setPoints(e.target.value)}
-            className={inputClass}
-          />
-          {/* Whether the night fits inside the card's yearly certificate. */}
-          {overAllotment > 0 ? (
-            <span className="mt-0.5 block text-[10px] font-medium text-negative">
-              {overAllotment.toLocaleString()} pts over the{" "}
-              {card?.freeNightPointsLimit?.toLocaleString()} allotted — you pay the difference
-            </span>
-          ) : null}
-        </Field>
-        <Field label="Value per point">
-          <input
-            name="pointsValue"
-            value={pointsValue}
-            onChange={(e) => setPointsValue(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label={`Hotel cost (${currencySymbol(currency)})`}>
-          <input
-            name="hotelCost"
-            value={hotelCost}
-            onChange={(e) => setHotelCost(e.target.value)}
-            inputMode="decimal"
-            className={inputClass}
-          />
-        </Field>
-        <Field label={`Pocket cost (${currencySymbol(currency)})`}>
-          <input
-            name="pocketCost"
-            value={pocketCost}
-            onChange={(e) => setPocketCost(e.target.value)}
-            inputMode="decimal"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label={`Hotel credit used (${currencySymbol(currency)})`}>
-          <input
-            name="hotelCredit"
-            value={hotelCredit}
-            onChange={(e) => setHotelCredit(e.target.value)}
-            inputMode="decimal"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Remarks" className="sm:col-span-2">
-          <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
-        </Field>
+          </label>
+          <Field label="Remarks" className="min-w-0 flex-1">
+            <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
+          </Field>
+        </div>
 
         <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">

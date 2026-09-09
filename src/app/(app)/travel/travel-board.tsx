@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
-import { CreditCardRewards } from "./credit-card-rewards";
+import { CreditCardRewardsProvider, CreditCardSections, RewardsPointsLog } from "./credit-card-rewards";
 import type { CreditCardBoardData } from "@/lib/credit-card-data";
 import { StayModal } from "./stay-modal";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
@@ -42,12 +42,13 @@ const SORTERS = {
   brand: (s: TravelStay) => (s.brand ?? "").toLowerCase(),
   cardLabel: (s: TravelStay) => (s.cardLabel ?? "").toLowerCase(),
   pax: (s: TravelStay) => s.pax ?? 0,
+  remarks: (s: TravelStay) => (s.remarks ?? "").toLowerCase(),
 } satisfies Record<string, (s: TravelStay) => string | number>;
 
 type SortKey = keyof typeof SORTERS;
 
 // Text sorts start A→Z; numbers and dates start with the biggest first.
-const TEXT_KEYS = new Set<SortKey>(["propertyName", "city", "brand", "cardLabel"]);
+const TEXT_KEYS = new Set<SortKey>(["propertyName", "city", "brand", "cardLabel", "remarks"]);
 
 function sheetDate(iso: string | null): string {
   if (!iso) return DASH;
@@ -113,8 +114,8 @@ export function TravelBoard({
     return stays.some((s) => stayYear(s) === current) ? current : ALL;
   });
   const [brand, setBrand] = useState<string>(ALL);
-  const [holder, setHolder] = useState<string>(ALL);
   const [query, setQuery] = useState("");
+  const [bfastOnly, setBfastOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "checkIn",
     dir: "desc",
@@ -149,10 +150,6 @@ export function TravelBoard({
     () => Array.from(new Set(stays.map((s) => s.brand).filter(Boolean) as string[])).sort(),
     [stays],
   );
-  const holders = useMemo(
-    () => Array.from(new Set(stays.map((s) => s.holder).filter(Boolean) as string[])).sort(),
-    [stays],
-  );
 
   // Search reads every text field on a stay, so "munich", "aspire" and
   // "breakfast" all find rows without picking a field first.
@@ -161,7 +158,7 @@ export function TravelBoard({
     const rows = stays.filter((s) => {
       if (year !== ALL && stayYear(s) !== year) return false;
       if (brand !== ALL && s.brand !== brand) return false;
-      if (holder !== ALL && s.holder !== holder) return false;
+      if (bfastOnly && !s.breakfastIncluded) return false;
       if (!needle) return true;
       return [s.propertyName, s.city, s.brand, s.cardLabel, s.holder, s.remarks]
         .some((field) => field?.toLowerCase().includes(needle));
@@ -177,7 +174,7 @@ export function TravelBoard({
       }
       return ((av as number) - (bv as number)) * dir;
     });
-  }, [stays, year, brand, holder, query, sort]);
+  }, [stays, year, brand, bfastOnly, query, sort]);
 
   // Clicking a column sorts by it; clicking the same one again flips it.
   function sortBy(key: SortKey) {
@@ -367,7 +364,14 @@ export function TravelBoard({
           </button>
         </section>
       ) : (
-        <>
+        <CreditCardRewardsProvider
+          accounts={rewards.cards}
+          currency={currency}
+          nonCardAccounts={rewards.nonCardAccounts}
+          allBuckets={rewards.allBuckets}
+          pointsSuggestions={rewards.pointsSuggestions}
+          travelBrands={rewards.travelBrands}
+        >
           {/* ---- What's still ahead. Sits above the archive because a booking
                you haven't taken yet is the thing you come here to check. */}
           {upcoming.length > 0 ? (
@@ -429,6 +433,11 @@ export function TravelBoard({
             </section>
           ) : null}
 
+          {/* ---- Travel & Credit Card Rewards: the points that pay for the
+               stays below. Moved here from /accounts — Accounts keeps the
+               plain card list and the Pay Card flow. */}
+          <CreditCardSections />
+
           {/* ---- The reservations themselves, with the filters that drive them
                and what the current selection adds up to. */}
           <Panel
@@ -462,6 +471,27 @@ export function TravelBoard({
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search hotel, city, card…"
+                  className="w-44 rounded-md bg-background px-2 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+                {/* Breakfast is the one perk worth pulling a list on, so it
+                    filters from here instead of only being readable per row. */}
+                <button
+                  type="button"
+                  onClick={() => setBfastOnly((v) => !v)}
+                  aria-pressed={bfastOnly}
+                  className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
+                    bfastOnly
+                      ? "text-white ring-transparent"
+                      : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                  }`}
+                  style={bfastOnly ? { backgroundColor: "var(--viz-bills)" } : undefined}
+                >
+                  B&apos;fast incl
+                </button>
                 {brands.length > 0 ? (
                   <select
                     value={brand}
@@ -472,25 +502,9 @@ export function TravelBoard({
                     {brands.map((b) => <option key={b} value={b}>{b}</option>)}
                   </select>
                 ) : null}
-                {holders.length > 0 ? (
-                  <select
-                    value={holder}
-                    onChange={(e) => setHolder(e.target.value)}
-                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                  >
-                    <option value={ALL}>All owners</option>
-                    {holders.map((h) => <option key={h} value={h}>{h}</option>)}
-                  </select>
-                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search hotel, city, card…"
-                  className="w-44 rounded-md bg-background px-2 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                />
                 {/* Mobile has cards, not column headers, so it needs its own
                     way to reorder them. */}
                 <select
@@ -508,9 +522,16 @@ export function TravelBoard({
                   <option value="pointsCost:desc">Most points</option>
                   <option value="propertyName:asc">Hotel name A–Z</option>
                 </select>
-                <Figure label="Hotel cost" value={formatMoney(shownTotals.hotel, currency)} tone="" />
+                {/* The night count opens the run of totals: it says what the
+                    money figures beside it are counting. */}
+                <span className="text-[11px] text-muted tabular-nums">
+                  Total in {year === ALL ? "all years" : year}: {shownTotals.nights} Night
+                  {shownTotals.nights === 1 ? "" : "s"}
+                  {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
+                </span>
+                <Figure label="Total hotel cost" value={formatMoney(shownTotals.hotel, currency)} tone="" />
                 <Figure
-                  label="Points used"
+                  label="Total pts used"
                   value={shownTotals.points.toLocaleString()}
                   tone=""
                   style={{ color: "var(--viz-savings)" }}
@@ -518,16 +539,11 @@ export function TravelBoard({
                 {/* What those points were actually worth, at the rate recorded
                     on each stay — the whole point of redeeming them. */}
                 <Figure
-                  label="Points worth"
+                  label="Total pts worth"
                   value={formatMoney(shownTotals.pointsValue, currency)}
                   tone=""
                   style={{ color: "var(--viz-savings)" }}
                 />
-                <span className="text-[11px] text-muted tabular-nums">
-                  Total in {year === ALL ? "all years" : year}: {shownTotals.nights} Night
-                  {shownTotals.nights === 1 ? "" : "s"}
-                  {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
-                </span>
               </div>
             </div>
 
@@ -546,11 +562,12 @@ export function TravelBoard({
                     <SortTh label="Hotel credit" col="hotelCredit" sort={sort} onSort={sortBy} />
                     <SortTh label="Hotel cost" col="hotelCost" sort={sort} onSort={sortBy} />
                     <SortTh label="Pocket cost" col="pocketCost" sort={sort} onSort={sortBy} />
-                    <SortTh label="City" col="city" sort={sort} onSort={sortBy} />
+                    <SortTh label="City" col="city" sort={sort} onSort={sortBy} align="left" />
                     <SortTh label="Total nights" col="nights" sort={sort} onSort={sortBy} nowrap />
-                    <SortTh label="Brand" col="brand" sort={sort} onSort={sortBy} />
-                    <SortTh label="CC info" col="cardLabel" sort={sort} onSort={sortBy} />
+                    <SortTh label="Brand" col="brand" sort={sort} onSort={sortBy} align="left" />
+                    <SortTh label="CC info" col="cardLabel" sort={sort} onSort={sortBy} align="left" />
                     <SortTh label="Total pax" col="pax" sort={sort} onSort={sortBy} nowrap />
+                    <SortTh label="Remarks" col="remarks" sort={sort} onSort={sortBy} align="left" />
                   </tr>
                 </thead>
                 <tbody>
@@ -604,14 +621,19 @@ export function TravelBoard({
                           <span className="text-[11px] font-semibold text-muted">{coveredBy(s)}</span>
                         )}
                       </td>
-                      <td className="px-2 py-2 text-center text-muted">{s.city ?? DASH}</td>
+                      <td className="px-2 py-2 text-left text-muted">{s.city ?? DASH}</td>
                       <td className="px-2 py-2 text-center tabular-nums">{s.nights}</td>
-                      <td className="px-2 py-2 text-center">{s.brand ?? DASH}</td>
-                      <td className="px-2 py-2 text-center text-xs text-muted">
+                      <td className="px-2 py-2 text-left">{s.brand ?? DASH}</td>
+                      <td className="px-2 py-2 text-left text-xs text-muted">
                         {(s.accountId ? cardName.get(s.accountId) : null) ?? s.cardLabel ?? DASH}
                       </td>
                       <td className={`px-2 py-2 text-center tabular-nums ${s.pax ? "" : "text-muted"}`}>
                         {s.pax ?? DASH}
+                      </td>
+                      {/* Free text, so it gets the leftover width and clamps at
+                          two lines rather than stretching the row. */}
+                      <td className="max-w-[220px] px-2 py-2 text-left text-xs text-muted">
+                        <span className="line-clamp-2">{s.remarks || DASH}</span>
                       </td>
                     </tr>
                   ))}
@@ -682,6 +704,11 @@ export function TravelBoard({
               <p className="px-4 py-8 text-center text-xs text-muted">No stays match these filters.</p>
             ) : null}
           </Panel>
+
+          {/* ---- The points those stays were paid with, right under the log
+               that spends them. */}
+          <RewardsPointsLog />
+
           {/* ---- The two charts stacked in one column with the table they're
                drawn from beside them, so the whole year-over-year picture is
                one screenful. Both charts read every stay, not the filtered set
@@ -749,18 +776,6 @@ export function TravelBoard({
             </div>
           </Panel>
           </section>
-
-          {/* ---- Travel & Credit Card Rewards: the points that pay for the
-               stays above. Moved here from /accounts — Accounts keeps the
-               plain card list and the Pay Card flow. */}
-          <CreditCardRewards
-            accounts={rewards.cards}
-            currency={currency}
-            nonCardAccounts={rewards.nonCardAccounts}
-            allBuckets={rewards.allBuckets}
-            pointsSuggestions={rewards.pointsSuggestions}
-            travelBrands={rewards.travelBrands}
-          />
 
           {/* ---- The two "who did we stay with" tallies, side by side: the
                same money cut by hotel brand on the left and by the card that
@@ -887,7 +902,7 @@ export function TravelBoard({
           </section>
 
 
-        </>
+        </CreditCardRewardsProvider>
       )}
 
       {linking ? (
@@ -968,20 +983,24 @@ function SortTh({
   sort,
   onSort,
   nowrap,
+  // Text columns read left-aligned: centring them leaves a ragged gap on both
+  // sides of every cell and pushes the neighbouring columns apart.
+  align = "center",
 }: {
   label: string;
   col: SortKey;
   sort: { key: SortKey; dir: "asc" | "desc" };
   onSort: (key: SortKey) => void;
   nowrap?: boolean;
+  align?: "center" | "left";
 }) {
   const active = sort.key === col;
   return (
-    <th className={`px-2 py-2 font-semibold ${nowrap ? "whitespace-nowrap" : ""}`}>
+    <th className={`px-2 py-2 font-semibold ${nowrap ? "whitespace-nowrap" : ""} ${align === "left" ? "text-left" : ""}`}>
       <button
         type="button"
         onClick={() => onSort(col)}
-        className={`mx-auto flex items-center gap-1 uppercase tracking-wide transition hover:text-foreground ${active ? "text-foreground" : ""}`}
+        className={`${align === "left" ? "mr-auto" : "mx-auto"} flex items-center gap-1 uppercase tracking-wide transition hover:text-foreground ${active ? "text-foreground" : ""}`}
       >
         {label}
         {active ? <span aria-hidden>{sort.dir === "asc" ? "▲" : "▼"}</span> : null}

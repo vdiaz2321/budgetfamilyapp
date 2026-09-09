@@ -21,6 +21,9 @@ export type TravelStay = {
   pocketCostCents: number;
   pocketPaidWith: PocketPaidWith;
   remarks: string | null;
+  // Breakfast came with the room. Lived inside `remarks` on the imported
+  // sheet; a flag of its own so it can be filtered and toggled from the log.
+  breakfastIncluded: boolean;
   // Set when the booking fell through. A cancelled stay stays in the archive
   // but is left out of every total, chart and tally.
   cancelledAt: string | null;

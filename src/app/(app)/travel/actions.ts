@@ -179,6 +179,7 @@ export async function saveTravelStay(formData: FormData) {
     points_cost: pointsCost,
     pocket_paid_with: pocketPaidWith,
     remarks: text(formData, "remarks"),
+    breakfast_included: formData.get("breakfastIncluded") === "on",
     updated_at: new Date().toISOString(),
   };
 
