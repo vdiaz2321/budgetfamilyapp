@@ -6,6 +6,7 @@ import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
+import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
 import {
@@ -76,6 +77,26 @@ function maskAccountNumber(accountNumber: string | null): string | null {
   return lastFour ? `•••• ${lastFour}` : null;
 }
 
+// How many months the popup shows, newest first. Columns past the first
+// appear only as the popup gets wide enough for them — see MONTH_GRID below.
+const MONTH_COLUMNS = 5;
+// Column visibility, by index: month 0 always, 1-2 once the panel clears
+// 560px, 3-4 once it clears 860px. Kept as literal class strings because
+// Tailwind only generates the arbitrary values it can see in the source.
+// Written out in full rather than built by string surgery: Tailwind only
+// emits the arbitrary variants it can literally see in the source, so a class
+// assembled at runtime silently never gets any CSS.
+const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents"] as const;
+const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block"] as const;
+const monthTier = (i: number) => (i === 0 ? MONTH_TIER[0] : i <= 2 ? MONTH_TIER[1] : MONTH_TIER[2]);
+const monthHeadTier = (i: number) =>
+  i === 0 ? MONTH_HEAD_TIER[0] : i <= 2 ? MONTH_HEAD_TIER[1] : MONTH_HEAD_TIER[2];
+// Row grids: name + 1 money column when narrow, + 3 at 560px, + 5 at 860px.
+const ROW_GRID =
+  "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem]";
+const DEBT_ROW_GRID =
+  "grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] @[860px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem]";
+
 const SECTIONS: Section[] = [
   {
     key: "banking",
@@ -135,7 +156,7 @@ type Props = {
   currency: string;
   nonCardAccounts?: NonCardAccount[];
   // [current, prev, prev2] as YYYY-MM-01 — powers the three balance columns.
-  historyMonths: [string, string, string];
+  historyMonths: string[];
   // Payments made TO cards — feeds the read-only "Card payments" report at
   // the bottom of the Credit Cards section. Never used for balances.
   cardPayments?: CardPayment[];
@@ -372,11 +393,9 @@ export function AccountsBoard({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   };
   const anchorMonth = periodSnapshotMonth ?? historyMonths[0];
-  const displayMonths: [string, string, string] = [
-    anchorMonth,
-    shiftMonth(anchorMonth, 1),
-    shiftMonth(anchorMonth, 2),
-  ];
+  const displayMonths: string[] = Array.from({ length: MONTH_COLUMNS }, (_, i) =>
+    shiftMonth(anchorMonth, i),
+  );
   // Resolve an account's balance for the currently-selected period: the
   // historical snapshot if one exists for that month, otherwise the live
   // current balance so pre-history months don't blank the total.
@@ -528,7 +547,6 @@ export function AccountsBoard({
   const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
   const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
   const creditSections = SECTIONS.filter((s) => s.creditCard);
-  const excludedSections = [...kidsSections, ...creditSections];
 
   // Hide only debts linked to a debt_loan account (those show as their own account row).
   // Payoff-tracked credit-card debts still list here so the Debts section stays the single view of what's owed.
@@ -540,16 +558,9 @@ export function AccountsBoard({
       s.liability &&
       (accounts.some((a) => s.match(a)) || (s.key === "loans" && visibleBudgetDebts.length > 0)),
   );
-  const sectionKeys = [
-    ...assetSections.map((s) => s.key),
-    ...excludedSections.map((s) => s.key),
-    ...debtSectionsToRender.map((s) => s.key),
-    ...(visibleBudgetDebts.length > 0 ? ["budget_debts"] : []),
-  ];
   const [collapsed, setCollapsed] = useSessionCollapse("accounts-sections-open", () =>
     Object.fromEntries(SECTIONS.map((s) => [s.key, s.key !== "credit"])),
   );
-  const allOpen = sectionKeys.every((k) => !collapsed[k]);
   const toggleSection = (key: string) =>
     setCollapsed((c) => ({ ...c, [key]: !c[key] }));
 
@@ -569,16 +580,17 @@ export function AccountsBoard({
     Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, false])),
   );
   const isBucketsOpen = (id: string) => bucketsOpen[id] ?? false;
+  // Which section's popup is showing. Deliberately not persisted: reopening
+  // the page to a modal over the board would be disorienting.
+  const [openSectionKey, setOpenSectionKey] = useState<string | null>(null);
   const toggleBuckets = (id: string) =>
     setBucketsOpen((c) => ({ ...c, [id]: !isBucketsOpen(id) }));
 
-  // Expand/collapse all — sections and every account's bucket drawer together.
-  const toggleAll = () => {
-    setCollapsed(Object.fromEntries(sectionKeys.map((k) => [k, allOpen])));
-    setBucketsOpen(
-      Object.fromEntries(accounts.filter((a) => a.buckets.length > 0).map((a) => [a.id, !allOpen])),
-    );
-  };
+  // Expand/collapse every bucket drawer in one section. Lives inside that
+  // section's popup now — as a page-header button it controlled drawers that
+  // are no longer on the page at all.
+  const setBucketsOpenFor = (ids: string[], open: boolean) =>
+    setBucketsOpen((c) => ({ ...c, ...Object.fromEntries(ids.map((id) => [id, open])) }));
 
   // Custom Types already saved on fund accounts, offered alongside the fixed
   // list so a one-off ("Mortgage") only has to be typed once.
@@ -593,7 +605,7 @@ export function AccountsBoard({
 
   return (
     <SubtypeOptionsContext.Provider value={knownSubtypes}>
-    <div className="mx-auto w-full max-w-5xl space-y-4">
+    <div className="mx-auto w-full max-w-[110rem] space-y-4">
       {/* Title + period picker in one row, right-aligned like Insights.
           Subtitle removed at Victor's request. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -614,13 +626,6 @@ export function AccountsBoard({
             className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
           >
             Add account
-          </button>
-          <button
-            type="button"
-            onClick={toggleAll}
-            className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-sm ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
-          >
-            {allOpen ? "Collapse all" : "Expand all"}
           </button>
           <PeriodPicker
             granularity={periodGranularity}
@@ -727,10 +732,14 @@ export function AccountsBoard({
             currency={currency}
             historyMonths={displayMonths}
             periodSnapshotMonth={periodSnapshotMonth}
-            open={!collapsed[section.key]}
-            onToggle={() => toggleSection(section.key)}
+            // One popup at a time — these open as dialogs now, so this is a
+            // plain "which section is open" rather than the persisted
+            // per-section collapse the credit-card lists still use.
+            open={openSectionKey === section.key}
+            onToggle={() => setOpenSectionKey((k) => (k === section.key ? null : section.key))}
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
+            onSetBucketsOpen={setBucketsOpenFor}
             headerBadge={section.kidsGroup ? "Not in net worth" : undefined}
           />
         );
@@ -1181,6 +1190,7 @@ function AccountSection({
   onToggle,
   isBucketsOpen,
   onToggleBuckets,
+  onSetBucketsOpen,
   legacy = false,
   extraDebts = [],
   headerBadge,
@@ -1188,7 +1198,7 @@ function AccountSection({
   section: Section;
   accounts: AccountData[];
   currency: string;
-  historyMonths: [string, string, string];
+  historyMonths: string[];
   // "YYYY-MM-01" of the snapshot the header's period picker points at.
   // null = current period → use live balances (default). See `balanceOf`.
   periodSnapshotMonth: string | null;
@@ -1196,6 +1206,7 @@ function AccountSection({
   onToggle: () => void;
   isBucketsOpen: (id: string) => boolean;
   onToggleBuckets: (id: string) => void;
+  onSetBucketsOpen: (ids: string[], open: boolean) => void;
   legacy?: boolean;
   extraDebts?: BudgetDebt[];
   headerBadge?: string;
@@ -1228,6 +1239,10 @@ function AccountSection({
   const extraDebtsTotal = extraDebts.reduce((sum, d) => sum + d.balanceCents, 0);
   const total = accountsTotal + extraDebtsTotal;
 
+  // Accounts in this section that actually have buckets to open.
+  const bucketedIds = localAccounts.filter((a) => a.buckets.length > 0).map((a) => a.id);
+  const allBucketsOpen = bucketedIds.length > 0 && bucketedIds.every((id) => isBucketsOpen(id));
+
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
   const reorder = (fromId: string, toId: string) => {
@@ -1248,14 +1263,15 @@ function AccountSection({
   const { dragOverId, startDrag } = usePointerReorder("account", reorder);
 
   return (
-    <section className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Header */}
-      {/* Full-row click target — tapping anywhere on the header (label OR
-          amount) expands/collapses the section. The Debt/Loan Page link
-          stops propagation so it navigates instead of also toggling. */}
+      {/* Full-row click target — tapping anywhere on the tile (label OR
+          amount) opens the section's popup. The Debt/Loan Page link stops
+          propagation so it navigates instead of also opening. */}
       <div
         role="button"
         tabIndex={0}
+        aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => {
           if (open) setEditingId(null);
@@ -1275,7 +1291,7 @@ function AccountSection({
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            className="shrink-0 -rotate-90 text-muted"
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
@@ -1299,22 +1315,47 @@ function AccountSection({
         </span>
       </div>
 
-      {reorderError ? (
-        <p className="border-t border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
-      ) : null}
-
       {open ? (
-        <div className="border-t border-line">
+        <ModalShell
+          title={section.label}
+          onClose={() => {
+            setEditingId(null);
+            onToggle();
+          }}
+          className="sm:max-w-5xl"
+        >
+        {/* The sheet sits flush with the bottom of the phone, so the last row
+            would otherwise sit under the home indicator. */}
+        <div className="@container pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+        {/* Popup toolbar. Bucket expansion belongs here, beside the rows it
+            acts on — and this row is where the filter goes next. */}
+        {bucketedIds.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-4 py-2">
+            <button
+              type="button"
+              onClick={() => onSetBucketsOpen(bucketedIds, !allBucketsOpen)}
+              className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-sm ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+            >
+              {allBucketsOpen ? "Collapse all buckets" : "Expand all buckets"}
+            </button>
+          </div>
+        ) : null}
+        {reorderError ? (
+          <p className="px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
+        ) : null}
+        <div>
           {localAccounts.length > 0 || extraDebts.length > 0 ? (
             localAccounts.length === 0 && extraDebts.length > 0 ? (
-              <div className="grid grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              <div className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 <span />
-                <span className="text-center">{monthAbbr(historyMonths[0])}</span>
-                <span className="hidden text-center @[560px]:block">{monthAbbr(historyMonths[1])}</span>
-                <span className="hidden text-center @[560px]:block">{monthAbbr(historyMonths[2])}</span>
+                {historyMonths.map((m, i) => (
+                  <span key={m} className={`text-right ${monthHeadTier(i)}`}>
+                    {monthAbbr(m)}
+                  </span>
+                ))}
               </div>
             ) : (
-              <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              <div className={`grid ${ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 {headerBadge ? (
                   <span className="col-span-3 truncate text-[10px] font-medium uppercase tracking-wide text-muted">{headerBadge}</span>
                 ) : (
@@ -1324,9 +1365,14 @@ function AccountSection({
                     <span />
                   </>
                 )}
-                <span className="justify-self-stretch text-center">{monthAbbr(historyMonths[0])}</span>
-                <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[1])}</span>
-                <span className="hidden justify-self-stretch text-center @[560px]:block">{monthAbbr(historyMonths[2])}</span>
+                {historyMonths.map((m, i) => (
+                  <span
+                    key={m}
+                    className={`justify-self-stretch text-right ${monthHeadTier(i)}`}
+                  >
+                    {monthAbbr(m)}
+                  </span>
+                ))}
                 <span className="hidden @[560px]:block" />
               </div>
             )
@@ -1360,7 +1406,7 @@ function AccountSection({
               {extraDebts.map((d) => (
                 <li
                   key={`debt:${d.subcategoryId}`}
-                  className="grid grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] items-center gap-1.5 px-4 py-1.5"
+                  className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 px-4 py-1.5`}
                 >
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
                   {/* Same as account rows: each column reads the snapshot for
@@ -1368,11 +1414,11 @@ function AccountSection({
                   <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
                     {formatMoney(d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents, currency)}
                   </span>
-                  <div className="hidden @[560px]:contents">
-                    {[1, 2].map((col) => {
-                      const v = d.balancesByMonth?.[historyMonths[col]] ?? null;
-                      return (
-                        <span key={col} className="flex w-full justify-end">
+                  {historyMonths.slice(1).map((m, idx) => {
+                    const v = d.balancesByMonth?.[m] ?? null;
+                    return (
+                      <div key={m} className={monthTier(idx + 1)}>
+                        <span className="flex w-full justify-end">
                           {v != null ? (
                             <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
                               <span className="text-xs text-muted">{currencySymbol(currency)}</span>
@@ -1380,9 +1426,9 @@ function AccountSection({
                             </span>
                           ) : <span className="text-sm text-muted">—</span>}
                         </span>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    );
+                  })}
                 </li>
               ))}
             </ul>
@@ -1398,6 +1444,8 @@ function AccountSection({
             </p>
           ) : null}
         </div>
+        </div>
+        </ModalShell>
       ) : null}
     </section>
   );
@@ -1419,7 +1467,7 @@ function AccountRow({
   account: AccountData;
   section: Section;
   currency: string;
-  historyMonths: [string, string, string];
+  historyMonths: string[];
   /** True when the header is showing a month other than the current one. */
   isPastPeriod: boolean;
   editing: boolean;
@@ -1446,13 +1494,13 @@ function AccountRow({
       data-drop-key={`account:${account.id}`}
       className={`group/row ${rowBg} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
-      <div className="grid grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] items-center gap-1.5 px-4 py-1.5">
+      <div className={`grid ${ROW_GRID} items-center gap-1.5 px-4 py-1.5`}>
         <GripHandle onMouseDown={onDragStart} />
         {allowBuckets ? (
           <button
             type="button"
             onClick={onToggleBuckets}
-            title={bucketsOpen ? "Hide buckets" : "Show buckets"}
+            aria-label={bucketsOpen ? "Hide buckets" : "Show buckets"}
             aria-expanded={bucketsOpen}
             className="self-stretch flex w-full items-center justify-center rounded text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
           >
@@ -1500,8 +1548,24 @@ function AccountRow({
             </EditPill>
           ) : null}
           {bucketCount > 0 ? (
-            <span className="hidden shrink-0 text-[11px] text-muted @[560px]:inline">
-              {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
+            // Always visible: the only signal on the row that this account is
+            // split into buckets. It used to be @[560px]-only text, which the
+            // half-width section cards never reached, so no account ever
+            // showed it.
+            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+              <svg
+                width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+              >
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              {bucketCount}
+              {/* The word only fits once the card is wide; on a phone the
+                  stacked glyph plus the count carries it without eating the
+                  account name. */}
+              <span className="hidden @[560px]:inline">
+                {bucketCount === 1 ? "bucket" : "buckets"}
+              </span>
             </span>
           ) : null}
           {maskAccountNumber(account.accountNumber) ? <span className="hidden shrink-0 text-[11px] text-muted @[560px]:inline">{maskAccountNumber(account.accountNumber)}</span> : null}
@@ -1511,18 +1575,15 @@ function AccountRow({
         {allowBuckets && bucketCount > 0 ? (
           <>
             <DerivedBalance balanceCents={balanceFor(account, 0) ?? account.balanceCents} currency={currency} />
-            <div className="hidden @[560px]:contents">
-              <DerivedBalance
-                balanceCents={balanceFor(account, 1) ?? 0}
-                currency={currency}
-                muted={balanceFor(account, 1) == null}
-              />
-              <DerivedBalance
-                balanceCents={balanceFor(account, 2) ?? 0}
-                currency={currency}
-                muted={balanceFor(account, 2) == null}
-              />
-            </div>
+            {historyMonths.slice(1).map((m, idx) => (
+              <div key={m} className={monthTier(idx + 1)}>
+                <DerivedBalance
+                  balanceCents={balanceFor(account, idx + 1) ?? 0}
+                  currency={currency}
+                  muted={balanceFor(account, idx + 1) == null}
+                />
+              </div>
+            ))}
           </>
         ) : (
           <>
@@ -1546,22 +1607,17 @@ function AccountRow({
                 liability={section.liability}
               />
             )}
-            <div className="hidden @[560px]:contents">
-              <HistoricBalanceInput
-                accountId={account.id}
-                month={historyMonths[1]}
-                balanceCents={balanceFor(account, 1)}
-                currency={currency}
-                liability={section.liability}
-              />
-              <HistoricBalanceInput
-                accountId={account.id}
-                month={historyMonths[2]}
-                balanceCents={balanceFor(account, 2)}
-                currency={currency}
-                liability={section.liability}
-              />
-            </div>
+            {historyMonths.slice(1).map((m, idx) => (
+              <div key={m} className={monthTier(idx + 1)}>
+                <HistoricBalanceInput
+                  accountId={account.id}
+                  month={m}
+                  balanceCents={balanceFor(account, idx + 1)}
+                  currency={currency}
+                  liability={section.liability}
+                />
+              </div>
+            ))}
           </>
         )}
         <span className="hidden @[560px]:block" aria-hidden />
@@ -1593,7 +1649,7 @@ function BucketDrawer({
 }: {
   account: AccountData;
   currency: string;
-  historyMonths: [string, string, string];
+  historyMonths: string[];
   isPastPeriod: boolean;
 }) {
   const [adding, setAdding] = useState(false);
@@ -1639,6 +1695,7 @@ function BucketDrawer({
             <BucketRow
               key={b.id}
               bucket={b}
+              accountKind={account.kind}
               currency={currency}
               historyMonths={historyMonths}
               isPastPeriod={isPastPeriod}
@@ -1666,6 +1723,7 @@ function BucketDrawer({
 
 function BucketRow({
   bucket,
+  accountKind,
   currency,
   historyMonths,
   isPastPeriod,
@@ -1673,8 +1731,9 @@ function BucketRow({
   isDragOver,
 }: {
   bucket: BucketData;
+  accountKind: string;
   currency: string;
-  historyMonths: [string, string, string];
+  historyMonths: string[];
   isPastPeriod: boolean;
   onDragStart: () => void;
   isDragOver: boolean;
@@ -1694,9 +1753,12 @@ function BucketRow({
       }`}
     >
       <div
-        className={`grid h-7 items-center gap-1.5 grid-cols-[1.5rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_minmax(0,1fr)_8.5rem_8.5rem_8.5rem_1.25rem]`}
+        className={`grid h-7 items-center gap-1.5 ${ROW_GRID}`}
       >
       <GripHandle onMouseDown={onDragStart} size="sm" />
+      {/* Empty cell under the account's expand chevron — the bucket grid is
+          the account grid, so the money columns line up between the two. */}
+      <span />
       {/* No per-bucket tax select: the treatment is set once on the account
           (its Type pill in the row header shows it), and resolveTaxTreatment
           reads the bucket's NAME, so a bucket called "Roth" still bands
@@ -1725,24 +1787,21 @@ function BucketRow({
       ) : (
         <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
       )}
-      <div className="hidden @[560px]:contents">
-        <HistoricBucketBalanceInput
-          bucketId={bucket.id}
-          month={historyMonths[1]}
-          balanceCents={cellFor(historyMonths[1])}
-          currency={currency}
-        />
-        <HistoricBucketBalanceInput
-          bucketId={bucket.id}
-          month={historyMonths[2]}
-          balanceCents={cellFor(historyMonths[2])}
-          currency={currency}
-        />
-      </div>
+      {historyMonths.slice(1).map((m, idx) => (
+        <div key={m} className={monthTier(idx + 1)}>
+          <HistoricBucketBalanceInput
+            bucketId={bucket.id}
+            month={m}
+            balanceCents={cellFor(m)}
+            currency={currency}
+          />
+        </div>
+      ))}
       </div>
       {editing ? (
         <BucketEditPanel
           bucket={bucket}
+          accountKind={accountKind}
           onDone={() => setEditing(false)}
         />
       ) : null}
@@ -1758,7 +1817,21 @@ function BucketRow({
 // (there is no hover on a phone), and a one-click delete sat permanently
 // beside an editable field. An explicit panel gives rename, Cancel and a
 // confirmed Delete the same shape the account rows already use.
-function BucketEditPanel({ bucket, onDone }: { bucket: BucketData; onDone: () => void }) {
+function BucketEditPanel({
+  bucket,
+  accountKind,
+  onDone,
+}: {
+  bucket: BucketData;
+  accountKind: string;
+  onDone: () => void;
+}) {
+  // Holder and retirement type only mean something on an investment account —
+  // a savings bucket under Banking is never a Roth IRA, and offering the
+  // choice there just invites a wrong answer. updateBucket only writes
+  // retirement_kind when the field is present, so leaving it out preserves
+  // whatever is already stored.
+  const isInvestment = accountKind === "investment";
   const [savePending, startSave] = useTransition();
   const [delPending, startDel] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1783,20 +1856,24 @@ function BucketEditPanel({ bucket, onDone }: { bucket: BucketData; onDone: () =>
           // Holder and retirement type joined this row, and three fields
           // sharing one line clipped the name to a few characters. The name
           // takes the full width and the other two wrap beneath it.
-          className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-auto sm:flex-1 sm:basis-48"
+          className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand @[420px]:w-auto @[420px]:flex-1 @[420px]:basis-48"
         />
         {/* Whose money this bucket is. IRA limits are per person and one
             brokerage account routinely holds a Roth for each spouse, so
             without this the cap card can only fall back to the account's
             holder and would merge two people's separate allowances. */}
-        <input
-          name="holder"
-          defaultValue={bucket.holder ?? ""}
-          aria-label="Bucket holder"
-          placeholder="Holder (e.g. Victor)"
-          className="w-32 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-        />
-        <RetirementKindSelect name="retirementKind" value={bucket.retirementKind} />
+        {isInvestment ? (
+          <>
+            <input
+              name="holder"
+              defaultValue={bucket.holder ?? ""}
+              aria-label="Bucket holder"
+              placeholder="Holder (e.g. Victor)"
+              className="w-32 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+            <RetirementKindSelect name="retirementKind" value={bucket.retirementKind} />
+          </>
+        ) : null}
         <button
           type="submit"
           disabled={savePending}
@@ -1850,6 +1927,57 @@ function BucketEditPanel({ bucket, onDone }: { bucket: BucketData; onDone: () =>
   );
 }
 
+/**
+ * An amount input exactly as wide as its own text, so the "$" beside it never
+ * floats away from the digits.
+ *
+ * Sizing it in `ch` was close but never right: CSS `1ch` is the width of "0"
+ * in the default figures (10.08px here) while these boxes render
+ * `tabular-nums` at 9.77px, and "," / "." are under half a digit. On a
+ * right-aligned value every bit of that slack pooled on the LEFT — precisely
+ * where the "$" sits. An invisible sizer holding the same string measures the
+ * real thing instead of estimating it.
+ */
+function AutoWidthAmountInput({
+  sizeClass,
+  className,
+  defaultValue,
+  placeholder,
+  onInput,
+  ...rest
+}: { sizeClass: string } & React.ComponentProps<"input">) {
+  const sizerRef = useRef<HTMLSpanElement>(null);
+  const initial = String(defaultValue ?? "");
+
+  return (
+    // The sizer sits in normal flow and sets the width; the input is laid over
+    // it. A grid/flex stack instead lets the input's intrinsic `size` (20
+    // characters) win the track, which is what pushed the "$" away again.
+    <span className="relative inline-block max-w-full flex-none">
+      <span
+        ref={sizerRef}
+        aria-hidden
+        className={`invisible block whitespace-pre ${sizeClass}`}
+      >
+        {initial || placeholder || ""}
+      </span>
+      <input
+        {...rest}
+        defaultValue={defaultValue}
+        placeholder={placeholder}
+        onInput={(e) => {
+          if (sizerRef.current) {
+            sizerRef.current.textContent = e.currentTarget.value || placeholder || "";
+          }
+          onInput?.(e);
+        }}
+        size={1}
+        className={`absolute inset-0 h-full w-full min-w-0 ${sizeClass} ${className ?? ""}`}
+      />
+    </span>
+  );
+}
+
 function BucketBalanceInput({
   id,
   balanceCents,
@@ -1871,21 +1999,18 @@ function BucketBalanceInput({
     >
       <input type="hidden" name="id" value={id} />
       <span className="pointer-events-none text-sm text-muted">{currencySymbol(currency)}</span>
-      <input
+      <AutoWidthAmountInput
         key={initial}
         name="balance"
         type="text"
         inputMode="decimal"
         defaultValue={initial}
-        style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
-        onInput={(e) => {
-          e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
-        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-0 px-0 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        sizeClass="py-0 text-right text-sm tabular-nums"
+        className={`rounded-md bg-transparent px-0 transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1922,24 +2047,21 @@ function HistoricBucketBalanceInput({
       <span className={`pointer-events-none text-sm ${balanceCents == null ? "text-muted/50" : "text-muted"}`}>
         {currencySymbol(currency)}
       </span>
-      <input
+      <AutoWidthAmountInput
         key={initial}
         name="balance"
         type="text"
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
-        style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
-        onInput={(e) => {
-          e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
-        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const v = e.currentTarget.value.trim();
           if (v === "" && balanceCents == null) return;
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-0.5 px-0 text-right text-sm tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        sizeClass="py-0.5 text-right text-sm tabular-nums"
+        className={`rounded-md bg-transparent px-0 transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -2069,17 +2191,13 @@ function HistoricBalanceInput({
       <span className={`pointer-events-none text-sm ${balanceCents == null ? "text-muted/50" : "text-muted"}`}>
         {currencySymbol(currency)}
       </span>
-      <input
+      <AutoWidthAmountInput
         key={initial}
         name="balance"
         type="text"
         inputMode="decimal"
         defaultValue={initial}
         placeholder="—"
-        style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
-        onInput={(e) => {
-          e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
-        }}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={(e) => {
           const v = e.currentTarget.value.trim();
@@ -2087,7 +2205,8 @@ function HistoricBalanceInput({
           if (v === "" && balanceCents == null) return;
           if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
         }}
-        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-1 px-0 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+        sizeClass="py-1 text-right text-[0.9375rem] tabular-nums"
+        className={`rounded-md bg-transparent px-0 transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
           balanceCents != null && ((liability && balanceCents > 0) || (!liability && balanceCents < 0))
             ? "text-negative font-semibold"
             : ""
@@ -2123,7 +2242,7 @@ function BalanceInput({
         <span className="pointer-events-none text-sm text-muted">
           {currencySymbol(currency)}
         </span>
-        <input
+        <AutoWidthAmountInput
           // Remount (reset to the server value) whenever the saved amount changes.
           key={initial}
           name="balance"
@@ -2132,15 +2251,12 @@ function BalanceInput({
           type="text"
           inputMode="decimal"
           defaultValue={initial}
-          style={{ width: `calc(${Math.max(initial.length, 1)}ch + 0.2rem)` }}
-          onInput={(e) => {
-            e.currentTarget.style.width = `calc(${Math.max(e.currentTarget.value.length, 1)}ch + 0.2rem)`;
-          }}
           onFocus={(e) => e.currentTarget.select()}
           onBlur={(e) => {
             if (e.currentTarget.value !== initial) formRef.current?.requestSubmit();
           }}
-        className={`w-auto min-w-0 max-w-full flex-none rounded-md bg-transparent py-1 px-0 text-right text-[0.9375rem] tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
+          sizeClass="py-1 text-right text-[0.9375rem] tabular-nums"
+          className={`rounded-md bg-transparent px-0 transition hover:bg-brand-soft/40 focus:bg-surface focus:outline-none focus:ring-2 ${
             (liability && balanceCents > 0) || (!liability && balanceCents < 0) ? "text-negative font-semibold" : ""
           } ${pending ? "ring-2 ring-brand" : "focus:ring-brand"}`}
         />
@@ -2535,25 +2651,28 @@ function EditAccountForm({
       >
         <input type="hidden" name="id" value={account.id} />
         {section.kidsGroup ? <input type="hidden" name="kidsAccount" value="on" /> : null}
-        {/* Row 1: name, holder, account reference */}
-        <div className="flex items-center gap-2">
+        {/* Row 1: name, holder, account reference — one equal third each, so
+            they grow together with the card instead of the two fixed-width
+            fields pushing "Account reference" past its edge. Stacked on a
+            narrow card, where three across would be unreadable. */}
+        <div className="grid grid-cols-1 items-center gap-2 @[420px]:grid-cols-3">
           <input
             name="name"
             defaultValue={account.name}
             required
-            className="min-w-0 flex-1 rounded-md bg-surface px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full min-w-0 rounded-md bg-surface px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
           <input
             name="holder"
             defaultValue={account.holder ?? ""}
             placeholder="Holder"
-            className="w-20 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
           <input
             name="accountNumber"
             defaultValue={account.accountNumber ?? ""}
             placeholder="Account reference"
-            className="w-36 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
         {/* Row 2: ownership, kind/subtype, active, save */}
@@ -2665,19 +2784,16 @@ function EditAccountForm({
 // Grab handle for drag-to-reorder — mirrors the Net Worth grid's handle so
 // both boards reorder the same way (Victor prefers grab-and-drag over arrows).
 function EditPill({ onClick, className, children }: { onClick: () => void; className: string; children: React.ReactNode }) {
+  // No "Click to edit" tooltip: hover-only hints don't exist on a phone, and
+  // the pill's own hover ring already says it is a control.
   return (
-    <span className="group/pill relative inline-flex">
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
-        className={`shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold hover:ring-1 ${className}`}
-      >
-        {children}
-      </button>
-      <span className="pointer-events-none absolute -top-6 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background opacity-0 transition-opacity duration-75 group-hover/pill:opacity-100">
-        Click to edit
-      </span>
-    </span>
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={`shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold hover:ring-1 ${className}`}
+    >
+      {children}
+    </button>
   );
 }
 

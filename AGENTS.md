@@ -58,3 +58,29 @@ Do NOT add `title="…"` attributes, hover tooltips, or any other hover-only aff
 **If the intent isn't clear without a tooltip, the fix is to relabel the control, not to bolt a `title=""` on top.** Make the button obviously clickable — clearer text, an icon, active/inactive styling — instead. When removing tooltips, delete the whole `title="…"` prop; don't leave it "just in case".
 
 This applies to every new control you add and every existing one you touch. If Victor explicitly asks for a tooltip on something specific, that's the only case where it's fine.
+
+# Challenge the request when a better design exists
+
+Victor is explicit that he wants to be advised, not just obeyed: he is new to
+UI/design work and relies on this repo's agents to spot the better option. If
+a request is a workaround for a structural problem, do what he asked AND name
+the better approach in a sentence or two — then let him choose.
+
+The pattern that prompted this rule (2026-09-10): the Accounts board's two
+side-by-side section cards could not fit a multi-month table, and the fix
+arrived as four separate symptom requests — stretch the page wider, drop a
+month column, shrink the header, un-cramp the edit form — before he proposed
+the real answer himself (open each section in a popup, which has room for five
+months and a full-width edit row). Executing each request literally cost him
+four rounds.
+
+**How to apply:** when a fix is fighting for space, fighting a breakpoint, or
+adding a third special case to the same component, say so and say what would
+remove the constraint. Keep it to a sentence or two — a recommendation, not a
+menu of options. He decides; the point is that he sees the choice. Verify the
+recommendation against the real layout first (measure it in the preview) so a
+suggestion is never just an opinion.
+
+This does NOT override his stated preferences elsewhere in this file — no
+tooltips, no purple/orange in data, centered table headers, no new sidebar
+pages. Those are settled; don't relitigate them as "better design".
