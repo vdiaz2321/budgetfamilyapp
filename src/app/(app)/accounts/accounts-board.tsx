@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { useEffect, useRef, useState, useTransition } from "react";
+import React, { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
@@ -586,12 +586,6 @@ export function AccountsBoard({
   const toggleBuckets = (id: string) =>
     setBucketsOpen((c) => ({ ...c, [id]: !isBucketsOpen(id) }));
 
-  // Expand/collapse every bucket drawer in one section. Lives inside that
-  // section's popup now — as a page-header button it controlled drawers that
-  // are no longer on the page at all.
-  const setBucketsOpenFor = (ids: string[], open: boolean) =>
-    setBucketsOpen((c) => ({ ...c, ...Object.fromEntries(ids.map((id) => [id, open])) }));
-
   // Custom Types already saved on fund accounts, offered alongside the fixed
   // list so a one-off ("Mortgage") only has to be typed once.
   const knownSubtypes = Array.from(
@@ -739,7 +733,6 @@ export function AccountsBoard({
             onToggle={() => setOpenSectionKey((k) => (k === section.key ? null : section.key))}
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
-            onSetBucketsOpen={setBucketsOpenFor}
             headerBadge={section.kidsGroup ? "Not in net worth" : undefined}
           />
         );
@@ -776,7 +769,6 @@ export function AccountsBoard({
             <CardPaymentsLedger
               payments={cardPayments}
               cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
-              sourceNames={Object.fromEntries(nonCardAccounts.map((a) => [a.id, a.name]))}
               currency={currency}
               storageKey="accounts-card-payments-open"
               showChart={false}
@@ -822,20 +814,20 @@ function CreditCardListSection({
   const [payCardFor, setPayCardFor] = useState<AccountData | null>(null);
   const isMain = section.key === "credit";
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
-  // Cards with a recorded limit only, so an un-entered limit can't make
-  // utilisation look better than it is.
-  const cardsWithLimit = accounts.filter((a) => (a.cardDetails?.spendingLimitCents ?? 0) > 0);
-  const totalLimitCents = cardsWithLimit.reduce((s, a) => s + (a.cardDetails?.spendingLimitCents ?? 0), 0);
-  const owedOnLimited = cardsWithLimit.reduce((s, a) => s + Math.max(0, a.owedCents ?? 0), 0);
-  const utilisationPct = totalLimitCents > 0 ? (owedOnLimited / totalLimitCents) * 100 : null;
 
   return (
     <section id={isMain ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Mobile puts the title and chevron on their own row and drops the
           link + total underneath; below ~400px they cannot share a line
           without the chip sitting on top of the title. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6">
-        <button type="button" onClick={onToggle} className="order-1 min-w-0 shrink-0 text-left" aria-expanded={open}>
+      {/* The whole header toggles, blank space included — same as the other
+          section tiles. The title and chevron buttons have no onClick of their
+          own: their clicks (and Enter/Space) bubble up to this one. */}
+      <div
+        onClick={onToggle}
+        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition hover:bg-black/[0.02] sm:px-6 dark:hover:bg-white/[0.04]"
+      >
+        <button type="button" className="order-1 min-w-0 shrink-0 text-left" aria-expanded={open}>
           <span className="inline-flex items-center gap-2">
             <span className={`h-2 w-2 shrink-0 rounded-full ${section.dot}`} aria-hidden />
             <span className="text-base font-bold sm:text-lg">{section.label}</span>
@@ -846,10 +838,13 @@ function CreditCardListSection({
         {open && accounts.length > 0 ? (
           <span className="order-1 min-w-0 flex-1 text-[11px] text-muted">Click on card to make payment</span>
         ) : null}
-        <div className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:w-auto sm:justify-end">
+        {/* ml-auto pins this group right even when collapsed — the hint
+            above used to be the only spacer, so it slid left without it. */}
+        <div className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:ml-auto sm:w-auto sm:justify-end">
         {/* Where the points live now. Named for what it holds, not "see also". */}
         <Link
           href="/travel"
+          onClick={(e) => e.stopPropagation()}
           className="shrink-0 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
         >
           Points & rewards →
@@ -859,20 +854,11 @@ function CreditCardListSection({
           <span className="block text-sm font-bold tabular-nums text-negative sm:text-base">
             {formatMoney(totalOwed, currency)}
           </span>
-          {utilisationPct != null ? (
-            <span
-              className="block text-[10px] font-semibold tabular-nums"
-              style={{ color: utilisationPct < 30 ? "var(--positive)" : "var(--negative)" }}
-            >
-              {utilisationPct.toFixed(0)}% of {formatMoney(totalLimitCents, currency).replace(/\.00$/, "")} limit
-            </span>
-          ) : null}
         </span>
         </div>
         <button
           type="button"
-          onClick={onToggle}
-          className="order-2 grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800 sm:order-3"
+          className="order-2 ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800 sm:order-3 sm:ml-0"
           aria-label={open ? `Collapse ${section.label}` : `Expand ${section.label}`}
         >
           <svg
@@ -1180,6 +1166,61 @@ function SummaryStat({
   );
 }
 
+type SumSelection = {
+  mode: boolean;
+  picks: Map<string, number>;
+  toggle: (key: string, cents: number) => void;
+  refresh: (key: string, cents: number) => void;
+};
+const SumSelectContext = React.createContext<SumSelection | null>(null);
+
+// Wraps one money cell so it can be picked into the popup's running sum.
+// In "Add up" mode a transparent button covers the input, so a tap (including
+// on a phone) selects instead of focusing. Outside the mode, Cmd/Ctrl/Shift
+// -click selects and a plain click still edits.
+function SumCell({ pickKey, cents, children }: { pickKey: string; cents: number | null; children: React.ReactNode }) {
+  const sum = React.useContext(SumSelectContext);
+  const picked = sum != null && sum.picks.has(pickKey);
+  const refresh = sum?.refresh;
+  useEffect(() => {
+    if (picked && cents != null) refresh?.(pickKey, cents);
+  }, [picked, cents, pickKey, refresh]);
+
+  if (!sum || cents == null) return <>{children}</>;
+  const isModifierClick = (e: React.MouseEvent) => e.metaKey || e.ctrlKey || e.shiftKey;
+  return (
+    <div
+      onMouseDownCapture={(e) => {
+        // Stop the input from taking focus on a modifier-click.
+        if (isModifierClick(e)) e.preventDefault();
+      }}
+      onClickCapture={(e) => {
+        if (!isModifierClick(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        sum.toggle(pickKey, cents);
+      }}
+      className={`relative -mx-0.5 flex w-full items-center justify-end rounded-md px-0.5 ${
+        picked ? "bg-sky-500/15 ring-1 ring-inset ring-sky-500/60" : ""
+      }`}
+    >
+      {children}
+      {sum.mode ? (
+        <button
+          type="button"
+          aria-pressed={picked}
+          aria-label={picked ? "Remove from sum" : "Add to sum"}
+          onClick={(e) => {
+            e.stopPropagation();
+            sum.toggle(pickKey, cents);
+          }}
+          className={`absolute inset-0 cursor-pointer rounded-md ${picked ? "" : "hover:bg-sky-500/10"}`}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function AccountSection({
   section,
   accounts,
@@ -1190,7 +1231,6 @@ function AccountSection({
   onToggle,
   isBucketsOpen,
   onToggleBuckets,
-  onSetBucketsOpen,
   legacy = false,
   extraDebts = [],
   headerBadge,
@@ -1206,7 +1246,6 @@ function AccountSection({
   onToggle: () => void;
   isBucketsOpen: (id: string) => boolean;
   onToggleBuckets: (id: string) => void;
-  onSetBucketsOpen: (ids: string[], open: boolean) => void;
   legacy?: boolean;
   extraDebts?: BudgetDebt[];
   headerBadge?: string;
@@ -1214,6 +1253,31 @@ function AccountSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [, startReorder] = useTransition();
+
+  // Pick-to-sum, spreadsheet style. "Add up" mode makes a tap select a value
+  // instead of editing it (the only way on a phone); on desktop Cmd/Ctrl/Shift
+  // -click selects without the mode, so editing is never locked out.
+  const [sumMode, setSumMode] = useState(false);
+  const [sumPicks, setSumPicks] = useState<Map<string, number>>(() => new Map());
+  const toggleSumPick = useCallback((key: string, cents: number) => {
+    setSumPicks((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, cents);
+      return next;
+    });
+  }, []);
+  // A picked value that gets edited keeps the sum current.
+  const refreshSumPick = useCallback((key: string, cents: number) => {
+    setSumPicks((prev) => (prev.has(key) && prev.get(key) !== cents ? new Map(prev).set(key, cents) : prev));
+  }, []);
+  const sumTotal = [...sumPicks.values()].reduce((s, c) => s + c, 0);
+  const closePopup = () => {
+    setEditingId(null);
+    setSumMode(false);
+    setSumPicks(new Map());
+    onToggle();
+  };
 
   // Reorder optimistically — reflect the new order the instant you click,
   // instead of waiting on a full round trip to the server. `accounts` still
@@ -1238,10 +1302,6 @@ function AccountSection({
     .reduce((sum, a) => sum + balanceOf(a), 0);
   const extraDebtsTotal = extraDebts.reduce((sum, d) => sum + d.balanceCents, 0);
   const total = accountsTotal + extraDebtsTotal;
-
-  // Accounts in this section that actually have buckets to open.
-  const bucketedIds = localAccounts.filter((a) => a.buckets.length > 0).map((a) => a.id);
-  const allBucketsOpen = bucketedIds.length > 0 && bucketedIds.every((id) => isBucketsOpen(id));
 
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
@@ -1318,28 +1378,44 @@ function AccountSection({
       {open ? (
         <ModalShell
           title={section.label}
-          onClose={() => {
-            setEditingId(null);
-            onToggle();
-          }}
+          onClose={closePopup}
           className="sm:max-w-5xl"
+          headerExtra={
+            sumPicks.size > 0 ? (
+              <div className="flex items-center gap-1.5 whitespace-nowrap sm:gap-2">
+                <span className="text-xs text-muted">
+                  Sum<span className="hidden sm:inline"> of {sumPicks.size}</span>
+                </span>
+                <span className="text-base font-bold tabular-nums">{formatMoney(sumTotal, currency)}</span>
+                <button
+                  type="button"
+                  onClick={() => setSumPicks(new Map())}
+                  className="rounded-md px-1.5 py-1 text-xs font-medium sm:px-2 text-muted ring-1 ring-line transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : null
+          }
+          headerActions={
+          <button
+            type="button"
+            aria-pressed={sumMode}
+            onClick={() => setSumMode((v) => !v)}
+            className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium shadow-sm ring-1 transition ${
+              sumMode
+                ? "bg-foreground text-surface ring-foreground hover:bg-foreground/80"
+                : "bg-surface text-foreground ring-black/10 hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+            }`}
+          >
+            {sumMode ? "Done adding up" : "Add up values"}
+          </button>
+          }
         >
+        <SumSelectContext.Provider value={{ mode: sumMode, picks: sumPicks, toggle: toggleSumPick, refresh: refreshSumPick }}>
         {/* The sheet sits flush with the bottom of the phone, so the last row
             would otherwise sit under the home indicator. */}
         <div className="@container pb-[max(env(safe-area-inset-bottom),0.75rem)]">
-        {/* Popup toolbar. Bucket expansion belongs here, beside the rows it
-            acts on — and this row is where the filter goes next. */}
-        {bucketedIds.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-4 py-2">
-            <button
-              type="button"
-              onClick={() => onSetBucketsOpen(bucketedIds, !allBucketsOpen)}
-              className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-foreground shadow-sm ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
-            >
-              {allBucketsOpen ? "Collapse all buckets" : "Expand all buckets"}
-            </button>
-          </div>
-        ) : null}
         {reorderError ? (
           <p className="px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
         ) : null}
@@ -1411,13 +1487,19 @@ function AccountSection({
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
                   {/* Same as account rows: each column reads the snapshot for
                       whichever month the header is currently showing. */}
-                  <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
-                    {formatMoney(d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents, currency)}
-                  </span>
+                  <SumCell
+                    pickKey={`d:${d.subcategoryId}:${historyMonths[0]}`}
+                    cents={d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents}
+                  >
+                    <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
+                      {formatMoney(d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents, currency)}
+                    </span>
+                  </SumCell>
                   {historyMonths.slice(1).map((m, idx) => {
                     const v = d.balancesByMonth?.[m] ?? null;
                     return (
                       <div key={m} className={monthTier(idx + 1)}>
+                        <SumCell pickKey={`d:${d.subcategoryId}:${m}`} cents={v}>
                         <span className="flex w-full justify-end">
                           {v != null ? (
                             <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
@@ -1426,6 +1508,7 @@ function AccountSection({
                             </span>
                           ) : <span className="text-sm text-muted">—</span>}
                         </span>
+                        </SumCell>
                       </div>
                     );
                   })}
@@ -1445,6 +1528,7 @@ function AccountSection({
           ) : null}
         </div>
         </div>
+        </SumSelectContext.Provider>
         </ModalShell>
       ) : null}
     </section>
@@ -1524,11 +1608,6 @@ function AccountRow({
           <span className={`min-w-0 truncate text-sm ${account.active ? "text-foreground" : "text-negative"}`}>
             {account.name}
           </span>
-          {account.holder ? (
-            <EditPill onClick={onToggleEdit} className="hidden bg-black/5 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-white/10">
-              {account.holder}
-            </EditPill>
-          ) : null}
           {account.ownership === "joint" ? (
             <EditPill onClick={onToggleEdit} className="hidden bg-black/5 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-white/10">
               Joint
@@ -1553,19 +1632,7 @@ function AccountRow({
             // half-width section cards never reached, so no account ever
             // showed it.
             <span className="inline-flex shrink-0 items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
-              <svg
-                width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden
-              >
-                <path d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-              {bucketCount}
-              {/* The word only fits once the card is wide; on a phone the
-                  stacked glyph plus the count carries it without eating the
-                  account name. */}
-              <span className="hidden @[560px]:inline">
-                {bucketCount === 1 ? "bucket" : "buckets"}
-              </span>
+              {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
             </span>
           ) : null}
           {maskAccountNumber(account.accountNumber) ? <span className="hidden shrink-0 text-[11px] text-muted @[560px]:inline">{maskAccountNumber(account.accountNumber)}</span> : null}
@@ -1574,48 +1641,59 @@ function AccountRow({
 
         {allowBuckets && bucketCount > 0 ? (
           <>
-            <DerivedBalance balanceCents={balanceFor(account, 0) ?? account.balanceCents} currency={currency} />
+            <SumCell pickKey={`a:${account.id}:${historyMonths[0]}`} cents={balanceFor(account, 0) ?? account.balanceCents}>
+              <DerivedBalance balanceCents={balanceFor(account, 0) ?? account.balanceCents} currency={currency} />
+            </SumCell>
             {historyMonths.slice(1).map((m, idx) => (
               <div key={m} className={monthTier(idx + 1)}>
-                <DerivedBalance
-                  balanceCents={balanceFor(account, idx + 1) ?? 0}
-                  currency={currency}
-                  muted={balanceFor(account, idx + 1) == null}
-                />
+                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx + 1)}>
+                  <DerivedBalance
+                    balanceCents={balanceFor(account, idx + 1) ?? 0}
+                    currency={currency}
+                    muted={balanceFor(account, idx + 1) == null}
+                  />
+                </SumCell>
               </div>
             ))}
           </>
         ) : (
           <>
-            {isPastPeriod ? (
-              // The column is headed with a past month, so writing here has to
-              // land on that month's snapshot. Using the live BalanceInput
-              // would show today's figure under a JUL heading and overwrite
-              // today's balance when edited.
-              <HistoricBalanceInput
-                accountId={account.id}
-                month={historyMonths[0]}
-                balanceCents={balanceFor(account, 0)}
-                currency={currency}
-                liability={section.liability}
-              />
-            ) : (
-              <BalanceInput
-                id={account.id}
-                balanceCents={account.balanceCents}
-                currency={currency}
-                liability={section.liability}
-              />
-            )}
-            {historyMonths.slice(1).map((m, idx) => (
-              <div key={m} className={monthTier(idx + 1)}>
+            <SumCell
+              pickKey={`a:${account.id}:${historyMonths[0]}`}
+              cents={isPastPeriod ? balanceFor(account, 0) : account.balanceCents}
+            >
+              {isPastPeriod ? (
+                // The column is headed with a past month, so writing here has to
+                // land on that month's snapshot. Using the live BalanceInput
+                // would show today's figure under a JUL heading and overwrite
+                // today's balance when edited.
                 <HistoricBalanceInput
                   accountId={account.id}
-                  month={m}
-                  balanceCents={balanceFor(account, idx + 1)}
+                  month={historyMonths[0]}
+                  balanceCents={balanceFor(account, 0)}
                   currency={currency}
                   liability={section.liability}
                 />
+              ) : (
+                <BalanceInput
+                  id={account.id}
+                  balanceCents={account.balanceCents}
+                  currency={currency}
+                  liability={section.liability}
+                />
+              )}
+            </SumCell>
+            {historyMonths.slice(1).map((m, idx) => (
+              <div key={m} className={monthTier(idx + 1)}>
+                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx + 1)}>
+                  <HistoricBalanceInput
+                    accountId={account.id}
+                    month={m}
+                    balanceCents={balanceFor(account, idx + 1)}
+                    currency={currency}
+                    liability={section.liability}
+                  />
+                </SumCell>
               </div>
             ))}
           </>
@@ -1773,28 +1851,35 @@ function BucketRow({
           {bucket.name}
         </button>
       </div>
-      {isPastPeriod ? (
-        // Same rule as the account row above: the column is headed with a past
-        // month, so the edit has to land on that month's bucket_snapshot. The
-        // live input would show today's figure under an AUG heading and write
-        // today's balance when edited.
-        <HistoricBucketBalanceInput
-          bucketId={bucket.id}
-          month={historyMonths[0]}
-          balanceCents={cellFor(historyMonths[0])}
-          currency={currency}
-        />
-      ) : (
-        <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
-      )}
-      {historyMonths.slice(1).map((m, idx) => (
-        <div key={m} className={monthTier(idx + 1)}>
+      <SumCell
+        pickKey={`b:${bucket.id}:${historyMonths[0]}`}
+        cents={isPastPeriod ? cellFor(historyMonths[0]) : bucket.balanceCents}
+      >
+        {isPastPeriod ? (
+          // Same rule as the account row above: the column is headed with a past
+          // month, so the edit has to land on that month's bucket_snapshot. The
+          // live input would show today's figure under an AUG heading and write
+          // today's balance when edited.
           <HistoricBucketBalanceInput
             bucketId={bucket.id}
-            month={m}
-            balanceCents={cellFor(m)}
+            month={historyMonths[0]}
+            balanceCents={cellFor(historyMonths[0])}
             currency={currency}
           />
+        ) : (
+          <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
+        )}
+      </SumCell>
+      {historyMonths.slice(1).map((m, idx) => (
+        <div key={m} className={monthTier(idx + 1)}>
+          <SumCell pickKey={`b:${bucket.id}:${m}`} cents={cellFor(m)}>
+            <HistoricBucketBalanceInput
+              bucketId={bucket.id}
+              month={m}
+              balanceCents={cellFor(m)}
+              currency={currency}
+            />
+          </SumCell>
         </div>
       ))}
       </div>

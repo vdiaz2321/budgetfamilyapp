@@ -15,14 +15,12 @@ export type FiPlan = {
   annualContributionCents: number | null;
   realReturnPct: number;
   withdrawalRatePct: number;
-  includeCash: boolean;
 };
 
 export type FiMeasured = {
-  /** Invested (non-kids) accounts today. */
-  investedCents: number;
-  /** Cash sitting in savings and checking, offered as an opt-in. */
-  cashCents: number;
+  /** Every asset on the Accounts page today (its Assets card: no kids
+   *  accounts, no cards or loans) — cash and savings included. */
+  assetsCents: number;
   /** Bills + expenses over the last twelve months. */
   spendCents: number;
   /** Into savings and investments over the last twelve months. */
@@ -63,7 +61,7 @@ export function FiSection({
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
   const [editing, setEditing] = useState(false);
 
-  const portfolioCents = measured.investedCents + (plan.includeCash ? measured.cashCents : 0);
+  const portfolioCents = measured.assetsCents;
 
   // The projection grid, read as today's money — which is what it holds. The
   // rows are typed by hand in round figures ($90k while the kids are home,
@@ -81,10 +79,13 @@ export function FiSection({
       .map((p) => ({
         year: p.year,
         spendCents: p.spendingCents,
-        // What the plan puts away that year: income less spending.
-        contributionCents: Math.max(0, p.incomeCents - p.spendingCents),
+        // What the plan puts away that year: income less spending — unless a
+        // flat Invest/Saving figure was typed, which has to win here too or
+        // the field silently does nothing while the grid has rows.
+        contributionCents:
+          plan.annualContributionCents ?? Math.max(0, p.incomeCents - p.spendingCents),
       }));
-  }, [projection, thisYear, plan.annualSpendCents]);
+  }, [projection, thisYear, plan.annualSpendCents, plan.annualContributionCents]);
 
   const usingGrid = schedule.length > 0;
 
@@ -151,17 +152,6 @@ export function FiSection({
           <span className="text-sm font-bold">NW / FI Projections</span>
         </button>
 
-        {/* Sat at the very bottom of the panel before, which meant scrolling
-            past the whole chart to change the numbers the chart is drawn
-            from. */}
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="mr-auto rounded-md px-2.5 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-        >
-          Assumptions
-        </button>
-
         <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           {/* The two "today" facts live up here rather than in the body: they
               describe where he stands now, so they'd read as competing with
@@ -176,14 +166,17 @@ export function FiSection({
             value={formatMoney(fi.fiNumberCents, currency)}
             tone="text-foreground"
           />
+          {/* Portfolio today ÷ FI number. */}
           <Figure
-            label="Funded"
+            label="% of FI goal"
             value={`${Math.round(fi.progress * 100)}%`}
             tone=""
             style={{ color: "var(--viz-savings)" }}
           />
+          {/* Portfolio today × withdrawal rate — what today's assets could pay
+              out each year if he stopped working now. */}
           <Figure
-            label="Supports today"
+            label="Portfolio could pay / yr"
             value={`${formatMoney(fi.sustainableSpendCents, currency)}/yr`}
             tone="text-foreground"
           />
@@ -202,7 +195,18 @@ export function FiSection({
       {open ? (
         <div className="border-t border-line px-4 py-4 sm:px-6">
           <p className="text-xs text-muted">
-            At a {plan.realReturnPct}% real return, this
+            {/* The button leads the sentence it feeds: the 5% (and the rest of
+                this line) comes from here, so that's where you change it. */}
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              // Soft blue from the viz palette (not brand indigo — no purple on data).
+              className="mr-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
+            >
+              NW Assumptions
+            </button>
+            at a{" "}
+            {plan.realReturnPct}% real return, this
             {usingGrid ? " plan" : ` ${formatMoney(contributionCents, currency)} a year`}
             {usingGrid ? " reaches FI" : " covers your spending"}
             {fi.fiYear ? (
@@ -259,7 +263,7 @@ export function FiSection({
         <PlanModal
           plan={plan}
           measured={measured}
-          currency={currency}
+          gridThisYear={projection.find((p) => p.year === thisYear) ?? null}
           onClose={() => setEditing(false)}
         />
       ) : null}
@@ -458,12 +462,14 @@ function FiChart({
               style={{ left: `${centreOf(fiIndex)}%`, borderColor: "var(--positive)" }}
             >
               <span
-                className={`absolute top-0 whitespace-nowrap rounded bg-surface/90 px-1 text-[10px] font-semibold text-positive ${
+                className={`absolute top-0 z-10 whitespace-nowrap rounded bg-surface px-1 text-[10px] font-semibold text-positive ${
                   fiIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
                 FI {fiRow.year}
-                {birthYear ? ` · age ${fiRow.year - birthYear}` : ""} · {axisMoney(fiRow.endCents)}
+                {/* The projected portfolio that year, not the FI number —
+                    named so it doesn't read as a second goal figure. */}
+                {birthYear ? ` · age ${fiRow.year - birthYear}` : ""} · portfolio {axisMoney(fiRow.endCents)}
               </span>
             </span>
           ) : null}
@@ -583,20 +589,38 @@ function Readout({ label, value }: { label: string; value: string }) {
 function PlanModal({
   plan,
   measured,
-  currency,
+  gridThisYear,
   onClose,
 }: {
   plan: FiPlan;
   measured: FiMeasured;
-  currency: string;
+  /** This year's row of the NW Projections table, when it has one. */
+  gridThisYear: FiProjectionYear | null;
   onClose: () => void;
 }) {
   const router = useRouter();
+  // What a blank field actually falls back to — the NW Projections table when
+  // it covers this year (it wins over history in projectFi), else the last 12
+  // months of Budget actuals. Shown as the placeholder so blank is never a
+  // mystery number.
+  const blankSpendCents = gridThisYear ? gridThisYear.spendingCents : measured.spendCents;
+  const blankSaveCents = gridThisYear
+    ? Math.max(0, gridThisYear.incomeCents - gridThisYear.spendingCents)
+    : measured.contributionCents;
+  // Names the exact column it reads, with this year's figure, so "blank" is a
+  // number you can find on the page. (The table's Saved / invested column is
+  // income − spending, the same figure used here.)
+  // The figure itself is the gray placeholder in the box; the hint only says
+  // where it comes from.
+  const blankHint = (column: string) =>
+    gridThisYear
+      ? `Value is from ${column} column in NW Projections section`
+      : "Value is from your last 12 months of Budget actuals";
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <ModalShell title="Assumptions" onClose={onClose}>
+    <ModalShell title="NW Assumptions" onClose={onClose} className="sm:max-w-2xl">
       <form
         action={(formData) =>
           start(async () => {
@@ -608,7 +632,7 @@ function PlanModal({
             }
           })
         }
-        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
+        className="grid grid-cols-1 gap-x-3 gap-y-0 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2 md:grid-cols-3"
       >
         <Field label="Birth year">
           <input
@@ -644,44 +668,28 @@ function PlanModal({
           />
         </Field>
 
-        <Field label="Spending / yr — blank uses the last 12 months">
+        <Field label="Current Spending this year (Optional to adjust)" hint={blankHint("Spending")}>
           <input
             name="annualSpend"
             inputMode="decimal"
             defaultValue={plan.annualSpendCents ? centsToDisplay(plan.annualSpendCents) : ""}
-            placeholder={centsToDisplay(measured.spendCents)}
+            placeholder={centsToDisplay(blankSpendCents)}
             className={inputClass}
           />
         </Field>
-        <Field label="Invest/Saving / yr — blank uses the last 12 months">
+        <Field label="Current Invest/Saving this year (Optional to adjust)" hint={blankHint("Saved / invested")}>
           <input
             name="annualContribution"
             inputMode="decimal"
             defaultValue={
               plan.annualContributionCents ? centsToDisplay(plan.annualContributionCents) : ""
             }
-            placeholder={centsToDisplay(measured.contributionCents)}
+            placeholder={centsToDisplay(blankSaveCents)}
             className={inputClass}
           />
         </Field>
 
-        <label className="sm:col-span-2 flex items-start gap-2">
-          <input
-            type="checkbox"
-            name="includeCash"
-            defaultChecked={plan.includeCash}
-            className="mt-0.5 h-4 w-4 rounded accent-[var(--brand)]"
-          />
-          <span className="text-xs">
-            Count cash savings ({formatMoney(measured.cashCents, currency)}) as retirement money.
-            <span className="block text-muted">
-              Off by default — money earmarked for a house or a car isn&rsquo;t funding a
-              retirement.
-            </span>
-          </span>
-        </label>
-
-        <div className="sm:col-span-2 flex items-center justify-end gap-2 border-t border-line pt-3">
+        <div className="sm:col-span-full flex items-center justify-end gap-2 border-t border-line pt-3">
           <button
             type="submit"
             disabled={pending}
@@ -691,7 +699,7 @@ function PlanModal({
           </button>
         </div>
         {error ? (
-          <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p>
+          <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p>
         ) : null}
       </form>
     </ModalShell>
@@ -701,13 +709,17 @@ function PlanModal({
 const inputClass =
   "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+// Each field is label / input / hint on the form's shared rows (subgrid), so
+// three across a row line up even when one label wraps to two lines: labels
+// sit at the bottom of their row, right above the input.
+function Field({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <label className="block">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+    <label className="row-span-3 grid grid-rows-subgrid">
+      <span className="mb-0.5 self-end text-[10px] font-semibold uppercase tracking-wide text-muted">
         {label}
       </span>
       {children}
+      <span className="block pb-3 pt-1 text-[11px] text-muted">{hint}</span>
     </label>
   );
 }

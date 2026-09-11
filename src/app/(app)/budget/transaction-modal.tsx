@@ -1350,7 +1350,7 @@ function PayeeField({
         }
       />
       {open && value.trim().length > 0 && matches.length > 0 ? (
-        <ul className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
+        <ul className="absolute inset-x-0 bottom-full z-10 mb-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
           {matches.map((entry, idx) => {
             const isLineItem = "kind" in entry;
             const isHighlighted = idx === highlighted;

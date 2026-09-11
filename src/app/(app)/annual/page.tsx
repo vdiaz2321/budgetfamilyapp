@@ -504,22 +504,18 @@ export default async function AnnualOverviewPage({
 
   return (
     <div className="mx-auto w-full space-y-4 max-w-[1800px]">
-      {/* Desktop only. Twelve months against five kinds, then the same again
-          per category and per year, is more table than a phone can show
-          without shrinking it past reading — and /annual is deliberately
-          absent from the mobile tab bar and its More menu for the same
-          reason. Below lg the page says where to find it instead of
-          rendering a wall of figures nobody can use. */}
-      <div className="rounded-xl bg-surface p-5 shadow-sm ring-1 ring-black/5 lg:hidden dark:ring-white/10">
+      {/* Phones get a note instead of the page: twelve months across five
+          kinds is too much table for a 375px screen, and /annual is left out
+          of the mobile tab bar for the same reason. From sm (tablets, small
+          laptops) up the page renders and its wide tables scroll sideways in
+          their own boxes, so it never reads as empty there. */}
+      <div className="rounded-xl bg-surface p-5 shadow-sm ring-1 ring-black/5 sm:hidden dark:ring-white/10">
         <h1 className="text-lg font-bold">Annual Overview</h1>
-        <p className="mt-1 text-sm text-muted">
-          This one is built for a big screen — twelve months across five kinds, plus the
-          multi-year breakdown. Open it on a desktop or laptop.
-        </p>
+        <p className="mt-1 text-sm text-muted">Open this page on a tablet or computer.</p>
       </div>
 
-      <div className="hidden space-y-4 lg:block">
-      <div className="flex items-end justify-between gap-3">
+      <div className="hidden space-y-4 sm:block">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Annual Overview</h1>
           <p className="text-sm text-muted">

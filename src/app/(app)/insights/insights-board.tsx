@@ -250,7 +250,6 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
         <CardPaymentsLedger
           payments={data.cardPayments}
           cardNames={data.cardNames}
-          sourceNames={data.sourceNames}
           currency={data.currency}
           storageKey="insights-card-payments-open"
         />

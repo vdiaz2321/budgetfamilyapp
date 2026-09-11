@@ -115,7 +115,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, include_cash")
+      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -462,17 +462,15 @@ export default async function NetworthPage() {
     }
   }
 
-  // The portfolio: investment accounts the household owns. Cash is offered
-  // separately because a house deposit is not retirement money.
-  let fiInvestedCents = 0;
-  let fiCashCents = 0;
+  // The portfolio: every asset the Accounts page counts — same rule as its
+  // Assets card (active, not a card or loan, not a kids account), so the FI
+  // figure and that card always agree. Victor's call (2026-09-11): cash and
+  // savings count toward FI too; there is no opt-in any more.
+  let fiAssetsCents = 0;
   for (const a of balanceRows ?? []) {
     if (a.is_kids_account || a.active === false) continue;
-    const cents = a.current_balance_cents ?? 0;
-    if (a.kind === "investment") fiInvestedCents += cents;
-    else if (a.kind === "savings_bucket" || a.kind === "checking" || a.kind === "cash") {
-      fiCashCents += cents;
-    }
+    if (a.kind === "credit_card" || a.kind === "debt_loan") continue;
+    fiAssetsCents += a.current_balance_cents ?? 0;
   }
 
   // ---- NW Projections.
@@ -597,11 +595,9 @@ export default async function NetworthPage() {
         realReturnPct: planRow?.real_return_pct == null ? 5 : Number(planRow.real_return_pct),
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
-        includeCash: planRow?.include_cash ?? false,
       }}
       fiMeasured={{
-        investedCents: fiInvestedCents,
-        cashCents: fiCashCents,
+        assetsCents: fiAssetsCents,
         spendCents: fiSpendCents,
         contributionCents: fiContributionCents,
         fromMonth: fiFromMonth.slice(0, 7),

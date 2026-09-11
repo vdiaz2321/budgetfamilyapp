@@ -41,14 +41,12 @@ export type CardPayment = {
 export function CardPaymentsLedger({
   payments,
   cardNames,
-  sourceNames,
   currency,
   storageKey,
   showChart = true,
 }: {
   payments: CardPayment[];
   cardNames: Record<string, string>;
-  sourceNames: Record<string, string>;
   currency: string;
   storageKey: string;
   // Accounts renders the table only — that page is already dense with cards,
@@ -57,14 +55,12 @@ export function CardPaymentsLedger({
 }) {
   const [view, setView] = useState<"month" | "year">("month");
   const [hoverBar, setHoverBar] = useState<string | null>(null);
-  const [showPayments, setShowPayments] = useState(false);
   // Open on a fresh login, and holds whatever it was last set to while moving
   // around the app inside one session.
   const [openState, setOpenState] = useSessionCollapse(storageKey, () => ({ open: true }));
   const open = openState.open;
 
   const nameById = new Map(Object.entries(cardNames));
-  const sourceById = new Map(Object.entries(sourceNames));
   const years = [...new Set(payments.map((p) => p.date.slice(0, 4)))].sort().reverse();
   const [yearState, setYear] = useState<string>("");
   // Falls back to the newest year with data, so the picker is never empty and
@@ -144,7 +140,6 @@ export function CardPaymentsLedger({
   }));
   const chartMax = Math.max(1, ...chartBars.map((b) => b.value));
 
-  const listed = [...inScope].sort((a, b) => b.date.localeCompare(a.date));
   const money = (cents: number) => formatMoney(cents, currency);
   const cell = "px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap";
   // Money columns are right-aligned, so their headers are too — a centered
@@ -168,12 +163,7 @@ export function CardPaymentsLedger({
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          <span className="min-w-0">
-            <span className="block text-sm font-bold">Card payments</span>
-            <span className="block text-xs text-muted">
-              What you paid toward each card — payments only, not the charges on them.
-            </span>
-          </span>
+          <span className="min-w-0 text-sm font-bold">Credit Card Payments Made</span>
         </button>
         {open ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -320,7 +310,8 @@ export function CardPaymentsLedger({
               <thead>
                 <tr className="border-b border-line bg-surface">
                   <th className={`${headBase} sticky left-0 z-10 bg-surface text-center`}>Card</th>
-                  <th className={head}>Total</th>
+                  {/* By year this column spans every year, so "Annual" only fits by month. */}
+                  <th className={head}>{view === "month" ? "Annual Total" : "Total"}</th>
                   {showPeriodColumns
                     ? columns.map((c) => <th key={c.key} className={head}>{c.label}</th>)
                     : null}
@@ -380,47 +371,6 @@ export function CardPaymentsLedger({
               </tfoot>
             </table>
           </div>
-
-          <div className="border-t border-line px-4 py-2">
-            <button
-              type="button"
-              aria-pressed={showPayments}
-              onClick={() => setShowPayments((v) => !v)}
-              className={`rounded-lg px-2.5 py-1 text-[11px] font-bold ring-1 transition ${
-                showPayments
-                  ? "bg-negative/15 text-negative ring-negative/40"
-                  : "bg-negative/5 text-negative ring-negative/25 hover:bg-negative/15"
-              }`}
-            >
-              {showPayments ? "Hide payments" : `Show ${listed.length} payment${listed.length === 1 ? "" : "s"}`}
-            </button>
-          </div>
-          {showPayments ? (
-            <ul className="divide-y divide-line border-t border-line bg-background/70">
-              {listed.map((p) => (
-                <li
-                  key={p.id}
-                  className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 text-xs"
-                >
-                  <span className="tabular-nums text-muted">{p.date}</span>
-                  <span className="min-w-0 truncate font-semibold">
-                    {nameById.get(p.cardId) ?? "Closed card"}
-                    {/* The Pay-card modal pre-fills the memo with "Payment to
-                        <card>", which just repeats the name — show where the
-                        money came from instead, and the memo only when the
-                        user actually wrote something of their own. */}
-                    {p.fromAccountId && sourceById.has(p.fromAccountId) ? (
-                      <span className="font-normal text-muted"> · from {sourceById.get(p.fromAccountId)}</span>
-                    ) : null}
-                    {p.memo && p.memo !== `Payment to ${nameById.get(p.cardId) ?? ""}` ? (
-                      <span className="font-normal text-muted"> · {p.memo}</span>
-                    ) : null}
-                  </span>
-                  <span className="whitespace-nowrap font-semibold tabular-nums">{money(p.amountCents)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
         </>
       )}
     </section>

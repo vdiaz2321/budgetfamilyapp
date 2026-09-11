@@ -33,7 +33,9 @@ const TABS: { href: string; label: string; icon: React.ReactNode }[] = [
 // simply unreachable on a phone — the tab bar is the only navigation there,
 // since the sidebar is desktop-only and the header's 3-dot menu is account
 // settings, not navigation.
-const MORE_LINKS: { href: string; label: string; icon: React.ReactNode }[] = [
+// `phoneHidden`: pages that don't render on a phone (below sm) — the link is
+// left out there too, so it can't lead to a page that only says "use a tablet".
+const MORE_LINKS: { href: string; label: string; icon: React.ReactNode; phoneHidden?: boolean }[] = [
   {
     href: "/snowball",
     label: "Debt/Loans",
@@ -62,6 +64,7 @@ const MORE_LINKS: { href: string; label: string; icon: React.ReactNode }[] = [
   {
     href: "/annual",
     label: "Annual Overview",
+    phoneHidden: true,
     icon: (
       <>
         <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -242,7 +245,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
                   href={link.href}
                   role="menuitem"
                   onClick={() => setMoreOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors ${
+                  className={`${link.phoneHidden ? "hidden sm:flex" : "flex"} items-center gap-3 px-4 py-3 text-sm font-medium transition-colors ${
                     active ? "bg-white/10 text-[#8B80F9]" : "text-slate-300 hover:bg-white/5"
                   }`}
                 >

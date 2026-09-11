@@ -388,9 +388,6 @@ export default async function InsightsPage({
     currency: household.currency,
     cardPayments,
     cardNames: Object.fromEntries(cardAccounts.map((a) => [a.id, a.name])),
-    sourceNames: Object.fromEntries(
-      (accounts ?? []).filter((a) => a.kind !== "credit_card").map((a) => [a.id, a.name]),
-    ),
   };
 
   return <InsightsBoard data={data} />;

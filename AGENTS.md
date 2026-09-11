@@ -4,6 +4,13 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# Keep replies short
+
+Victor is new to this and long replies are hard for him to follow. End each
+task with: one line saying what changed, 2–4 short bullets (how it was checked,
+anything skipped), and at most one question or suggestion. Plain words, no
+repeating a point, no restating what the screenshot already shows.
+
 # Server-component pages in (app)/
 
 Every page under `src/app/(app)/` MUST get its auth + household from `getSessionContext()` in `src/lib/auth-context.ts` — do NOT re-run the `getUser → profile → household` chain manually. The layout already calls it; `getSessionContext` is `React.cache`'d so both share one result. Skipping this doubles the auth round-trips per page load, which is our biggest latency cost.

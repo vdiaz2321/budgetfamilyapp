@@ -86,5 +86,4 @@ export type InsightsData = {
   // sliced by the page's period picker.
   cardPayments: CardPayment[];
   cardNames: Record<string, string>;
-  sourceNames: Record<string, string>;
 };

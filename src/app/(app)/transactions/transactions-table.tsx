@@ -20,7 +20,22 @@ const KIND_LABEL: Record<CategoryKind, string> = {
   debt: "Debt",
 };
 
-const GRID = "grid-cols-[5rem_2rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
+// Same tokens as the category dots (KIND_DOT), as raw CSS vars so the Type
+// pill can tint its background and text from one color.
+const KIND_VAR: Record<CategoryKind, string> = {
+  income: "var(--positive)",
+  savings: "var(--viz-savings)",
+  bills: "var(--viz-bills)",
+  expenses: "var(--viz-expenses)",
+  debt: "var(--viz-debt)",
+};
+const kindPillStyle = (kind: CategoryKind): React.CSSProperties => ({
+  backgroundColor: `color-mix(in srgb, ${KIND_VAR[kind]} 16%, transparent)`,
+  // Pulled toward the text color so the light sky/teal tones stay readable.
+  color: `color-mix(in srgb, ${KIND_VAR[kind]} 75%, var(--foreground))`,
+});
+
+const GRID ="grid-cols-[5rem_2rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
 const CalendarIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -510,12 +525,12 @@ export function TransactionsTable({
             <span className="whitespace-nowrap text-xs text-muted">
               <span className="font-bold text-foreground">Received</span>{" "}
               <span className="tabular-nums font-semibold text-positive">{formatMoney(incomeTotal, currency)}</span>
-              <span className="mx-1.5">–</span>
+              <span className="mx-1.5">/</span>
               <span className="font-bold text-foreground">Spent</span>{" "}
               <span className="tabular-nums font-semibold text-negative">{formatMoney(outflowTotal, currency)}</span>
-              <span className="mx-1.5">–</span>
+              <span className="mx-1.5">/</span>
               <span className="font-bold text-foreground">Net</span>{" "}
-              <span className={`tabular-nums ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>
+              <span className={`tabular-nums font-semibold ${incomeLeft >= 0 ? "text-positive" : "text-negative"}`}>
                 {formatMoney(incomeLeft, currency)}
               </span>
             </span>
@@ -888,19 +903,26 @@ function TxLine({
         {formatMoney(Math.abs(tx.amountCents), currency)}
         </button>
       )}
-      <span className="truncate text-sm text-muted">
+      <span className="min-w-0 truncate text-sm text-muted">
         {tx.amountCents < 0 ? (
           <span className="rounded bg-positive/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-positive">
             Refund
           </span>
+        ) : tx.isTransfer || tx.isInvestmentTransfer || tx.isCardPayment ? (
+          // Money moving between your own accounts has no budget category, so
+          // it gets a neutral pill rather than borrowing a category's color.
+          <span className="inline-block max-w-full truncate rounded-full bg-black/5 px-2 py-0.5 align-middle text-xs font-medium text-muted dark:bg-white/10">
+            {tx.isTransfer ? "Transfer" : tx.isInvestmentTransfer ? "Investment transfer" : "Card payment"}
+          </span>
+        ) : tx.kind ? (
+          <span
+            className="inline-block max-w-full truncate rounded-full px-2 py-0.5 align-middle text-xs font-medium"
+            style={kindPillStyle(tx.kind)}
+          >
+            {KIND_LABEL[tx.kind]}
+          </span>
         ) : (
-          tx.isTransfer
-            ? "Transfer"
-            : tx.isInvestmentTransfer
-              ? "Investment transfer"
-              : tx.isCardPayment
-                ? "Card payment"
-                : tx.kind ? KIND_LABEL[tx.kind] : "—"
+          "—"
         )}
       </span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">

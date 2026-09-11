@@ -13,11 +13,18 @@ export function ModalShell({
   children,
   className,
   mobileAlign = "bottom",
+  headerExtra,
+  headerActions,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   className?: string;
+  // Rendered in the header between the title and Close — stays visible while
+  // the body scrolls (e.g. a running total).
+  headerExtra?: React.ReactNode;
+  // Buttons that act on the whole body (e.g. expand all), shown after the title.
+  headerActions?: React.ReactNode;
   // Where the panel sits on phones. "bottom" (default) is right for long,
   // scroll-heavy forms the thumb works through. "top" suits short forms, which
   // otherwise end up with their action buttons pinned in the very corner of the
@@ -39,18 +46,27 @@ export function ModalShell({
         className="fixed inset-0 z-40 bg-black/30"
       />
       <div className={`relative z-50 flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:max-h-[85vh] sm:rounded-2xl ${alignsTop ? "rounded-2xl" : "rounded-t-2xl"}${className ? ` ${className}` : ""}`}>
-        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3.5">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-5 py-3.5">
+          <h2 className="min-w-0 truncate text-lg font-bold">{title}</h2>
+          {/* Beside the title on wide screens; its own line under it on a phone. */}
+          {headerActions ? (
+            <div className="order-last flex basis-full flex-wrap items-center gap-2 sm:order-none sm:basis-auto">
+              {headerActions}
+            </div>
+          ) : null}
+          <div className="ml-auto flex min-w-0 items-center gap-3">
+            {headerExtra}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="overflow-y-auto">{children}</div>
       </div>

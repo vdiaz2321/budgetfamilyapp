@@ -284,7 +284,6 @@ export async function saveRetirementPlan(formData: FormData) {
       annual_contribution_cents: money("annualContribution"),
       real_return_pct: realReturn ?? 5,
       withdrawal_rate_pct: withdrawal ?? 4,
-      include_cash: formData.get("includeCash") === "on",
       updated_at: new Date().toISOString(),
     },
     { onConflict: "household_id" },

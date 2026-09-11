@@ -198,8 +198,8 @@ export function ProjectionSection({
                   <th className="px-3 py-2 text-center font-semibold">Income</th>
                   <th className="px-3 py-2 text-center font-semibold">Spending</th>
                   <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Saved / invested</th>
-                  <th className="px-3 py-2 text-center font-semibold">Proj EOY NW</th>
                   <th className="px-3 py-2 text-center font-semibold">Actual</th>
+                  <th className="px-3 py-2 text-center font-semibold">Proj EOY NW</th>
                   <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Actual Diff</th>
                 </tr>
               </thead>
@@ -258,6 +258,20 @@ export function ProjectionSection({
                           </span>
                         ) : null}
                       </td>
+                      <td className="px-3 py-2 text-center tabular-nums">
+                        {y.actualCents == null ? (
+                          <span className="text-muted">—</span>
+                        ) : (
+                          <>
+                            {formatMoney(y.actualCents, currency)}
+                            {y.inProgress ? (
+                              <span className="block text-[10px] font-normal text-muted">
+                                Actual so far
+                              </span>
+                            ) : null}
+                          </>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-center font-semibold tabular-nums">
                         {formatMoney(y.eoyCents, currency)}
                         {(() => {
@@ -272,20 +286,6 @@ export function ProjectionSection({
                             </span>
                           );
                         })()}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums">
-                        {y.actualCents == null ? (
-                          <span className="text-muted">—</span>
-                        ) : (
-                          <>
-                            {formatMoney(y.actualCents, currency)}
-                            {y.inProgress ? (
-                              <span className="block text-[10px] font-normal text-muted">
-                                Actual so far
-                              </span>
-                            ) : null}
-                          </>
-                        )}
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums">
                         {diff == null ? (
