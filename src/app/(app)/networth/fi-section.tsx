@@ -15,6 +15,14 @@ export type FiPlan = {
   annualContributionCents: number | null;
   realReturnPct: number;
   withdrawalRatePct: number;
+  /** Spending drift above inflation, in real terms — 0 means "keeps pace". */
+  spendingGrowthPct: number;
+  /** Income drift above inflation, in real terms. */
+  incomeGrowthPct: number;
+  /** Pension + VA + Social Security per year, in today's money. */
+  guaranteedIncomeCents: number | null;
+  /** First year that income arrives; null means it already does. */
+  guaranteedIncomeStartYear: number | null;
 };
 
 export type FiMeasured = {
@@ -35,6 +43,8 @@ export type FiProjectionYear = {
   year: number;
   incomeCents: number;
   spendingCents: number;
+  /** Signed one-time effect on that year — a house, a car, a windfall. */
+  oneOffCents: number;
   /** The plan's closing net worth for that year — the grid's "Proj EOY NW". */
   eoyCents: number;
 };
@@ -82,8 +92,16 @@ export function FiSection({
         // What the plan puts away that year: income less spending — unless a
         // flat Invest/Saving figure was typed, which has to win here too or
         // the field silently does nothing while the grid has rows.
+        // A one-off moves the portfolio too, and with the sign it was typed
+        // with: a down payment is cash leaving, so that year contributes less
+        // (or nothing). Without this the grid's close and the chart's
+        // portfolio would part company the year a house is bought — the exact
+        // divergence the two were just reconciled to avoid. Not floored at
+        // zero for the same reason: a $100k down payment out of a $50k saving
+        // year is a net $50k coming OUT.
         contributionCents:
-          plan.annualContributionCents ?? Math.max(0, p.incomeCents - p.spendingCents),
+          (plan.annualContributionCents ?? Math.max(0, p.incomeCents - p.spendingCents)) +
+          p.oneOffCents,
       }));
   }, [projection, thisYear, plan.annualSpendCents, plan.annualContributionCents]);
 
@@ -106,6 +124,8 @@ export function FiSection({
           realReturnPct: plan.realReturnPct,
           withdrawalRatePct: plan.withdrawalRatePct,
           schedule,
+          guaranteedIncomeCents: plan.guaranteedIncomeCents ?? 0,
+          guaranteedIncomeStartYear: plan.guaranteedIncomeStartYear,
         },
         thisYear,
       ),
@@ -117,6 +137,8 @@ export function FiSection({
       measured.spendCents,
       plan.realReturnPct,
       plan.withdrawalRatePct,
+      plan.guaranteedIncomeCents,
+      plan.guaranteedIncomeStartYear,
       schedule,
       thisYear,
     ],
@@ -235,15 +257,28 @@ export function FiSection({
               <span className="font-semibold text-foreground">
                 {formatMoney(Math.round((atTarget.endCents * plan.withdrawalRatePct) / 100), currency)}
               </span>{" "}
-              a year —{" "}
-              {atTarget.endCents >= fi.fiNumberCents ? (
+              a year
+              {atTarget.guaranteedCents > 0 ? (
+                <>
+                  {" "}
+                  on top of {formatMoney(atTarget.guaranteedCents, currency)} of guaranteed income
+                </>
+              ) : null}{" "}
+              —{" "}
+              {/* Measured against what THAT year needs, not against the FI
+                  number. fi.fiNumberCents is the target at the year the plan
+                  crosses — 2041, sized for $45k of spending — so comparing a
+                  2036 portfolio with it called a $1,233,000 gap "$108,025.23
+                  short" while 2036 actually plans to spend $90,000. Every row
+                  carries its own targetCents; this is the one that applies. */}
+              {atTarget.endCents >= atTarget.targetCents ? (
                 <span className="font-semibold text-positive">enough</span>
               ) : (
                 <span className="font-semibold text-negative">
-                  {formatMoney(fi.fiNumberCents - atTarget.endCents, currency)} short
+                  {formatMoney(atTarget.targetCents - atTarget.endCents, currency)} short
                 </span>
-              )}
-              .
+              )}{" "}
+              of the {formatMoney(atTarget.targetCents, currency)} that year needs.
             </p>
           ) : null}
 
@@ -264,6 +299,7 @@ export function FiSection({
           plan={plan}
           measured={measured}
           gridThisYear={projection.find((p) => p.year === thisYear) ?? null}
+          thisYear={thisYear}
           onClose={() => setEditing(false)}
         />
       ) : null}
@@ -562,14 +598,14 @@ function FiChart({
             className="inline-block h-2 w-2.5 rounded-[1px]"
             style={{ backgroundColor: "var(--viz-spending)" }}
           />
-          Portfolio at year end — still short of the FI number
+          Portfolio at year end
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block h-2 w-2.5 rounded-[1px]"
             style={{ backgroundColor: "var(--positive)" }}
           />
-          {fi.fiYear ? `Reach FI — ${fi.fiYear} onward` : "Reach FI"}
+          Reach FI
         </span>
         <span className="text-muted">Press a bar for that year&rsquo;s figures.</span>
       </div>
@@ -590,12 +626,14 @@ function PlanModal({
   plan,
   measured,
   gridThisYear,
+  thisYear,
   onClose,
 }: {
   plan: FiPlan;
   measured: FiMeasured;
   /** This year's row of the NW Projections table, when it has one. */
   gridThisYear: FiProjectionYear | null;
+  thisYear: number;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -651,7 +689,7 @@ function PlanModal({
           />
         </Field>
 
-        <Field label="Real return (%)">
+        <Field label="Real return (%)" hint="After inflation. Drives the FI chart and Fill forward.">
           <input
             name="realReturnPct"
             inputMode="decimal"
@@ -664,6 +702,61 @@ function PlanModal({
             name="withdrawalRatePct"
             inputMode="decimal"
             defaultValue={plan.withdrawalRatePct}
+            className={inputClass}
+          />
+        </Field>
+
+        {/* The two drift rates Fill forward types with. Real, not nominal:
+            the grid is in today's money, so 0 means "keeps pace with
+            inflation" rather than "frozen". Named that way in the hint so a
+            blank 0 doesn't read as an unfinished field. */}
+        <Field
+          label="Income growth (%/yr)"
+          hint="Above inflation. 0 = keeps pace. Used by Fill forward."
+        >
+          <input
+            name="incomeGrowthPct"
+            inputMode="decimal"
+            defaultValue={plan.incomeGrowthPct}
+            className={inputClass}
+          />
+        </Field>
+        <Field
+          label="Spending growth (%/yr)"
+          hint="Above inflation. 0 = keeps pace. Used by Fill forward."
+        >
+          <input
+            name="personalInflationPct"
+            inputMode="decimal"
+            defaultValue={plan.spendingGrowthPct}
+            className={inputClass}
+          />
+        </Field>
+
+        {/* Pension, VA, Social Security. One combined figure on purpose —
+            the retirement plan itself lives elsewhere; this is only here so
+            the FI number stops asking the portfolio to fund income that is
+            already guaranteed. */}
+        <Field
+          label="Guaranteed income (/yr)"
+          hint="Pension, VA, Social Security. Today's money. Lowers the FI number."
+        >
+          <input
+            name="guaranteedIncome"
+            inputMode="decimal"
+            defaultValue={
+              plan.guaranteedIncomeCents ? centsToDisplay(plan.guaranteedIncomeCents) : ""
+            }
+            placeholder="0.00"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Guaranteed income starts" hint="Year it begins. Blank = already receiving it.">
+          <input
+            name="guaranteedIncomeStartYear"
+            inputMode="numeric"
+            defaultValue={plan.guaranteedIncomeStartYear ?? ""}
+            placeholder={String(thisYear)}
             className={inputClass}
           />
         </Field>

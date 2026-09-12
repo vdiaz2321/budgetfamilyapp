@@ -36,6 +36,15 @@ export type FiInputs = {
   realReturnPct: number;
   /** Safe withdrawal rate, e.g. 4 for the 4% rule (a 25× target). */
   withdrawalRatePct: number;
+  /**
+   * Income that arrives whether or not the portfolio does — a pension, VA
+   * disability, Social Security — per year, in today's money. It is subtracted
+   * from spending before the target is sized, because the portfolio only has
+   * to fund the part nothing else covers.
+   */
+  guaranteedIncomeCents?: number;
+  /** First year that income is received. Omit if it is already arriving. */
+  guaranteedIncomeStartYear?: number | null;
   /** Stop projecting after this many years. */
   maxYears?: number;
   /**
@@ -58,7 +67,12 @@ export type FiYear = {
   endCents: number;
   /** What this particular year of life costs, in today's money. */
   spendCents: number;
-  /** The portfolio that sustains THIS year's spending at the withdrawal rate. */
+  /** Guaranteed income received that year, in today's money. */
+  guaranteedCents: number;
+  /**
+   * The portfolio that sustains THIS year at the withdrawal rate — sized on
+   * spending less guaranteed income, which is the only part it has to fund.
+   */
   targetCents: number;
   /** Is the portfolio big enough to fund the spending at this point? */
   independent: boolean;
@@ -87,6 +101,8 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     withdrawalRatePct,
     maxYears = 60,
     schedule,
+    guaranteedIncomeCents = 0,
+    guaranteedIncomeStartYear = null,
   } = inputs;
 
   const byYear = new Map((schedule ?? []).map((y) => [y.year, y]));
@@ -103,10 +119,26 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     if (lastScheduled && year > lastScheduled.year) return lastScheduled;
     return { spendCents: annualSpendCents, contributionCents: annualContributionCents };
   };
-  const targetFor = (spendCents: number) =>
-    withdrawalRatePct > 0 ? Math.round(spendCents / (withdrawalRatePct / 100)) : 0;
+  // A pension (or VA, or Social Security) pays from its start year onward and
+  // is already in today's money, like everything else here.
+  const guaranteedFor = (year: number): number => {
+    if (guaranteedIncomeCents <= 0) return 0;
+    if (guaranteedIncomeStartYear != null && year < guaranteedIncomeStartYear) return 0;
+    return guaranteedIncomeCents;
+  };
+  // Only the part of a year's spending that nothing else covers has to come
+  // out of the portfolio. Floored at zero: once guaranteed income covers the
+  // whole year, the portfolio is not required at all and the target is $0.
+  const targetFor = (year: number, spendCents: number) => {
+    if (withdrawalRatePct <= 0) return 0;
+    const uncovered = Math.max(0, spendCents - guaranteedFor(year));
+    return Math.round(uncovered / (withdrawalRatePct / 100));
+  };
 
   const sustainableSpendCents = Math.round((portfolioCents * withdrawalRatePct) / 100);
+  // With no withdrawal rate there is no target to reach, so nothing can be
+  // called independent; with one, a $0 target means it already is.
+  const canReachTarget = withdrawalRatePct > 0;
 
   const years: FiYear[] = [];
   let balance = portfolioCents;
@@ -115,8 +147,8 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
 
   // Today counts too: if the portfolio already covers this year's spending,
   // the answer is "now" and the loop below never needs to say so.
-  const todayTarget = targetFor(planFor(fromYear).spendCents);
-  if (todayTarget > 0 && balance >= todayTarget) {
+  const todayTarget = targetFor(fromYear, planFor(fromYear).spendCents);
+  if (canReachTarget && balance >= todayTarget) {
     fiYear = fromYear;
     fiNumberAtCrossing = todayTarget;
   }
@@ -125,7 +157,7 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
   for (let offset = 1; offset <= maxYears; offset++) {
     const year = fromYear + offset;
     const { spendCents, contributionCents } = planFor(year);
-    const target = targetFor(spendCents);
+    const target = targetFor(year, spendCents);
     lastTarget = target;
 
     const start = balance;
@@ -133,7 +165,7 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     const end = start + growth + contributionCents;
     balance = end;
 
-    const independent = target > 0 && end >= target;
+    const independent = canReachTarget && end >= target;
     if (independent && fiYear == null) {
       fiYear = year;
       fiNumberAtCrossing = target;
@@ -146,6 +178,7 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
       contributionCents,
       endCents: end,
       spendCents,
+      guaranteedCents: guaranteedFor(year),
       targetCents: target,
       independent,
     });
@@ -161,7 +194,10 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
   return {
     fiNumberCents,
     sustainableSpendCents,
-    progress: fiNumberCents > 0 ? Math.min(1, portfolioCents / fiNumberCents) : 0,
+    // A $0 target means guaranteed income already covers the spending — that
+    // is 100% funded, not 0%. Reporting it as 0 read as "no progress" on the
+    // one household that needs the portfolio least.
+    progress: fiNumberCents > 0 ? Math.min(1, portfolioCents / fiNumberCents) : 1,
     years,
     fiYear,
     yearsToFi: fiYear == null ? null : fiYear - fromYear,

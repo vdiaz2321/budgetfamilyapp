@@ -1,5 +1,43 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
+// Every ModalShell currently on screen, oldest first. Escape closes only the
+// last one: with a confirmation opened over a form, one press should dismiss
+// the confirmation and leave the form standing, not clear the whole stack.
+const openModals: symbol[] = [];
+
+// Escape closes the topmost modal. Until now nothing listened for it anywhere
+// in the app, so every overlay — year editor, assumptions, confirmations,
+// transaction modal — could only be dismissed by finding the X or the backdrop.
+function useCloseOnEscape(onClose: () => void) {
+  // Read through a ref so the listener is bound once per modal rather than
+  // re-bound on every render an inline arrow prop causes.
+  const latest = useRef(onClose);
+  useEffect(() => {
+    latest.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const id = Symbol("modal");
+    openModals.push(id);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (openModals[openModals.length - 1] !== id) return;
+      event.stopPropagation();
+      latest.current();
+    };
+    // Capture, so a keydown handled inside a field (a select, a combobox)
+    // still reaches this first — and so the check above decides who closes.
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      const at = openModals.indexOf(id);
+      if (at >= 0) openModals.splice(at, 1);
+    };
+  }, []);
+}
+
 // A generic centered modal: backdrop (click closes) + scrollable panel, styled
 // to match the rest of the app's overlays (TransactionModal, item panels).
 //
@@ -32,6 +70,7 @@ export function ModalShell({
   mobileAlign?: "bottom" | "top";
 }) {
   const alignsTop = mobileAlign === "top";
+  useCloseOnEscape(onClose);
   return (
     <div
       onClick={(event) => event.stopPropagation()}
@@ -45,7 +84,12 @@ export function ModalShell({
         onClick={onClose}
         className="fixed inset-0 z-40 bg-black/30"
       />
-      <div className={`relative z-50 flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:max-h-[85vh] sm:rounded-2xl ${alignsTop ? "rounded-2xl" : "rounded-t-2xl"}${className ? ` ${className}` : ""}`}>
+      {/* A top-aligned panel on a phone sits under the status bar and notch,
+          which clips exactly the row that carries the title and the Close
+          button — so the header gets the safe area on top of its own padding.
+          It goes on this outer, non-scrolling box so it can't scroll away with
+          the content, and is dropped from `sm:` up where there is no notch. */}
+      <div className={`relative z-50 flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:max-h-[85vh] sm:rounded-2xl sm:pt-0 ${alignsTop ? "rounded-2xl pt-[max(env(safe-area-inset-top),0.5rem)]" : "rounded-t-2xl"}${className ? ` ${className}` : ""}`}>
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-5 py-3.5">
           <h2 className="min-w-0 truncate text-lg font-bold">{title}</h2>
           {/* Beside the title on wide screens; its own line under it on a phone. */}

@@ -35,10 +35,10 @@ export function isLiabilityKind(kind: string): boolean {
 /**
  * Does a `debts` row contribute to Net Worth?
  *
- * Mortgages are deliberately excluded: the app tracks the loan but not the
- * home's value, so counting one without the other would understate net worth
- * by roughly the value of the house. They stay visible on Accounts and
- * Debt/Loans for payoff tracking.
+ * Mortgages are deliberately excluded, always: the loan total is not the
+ * figure being measured — the monthly payment is, and that arrives as ordinary
+ * budgeted spending. They stay visible on Accounts and Debt/Loans for payoff
+ * tracking. See lib/net-worth.ts for the full rule.
  */
 export function debtCountsInNetWorth(debtKind: string | null | undefined): boolean {
   return !isDebtExcludedFromNetWorth(debtKind);

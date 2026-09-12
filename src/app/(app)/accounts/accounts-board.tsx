@@ -25,7 +25,7 @@ import {
 } from "./actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
-import { isDebtExcludedFromNetWorth, hasPropertyAsset } from "@/lib/net-worth";
+import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { PeriodPicker } from "../insights/insights-period-picker";
 import { currentPeriodKey, periodLabel, priorKey, type Granularity } from "../insights/period";
 import {
@@ -409,7 +409,6 @@ export function AccountsBoard({
   const active = accounts.filter((a) => a.active);
   // A mortgage only counts against Net Worth once the home behind it is
   // tracked — see lib/net-worth.ts.
-  const ownsProperty = hasPropertyAsset(active);
   const isLiability = (kind: string) => kind === "credit_card" || kind === "debt_loan";
 
   const assets = active
@@ -448,7 +447,7 @@ export function AccountsBoard({
     .filter((a) => a.kind === "debt_loan")
     .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
   const countedDirectDebtTotal = active
-    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype, ownsProperty))
+    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype))
     .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
 
   // Budget debts only count rows NOT already represented as a debt_loan account
@@ -458,7 +457,7 @@ export function AccountsBoard({
     0,
   );
   const countedBudgetDebtTotal = budgetDebts.reduce(
-    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, ownsProperty) ? sum : sum + debtBalanceOf(d)),
+    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind) ? sum : sum + debtBalanceOf(d)),
     0,
   );
   // Rewards cards are tracked separately from the Debt section. Their
@@ -491,7 +490,7 @@ export function AccountsBoard({
     let sum = 0;
     let covered = 0;
     for (const a of debtLoanAccounts) {
-      if (isDebtExcludedFromNetWorth(a.subtype, ownsProperty)) continue;
+      if (isDebtExcludedFromNetWorth(a.subtype)) continue;
       const p = priorBalanceOf(a);
       if (p == null) {
         sum += Math.abs(balanceOf(a));
@@ -521,7 +520,7 @@ export function AccountsBoard({
     let sum = 0;
     let covered = 0;
     for (const d of budgetDebts) {
-      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, ownsProperty)) continue;
+      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
       const p = priorDebtBalanceOf(d);
       if (p == null) {
         sum += debtBalanceOf(d);

@@ -1,9 +1,24 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
-import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { useRouter } from "next/navigation";
+import { ModalShell } from "@/components/modal-shell";
+import {
+  centsToDisplay,
+  centsToGroupedDisplay,
+  currencySymbol,
+  displayToCents,
+  formatMoney,
+} from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { setAccountSnapshot, setBucketSnapshot, upsertNetworthYear } from "./actions";
+import {
+  deleteNetworthHistory,
+  setAccountSnapshot,
+  setBucketSnapshot,
+  setDebtSnapshot,
+  setNetworthHistory,
+  upsertNetworthYear,
+} from "./actions";
 import { reorderAccounts, reorderBuckets } from "../accounts/actions";
 import { FiSection, type FiMeasured, type FiPlan } from "./fi-section";
 import { ProjectionSection, type ProjectionSeed, type ProjectionYear } from "./projection-section";
@@ -122,6 +137,8 @@ export type GridRow = {
   // Editing: which snapshot this row writes, if any.
   accountId?: string;
   bucketId?: string;
+  // A Budget debt row — writes debt_snapshots rather than account_snapshots.
+  subcategoryId?: string;
   editable?: boolean;
 };
 
@@ -224,6 +241,14 @@ export function NetworthBoard({
         currency={currency}
         thisYear={thisYear}
         seed={projectionSeed}
+        // Fill forward runs on the same assumptions the FI chart compounds
+        // with — one return rate, so the two sections can't disagree about
+        // growth the way they did when the grid carried a flat figure.
+        rates={{
+          returnPct: fiPlan.realReturnPct,
+          incomeGrowthPct: fiPlan.incomeGrowthPct,
+          spendingGrowthPct: fiPlan.spendingGrowthPct,
+        }}
       />
 
       {/* The chart used to pin to the top of the viewport while you scrolled
@@ -830,18 +855,21 @@ function GripHandle({ onMouseDown, label }: { onMouseDown: () => void; label: st
 function EditableBalanceCell({
   accountId,
   bucketId,
+  subcategoryId,
   month,
   balanceCents,
   currency,
 }: {
   accountId?: string;
   bucketId?: string;
+  subcategoryId?: string;
   month: string;
   balanceCents: number | null;
   currency: string;
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // The currency symbol lives INSIDE the field rather than beside it. As a
   // sibling it either sat marooned at the far left of the cell (input full
   // width) or shrank the input to the width of its text — and an empty cell's
@@ -859,6 +887,14 @@ function EditableBalanceCell({
     // Never write a snapshot for a cell that was empty and stayed empty —
     // otherwise tabbing across a row backfills it with zeros.
     if (value === "" && balanceCents == null) return;
+    // Text with no digit in it parses to 0 and would save as $0 — a typo like
+    // "125O" (letter O) or a stray keystroke silently wipes a real balance,
+    // on the one page whose whole job is typing balances. Put the cell back
+    // and write nothing.
+    if (value !== "" && !/\d/.test(value)) {
+      if (inputRef.current) inputRef.current.value = initial;
+      return;
+    }
     if (raw === (lastSent.current ?? initial)) return;
     lastSent.current = raw;
     formRef.current?.requestSubmit();
@@ -867,10 +903,20 @@ function EditableBalanceCell({
   return (
     <form
       ref={formRef}
-      action={(fd) => start(() => (bucketId ? setBucketSnapshot(fd) : setAccountSnapshot(fd)))}
+      action={(fd) =>
+        start(() =>
+          subcategoryId
+            ? setDebtSnapshot(fd)
+            : bucketId
+              ? setBucketSnapshot(fd)
+              : setAccountSnapshot(fd),
+        )
+      }
       className="block w-full"
     >
-      {bucketId ? (
+      {subcategoryId ? (
+        <input type="hidden" name="subcategoryId" value={subcategoryId} />
+      ) : bucketId ? (
         <input type="hidden" name="bucketId" value={bucketId} />
       ) : (
         <input type="hidden" name="accountId" value={accountId ?? ""} />
@@ -878,6 +924,7 @@ function EditableBalanceCell({
       <input type="hidden" name="month" value={month} />
       <input
         key={initial}
+        ref={inputRef}
         name="balance"
         type="text"
         inputMode="decimal"
@@ -1137,21 +1184,22 @@ function BalanceGrid({
 
   const readCell = (r: GridRow, i: number) => {
     const v = r.balances[i];
-    // Accounts without buckets, and bucket rows, write their own snapshot — so
-    // their cells are typed into directly. A bucketed account's own row stays
-    // read-only: its figure is re-derived from its buckets on every save, so an
-    // edit here would be overwritten. Debt rows come from debt_snapshots and
-    // have no setter yet, so they stay read-only too.
-    // The current month and anything after it is owned by the Accounts page —
-    // those balances flow from there, so typing over them here would only be
-    // undone on the next save. Past months stay typeable: that's where
-    // corrections to history are made.
-    if (r.editable && (r.bucketId || r.accountId) && months[i] < lockedFromMonth) {
+    // Accounts without buckets, bucket rows and debt rows each write their own
+    // snapshot, so their cells are typed into directly. A bucketed account's
+    // own row stays read-only: its figure is re-derived from its buckets on
+    // every save, so an edit here would be overwritten.
+    // The current month and anything after it is owned by the Accounts and
+    // Debt/Loans pages — those balances flow from there, so typing over them
+    // here would only be undone on the next save. Past months stay typeable:
+    // that's where corrections to history are made.
+    const writesTo = r.subcategoryId ?? r.bucketId ?? r.accountId;
+    if (r.editable && writesTo && months[i] < lockedFromMonth) {
       return (
         <EditableBalanceCell
-          key={`${r.bucketId ?? r.accountId}:${months[i]}`}
-          accountId={r.bucketId ? undefined : r.accountId}
+          key={`${writesTo}:${months[i]}`}
+          accountId={r.bucketId || r.subcategoryId ? undefined : r.accountId}
           bucketId={r.bucketId}
+          subcategoryId={r.subcategoryId}
           month={months[i]}
           balanceCents={v}
           currency={currency}
@@ -1918,8 +1966,11 @@ function MonthlyAnalytics({
                     <td className="border-l border-line px-1.5 py-1 text-center tabular-nums">
                       {fmt0(c.value)}
                     </td>
+                    {/* Signed, not just coloured. Math.abs() here meant a
+                        $514 fall and a $514 rise printed identically and were
+                        told apart by red-vs-plain alone. */}
                     <td className={`px-1.5 py-1 text-center tabular-nums ${negCls(c.delta)}`}>
-                      {c.delta == null ? "—" : fmt0(Math.abs(c.delta))}
+                      {c.delta == null ? "—" : `${c.delta < 0 ? "−" : ""}${fmt0(Math.abs(c.delta))}`}
                     </td>
                     {showChanges ? (
                       <>
@@ -1955,6 +2006,8 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
   const [yearState, setYearState] = useSessionCollapse("networth-year-table", () => ({ v: true }));
   const collapsed = !!yearState.v;
   const setCollapsed = (fn: (v: boolean) => boolean) => setYearState((s) => ({ v: fn(!!s.v) }));
+  // The history-backed month currently open for correction, if any.
+  const [editingMonth, setEditingMonth] = useState<MonthPoint | null>(null);
 
   // Anchor each year to its December snapshot; fall back to the following
   // January (Jan Y+1 reflects the Y year-end position). Current year uses
@@ -1986,10 +2039,16 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
     const raw = formatMoney(Math.round(cents / 100) * 100, currency);
     return raw.replace(/\.00$/, "");
   };
+  // Signed as well as coloured — see the M2M Diff column above.
   const diff = (v: number | null) => {
     if (v == null) return <span className="text-muted">—</span>;
     const cls = v >= 0 ? "text-positive" : "text-negative";
-    return <span className={cls}>{fmt(Math.abs(v))}</span>;
+    return (
+      <span className={cls}>
+        {v < 0 ? "−" : ""}
+        {fmt(Math.abs(v))}
+      </span>
+    );
   };
   const y2y = (r: Row, get: (p: MonthPoint) => number) => {
     const prev = rowByYear.get(r.year - 1);
@@ -2059,7 +2118,24 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
                 return (
                   <tr key={r.year} className="border-b border-line last:border-0">
                     <td className="sticky left-0 z-20 border-b border-r border-line bg-brand-soft px-2 py-1 text-center text-xs font-semibold">
-                      {r.label}
+                      {/* A year that came from the imported history is the one
+                          kind of row nothing on this page could correct: the
+                          balances grid only covers months with per-account
+                          snapshots, so 2018–2025 were read-only totals with a
+                          typo in them or nothing. Pressing the year opens them.
+                          Snapshot-backed years are edited in the grid above and
+                          stay plain text here. */}
+                      {r.p.fromHistory ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditingMonth(r.p)}
+                          className="rounded px-1 py-0.5 underline decoration-dotted underline-offset-2 transition hover:bg-black/5 dark:hover:bg-white/10"
+                        >
+                          {r.label}
+                        </button>
+                      ) : (
+                        r.label
+                      )}
                     </td>
                     <td className="px-1.5 py-1 text-center tabular-nums">{fmt(nwOut)}</td>
                     <td className="border-r border-line px-1.5 py-1 text-center tabular-nums">{diff(y2y(r, (p) => p.nwWithoutInvest))}</td>
@@ -2082,7 +2158,155 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
           </table>
         </div>
       )}
+
+      {editingMonth ? (
+        <HistoryMonthModal
+          point={editingMonth}
+          currency={currency}
+          onClose={() => setEditingMonth(null)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+// Corrects — or removes — one month of imported history.
+//
+// setNetworthHistory and deleteNetworthHistory have existed since the importer
+// was written and were called from nowhere, so a wrong figure in 2018–2025 was
+// permanent as far as the app was concerned. The four boxes are the same four
+// section totals the importer writes, and net is shown as you type so the
+// number you are aiming at is the one on screen.
+function HistoryMonthModal({
+  point,
+  currency,
+  onClose,
+}: {
+  point: MonthPoint;
+  currency: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [savings, setSavings] = useState(centsToDisplay(point.savings));
+  const [bank, setBank] = useState(centsToDisplay(point.bank));
+  const [stocks, setStocks] = useState(centsToDisplay(point.stocks));
+  const [debt, setDebt] = useState(centsToDisplay(point.debt));
+
+  const netCents =
+    displayToCents(savings) + displayToCents(bank) + displayToCents(stocks) - displayToCents(debt);
+
+  const field =
+    "w-full rounded-md bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  const label = "mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted";
+
+  return (
+    <ModalShell title={`${monthLabel(point.month)} — recorded totals`} onClose={onClose} className="sm:max-w-lg" mobileAlign="top">
+      <form
+        action={(fd) =>
+          start(async () => {
+            const res = await setNetworthHistory(fd);
+            if (res?.error) setError(res.error);
+            else {
+              router.refresh();
+              onClose();
+            }
+          })
+        }
+        className="px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
+      >
+        <input type="hidden" name="month" value={point.month} />
+        <div className="grid grid-cols-2 gap-3">
+          <label>
+            <span className={label}>Savings</span>
+            <input name="savings" inputMode="decimal" value={savings} onChange={(e) => setSavings(e.target.value)} className={field} />
+          </label>
+          <label>
+            <span className={label}>Bank</span>
+            <input name="bank" inputMode="decimal" value={bank} onChange={(e) => setBank(e.target.value)} className={field} />
+          </label>
+          <label>
+            <span className={label}>Stocks</span>
+            <input name="stocks" inputMode="decimal" value={stocks} onChange={(e) => setStocks(e.target.value)} className={field} />
+          </label>
+          <label>
+            <span className={label}>Debt</span>
+            <input name="debt" inputMode="decimal" value={debt} onChange={(e) => setDebt(e.target.value)} className={field} />
+          </label>
+        </div>
+
+        <p className="mt-3 text-xs">
+          <span className="text-muted">Net worth for this month: </span>
+          <span className={`font-semibold tabular-nums ${negCls(netCents)}`}>
+            {formatMoney(netCents, currency)}
+          </span>
+        </p>
+        <p className="mt-1 text-[11px] text-muted">
+          These are the totals the importer recorded, for months that predate
+          per-account tracking. Removing the month drops it from the chart and
+          both tables entirely.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-3">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => setConfirmDelete(true)}
+            className="mr-auto rounded-md px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/40 transition hover:bg-negative/10 disabled:opacity-60"
+          >
+            Remove month
+          </button>
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save month"}
+          </button>
+        </div>
+        {error ? <p className="mt-2 text-sm font-medium text-negative">{error}</p> : null}
+      </form>
+
+      {confirmDelete ? (
+        <ModalShell title={`Remove ${monthLabel(point.month)}?`} onClose={() => setConfirmDelete(false)} className="sm:max-w-md">
+          <div className="px-5 pt-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:pb-4">
+            <p className="text-sm text-muted">
+              This deletes the recorded totals for {monthLabel(point.month)}. The
+              month disappears from the chart, Net Worth Over Time and Year by
+              year. It can&rsquo;t be undone, but you can add the year back with
+              &ldquo;Add past year&rdquo;.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  const fd = new FormData();
+                  fd.set("month", point.month);
+                  start(async () => {
+                    await deleteNetworthHistory(fd);
+                    router.refresh();
+                    onClose();
+                  });
+                }}
+                className="rounded-md bg-negative px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+              >
+                {pending ? "Removing…" : "Remove month"}
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      ) : null}
+    </ModalShell>
   );
 }
 

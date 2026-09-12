@@ -3,7 +3,7 @@ import { SessionInit } from "./session-init";
 import { MobileTabBar } from "./mobile-tab-bar";
 import { MobileHeaderMenu } from "./mobile-header-menu";
 import type { SidebarGroup } from "./sidebar-accounts";
-import { isDebtExcludedFromNetWorth, hasPropertyAsset } from "@/lib/net-worth";
+import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
 import { getSessionContext } from "@/lib/auth-context";
 import { throwIfAny } from "@/lib/supabase-result";
 
@@ -70,7 +70,6 @@ export default async function AppLayout({
   const active = (accounts ?? []).filter((a) => a.active !== false);
   // Mortgages only count against the sidebar's Net Worth pill once a Property
   // account carries the value behind them (lib/net-worth.ts).
-  const ownsProperty = hasPropertyAsset(active);
 
   // Group buckets by their parent account so we can swap accounts-with-buckets
   // out for their individual buckets in the sidebar list.
@@ -145,7 +144,7 @@ export default async function AppLayout({
   const debtTotal = (items: typeof debtItems) => items.reduce((s, d) => s + d.balanceCents, 0);
   const netWorthDebtTotal = (items: typeof debtItems) =>
     items.reduce(
-      (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.kind, ownsProperty) ? 0 : debt.balanceCents),
+      (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.kind) ? 0 : debt.balanceCents),
       0,
     );
 

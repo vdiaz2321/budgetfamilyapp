@@ -166,6 +166,53 @@ export async function setBucketSnapshot(formData: FormData) {
   revalidate();
 }
 
+// Set one debt's balance for one month. The liability half of
+// setAccountSnapshot, and it follows the same rule: history only. The current
+// month's balance belongs to Debt/Loans and is re-derived from there on every
+// capture, so a write here would just be undone.
+//
+// Asset rows in the Net Worth grid have always been typeable and debt rows
+// never were, which meant a wrong card balance in a past month was the one
+// figure on the page with no way to correct it — the number sat there, wrong,
+// in the totals and the chart.
+export async function setDebtSnapshot(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  const month = String(formData.get("month") ?? "");
+  if (!subcategoryId || !MONTH_RE.test(month)) return;
+  if (month >= currentMonthFirst()) return;
+
+  // Balances are held positive here (the grid subtracts them), so a typed
+  // "-500" means the same thing as "500" rather than a negative liability.
+  const balanceCents = Math.abs(displayToCents(String(formData.get("balance") ?? "0")));
+
+  // Only a debt this household actually has — the subcategory id arrives from
+  // a form field, so it is checked rather than trusted.
+  const debt = unwrap(
+    await supabase
+      .from("debts")
+      .select("subcategory_id")
+      .eq("household_id", householdId)
+      .eq("subcategory_id", subcategoryId)
+      .maybeSingle(),
+    "debts",
+  );
+  if (!debt) return;
+
+  await supabase.from("debt_snapshots").upsert(
+    {
+      household_id: householdId,
+      month,
+      subcategory_id: subcategoryId,
+      balance_cents: balanceCents,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+
+  revalidate();
+}
+
 // Section-level totals for a month that predates per-account tracking. Used only
 // as a fallback for months with no account_snapshots (see networth/page.tsx).
 export async function setNetworthHistory(formData: FormData) {
@@ -194,8 +241,15 @@ export async function setNetworthHistory(formData: FormData) {
 }
 
 // Saves a single year-end (December) net worth total to networth_history.
-// For years where only the total is known (no section breakdown), the full
-// amount is stored in bank_cents so net = bank_cents = total.
+//
+// For a year that has no row yet, the whole amount goes in bank_cents so that
+// net = total; there is no breakdown to honour.
+//
+// For a year that ALREADY has one, the breakdown is kept and only the cash
+// line absorbs the difference. This used to overwrite savings, stocks and debt
+// with zeros, so correcting a typo in 2023's total silently erased the stocks
+// and debt split behind it — and the Year by Year table then reported $0 of
+// stocks for a year that plainly had some, with no undo.
 export async function upsertNetworthYear(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const year = Number(formData.get("year"));
@@ -206,16 +260,51 @@ export async function upsertNetworthYear(formData: FormData) {
   const totalCents = displayToCents(String(formData.get("total") ?? "0"));
   const month = `${year}-12-01`;
 
+  // A December the per-account snapshots already cover ignores anything
+  // written here — snapshots win when a month has them (networth/page.tsx).
+  // Saving would have looked like it worked and changed nothing on screen,
+  // which is exactly what happens to every year from now on as the snapshot
+  // record grows past its first December. Say so instead.
+  const { count: snapshotCount, error: snapshotCountError } = await supabase
+    .from("account_snapshots")
+    .select("account_id", { count: "exact", head: true })
+    .eq("household_id", householdId)
+    .eq("month", month);
+  if (snapshotCountError) {
+    return { error: `Couldn't check ${year} — ${snapshotCountError.message}` };
+  }
+  if ((snapshotCount ?? 0) > 0) {
+    return {
+      error: `${year} is already tracked account by account — edit it in Monthly Actual Balances instead.`,
+    };
+  }
+
+  const existing = unwrap(
+    await supabase
+      .from("networth_history")
+      .select("savings_cents, stocks_cents, debt_cents")
+      .eq("household_id", householdId)
+      .eq("month", month)
+      .maybeSingle(),
+    "networth_history",
+  );
+
+  const savings = existing?.savings_cents ?? 0;
+  const stocks = existing?.stocks_cents ?? 0;
+  const debt = existing?.debt_cents ?? 0;
+  // net = savings + bank + stocks − debt, and net is what was typed.
+  const bank = totalCents - savings - stocks + debt;
+
   const { error } = await supabase
     .from("networth_history")
     .upsert(
       {
         household_id: householdId,
         month,
-        bank_cents: totalCents,
-        savings_cents: 0,
-        stocks_cents: 0,
-        debt_cents: 0,
+        bank_cents: bank,
+        savings_cents: savings,
+        stocks_cents: stocks,
+        debt_cents: debt,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "household_id,month" },
@@ -261,6 +350,12 @@ export async function saveRetirementPlan(formData: FormData) {
   const targetYear = num("targetRetireYear");
   const realReturn = num("realReturnPct");
   const withdrawal = num("withdrawalRatePct");
+  // The two drift rates the projection grid fills forward with. They have
+  // lived in the table since the grid was built but nothing ever wrote them,
+  // so every fill-forward ran on the column defaults.
+  const personalInflation = num("personalInflationPct");
+  const incomeGrowth = num("incomeGrowthPct");
+  const guaranteedStartYear = num("guaranteedIncomeStartYear");
 
   if (birthYear != null && (birthYear < 1900 || birthYear > 2200)) {
     return { error: "Enter a four-digit birth year." };
@@ -274,6 +369,15 @@ export async function saveRetirementPlan(formData: FormData) {
   if (withdrawal != null && (withdrawal <= 0 || withdrawal > 20)) {
     return { error: "Withdrawal rate has to be between 0% and 20%." };
   }
+  if (personalInflation != null && (personalInflation < -20 || personalInflation > 20)) {
+    return { error: "Spending growth has to be between -20% and 20%." };
+  }
+  if (incomeGrowth != null && (incomeGrowth < -20 || incomeGrowth > 20)) {
+    return { error: "Income growth has to be between -20% and 20%." };
+  }
+  if (guaranteedStartYear != null && (guaranteedStartYear < 1900 || guaranteedStartYear > 2200)) {
+    return { error: "Enter a four-digit year for when the guaranteed income starts." };
+  }
 
   const { error } = await supabase.from("retirement_plan").upsert(
     {
@@ -284,6 +388,18 @@ export async function saveRetirementPlan(formData: FormData) {
       annual_contribution_cents: money("annualContribution"),
       real_return_pct: realReturn ?? 5,
       withdrawal_rate_pct: withdrawal ?? 4,
+      // Blank means zero drift, not the old nominal defaults of 4% and 2.5%:
+      // these are real rates now, so clearing the box has to mean "keeps pace
+      // with inflation" — the very thing the field's own hint promises.
+      // `projection_return_pct` is deliberately not written: nothing reads it
+      // any more (gains use real_return_pct), and no field on the form sets
+      // it, so every save was quietly stamping it back to 8.
+      personal_inflation_pct: personalInflation ?? 0,
+      income_growth_pct: incomeGrowth ?? 0,
+      // Both nullable: a blank guaranteed income means there isn't one, and a
+      // blank start year means it is already arriving.
+      guaranteed_income_cents: money("guaranteedIncome"),
+      guaranteed_income_start_year: guaranteedStartYear,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "household_id" },
@@ -312,6 +428,7 @@ type ProjectionRow = {
   income_cents: number;
   spending_cents: number;
   growth_cents: number;
+  one_off_cents: number;
   eoy_cents: number;
 };
 
@@ -322,7 +439,7 @@ async function rebuildProjectionChain(
 ) {
   const { data: rows, error } = await supabase
     .from("networth_projection")
-    .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
+    .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
     .eq("household_id", householdId)
     .gte("year", fromYear)
     .order("year");
@@ -339,7 +456,8 @@ async function rebuildProjectionChain(
 
   for (const row of (rows ?? []) as ProjectionRow[]) {
     const boy: number = carry ?? row.boy_cents;
-    const eoy: number = boy + row.income_cents - row.spending_cents + row.growth_cents;
+    const eoy: number =
+      boy + row.income_cents - row.spending_cents + row.growth_cents + (row.one_off_cents ?? 0);
     if (boy !== row.boy_cents || eoy !== row.eoy_cents) {
       // Every column is sent, not just the two that moved: on the insert half
       // of an upsert the omitted ones would fall back to their defaults and
@@ -352,6 +470,7 @@ async function rebuildProjectionChain(
         income_cents: row.income_cents,
         spending_cents: row.spending_cents,
         growth_cents: row.growth_cents,
+        one_off_cents: row.one_off_cents ?? 0,
         eoy_cents: eoy,
         updated_at: stamp,
       });
@@ -483,6 +602,8 @@ export async function appendProjectionYears(count: number = APPEND_YEARS) {
 
   for (let i = 1; i <= years; i++) {
     const year = last.year + i;
+    // No one-off: buying a house in the last planned year is not a reason to
+    // buy one every year after it.
     const eoy = carry + last.income_cents - last.spending_cents + last.growth_cents;
     rows.push({
       household_id: householdId,
@@ -523,6 +644,8 @@ export async function saveProjectionYear(formData: FormData) {
   const income = cents("income");
   const spending = cents("spending");
   const growth = cents("growth");
+  // Signed, unlike the others: a windfall is positive, a house is negative.
+  const oneOff = displayToCents(String(formData.get("oneOff") ?? "0"));
 
   // What the year held before this save, so the carry-forward below can tell
   // which figures were actually typed and which were merely resubmitted.
@@ -547,6 +670,7 @@ export async function saveProjectionYear(formData: FormData) {
       income_cents: income,
       spending_cents: spending,
       growth_cents: growth,
+      one_off_cents: oneOff,
       eoy_cents: 0,
       updated_at: new Date().toISOString(),
     },
@@ -567,10 +691,22 @@ export async function saveProjectionYear(formData: FormData) {
   // Only the figures that CHANGED travel. Retyping income while editing
   // spending must not overwrite twenty years of income, so each column is
   // compared against what the row held a moment ago and left alone if equal.
+  //
+  // And figures taken from ACTUALS never travel at all. What a year turned out
+  // to cost is a fact about that year, not a forecast for the next twenty —
+  // pressing "Use 2026 actuals" in September would otherwise write nine months
+  // of income ($97,130) into every row through 2047 in one press, with the
+  // dialog only warning that later years are "recomputed". The modal sends
+  // carryForward=0 whenever the boxes were filled from measured figures.
+  // The one-off is never in here, whatever else is: a house bought in 2027 is
+  // not a house bought every year to 2047.
+  const carryForward = String(formData.get("carryForward") ?? "1") !== "0";
   const carry: Record<string, number> = {};
-  if (!prev || prev.income_cents !== income) carry.income_cents = income;
-  if (!prev || prev.spending_cents !== spending) carry.spending_cents = spending;
-  if (!prev || prev.growth_cents !== growth) carry.growth_cents = growth;
+  if (carryForward) {
+    if (!prev || prev.income_cents !== income) carry.income_cents = income;
+    if (!prev || prev.spending_cents !== spending) carry.spending_cents = spending;
+    if (!prev || prev.growth_cents !== growth) carry.growth_cents = growth;
+  }
 
   if (Object.keys(carry).length > 0) {
     const { error: carryError } = await supabase
@@ -594,23 +730,37 @@ export async function saveProjectionYear(formData: FormData) {
   return { error: null };
 }
 
-// Regenerates every year after `fromYear` from the assumptions — income grows
-// at its rate, spending at personal inflation, growth is the return applied to
-// the opening balance. This is the sheet's model doing the typing instead of
+// Regenerates every year after `fromYear` from the assumptions — income and
+// spending drift at their own rates, gains are the return applied to the
+// opening balance. This is the sheet's model doing the typing instead of
 // Victor doing it, and it deliberately overwrites hand-entered future years,
 // so the UI asks first.
+//
+// ---- Everything here is in TODAY'S MONEY, and that is the whole point.
+//
+// The grid is read as today's money everywhere else (the FI section feeds its
+// rows straight into a real-return projection without deflating them), so the
+// rates applied here have to be real ones too:
+//
+//   * gains use `real_return_pct` — the SAME knob the FI chart compounds with.
+//     It used to read a separate `projection_return_pct`, which is how the two
+//     halves of this page ended up quoting $926,835 and $1,516,822 for the
+//     same year 2041. One return, one answer.
+//   * income and spending drift at their rates ABOVE inflation, which is why
+//     both default to 0 — in today's money, a salary that merely keeps pace
+//     with inflation is a flat line.
 export async function fillProjectionForward(fromYear: number) {
   const { supabase, householdId } = await requireHousehold();
 
   const [{ data: plan }, { data: rows, error: rowsError }] = await Promise.all([
     supabase
       .from("retirement_plan")
-      .select("projection_return_pct, personal_inflation_pct, income_growth_pct")
+      .select("real_return_pct, personal_inflation_pct, income_growth_pct")
       .eq("household_id", householdId)
       .maybeSingle(),
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
       .eq("household_id", householdId)
       .order("year"),
   ]);
@@ -620,9 +770,9 @@ export async function fillProjectionForward(fromYear: number) {
   const base = all.find((r) => r.year === fromYear);
   if (!base) return { error: `${fromYear} isn't in the projection yet.` };
 
-  const returnPct = Number(plan?.projection_return_pct ?? 8);
-  const inflationPct = Number(plan?.personal_inflation_pct ?? 4);
-  const incomePct = Number(plan?.income_growth_pct ?? 2.5);
+  const returnPct = Number(plan?.real_return_pct ?? 5);
+  const inflationPct = Number(plan?.personal_inflation_pct ?? 0);
+  const incomePct = Number(plan?.income_growth_pct ?? 0);
 
   // The year you fill forward FROM is the anchor: its own figures are left
   // exactly as typed, and the chain starts from the balance they actually
@@ -630,10 +780,9 @@ export async function fillProjectionForward(fromYear: number) {
   // closing balance that disagreed with the row's own stored EOY, so the
   // grid showed year N ending on one number and year N+1 opening on another.
   const baseEoy =
-    base.boy_cents + base.income_cents - base.spending_cents + base.growth_cents;
+    base.boy_cents + base.income_cents - base.spending_cents + base.growth_cents +
+    (base.one_off_cents ?? 0);
 
-  let income = base.income_cents;
-  let spending = base.spending_cents;
   let carry = baseEoy;
 
   const updates: Array<Record<string, unknown>> = [];
@@ -648,16 +797,36 @@ export async function fillProjectionForward(fromYear: number) {
       income_cents: base.income_cents,
       spending_cents: base.spending_cents,
       growth_cents: base.growth_cents,
+      one_off_cents: base.one_off_cents ?? 0,
       eoy_cents: baseEoy,
       updated_at: new Date().toISOString(),
     });
   }
 
+  // ---- Each year keeps its OWN shape; the drift rates scale it.
+  //
+  // This used to take the anchor year's income and spending and walk them
+  // forward over every later row, which meant a 0% drift rate — the default,
+  // and the honest one in today's money — did not mean "leave them alone", it
+  // meant "copy 2026 over the next twenty-one years". Victor's plan steps
+  // down deliberately ($90k while the kids are home, $65k, then $45k once
+  // they've gone); one press flattened all of it to a single flat line and
+  // moved his FI date two years.
+  //
+  // So a row's own figures are the plan, and the rate is a multiplier on top:
+  // at 0% every typed year survives untouched, and at 2% the whole shape —
+  // steps included — rises 2% a year. Only the gains are always recomputed,
+  // because that is the column this exists to fix.
   for (const row of all.filter((r) => r.year > fromYear)) {
-    income = Math.round(income * (1 + incomePct / 100));
-    spending = Math.round(spending * (1 + inflationPct / 100));
+    const n = row.year - fromYear;
+    const income = Math.round(row.income_cents * Math.pow(1 + incomePct / 100, n));
+    const spending = Math.round(row.spending_cents * Math.pow(1 + inflationPct / 100, n));
     const growth = Math.round((carry * returnPct) / 100);
-    const eoy = carry + income - spending + growth;
+    // A one-off is kept exactly as typed and never scaled: the drift rates say
+    // how a salary or a grocery bill changes over time, and a house purchase
+    // is neither.
+    const oneOff = row.one_off_cents ?? 0;
+    const eoy = carry + income - spending + growth + oneOff;
     updates.push({
       household_id: householdId,
       year: row.year,
@@ -666,6 +835,7 @@ export async function fillProjectionForward(fromYear: number) {
       income_cents: income,
       spending_cents: spending,
       growth_cents: growth,
+      one_off_cents: oneOff,
       eoy_cents: eoy,
       updated_at: new Date().toISOString(),
     });

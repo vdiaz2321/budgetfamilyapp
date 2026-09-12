@@ -1,6 +1,6 @@
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
-import { isDebtExcludedFromNetWorth, hasPropertyAsset, PROPERTY_KIND } from "@/lib/net-worth";
+import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
 import { adoptClosedProjectionYears } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
@@ -115,7 +115,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct")
+      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, personal_inflation_pct, income_growth_pct, guaranteed_income_cents, guaranteed_income_start_year")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -136,7 +136,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -158,10 +158,9 @@ export default async function NetworthPage() {
 
   // Once a property carries the home's value, the mortgage against it counts
   // as the liability it is — before that it stays out (lib/net-worth.ts).
-  const ownsProperty = hasPropertyAsset(accountRows ?? []);
   const excludedDebtIds = new Set(
     (debtRows ?? [])
-      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind, ownsProperty))
+      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind))
       .map((debt) => debt.subcategory_id),
   );
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
@@ -245,16 +244,24 @@ export default async function NetworthPage() {
     ]),
   );
 
-  // Union of every month we know about, in order. History wins over per-account
-  // snapshots for any overlapping month — this lets the user override a month
-  // whose imported per-account values are wrong by entering the correct totals
-  // via "Add historical data", without touching the underlying snapshots.
+  // Union of every month we know about, in order. Per-account snapshots win
+  // over the imported history for any month that has them, and the history
+  // fills in every month that predates per-account tracking.
+  //
+  // It used to be the other way round, so that a bad imported month could be
+  // overridden by typing its totals in. But the importer's rows ran six months
+  // past the first snapshot, and this page then showed BOTH: the Monthly Actual
+  // Balances grid reads the snapshots (June 2026 = $342,002.65) while the chart
+  // and both analytics tables read the history (June 2026 = $334,218). One
+  // page, one month, two net worths. The account-level figures are the ones
+  // the user maintains and the only ones that can be corrected in the UI, so
+  // they are the ones that count.
   const allMonths = [...new Set([...snapshotMonths, ...history.keys()])].sort((a, b) =>
     a.localeCompare(b),
   );
 
   const points: MonthPoint[] = allMonths.map((month) => {
-    const fromHistory = history.has(month);
+    const fromHistory = history.has(month) && !derived.has(month);
     const t = (fromHistory ? history.get(month) : derived.get(month)) ?? zero();
     const assets = t.savings + t.bank + t.stocks + t.property;
     return {
@@ -339,6 +346,9 @@ export default async function NetworthPage() {
         excluded: excludedDebtIds.has(s.subcategory_id),
         section: sectionForDebt(),
         balances: months.map(() => null),
+        // Correctable in past months, exactly like an asset row.
+        subcategoryId: s.subcategory_id,
+        editable: true,
       };
       debtGrid.set(s.subcategory_id, r);
     }
@@ -462,16 +472,28 @@ export default async function NetworthPage() {
     }
   }
 
-  // The portfolio: every asset the Accounts page counts — same rule as its
-  // Assets card (active, not a card or loan, not a kids account), so the FI
-  // figure and that card always agree. Victor's call (2026-09-11): cash and
+  // The portfolio: what the household could actually draw on. Active, not a
+  // kids account, not a card or loan. Victor's call (2026-09-11): cash and
   // savings count toward FI too; there is no opt-in any more.
+  //
+  // A PROPERTY account does not count, and the debts do get subtracted. Both
+  // matter for the same reason: this number is divided by the withdrawal rate
+  // to answer "could I stop working". A house pays no 4% — counting one would
+  // have made "% of FI goal" and the FI date jump by the price of the home the
+  // day the VA purchase is entered, while the mortgage behind it sat outside
+  // the figure entirely. Debts are netted off for the mirror of that: money
+  // owed on a card is not money that can fund a retirement.
   let fiAssetsCents = 0;
   for (const a of balanceRows ?? []) {
     if (a.is_kids_account || a.active === false) continue;
     if (a.kind === "credit_card" || a.kind === "debt_loan") continue;
+    if (a.kind === PROPERTY_KIND) continue;
     fiAssetsCents += a.current_balance_cents ?? 0;
   }
+  // The same liabilities Net Worth counts, taken from the latest point so the
+  // two can't drift: a mortgage stays out while no property is tracked,
+  // exactly as it does in the totals above.
+  fiAssetsCents -= points.at(-1)?.debt ?? 0;
 
   // ---- NW Projections.
   //
@@ -528,6 +550,68 @@ export default async function NetworthPage() {
     // the register to derive them from.
     bump(gainsByYear, year, stored?.accrued ?? 0);
   }
+  // ---- Gains a year has actually made, measured instead of typed.
+  //
+  // `investment_years.accrued_cents` is entered by hand once, at year end, so
+  // for eight months of every year the app knew the market had moved and could
+  // not say by how much: the grid showed no gains at all for the year running,
+  // and the forecast added the WHOLE year's estimated gains on top of an actual
+  // net worth that already contained the real ones.
+  //
+  // The snapshots have the answer. What investments are worth now, less what
+  // they were worth at the end of last year, less everything paid in since, is
+  // what the market added — the same subtraction anyone does by hand.
+  //
+  //   gains = (stocks now − stocks at last December) − contributions this year
+  //
+  // Contributions come from v_investment_contributions, which filters to
+  // investment-kind accounts, so both sides of the subtraction cover the same
+  // accounts.
+  //
+  // BOTH ends come from `derived` — the per-account snapshots — and never from
+  // the imported history, even though `points` would happily supply a stocks
+  // figure for December 2025. The two are different bases: the importer's
+  // December 2025 stocks total is $146,508 while the first per-account capture
+  // a month later is $154,660. Measuring from the imported number produced
+  // $24,291 of gains where Invest / Savings, which anchors on the per-account
+  // opening, reports $16,139 — an $8,152 disagreement between two pages about
+  // the same year. This mirrors that page's `openingCents` rule exactly, so
+  // the two cannot drift.
+  //
+  // Only the year in progress, and only when all three pieces are on record:
+  //  * a per-account opening — last December's, or January's when the record
+  //    starts there (the case today) and January is genuinely the first month;
+  //  * this year's contributions, or the subtraction collapses into
+  //    "investments went up", counting every dollar paid in as a gain — the
+  //    pre-2024 years have no contribution history at all and would have
+  //    reported $11,969 of "gains" for a year that mostly just got deposits.
+  //
+  // Closed years stay blank until their reviewed figure is typed. That is the
+  // point of the distinction: this number is still moving, so it reports and
+  // never feeds "Use <year> actuals" or the automatic year-end adoption.
+  const runningGainsByYear = new Map<number, number>();
+  {
+    const snapMonths = [...snapshotMonths].sort((a, b) => a.localeCompare(b));
+    const inYear = snapMonths.filter((m) => m.startsWith(String(thisYearNum)));
+    const closing = inYear.length > 0 ? derived.get(inYear[inYear.length - 1])?.stocks : undefined;
+
+    const priorDec = derived.get(`${thisYearNum - 1}-12-01`)?.stocks;
+    // January only stands in when the whole record starts there. A first
+    // snapshot in, say, August means the account was tracked mid-year, and
+    // treating August as the opening would read every earlier contribution as
+    // a loss — the same trap Invest / Savings guards against.
+    const janStandIn =
+      snapMonths[0] === `${thisYearNum}-01-01`
+        ? derived.get(`${thisYearNum}-01-01`)?.stocks
+        : undefined;
+    const opening = priorDec ?? janStandIn;
+
+    const contributed = investedByYear.get(thisYearNum);
+    if (closing != null && opening != null && contributed != null) {
+      runningGainsByYear.set(thisYearNum, closing - opening - contributed);
+    }
+  }
+
   // A finished year stops being a forecast: once the register covers it and
   // its gains are in, the plan takes the measured figures and every later year
   // is rebuilt on them. Runs on load, like the snapshot capture above, and
@@ -555,7 +639,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -569,13 +653,19 @@ export default async function NetworthPage() {
     incomeCents: r.income_cents ?? 0,
     spendingCents: r.spending_cents ?? 0,
     growthCents: r.growth_cents ?? 0,
+    oneOffCents: r.one_off_cents ?? 0,
     eoyCents: r.eoy_cents ?? 0,
     actualCents: netByYear.get(r.year) ?? null,
     actualSavedCents: savedByYear.get(r.year) ?? null,
     actualIncomeCents: earnedByYear.get(r.year) ?? null,
     actualSpendingCents: spentByYear.get(r.year) ?? null,
     actualMonths: monthsByYear.get(r.year)?.size ?? 0,
-    actualGainsCents: gainsByYear.get(r.year) ?? null,
+    // `|| null`, not `?? null`: every year with an investment slot gets a
+    // gainsByYear entry, and mid-year that entry is 0 because the reviewed
+    // figure has not been typed yet. A stored 0 is "not entered", not "the
+    // market did nothing" — left as 0 it shadowed the measured figure below it.
+    actualGainsCents: gainsByYear.get(r.year) || null,
+    runningGainsCents: runningGainsByYear.get(r.year) ?? null,
     actualInvestedCents: investedByYear.get(r.year) ?? null,
     inProgress: r.year === thisYearNum,
   }));
@@ -595,6 +685,16 @@ export default async function NetworthPage() {
         realReturnPct: planRow?.real_return_pct == null ? 5 : Number(planRow.real_return_pct),
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
+        // Real (above-inflation) drift, which is why both default to zero —
+        // the grid these fill forward is in today's money.
+        spendingGrowthPct:
+          planRow?.personal_inflation_pct == null ? 0 : Number(planRow.personal_inflation_pct),
+        incomeGrowthPct:
+          planRow?.income_growth_pct == null ? 0 : Number(planRow.income_growth_pct),
+        // A pension, VA, Social Security — income the portfolio never has to
+        // fund, so the FI number stops pretending it does.
+        guaranteedIncomeCents: planRow?.guaranteed_income_cents ?? null,
+        guaranteedIncomeStartYear: planRow?.guaranteed_income_start_year ?? null,
       }}
       fiMeasured={{
         assetsCents: fiAssetsCents,
