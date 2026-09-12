@@ -7,6 +7,9 @@ import { upsertPlan } from "./actions";
 import type { RowData } from "./types";
 import { planNavKeyDown } from "./plan-nav";
 
+// Victor asked for the tooltips that describe the SPENDING figures to stay —
+// the actual amount and the overspend. The ones that only restated a button's
+// own label were the problem, not these.
 const ACTUAL_WORD: Record<CategoryKind, string> = {
   income: "received",
   savings: "saved",

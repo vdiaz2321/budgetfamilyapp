@@ -68,10 +68,11 @@ export function CardPaymentsLedger({
   const year = years.includes(yearState) ? yearState : years[0] ?? String(new Date().getFullYear());
 
   const inScope = view === "month" ? payments.filter((p) => p.date.slice(0, 4) === year) : payments;
-  // Most recent period first in both views — the months you actually just
-  // paid are the ones worth reading, and they land next to the total. In the
-  // current year the months that haven't happened yet are dropped rather than
-  // shown as a row of leading dashes.
+  // Months run Jan -> Dec, the same direction as the Annual Overview's Months
+  // table, so the two pages read the same way. Years stay newest-first, which
+  // is how Annual's own Breakdown orders them. In the current year the months
+  // that haven't happened yet are dropped rather than shown as a row of
+  // leading dashes.
   const now = new Date();
   const lastMonthShown =
     view === "month" && year === String(now.getFullYear()) ? now.getMonth() + 1 : 12;
@@ -79,12 +80,10 @@ export function CardPaymentsLedger({
     view === "month"
       ? PAYMENT_MONTHS.slice(0, lastMonthShown)
           .map((label, i) => ({ key: String(i + 1).padStart(2, "0"), label }))
-          .reverse()
       : years.map((y) => ({ key: y, label: y }));
   const columnOf = (p: CardPayment) => (view === "month" ? p.date.slice(5, 7) : p.date.slice(0, 4));
   // With one year of history the year column would just repeat Total, so it
-  // is dropped; the moment a second year exists every year column appears and
-  // the table grows sideways, newest first.
+  // is dropped; the moment a second year exists every year column appears.
   const showPeriodColumns = !(view === "year" && columns.length <= 1);
 
   // cardId -> column key -> cents.
@@ -123,17 +122,20 @@ export function CardPaymentsLedger({
   })();
   const perMonth = (cents: number) => Math.round(cents / Math.max(1, elapsedMonths));
 
-  // Total and the newest months are the leftmost columns, so the default
-  // scroll position (left edge) is already the useful one.
+  // Months now run Jan -> Dec, which puts the ones you just paid at the far
+  // right — off-screen on a phone. So the month view opens scrolled to that
+  // end instead of the left. The year view is still newest-first, where the
+  // left edge is already the useful one.
   const scrollBoxRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const box = scrollBoxRef.current;
-    if (box) box.scrollLeft = 0;
+    if (!box) return;
+    box.scrollLeft = view === "month" ? box.scrollWidth : 0;
   }, [view, year, payments]);
 
-  // The chart reads oldest -> newest (time runs left to right) even though the
-  // table is newest-first; a reversed time axis reads as a mistake.
-  const chartBars = [...columns].reverse().map((c) => ({
+  // Time runs left to right in the chart. The month columns already do, so
+  // only the newest-first year view needs flipping for it.
+  const chartBars = (view === "month" ? columns : [...columns].reverse()).map((c) => ({
     key: c.key,
     label: c.label,
     value: columnTotal(c.key),
@@ -203,8 +205,8 @@ export function CardPaymentsLedger({
             ) : null}
             {/* The running total reads as a figure worth looking at, not a
                 caption: its own tile, label above value. */}
-            <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-surface px-3 py-1.5 text-center ring-1 ring-black/5 dark:ring-white/10">
+            <div className="flex items-center divide-x divide-line">
+              <div className="px-3 py-1.5 text-center">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total paid</div>
                 <div className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
                   {money(grandTotal)}
@@ -212,7 +214,7 @@ export function CardPaymentsLedger({
               </div>
               {/* Shown in both views — in By year it's the average month across
                   the whole history — so the header keeps its width. */}
-              <div className="rounded-lg bg-surface px-3 py-1.5 text-center ring-1 ring-black/5 dark:ring-white/10">
+              <div className="px-3 py-1.5 text-center">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Avg / month</div>
                 <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
               </div>
@@ -332,8 +334,8 @@ export function CardPaymentsLedger({
                       ? columns.map((c) => {
                           const v = r.cells.get(c.key) ?? 0;
                           return (
-                            <td key={c.key} className={`${cell} ${v ? "text-foreground" : "text-muted/50"}`}>
-                              {v ? money(v) : "—"}
+                            <td key={c.key} className={`${cell} ${v ? "text-foreground" : ""}`}>
+                              {v ? money(v) : null}
                             </td>
                           );
                         })
@@ -356,8 +358,8 @@ export function CardPaymentsLedger({
                     ? columns.map((c) => {
                         const v = columnTotal(c.key);
                         return (
-                          <td key={c.key} className={`${cell} ${v ? "" : "text-muted/50"}`}>
-                            {v ? money(v) : "—"}
+                          <td key={c.key} className={cell}>
+                            {v ? money(v) : null}
                           </td>
                         );
                       })

@@ -239,7 +239,6 @@ export function BudgetGroup({
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
             aria-label={`Add ${group.name} item`}
-            title={`Add ${group.name} item`}
             className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-xs font-bold opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 ${ADD_ACCENT[group.kind]}`}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
@@ -256,24 +255,30 @@ export function BudgetGroup({
         {/* Three tiles, two behaviours: Plan and the actual open the group and
             filter the transaction log by kind (as the whole block always did);
             Left filters the item list down to what still has a balance. */}
+        {/* The amount steps down with the card, not with the window: at a
+            ~520px card these tiles are 74px wide inside their padding and
+            "$21,124.75" needs 92px at text-sm, so the Plan / actual / Left
+            figures were being painted straight through their own edges on a
+            laptop. Full size returns once the card is wide enough to hold
+            them. */}
         <div className="col-span-7 grid grid-cols-3 items-start gap-2 text-[11px] tabular-nums text-muted">
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
             disabled={!onFilter}
-            className="min-w-0 rounded-md px-2 py-1 text-center leading-tight enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+            className="min-w-0 rounded-md px-1 py-1 text-center leading-tight @2xl:px-2 enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
           >
             <span className="block text-xs font-semibold text-muted">Plan</span>
-            <span className="block text-sm font-semibold text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
+            <span className="block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
           </button>
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
             disabled={!onFilter}
-            className="min-w-0 rounded-md px-2 py-1 text-center leading-tight enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+            className="min-w-0 rounded-md px-1 py-1 text-center leading-tight @2xl:px-2 enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
           >
             <span className="block text-xs font-semibold text-muted">{headerActualLabel}</span>
-            <span className={`block text-sm font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+            <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${actualColorClass(group.kind, visibleSpentTotal)}`}>
               {formatMoney(visibleSpentTotal, currency)}
             </span>
           </button>
@@ -281,14 +286,14 @@ export function BudgetGroup({
             type="button"
             onClick={(event) => { event.stopPropagation(); toggleLeftOnly(); }}
             aria-pressed={leftOnly}
-            className={`min-w-0 cursor-pointer rounded-md px-2 py-1 text-center leading-tight ring-1 transition ${
+            className={`min-w-0 cursor-pointer rounded-md px-1 py-1 text-center leading-tight ring-1 transition @2xl:px-2 ${
               leftOnly
                 ? "bg-black/[0.06] ring-black/15 dark:bg-white/10 dark:ring-white/20"
                 : "ring-transparent hover:bg-black/5 dark:hover:bg-white/10"
             }`}
           >
             <span className="block text-xs font-semibold text-muted">Left</span>
-            <span className={`block text-sm font-semibold ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+            <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
               {formatMoney(remainingTotal, currency)}
             </span>
           </button>

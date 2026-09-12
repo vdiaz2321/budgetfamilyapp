@@ -637,7 +637,6 @@ function CreditCardSection({
                   type="button"
                   onClick={() => setShowOnlyFeeCards((v) => !v)}
                   className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"}`}
-                  title={showOnlyFeeCards ? "Show all cards" : "Show only cards with active annual fees"}
                 >
                   Active fees <span className="tabular-nums text-negative">{formatMoney(feesPaid, currency)}/yr</span>
                 </button>
@@ -1397,7 +1396,6 @@ function CreditCardPanel({
                 href={externalCardUrl(d.cardUrl)}
                 target="_blank"
                 rel="noreferrer"
-                title={`Open ${d.cardUrl}`}
                 className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-line bg-background px-1.5 py-1.5 text-[11px] font-semibold text-brand transition-colors hover:border-brand hover:bg-brand-soft sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
               >
                 <span className="sm:hidden">Site</span><span className="hidden sm:inline">Visit site</span> <span aria-hidden>↗</span>
@@ -1569,17 +1567,24 @@ function RewardActivityForm({
     >
       <div className="px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
       <form
-        action={(formData) => start(async () => {
-          setError(null);
-          const result = await logCreditCardRewardActivity(formData);
-          if (result?.error) setError(result.error);
-          else {
-            // The card's points and Booked date are server-rendered; without
-            // this the row keeps showing the pre-redemption balance.
-            router.refresh();
-            onDone();
-          }
-        })}
+        // onSubmit, not `action` — React resets a form with an `action` prop
+        // once the action returns, so a rejected save cleared the activity
+        // date and the note you had just typed.
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.currentTarget);
+          start(async () => {
+            setError(null);
+            const result = await logCreditCardRewardActivity(formData);
+            if (result?.error) setError(result.error);
+            else {
+              // The card's points and Booked date are server-rendered; without
+              // this the row keeps showing the pre-redemption balance.
+              router.refresh();
+              onDone();
+            }
+          });
+        }}
         className="grid grid-cols-1 gap-2 sm:grid-cols-2"
       >
         <input type="hidden" name="accountId" value={card.id} />

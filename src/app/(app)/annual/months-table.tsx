@@ -158,8 +158,12 @@ export function MonthsTable({
               <div className={`grid ${gridCols} items-center gap-1 border-t border-line bg-black/[0.03] px-4 py-3 dark:bg-white/[0.05]`}>
                 <span className="flex flex-col items-center text-[15px] font-bold">
                   <span className="self-start">Total</span>
-                  <span className="mt-1 w-full whitespace-nowrap border-t border-line pt-1 text-center text-[13px] font-medium uppercase tracking-wide text-muted">
-                    Total % from income
+                  {/* "% of income" is the hero cards' own wording, and it
+                      fits: the label column is capped at 7rem and the old
+                      "Total % from income" needed 160px with nowrap on it,
+                      so it painted across the Income total beside it. */}
+                  <span className="mt-1 w-full border-t border-line pt-1 text-center text-[13px] font-medium uppercase tracking-wide text-muted">
+                    % of income
                   </span>
                 </span>
                 {columns.map((c) => {

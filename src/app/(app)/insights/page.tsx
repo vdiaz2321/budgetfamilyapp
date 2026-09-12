@@ -7,6 +7,7 @@ import {
   bucketLabel,
   currentPeriodKey,
   keyOfDate,
+  normalizePeriodKey,
   periodLabel,
   periodRange,
   priorKey,
@@ -61,7 +62,11 @@ export default async function InsightsPage({
   const now = new Date();
 
   const granularity: Granularity = isGranularity(sp.g) ? sp.g : "monthly";
-  const periodKey = sp.p || currentPeriodKey(granularity, now);
+  // Normalized, never trusted raw: an unparseable ?p= used to crash the page
+  // (see normalizePeriodKey), and an off-Monday weekly key silently produced
+  // a window no other panel agreed with.
+  const periodKey =
+    normalizePeriodKey(granularity, sp.p) ?? currentPeriodKey(granularity, now);
   const prior = priorKey(granularity, periodKey);
   const selRange = periodRange(granularity, periodKey);
   const priRange = periodRange(granularity, prior);

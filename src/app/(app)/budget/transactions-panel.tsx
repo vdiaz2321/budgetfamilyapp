@@ -161,7 +161,14 @@ export function TransactionsPanel({
             <h2 className="truncate text-sm font-bold">{title}</h2>
             {collapsed ? null : (
               <p className="truncate text-xs text-muted">
-                {subtitle ?? `${monthLabel} · ${transactions.length} ${transactions.length === 1 ? "transaction" : "transactions"}`}
+                {/* The count follows whatever is filtering the list. The chip
+                    filters had their own "N transactions" line below, but the
+                    search box had nothing — type "kaufland", see four rows,
+                    and the header still read "42 transactions". */}
+                {subtitle ??
+                  (filtered.length === transactions.length
+                    ? `${monthLabel} · ${transactions.length} ${transactions.length === 1 ? "transaction" : "transactions"}`
+                    : `${monthLabel} · ${filtered.length} of ${transactions.length} transactions`)}
               </p>
             )}
           </div>
@@ -324,7 +331,6 @@ function TxRow({
         type="button"
         disabled={!canEdit}
         onClick={onEdit}
-        title={canEdit ? undefined : "Card payment — delete and recreate it from the card"}
         className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
       >
         <div className="min-w-0 flex-1">
@@ -343,7 +349,6 @@ function TxRow({
             type="button"
             disabled={!canEdit}
             onClick={onEdit}
-            title={canEdit ? "Edit transaction" : "Card payment — delete and recreate it from the card"}
             aria-label="Edit transaction"
             className="flex h-6 w-6 items-center justify-center rounded-md text-muted transition hover:bg-brand-soft hover:text-foreground disabled:cursor-default disabled:opacity-40"
           >

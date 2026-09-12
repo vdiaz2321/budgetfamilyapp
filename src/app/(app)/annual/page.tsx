@@ -61,12 +61,22 @@ export default async function AnnualOverviewPage({
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-01`;
 
-  // Live 2026+ range for the Annual Breakdown card — queried straight from
+  // Live range for the Annual Breakdown card — queried straight from
   // `transactions` (not `v_monthly_actuals`) so we can honor Victor's
   // "deposits only, no withdrawals" rule for Savings/Investment. See
   // buildBreakdown() for the merge logic and kind mapping.
-  const liveRangeStart = "2026-01-01";
-  const liveRangeEnd = `${currentYear}-12-31`;
+  //
+  // The Breakdown always needs 2026..this year, but three things on this page
+  // read these rows for the *viewed* year alone — the Subscriptions and
+  // Irregular Bills payee splits, and the per-property rollup. Pinning the
+  // window to 2026..currentYear meant that on any other year those silently
+  // came back empty while the row totals beside them (which come from
+  // v_monthly_actuals, and are not year-limited) still showed money. So the
+  // window stretches to cover the viewed year in either direction.
+  const liveFromYear = Math.min(2026, year);
+  const liveToYear = Math.max(currentYear, year);
+  const liveRangeStart = `${liveFromYear}-01-01`;
+  const liveRangeEnd = `${liveToYear}-12-31`;
 
   const [
     { data: subs, error: subsError },
@@ -124,8 +134,8 @@ export default async function AnnualOverviewPage({
       .from("v_investment_contributions")
       .select("account_id, bucket_id, year, net_contribution_cents")
       .eq("household_id", household.id)
-      .gte("year", 2026)
-      .lte("year", currentYear),
+      .gte("year", liveFromYear)
+      .lte("year", liveToYear),
     supabase
       .from("accounts")
       .select("id, name, kind, subtype, is_kids_account")
@@ -403,8 +413,16 @@ export default async function AnnualOverviewPage({
   // → line, then overlay 2026+ live totals from Budget transactions.
   const breakdownKinds = buildBreakdown(breakdownRows ?? [], budgetSubsForLive);
   const seedYears = new Set((breakdownRows ?? []).map((r) => r.year));
+  // Years the Breakdown gets a column for: the ones that have actually
+  // happened (2026 through today), plus any other year the widened window
+  // turned up real rows for. Spanning liveFromYear..liveToYear outright would
+  // hand a future year a run of empty columns just for visiting it.
   const liveYears = new Set<number>();
   for (let y = 2026; y <= currentYear; y++) liveYears.add(y);
+  for (const t of liveTxRows ?? []) {
+    liveYears.add(parseInt(t.occurred_on.slice(0, 4), 10));
+  }
+  for (const row of investmentContributionRows ?? []) liveYears.add(row.year);
   const breakdownYears = [...new Set([...seedYears, ...liveYears])].sort(
     (a, b) => b - a,
   ); // newest-first

@@ -1,4 +1,5 @@
 import { currentMonthFirst } from "@/lib/snapshots";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type RewardActivity } from "./accounts-board";
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { syncAllBucketedAccounts } from "./actions";
@@ -33,10 +34,10 @@ export default async function AccountsPage() {
     { data: subRows, error: subRowsError },
     { data: cardDetailRowsInitial, error: cardDetailsError },
     { data: rewardActivityRowsInitial, error: rewardActivitiesError },
-    { data: acctSnapshotRows, error: acctSnapshotRowsError },
-    { data: bktSnapshotRows, error: bktSnapshotRowsError },
-    { data: debtSnapshotRows, error: debtSnapshotRowsError },
-    { data: cardPaymentRows, error: cardPaymentRowsError },
+    acctSnapshotRows,
+    bktSnapshotRows,
+    debtSnapshotRows,
+    cardPaymentRows,
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -75,46 +76,99 @@ export default async function AccountsPage() {
     // full for the same reason: the bucket rows' three balance columns are
     // anchored on the selected period, so they have to resolve months
     // outside the current 3-month window.
-    supabase
-      .from("account_snapshots")
-      .select("account_id, month, balance_cents")
-      .eq("household_id", household.id),
-    supabase
-      .from("bucket_snapshots")
-      .select("bucket_id, month, balance_cents")
-      .eq("household_id", household.id),
+    // Paged. These four grow by one row per account/bucket/debt per month and
+    // are read across ALL history, which is precisely the shape fetch-all-rows
+    // exists for — at ~29 account rows a month this crosses PostgREST's 1000
+    // cap in 2029 and every historical period figure would quietly go wrong,
+    // with no error to notice. (The same truncation already bit this page's
+    // card balances once.)
+    fetchAllRows<{ account_id: string; month: string; balance_cents: number }>((from, to) =>
+      supabase
+        .from("account_snapshots")
+        .select("account_id, month, balance_cents")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("account_id")
+        .range(from, to),
+    ),
+    fetchAllRows<{ bucket_id: string; month: string; balance_cents: number }>((from, to) =>
+      supabase
+        .from("bucket_snapshots")
+        .select("bucket_id, month, balance_cents")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("bucket_id")
+        .range(from, to),
+    ),
     // Pull ALL debt_snapshots (matching account_snapshots above) so the header
     // period picker can compute a real "% vs last period" delta on the Debts
     // and Net Worth cards.
-    supabase
-      .from("debt_snapshots")
-      .select("subcategory_id, month, balance_cents")
-      .eq("household_id", household.id),
+    fetchAllRows<{ subcategory_id: string; month: string; balance_cents: number }>((from, to) =>
+      supabase
+        .from("debt_snapshots")
+        .select("subcategory_id, month, balance_cents")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("subcategory_id")
+        .range(from, to),
+    ),
     // Card payments only — the transactions that move money TO a credit card.
     // The charges made ON a card are deliberately left out: this feeds the
     // "Card payments" report, which tracks what leaves the bank per card, not
     // the register. Read-only; nothing here writes back to balances.
-    supabase
-      .from("transactions")
-      .select("id, occurred_on, amount_cents, memo, account_id, paid_to_account_id, movement_type")
-      .eq("household_id", household.id)
-      .not("paid_to_account_id", "is", null)
-      .order("occurred_on", { ascending: false }),
+    fetchAllRows<{
+      id: string; occurred_on: string; amount_cents: number; memo: string | null;
+      account_id: string | null; paid_to_account_id: string | null; movement_type: string | null;
+    }>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("id, occurred_on, amount_cents, memo, account_id, paid_to_account_id, movement_type")
+        .eq("household_id", household.id)
+        .not("paid_to_account_id", "is", null)
+        .order("occurred_on", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
   ]);
-  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, cardDetails: cardDetailsError, rewardActivities: rewardActivitiesError, acctSnapshotRows: acctSnapshotRowsError, bktSnapshotRows: bktSnapshotRowsError, debtSnapshotRows: debtSnapshotRowsError, cardPaymentRows: cardPaymentRowsError });
+  // cardDetails and rewardActivities are deliberately NOT in this list: both
+  // have a fallback below for the case where the migration behind them hasn't
+  // been applied yet, and throwIfAny would throw before either could run —
+  // the two recoveries underneath were unreachable code. Every other read
+  // still fails the page loudly rather than rendering a misleading $0.
+  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, });
+
+  // "That column/table isn't there yet" — the only failures these two reads
+  // are allowed to swallow. Anything else (auth, network, RLS) still throws,
+  // because silently blanking the rewards data would read as "no points".
+  const schemaNotMigrated = (code: string | undefined) =>
+    code === "PGRST204" || code === "PGRST205" || code === "42703" || code === "42P01";
+
+  // Captured before the narrowing below: inside `if (cardDetailsError)` the
+  // Supabase result type collapses `data` to null, so the legacy rows have
+  // nothing left to be cast to.
+  type CardDetailRows = typeof cardDetailRowsInitial;
 
   // Keep the Accounts page usable before the user applies the new SQL in
   // Supabase. The existing rewards columns remain fully supported.
-  let cardDetailRows = cardDetailRowsInitial;
-  if (cardDetailsError?.code === "PGRST204" || cardDetailsError?.code === "42703") {
+  let cardDetailRows: CardDetailRows = cardDetailRowsInitial;
+  if (cardDetailsError) {
+    if (!schemaNotMigrated(cardDetailsError.code)) {
+      throw new Error(`Could not read cardDetails: ${cardDetailsError.message}`);
+    }
     const legacy = await supabase
       .from("credit_card_details")
       .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id")
       .eq("household_id", household.id);
-    cardDetailRows = legacy.data as typeof cardDetailRowsInitial;
+    if (legacy.error) {
+      throw new Error(`Could not read cardDetails: ${legacy.error.message}`);
+    }
+    cardDetailRows = legacy.data as CardDetailRows;
   }
   // Migration 0037 adds the rewards ledger. Keep the rest of Accounts usable
   // until it has been applied in Supabase.
+  if (rewardActivitiesError && !schemaNotMigrated(rewardActivitiesError.code)) {
+    throw new Error(`Could not read rewardActivities: ${rewardActivitiesError.message}`);
+  }
   const rewardActivityRows = rewardActivitiesError ? [] : rewardActivityRowsInitial ?? [];
   // (accountId, month) -> cents.
   const acctHistory = new Map<string, number>();

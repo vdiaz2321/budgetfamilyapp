@@ -164,6 +164,14 @@ export async function saveTravelStay(formData: FormData) {
   if (!propertyName) return { error: "Enter the hotel or apartment name." };
   if (!isDate(checkIn)) return { error: "Enter a valid check-in date." };
   if (reservedOn && !isDate(reservedOn)) return { error: "Enter a valid reservation date." };
+  // You cannot check in before you booked. Without this the usual slip — a
+  // check-in typed with last year's year — saves silently and then lands the
+  // stay in the wrong year's totals and out of "Coming up".
+  if (reservedOn && checkIn < reservedOn) {
+    return {
+      error: `Check-in (${checkIn}) is before the reservation date (${reservedOn}) — check the year on both.`,
+    };
+  }
 
   const row = {
     household_id: householdId,

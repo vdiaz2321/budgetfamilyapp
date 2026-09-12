@@ -57,6 +57,12 @@ export function StayModal({
   // unset amount stays blank and only a saved non-zero value is filled in.
   const money = (cents: number | undefined) => (cents ? centsToDisplay(cents) : "");
   const [hotelCredit, setHotelCredit] = useState(money(stay?.hotelCreditCents));
+  // The two dates are held so the form can say, while you type, that the
+  // check-in lands before the booking — almost always last year's year typed
+  // by mistake. The server refuses it too; this just catches it sooner.
+  const [reservedOn, setReservedOn] = useState(stay?.reservedOn ?? "");
+  const [checkIn, setCheckIn] = useState(stay?.checkIn ?? "");
+  const datesOutOfOrder = Boolean(reservedOn && checkIn && checkIn < reservedOn);
   // Live totals so the saving is visible while typing, not only after saving.
   const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
   const [pocketCost, setPocketCost] = useState(money(stay?.pocketCostCents));
@@ -133,17 +139,25 @@ export function StayModal({
   return (
     <ModalShell title={stay ? "Edit stay" : "Add stay"} onClose={onClose}>
       <form
-        action={(formData) => start(async () => {
-          setError(null);
-          const result = await saveTravelStay(formData);
-          if (result?.error) setError(result.error);
-          else {
-            // revalidatePath alone leaves the client router cache in place,
-            // so the new row wouldn't appear until a manual reload.
-            router.refresh();
-            onClose();
-          }
-        })}
+        // onSubmit, not `action` — React resets a form with an `action` prop
+        // once the action returns, so a rejected save wiped every uncontrolled
+        // field (hotel name, city, nights, pax, card name, remarks) and left
+        // the error pointing at a form you had to retype.
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.currentTarget);
+          start(async () => {
+            setError(null);
+            const result = await saveTravelStay(formData);
+            if (result?.error) setError(result.error);
+            else {
+              // revalidatePath alone leaves the client router cache in place,
+              // so the new row wouldn't appear until a manual reload.
+              router.refresh();
+              onClose();
+            }
+          });
+        }}
         className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
       >
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
@@ -168,10 +182,27 @@ export function StayModal({
              needs more than a quarter of the form. Two per row at 375px. */}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4">
           <Field label="Reservation made">
-            <input type="date" name="reservedOn" defaultValue={stay?.reservedOn ?? ""} className={inputClass} />
+            <input
+              type="date"
+              name="reservedOn"
+              value={reservedOn}
+              onChange={(e) => setReservedOn(e.target.value)}
+              className={inputClass}
+            />
           </Field>
           <Field label="Check-in date">
-            <input type="date" name="checkIn" defaultValue={stay?.checkIn ?? ""} className={inputClass} />
+            <input
+              type="date"
+              name="checkIn"
+              value={checkIn}
+              onChange={(e) => setCheckIn(e.target.value)}
+              className={`${inputClass} ${datesOutOfOrder ? "ring-2 ring-negative" : ""}`}
+            />
+            {datesOutOfOrder ? (
+              <span className="mt-0.5 block text-[10px] font-medium text-negative">
+                Before the reservation date — check the year
+              </span>
+            ) : null}
           </Field>
           <Field label="Nights">
             <input type="number" name="nights" min="1" step="1" defaultValue={stay?.nights ?? 1} className={inputClass} />
@@ -363,6 +394,15 @@ export function StayModal({
           </Field>
         </div>
 
+        {/* Above the buttons, not below them. Rendered after the footer row
+            it sat ~4px under the fold on a 375x812 phone, so a blocked save
+            looked like a dead button. */}
+        {error ? (
+          <p className="sm:col-span-2 rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">
+            {error}
+          </p>
+        ) : null}
+
         <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             Saved on this stay{" "}
@@ -426,7 +466,6 @@ export function StayModal({
             </button>
           </div>
         </div>
-        {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
         {draw && (draw.points !== 0 || draw.credit !== 0) ? (
           <p className="sm:col-span-2 text-[11px] text-muted">
             Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}

@@ -18,6 +18,28 @@ const ymd = (d: Date) =>
   `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const DAY = 86_400_000;
 
+/**
+ * Weekly keys are plain Monday date-strings, and every step between them is
+ * done in UTC.
+ *
+ * Doing it with local timestamps broke twice. `new Date(key + "T00:00:00")`
+ * is local midnight, so adding 7 * DAY across a DST change lands on 23:00 the
+ * day before — the week after 2026-10-19 came back as Sunday 2026-10-25. And
+ * dividing a local timestamp by one week to get an ordinal put the epoch on a
+ * Thursday (1970-01-01 was one), so rebuilding a key from an ordinal returned
+ * Thursdays while every bucket in the data was keyed to a Monday.
+ *
+ * UTC days are all exactly 24h, so none of that applies here.
+ */
+const WEEK_EPOCH = Date.UTC(1970, 0, 5); // the first Monday of the epoch
+const utcOf = (key: string) =>
+  Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10)));
+const utcYmd = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+};
+const shiftWeekKey = (key: string, days: number) => utcYmd(utcOf(key) + days * DAY);
+
 export function mondayOf(d: Date): Date {
   const x = new Date(d);
   const shift = (x.getDay() + 6) % 7; // 0 = Monday
@@ -59,13 +81,51 @@ export function currentPeriodKey(g: Granularity, now = new Date()): string {
   return periodKeyOf(g, now);
 }
 
+/**
+ * Clean a `?p=` value into a key this module can actually do arithmetic on,
+ * or null when it can't.
+ *
+ * Nothing validated this before, and an unparseable key took the whole page
+ * down: ordinal() returned NaN, so seriesKeys()' `while (ordinal(k) <= endOrd)`
+ * never ran, and the empty series' `series[0]` reached periodRange() as
+ * undefined — "Cannot read properties of undefined (reading 'slice')" on a URL
+ * anyone could reach from a stale bookmark.
+ *
+ * A weekly key is also snapped to its Monday, so ?p=2026-09-09 (a Wednesday)
+ * reads the Mon-Sun week that day belongs to rather than a Wed-Tue window
+ * nothing else on the page uses.
+ */
+export function normalizePeriodKey(g: Granularity, raw: string | undefined): string | null {
+  const key = raw?.trim();
+  if (!key) return null;
+  switch (g) {
+    case "weekly": {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+      const d = new Date(`${key}T00:00:00`);
+      if (Number.isNaN(d.getTime())) return null;
+      return ymd(mondayOf(d));
+    }
+    case "quarterly":
+      return /^\d{4}-Q[1-4]$/.test(key) && inYearRange(key.slice(0, 4)) ? key : null;
+    case "yearly":
+      return /^\d{4}$/.test(key) && inYearRange(key) ? key : null;
+    default:
+      return /^\d{4}-(0[1-9]|1[0-2])$/.test(key) && inYearRange(key.slice(0, 4)) ? key : null;
+  }
+}
+
+// The same bounds the Annual Overview's year param uses, so a nonsense year
+// can't send the series walker off building thousands of buckets.
+const inYearRange = (year: string) => {
+  const y = Number(year);
+  return y >= 2000 && y <= 2100;
+};
+
 // Inclusive [from, to] date-string range covered by a period key.
 export function periodRange(g: Granularity, key: string): { from: string; to: string } {
   switch (g) {
-    case "weekly": {
-      const start = new Date(`${key}T00:00:00`);
-      return { from: key, to: ymd(new Date(start.getTime() + 6 * DAY)) };
-    }
+    case "weekly":
+      return { from: key, to: shiftWeekKey(key, 6) };
     case "quarterly": {
       const y = Number(key.slice(0, 4));
       const q = Number(key.slice(6)) - 1;
@@ -85,7 +145,7 @@ export function periodRange(g: Granularity, key: string): { from: string; to: st
 export function priorKey(g: Granularity, key: string): string {
   switch (g) {
     case "weekly":
-      return ymd(new Date(new Date(`${key}T00:00:00`).getTime() - 7 * DAY));
+      return shiftWeekKey(key, -7);
     case "quarterly": {
       const y = Number(key.slice(0, 4));
       const q = Number(key.slice(6));
@@ -140,7 +200,7 @@ export function bucketLabel(g: Granularity, key: string, withYear: boolean): str
 function nextKey(g: Granularity, key: string): string {
   switch (g) {
     case "weekly":
-      return ymd(new Date(new Date(`${key}T00:00:00`).getTime() + 7 * DAY));
+      return shiftWeekKey(key, 7);
     case "quarterly": {
       const y = Number(key.slice(0, 4));
       const q = Number(key.slice(6));
@@ -161,7 +221,7 @@ function nextKey(g: Granularity, key: string): string {
 function ordinal(g: Granularity, key: string): number {
   switch (g) {
     case "weekly":
-      return Math.round(new Date(`${key}T00:00:00`).getTime() / (7 * DAY));
+      return Math.round((utcOf(key) - WEEK_EPOCH) / (7 * DAY));
     case "quarterly":
       return Number(key.slice(0, 4)) * 4 + (Number(key.slice(6)) - 1);
     case "yearly":
@@ -212,7 +272,7 @@ export function seriesKeys(
 function keyFromOrdinal(g: Granularity, ord: number): string {
   switch (g) {
     case "weekly":
-      return ymd(new Date(ord * 7 * DAY));
+      return utcYmd(WEEK_EPOCH + ord * 7 * DAY);
     case "quarterly": {
       const y = Math.floor(ord / 4);
       const q = (ord % 4) + 1;

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
+import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
 import { CreditCardRewardsProvider, CreditCardSections, RewardsPointsLog } from "./credit-card-rewards";
@@ -142,6 +143,9 @@ export function TravelBoard({
   const openList = !!listState.open;
   const setOpenList = (fn: (v: boolean) => boolean) =>
     setListState((s) => ({ open: fn(!!s.open) }));
+  // The reservations log opened in a popup, where the sheet's full column set
+  // has room. Desktop only — see the button in the panel header.
+  const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -353,6 +357,291 @@ export function TravelBoard({
     return { hotel, pocket, points, pointsValue, nights, cancelled, saved: hotel - pocket };
   }, [filtered]);
 
+  // The reservations filter bar, desktop table and mobile card list, built
+  // once and rendered in both the inline panel and the full-width popup —
+  // they read the same filter/sort state, so the two can never disagree.
+  const reservations = (
+    <>
+              {/* Filters on the left, and the figures the header doesn't carry
+                  on the right — spent and saved live in the header, so they are
+                  not repeated here. */}
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* The year picker is the dropdown alone: it opens on the year
+                      you're in, and every other year (and all of them) is one
+                      click away without a row of chips across the page. */}
+                  <select
+                    value={year}
+                    onChange={(e) => setYear(e.target.value)}
+                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    <option value={ALL}>All years</option>
+                    {years.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search hotel, city, card…"
+                    className="w-44 rounded-md bg-background px-2 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                  {/* Breakfast is the one perk worth pulling a list on, so it
+                      filters from here instead of only being readable per row. */}
+                  <button
+                    type="button"
+                    onClick={() => setBfastOnly((v) => !v)}
+                    aria-pressed={bfastOnly}
+                    className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
+                      bfastOnly
+                        ? "text-white ring-transparent"
+                        : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    }`}
+                    style={bfastOnly ? { backgroundColor: "var(--viz-bills)" } : undefined}
+                  >
+                    B&apos;fast incl
+                  </button>
+                  {/* The other half of the points question: show only the stays
+                      that actually redeemed. */}
+                  <button
+                    type="button"
+                    onClick={() => setPtsOnly((v) => !v)}
+                    aria-pressed={ptsOnly}
+                    className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
+                      ptsOnly
+                        ? "text-white ring-transparent"
+                        : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    }`}
+                    style={ptsOnly ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                  >
+                    Pts used
+                  </button>
+                  {brands.length > 0 ? (
+                    <select
+                      value={brand}
+                      onChange={(e) => setBrand(e.target.value)}
+                      className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                    >
+                      <option value={ALL}>All brands</option>
+                      {brands.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  {/* Mobile has cards, not column headers, so it needs its own
+                      way to reorder them. */}
+                  <select
+                    value={`${sort.key}:${sort.dir}`}
+                    onChange={(e) => {
+                      const [key, dir] = e.target.value.split(":");
+                      setSort({ key: key as SortKey, dir: dir as "asc" | "desc" });
+                    }}
+                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
+                  >
+                    <option value="checkIn:desc">Newest check-in</option>
+                    <option value="checkIn:asc">Oldest check-in</option>
+                    <option value="hotelCost:desc">Highest hotel cost</option>
+                    <option value="pocketCost:desc">Highest pocket cost</option>
+                    <option value="pointsCost:desc">Most points</option>
+                    <option value="propertyName:asc">Hotel name A–Z</option>
+                  </select>
+                  {/* The night count opens the run of totals: it says what the
+                      money figures beside it are counting. */}
+                  <span className="text-[11px] text-muted tabular-nums">
+                    Total in {year === ALL ? "all years" : year}: {shownTotals.nights} Night
+                    {shownTotals.nights === 1 ? "" : "s"}
+                    {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
+                  </span>
+                  <Figure label="Total hotel cost" value={formatMoney(shownTotals.hotel, currency)} tone="" />
+                  <Figure
+                    label="Total pts used"
+                    value={shownTotals.points.toLocaleString()}
+                    tone=""
+                    style={{ color: "var(--viz-savings)" }}
+                  />
+                  {/* What those points were actually worth, at the rate recorded
+                      on each stay — the whole point of redeeming them. */}
+                  <Figure
+                    label="Total pts worth"
+                    value={formatMoney(shownTotals.pointsValue, currency)}
+                    tone=""
+                    style={{ color: "var(--viz-savings)" }}
+                  />
+                </div>
+              </div>
+
+              {/* Desktop: the sheet's own columns, in the sheet's own order.
+                  Annual fee, Year and Card owner are the three the app doesn't
+                  carry — everything else is here, left to right, as typed. */}
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full min-w-[1180px] text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+                      <SortTh label="Reservation made" col="reservedOn" sort={sort} onSort={sortBy} nowrap />
+                      <SortTh label="Check in date" col="checkIn" sort={sort} onSort={sortBy} nowrap />
+                      <SortTh label="Hotel name" col="propertyName" sort={sort} onSort={sortBy} />
+                      <SortTh label="Points used" col="pointsCost" sort={sort} onSort={sortBy} />
+                      <SortTh label="Cash value" col="pointsValue" sort={sort} onSort={sortBy} />
+                      <SortTh label="Hotel credit" col="hotelCredit" sort={sort} onSort={sortBy} />
+                      <SortTh label="Hotel cost" col="hotelCost" sort={sort} onSort={sortBy} />
+                      <SortTh label="Pocket cost" col="pocketCost" sort={sort} onSort={sortBy} />
+                      <SortTh label="City" col="city" sort={sort} onSort={sortBy} align="left" />
+                      <SortTh label="Total nights" col="nights" sort={sort} onSort={sortBy} nowrap />
+                      <SortTh label="Brand" col="brand" sort={sort} onSort={sortBy} align="left" />
+                      <SortTh label="CC info" col="cardLabel" sort={sort} onSort={sortBy} align="left" />
+                      <SortTh label="Total pax" col="pax" sort={sort} onSort={sortBy} nowrap />
+                      <SortTh label="Remarks" col="remarks" sort={sort} onSort={sortBy} align="left" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((s) => (
+                      <tr
+                        key={s.id}
+                        onClick={() => setEditing(s)}
+                        className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${s.cancelledAt ? "opacity-55" : ""}`}
+                      >
+                        <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">{sheetDate(s.reservedOn)}</td>
+                        <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{sheetDate(s.checkIn)}</td>
+                        {/* Two lines at most: a long property name was pushing
+                            rows to three, which broke the row rhythm. */}
+                        <td className="max-w-[220px] px-2 py-2 text-left">
+                          <span className={`line-clamp-2 ${s.cancelledAt ? "line-through" : ""}`}>
+                            {s.propertyName}
+                          </span>
+                          {s.cancelledAt ? (
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                              Cancelled
+                            </span>
+                          ) : null}
+                        </td>
+                        {/* Grey and bracketed when the points were never spent:
+                            the figure is what the room would have cost on
+                            points, kept beside what it actually cost in cash. */}
+                        <td
+                          className={`px-2 py-2 text-center tabular-nums ${s.pointsCost > 0 && s.pointsUsed ? "" : "text-muted"}`}
+                          style={s.pointsCost > 0 && s.pointsUsed ? { color: "var(--viz-savings)" } : undefined}
+                        >
+                          {s.pointsCost > 0
+                            ? s.pointsUsed
+                              ? s.pointsCost.toLocaleString()
+                              : `(${s.pointsCost.toLocaleString()})`
+                            : DASH}
+                        </td>
+                        <td className="px-2 py-2 text-center tabular-nums text-muted">
+                          {(() => {
+                            const v = cashValue(s);
+                            return <span className={v.derived ? "italic opacity-70" : ""}>{v.text}</span>;
+                          })()}
+                        </td>
+                        <td
+                          className={`px-2 py-2 text-center tabular-nums ${s.hotelCreditCents > 0 ? "" : "text-muted"}`}
+                          style={s.hotelCreditCents > 0 ? { color: "var(--viz-bills)" } : undefined}
+                        >
+                          {money(s.hotelCreditCents, currency)}
+                        </td>
+                        <td className={`px-2 py-2 text-center tabular-nums ${s.hotelCostCents > 0 ? "" : "text-muted"}`}>
+                          {money(s.hotelCostCents, currency)}
+                        </td>
+                        {/* Column H: the amount when he paid, and otherwise the
+                            word for what covered it — "Pts", never "$0.00". */}
+                        <td className="px-2 py-2 text-center tabular-nums text-negative">
+                          {s.pocketCostCents > 0 ? (
+                            formatMoney(s.pocketCostCents, currency)
+                          ) : (
+                            <span className="text-[11px] font-semibold text-muted">{coveredBy(s)}</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-left text-muted">{s.city ?? DASH}</td>
+                        <td className="px-2 py-2 text-center tabular-nums">{s.nights}</td>
+                        <td className="px-2 py-2 text-left">{s.brand ?? DASH}</td>
+                        <td className="px-2 py-2 text-left text-xs text-muted">
+                          {(s.accountId ? cardName.get(s.accountId) : null) ?? s.cardLabel ?? DASH}
+                        </td>
+                        <td className={`px-2 py-2 text-center tabular-nums ${s.pax ? "" : "text-muted"}`}>
+                          {s.pax ?? DASH}
+                        </td>
+                        {/* Free text, so it gets the leftover width and clamps at
+                            two lines rather than stretching the row. */}
+                        <td className="max-w-[220px] px-2 py-2 text-left text-xs text-muted">
+                          <span className="line-clamp-2">{s.remarks || DASH}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile: one card per stay — 13 columns can't be read at 375px.
+                  Same fields, same order, wrapped instead of scrolled. */}
+              <ul className="divide-y divide-line sm:hidden">
+                {filtered.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(s)}
+                      className={`w-full px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${s.cancelledAt ? "opacity-55" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="min-w-0 flex-1 text-sm font-semibold">
+                          <span className={s.cancelledAt ? "line-through" : ""}>{s.propertyName}</span>
+                          {s.cancelledAt ? (
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                              Cancelled
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="shrink-0 text-sm font-bold tabular-nums text-negative">
+                          {s.pocketCostCents > 0 ? (
+                            formatMoney(s.pocketCostCents, currency)
+                          ) : (
+                            <span className="text-xs text-muted">{coveredBy(s)}</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+                        <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
+                        <span className="tabular-nums">{s.nights}n</span>
+                        {s.city ? <span>{s.city}</span> : null}
+                        {s.brand ? <span>{s.brand}</span> : null}
+                        {s.cardLabel ? <span>{s.cardLabel}</span> : null}
+                        {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px]">
+                        <span>
+                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">
+                            {s.pointsCost > 0 && !s.pointsUsed ? "Pts if used" : "Points used"}
+                          </span>
+                          <span
+                            className={`tabular-nums font-semibold ${s.pointsUsed ? "" : "text-muted"}`}
+                            style={s.pointsCost > 0 && s.pointsUsed ? { color: "var(--viz-savings)" } : undefined}
+                          >
+                            {s.pointsCost > 0 ? s.pointsCost.toLocaleString() : "—"}
+                          </span>
+                        </span>
+                        <span>
+                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel credit</span>
+                          <span className="tabular-nums font-semibold" style={{ color: "var(--viz-bills)" }}>
+                            {s.hotelCreditCents > 0 ? formatMoney(s.hotelCreditCents, currency) : "—"}
+                          </span>
+                        </span>
+                        <span>
+                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel cost</span>
+                          <span className="tabular-nums font-semibold">
+                            {s.hotelCostCents > 0 ? formatMoney(s.hotelCostCents, currency) : "—"}
+                          </span>
+                        </span>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {filtered.length === 0 ? (
+                <p className="px-4 py-8 text-center text-xs text-muted">No stays match these filters.</p>
+              ) : null}
+    </>
+  );
+
   return (
     <div className="space-y-3">
       <header className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
@@ -429,15 +718,19 @@ export function TravelBoard({
                       onClick={() => setEditing(s)}
                       className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
                     >
-                      {/* One line: the name truncates before the trip details
-                          or the figures beside it are pushed off. */}
-                      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 sm:flex-nowrap">
+                      {/* Two lines, not one. Sharing a line with the trip
+                          details left the name a `truncate` box ~30px wide
+                          next to a shrink-0 detail run — "Hotel Babylon
+                          Royal" rendered as "Hot…". The name owns its line
+                          and the details sit under it, the way the mobile
+                          card already reads. */}
+                      <span className="flex min-w-0 flex-1 flex-col gap-y-0.5">
                         <span className="truncate text-sm font-semibold">{s.propertyName}</span>
-                        <span className="flex shrink-0 items-baseline gap-x-2 text-[11px] text-muted">
+                        <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
                           <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
                           <span className="tabular-nums">{s.nights}n</span>
-                          {s.city ? <span className="hidden sm:inline">{s.city}</span> : null}
-                          {s.brand ? <span className="hidden sm:inline">{s.brand}</span> : null}
+                          {s.city ? <span>{s.city}</span> : null}
+                          {s.brand ? <span>{s.brand}</span> : null}
                           {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
                         </span>
                       </span>
@@ -478,7 +771,15 @@ export function TravelBoard({
           <CreditCardSections />
 
           {/* ---- The reservations themselves, with the filters that drive them
-               and what the current selection adds up to. */}
+          {/* ---- The reservations themselves, with the filters that drive them
+               and what the current selection adds up to. The same body is
+               rendered twice: inline in the page column, and — on a wide
+               screen — inside a popup that is not boxed in by the sidebar.
+               The sheet's 14 columns need ~1275px and the page column gives
+               them 780, so six of them (City, Brand, CC info, Pax, Nights,
+               Remarks) were only reachable by scrolling the table sideways.
+               The popup is where they actually fit; no column was dropped to
+               make the inline view work. */}
           <Panel
             title="Hotel Reservations Log"
             meta={
@@ -489,299 +790,37 @@ export function TravelBoard({
                 currency={currency}
               />
             }
+            control={
+              /* Desktop only: on a phone the list below is already a card per
+                 stay, so there are no hidden columns for a popup to reveal. */
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                className="hidden items-center gap-1.5 rounded-md border border-black/25 bg-background px-2 py-1 text-[11px] font-semibold transition hover:bg-black/5 sm:inline-flex dark:border-white/30 dark:hover:bg-white/10"
+              >
+                Open full width
+                <svg
+                  width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
+                >
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                </svg>
+              </button>
+            }
             open={openList}
             onToggle={() => setOpenList((v) => !v)}
           >
-            {/* Filters on the left, and the figures the header doesn't carry
-                on the right — spent and saved live in the header, so they are
-                not repeated here. */}
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
-              <div className="flex flex-wrap items-center gap-2">
-                {/* The year picker is the dropdown alone: it opens on the year
-                    you're in, and every other year (and all of them) is one
-                    click away without a row of chips across the page. */}
-                <select
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                >
-                  <option value={ALL}>All years</option>
-                  {years.map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search hotel, city, card…"
-                  className="w-44 rounded-md bg-background px-2 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                />
-                {/* Breakfast is the one perk worth pulling a list on, so it
-                    filters from here instead of only being readable per row. */}
-                <button
-                  type="button"
-                  onClick={() => setBfastOnly((v) => !v)}
-                  aria-pressed={bfastOnly}
-                  className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
-                    bfastOnly
-                      ? "text-white ring-transparent"
-                      : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
-                  }`}
-                  style={bfastOnly ? { backgroundColor: "var(--viz-bills)" } : undefined}
-                >
-                  B&apos;fast incl
-                </button>
-                {/* The other half of the points question: show only the stays
-                    that actually redeemed. */}
-                <button
-                  type="button"
-                  onClick={() => setPtsOnly((v) => !v)}
-                  aria-pressed={ptsOnly}
-                  className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
-                    ptsOnly
-                      ? "text-white ring-transparent"
-                      : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
-                  }`}
-                  style={ptsOnly ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                >
-                  Pts used
-                </button>
-                {brands.length > 0 ? (
-                  <select
-                    value={brand}
-                    onChange={(e) => setBrand(e.target.value)}
-                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                  >
-                    <option value={ALL}>All brands</option>
-                    {brands.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                ) : null}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                {/* Mobile has cards, not column headers, so it needs its own
-                    way to reorder them. */}
-                <select
-                  value={`${sort.key}:${sort.dir}`}
-                  onChange={(e) => {
-                    const [key, dir] = e.target.value.split(":");
-                    setSort({ key: key as SortKey, dir: dir as "asc" | "desc" });
-                  }}
-                  className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
-                >
-                  <option value="checkIn:desc">Newest check-in</option>
-                  <option value="checkIn:asc">Oldest check-in</option>
-                  <option value="hotelCost:desc">Highest hotel cost</option>
-                  <option value="pocketCost:desc">Highest pocket cost</option>
-                  <option value="pointsCost:desc">Most points</option>
-                  <option value="propertyName:asc">Hotel name A–Z</option>
-                </select>
-                {/* The night count opens the run of totals: it says what the
-                    money figures beside it are counting. */}
-                <span className="text-[11px] text-muted tabular-nums">
-                  Total in {year === ALL ? "all years" : year}: {shownTotals.nights} Night
-                  {shownTotals.nights === 1 ? "" : "s"}
-                  {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
-                </span>
-                <Figure label="Total hotel cost" value={formatMoney(shownTotals.hotel, currency)} tone="" />
-                <Figure
-                  label="Total pts used"
-                  value={shownTotals.points.toLocaleString()}
-                  tone=""
-                  style={{ color: "var(--viz-savings)" }}
-                />
-                {/* What those points were actually worth, at the rate recorded
-                    on each stay — the whole point of redeeming them. */}
-                <Figure
-                  label="Total pts worth"
-                  value={formatMoney(shownTotals.pointsValue, currency)}
-                  tone=""
-                  style={{ color: "var(--viz-savings)" }}
-                />
-              </div>
-            </div>
-
-            {/* Desktop: the sheet's own columns, in the sheet's own order.
-                Annual fee, Year and Card owner are the three the app doesn't
-                carry — everything else is here, left to right, as typed. */}
-            <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full min-w-[1180px] text-sm">
-                <thead>
-                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <SortTh label="Reservation made" col="reservedOn" sort={sort} onSort={sortBy} nowrap />
-                    <SortTh label="Check in date" col="checkIn" sort={sort} onSort={sortBy} nowrap />
-                    <SortTh label="Hotel name" col="propertyName" sort={sort} onSort={sortBy} />
-                    <SortTh label="Points used" col="pointsCost" sort={sort} onSort={sortBy} />
-                    <SortTh label="Cash value" col="pointsValue" sort={sort} onSort={sortBy} />
-                    <SortTh label="Hotel credit" col="hotelCredit" sort={sort} onSort={sortBy} />
-                    <SortTh label="Hotel cost" col="hotelCost" sort={sort} onSort={sortBy} />
-                    <SortTh label="Pocket cost" col="pocketCost" sort={sort} onSort={sortBy} />
-                    <SortTh label="City" col="city" sort={sort} onSort={sortBy} align="left" />
-                    <SortTh label="Total nights" col="nights" sort={sort} onSort={sortBy} nowrap />
-                    <SortTh label="Brand" col="brand" sort={sort} onSort={sortBy} align="left" />
-                    <SortTh label="CC info" col="cardLabel" sort={sort} onSort={sortBy} align="left" />
-                    <SortTh label="Total pax" col="pax" sort={sort} onSort={sortBy} nowrap />
-                    <SortTh label="Remarks" col="remarks" sort={sort} onSort={sortBy} align="left" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((s) => (
-                    <tr
-                      key={s.id}
-                      onClick={() => setEditing(s)}
-                      className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${s.cancelledAt ? "opacity-55" : ""}`}
-                    >
-                      <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">{sheetDate(s.reservedOn)}</td>
-                      <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{sheetDate(s.checkIn)}</td>
-                      {/* Two lines at most: a long property name was pushing
-                          rows to three, which broke the row rhythm. */}
-                      <td className="max-w-[220px] px-2 py-2 text-left">
-                        <span className={`line-clamp-2 ${s.cancelledAt ? "line-through" : ""}`}>
-                          {s.propertyName}
-                        </span>
-                        {s.cancelledAt ? (
-                          <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
-                            Cancelled
-                          </span>
-                        ) : null}
-                      </td>
-                      {/* Grey and bracketed when the points were never spent:
-                          the figure is what the room would have cost on
-                          points, kept beside what it actually cost in cash. */}
-                      <td
-                        className={`px-2 py-2 text-center tabular-nums ${s.pointsCost > 0 && s.pointsUsed ? "" : "text-muted"}`}
-                        style={s.pointsCost > 0 && s.pointsUsed ? { color: "var(--viz-savings)" } : undefined}
-                      >
-                        {s.pointsCost > 0
-                          ? s.pointsUsed
-                            ? s.pointsCost.toLocaleString()
-                            : `(${s.pointsCost.toLocaleString()})`
-                          : DASH}
-                      </td>
-                      <td className="px-2 py-2 text-center tabular-nums text-muted">
-                        {(() => {
-                          const v = cashValue(s);
-                          return <span className={v.derived ? "italic opacity-70" : ""}>{v.text}</span>;
-                        })()}
-                      </td>
-                      <td
-                        className={`px-2 py-2 text-center tabular-nums ${s.hotelCreditCents > 0 ? "" : "text-muted"}`}
-                        style={s.hotelCreditCents > 0 ? { color: "var(--viz-bills)" } : undefined}
-                      >
-                        {money(s.hotelCreditCents, currency)}
-                      </td>
-                      <td className={`px-2 py-2 text-center tabular-nums ${s.hotelCostCents > 0 ? "" : "text-muted"}`}>
-                        {money(s.hotelCostCents, currency)}
-                      </td>
-                      {/* Column H: the amount when he paid, and otherwise the
-                          word for what covered it — "Pts", never "$0.00". */}
-                      <td className="px-2 py-2 text-center tabular-nums text-negative">
-                        {s.pocketCostCents > 0 ? (
-                          formatMoney(s.pocketCostCents, currency)
-                        ) : (
-                          <span className="text-[11px] font-semibold text-muted">{coveredBy(s)}</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 text-left text-muted">{s.city ?? DASH}</td>
-                      <td className="px-2 py-2 text-center tabular-nums">{s.nights}</td>
-                      <td className="px-2 py-2 text-left">{s.brand ?? DASH}</td>
-                      <td className="px-2 py-2 text-left text-xs text-muted">
-                        {(s.accountId ? cardName.get(s.accountId) : null) ?? s.cardLabel ?? DASH}
-                      </td>
-                      <td className={`px-2 py-2 text-center tabular-nums ${s.pax ? "" : "text-muted"}`}>
-                        {s.pax ?? DASH}
-                      </td>
-                      {/* Free text, so it gets the leftover width and clamps at
-                          two lines rather than stretching the row. */}
-                      <td className="max-w-[220px] px-2 py-2 text-left text-xs text-muted">
-                        <span className="line-clamp-2">{s.remarks || DASH}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile: one card per stay — 13 columns can't be read at 375px.
-                Same fields, same order, wrapped instead of scrolled. */}
-            <ul className="divide-y divide-line sm:hidden">
-              {filtered.map((s) => (
-                <li key={s.id}>
-                  <button
-                    type="button"
-                    onClick={() => setEditing(s)}
-                    className={`w-full px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${s.cancelledAt ? "opacity-55" : ""}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="min-w-0 flex-1 text-sm font-semibold">
-                        <span className={s.cancelledAt ? "line-through" : ""}>{s.propertyName}</span>
-                        {s.cancelledAt ? (
-                          <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
-                            Cancelled
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="shrink-0 text-sm font-bold tabular-nums text-negative">
-                        {s.pocketCostCents > 0 ? (
-                          formatMoney(s.pocketCostCents, currency)
-                        ) : (
-                          <span className="text-xs text-muted">{coveredBy(s)}</span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
-                      <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
-                      <span className="tabular-nums">{s.nights}n</span>
-                      {s.city ? <span>{s.city}</span> : null}
-                      {s.brand ? <span>{s.brand}</span> : null}
-                      {s.cardLabel ? <span>{s.cardLabel}</span> : null}
-                      {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
-                    </div>
-                    <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px]">
-                      <span>
-                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">
-                          {s.pointsCost > 0 && !s.pointsUsed ? "Pts if used" : "Points used"}
-                        </span>
-                        <span
-                          className={`tabular-nums font-semibold ${s.pointsUsed ? "" : "text-muted"}`}
-                          style={s.pointsCost > 0 && s.pointsUsed ? { color: "var(--viz-savings)" } : undefined}
-                        >
-                          {s.pointsCost > 0 ? s.pointsCost.toLocaleString() : "—"}
-                        </span>
-                      </span>
-                      <span>
-                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel credit</span>
-                        <span className="tabular-nums font-semibold" style={{ color: "var(--viz-bills)" }}>
-                          {s.hotelCreditCents > 0 ? formatMoney(s.hotelCreditCents, currency) : "—"}
-                        </span>
-                      </span>
-                      <span>
-                        <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel cost</span>
-                        <span className="tabular-nums font-semibold">
-                          {s.hotelCostCents > 0 ? formatMoney(s.hotelCostCents, currency) : "—"}
-                        </span>
-                      </span>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {filtered.length === 0 ? (
-              <p className="px-4 py-8 text-center text-xs text-muted">No stays match these filters.</p>
-            ) : null}
+            {reservations}
           </Panel>
 
           {/* ---- The points those stays were paid with, right under the log
                that spends them. */}
           <RewardsPointsLog />
 
-          {/* ---- The two charts stacked in one column with the table they're
-               drawn from beside them, so the whole year-over-year picture is
-               one screenful. Both charts read every stay, not the filtered set
-               — a one-year filter would leave one column. Below lg the table
-               drops under the charts, where it has the width to breathe. */}
+          {/* ---- The two charts side by side. They are drawn narrow by
+               design, so half a row suits them; the summary tables below are
+               not, which is why they no longer share this grid. */}
           <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
-            <div className="space-y-3">
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
                 <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
@@ -792,8 +831,12 @@ export function TravelBoard({
                 <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
                 <SavedLine years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
               </div>
-            </div>
-          {/* ---- Year-over-year rollup: the sheet's summary block. */}
+          </section>
+
+          {/* ---- Year-over-year rollup: the sheet's summary block. Full
+               width, not half: six columns in a half-row put Total saved —
+               the figure the whole table exists for — off the right edge
+               behind a sideways scroll. */}
           <Panel
             title="Total Cost Saved by Year"
             meta={
@@ -811,7 +854,7 @@ export function TravelBoard({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-2 py-2 text-center font-semibold">Year</th>
+                    <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Year</th>
                     <th className="px-2 py-2 text-center font-semibold">Total stays</th>
                     <th className="px-2 py-2 text-center font-semibold">Total pts used</th>
                     <th className="px-2 py-2 text-center font-semibold">Total hotel cost</th>
@@ -825,7 +868,14 @@ export function TravelBoard({
                       key={y}
                       className={`border-b border-line/60 last:border-0 ${year === y ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
                     >
-                      <td className="px-2 py-2 text-center font-semibold tabular-nums">{y}</td>
+                      <td
+                        className="sticky left-0 z-10 px-2 py-2 text-center font-semibold tabular-nums"
+                        style={{
+                          backgroundColor: year === y ? "var(--viz-sel)" : "var(--surface)",
+                        }}
+                      >
+                        {y}
+                      </td>
                       <td className="px-2 py-2 text-center tabular-nums text-muted">{row.stays}</td>
                       <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {row.points > 0 ? row.points.toLocaleString() : DASH}
@@ -841,13 +891,12 @@ export function TravelBoard({
               </table>
             </div>
           </Panel>
-          </section>
 
-          {/* ---- The two "who did we stay with" tallies, side by side: the
-               same money cut by hotel brand on the left and by the card that
-               paid on the right. They stack below lg, where half a viewport
-               can't hold either table. */}
-          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+          {/* ---- The two "who did we stay with" tallies: the same money cut
+               by hotel brand and by the card that paid. Stacked full width
+               rather than side by side — five money columns need ~560px, and
+               half a row gave them 383, hiding Total saved behind a
+               horizontal scroll on desktop as well as on a phone. */}
           {/* ---- Stays by brand: the sheet's right-hand tally. */}
           <Panel
             title="Total Stays by Brand"
@@ -864,10 +913,13 @@ export function TravelBoard({
             onToggle={() => setOpenBrands((v) => !v)}
           >
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm">
+              <table className="w-full min-w-[520px] text-sm sm:min-w-0">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-2 text-center font-semibold">Brand</th>
+                    {/* Pinned: on a phone these five columns still need a
+                        sideways swipe, and without an anchor you arrive at
+                        Total saved with no idea whose row you are reading. */}
+                    <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Brand</th>
                     <th className="px-3 py-2 text-center font-semibold">Stays</th>
                     <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Total Pts Used</th>
                     <th className="px-3 py-2 text-center font-semibold">Total spent</th>
@@ -877,7 +929,7 @@ export function TravelBoard({
                 <tbody>
                   {brandTally.map(([b, row]) => (
                     <tr key={b} className="border-b border-line/60 last:border-0">
-                      <td className="px-3 py-2 text-left font-semibold">{b}</td>
+                      <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold">{b}</td>
                       <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>
                       <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
@@ -910,10 +962,10 @@ export function TravelBoard({
             onToggle={() => setOpenCards((v) => !v)}
           >
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm">
+              <table className="w-full min-w-[520px] text-sm sm:min-w-0">
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-2 py-2 text-center font-semibold">Card</th>
+                    <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Card</th>
                     <th className="px-2 py-2 text-center font-semibold">Stays</th>
                     <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Total Pts Used</th>
                     <th className="px-2 py-2 text-center font-semibold">Total spent</th>
@@ -926,7 +978,7 @@ export function TravelBoard({
                       {/* One line, even on a phone: the table already scrolls
                           sideways, and wrapping broke "1002 Hilton Aspire Amex
                           V" into four stacked words per row. */}
-                      <td className={`whitespace-nowrap px-2 py-2 text-left font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
+                      <td className={`sticky left-0 z-10 whitespace-nowrap bg-surface px-2 py-2 text-left font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
                         {name}
                       </td>
                       <td className="px-2 py-2 text-center tabular-nums">{row.stays}</td>
@@ -945,11 +997,30 @@ export function TravelBoard({
               </table>
             </div>
           </Panel>
-          </section>
-
 
         </CreditCardRewardsProvider>
       )}
+
+      {/* The log at full width. `max-w-[96vw]` rather than one of the shared
+          max-w-* caps: the table needs ~1275px and a 5xl panel (1024) would
+          still hide the last columns on a laptop. */}
+      {expanded ? (
+        <ModalShell
+          title="Hotel Reservations Log"
+          onClose={() => setExpanded(false)}
+          className="sm:max-w-[96vw]"
+          headerExtra={
+            <HeaderTotals
+              count={`${filtered.length} shown`}
+              spent={shownTotals.pocket}
+              saved={shownTotals.saved}
+              currency={currency}
+            />
+          }
+        >
+          {reservations}
+        </ModalShell>
+      ) : null}
 
       {linking ? (
         <CardLinkModal rows={cardLabels} cards={cards} onClose={() => setLinking(false)} />

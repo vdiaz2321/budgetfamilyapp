@@ -25,14 +25,33 @@ type TransactionQueryRow = {
   is_withdrawal: boolean | null;
 };
 
+// A `YYYY-MM-DD` that is also a real day — "2026-13-45" and "2026-02-30" are
+// the right shape but not real dates, and Postgres rejects both.
+function validDate(raw: string | undefined): string | undefined {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return undefined;
+  const [y, m, d] = raw.split("-").map(Number);
+  const parsed = new Date(Date.UTC(y, m - 1, d));
+  const roundTrips =
+    parsed.getUTCFullYear() === y &&
+    parsed.getUTCMonth() === m - 1 &&
+    parsed.getUTCDate() === d;
+  return roundTrips ? raw : undefined;
+}
+
 export default async function TransactionsPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  const { month: monthParam, from, to } = await searchParams;
+  const { month: monthParam, from: fromParam, to: toParam } = await searchParams;
   const month = resolveMonth(monthParam);
   const nextFirst = `${month.nextKey}-01`;
+  // `from`/`to` are pasted straight into the query below, so a value Postgres
+  // can't parse as a date used to take the whole page down with a 500 — and
+  // "/transactions?from=notadate" is one mistyped bookmark away. Anything that
+  // isn't a real calendar date is dropped, falling back to the month scoping.
+  const from = validDate(fromParam);
+  const to = validDate(toParam);
   // A custom date range overrides the month scoping entirely, so searching
   // isn't limited to whatever month happens to be selected.
   const hasRange = Boolean(from || to);

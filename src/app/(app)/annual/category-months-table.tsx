@@ -64,13 +64,18 @@ function visibleMonths<T>(values: T[], count: number) {
 // one, so neither table strands its numbers in white space.
 function gridStyle(monthCount: number) {
   return {
-    gridTemplateColumns: `11rem minmax(7rem,1fr) repeat(${monthCount},minmax(6.25rem,1fr))`,
+    // 7rem, not 6.25: the totals strip sets its figures at 18px bold, where
+    // "$14,322.10" measures 104px and a 100px track cannot hold it. These
+    // rows already overflow their panel, so the `1fr` never gets to stretch
+    // — the track sits at its minimum and anything wider paints straight
+    // over the gap into the next column's number.
+    gridTemplateColumns: `11rem minmax(8rem,1fr) repeat(${monthCount},minmax(7rem,1fr))`,
   };
 }
 // Enough width for every column at its minimum; narrower than a full year
 // once the empty tail months are dropped.
 function trackMinWidth(monthCount: number) {
-  return { minWidth: `${12 + 7 + 6.25 * monthCount}rem` };
+  return { minWidth: `${12 + 8 + 7 * monthCount}rem` };
 }
 
 export function CategoryMonthsTable({

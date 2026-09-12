@@ -59,6 +59,23 @@ const NET_SIGN: Record<KindKey, 1 | -1 | 0> = {
 
 type SelectedYearCell = { year: number; kind: KindKey; amountCents: number };
 
+// How many years "Recent" keeps. The panel gains a column every January, so
+// without this the table only ever gets wider — by 2031 it is 14 columns and
+// 1,860px, and the years you actually compare against are the ones pushed
+// furthest from the Category label.
+const RECENT_YEARS = 5;
+
+/**
+ * A row's Total, summed over the years currently on screen.
+ *
+ * The seeded `total` on every line is an all-years figure, so showing it
+ * beside five visible columns would print a Total the row visibly doesn't add
+ * up to. Everything in this panel totals what it shows.
+ */
+function sumOverYears(byYear: Record<number, number>, years: number[]): number {
+  return years.reduce((sum, y) => sum + (byYear[y] ?? 0), 0);
+}
+
 type Props = {
   kinds: BreakdownKind[];
   years: number[]; // newest-first
@@ -66,9 +83,15 @@ type Props = {
   currency: string;
 };
 
-export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Props) {
+export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, currency }: Props) {
   const [collapse, setCollapse] = useSessionCollapse("annual-breakdown-history", () => ({ open: false }));
   const open = collapse.open;
+  // Recent by default — the full history is two clicks of scrolling away and
+  // is rarely the question. `allYears` is newest-first, so the recent slice is
+  // just the head of it.
+  const [showAllYears, setShowAllYears] = useState(false);
+  const canTrim = allYears.length > RECENT_YEARS;
+  const years = showAllYears || !canTrim ? allYears : allYears.slice(0, RECENT_YEARS);
   // All overflow-x-auto scroll containers (summary + each kind body) share one
   // scroll position so horizontal scrolling moves everything together.
   // Cells picked out of the line-item rows below. Kept here rather than in
@@ -98,13 +121,15 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
   // Dynamic column count (label + N years + Total) → inline style, since Tailwind's
   // JIT can't see a computed grid-cols-[…] arbitrary value.
   const gridStyle: CSSProperties = {
-    // Columns are sized to the figures they hold — a year column fits
-    // "$133,847.09" and no more — so nine years of history read as a table
-    // rather than as numbers marooned in white space. The line-item column
-    // still takes any width left over on a wide screen.
-    gridTemplateColumns: `minmax(9.5rem, 1fr) minmax(8rem, 1fr) repeat(${years.length}, minmax(6.25rem, 1fr))`,
+    // Columns are sized to the figures they hold, with the widest figure
+    // actually measured rather than estimated: a year column has to fit
+    // "$133,847.09" (108px) and the Total column "$1,046,113.78" (133px).
+    // At the old 6.25rem/8rem those two overflowed their tracks — and
+    // because the row is already wider than the panel the `1fr` never
+    // stretches, so the overflow landed on top of the neighbouring year.
+    gridTemplateColumns: `minmax(9.5rem, 1fr) minmax(9.5rem, 1fr) repeat(${years.length}, minmax(7rem, 1fr))`,
   };
-  const minW = `${10 + 8 + years.length * 6.25}rem`;
+  const minW = `${9.5 + 9.5 + years.length * 7}rem`;
 
   // What the selection adds up to, per year and overall. `net` only means
   // anything once both sides of the ledger are in play, so it is computed but
@@ -141,6 +166,20 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
           <Chevron open={open} />
           <span className="font-semibold">Annual Breakdown</span>
         </button>
+        {/* Only offered once there is something to trim, and only while the
+            panel is open — a range control over a folded table is noise. */}
+        {open && canTrim ? (
+          <button
+            type="button"
+            onClick={() => setShowAllYears((v) => !v)}
+            aria-pressed={showAllYears}
+            className="shrink-0 rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+          >
+            {showAllYears
+              ? `Last ${RECENT_YEARS} years`
+              : `All ${allYears.length} years`}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => downloadBreakdownCsv(kinds, years, netByYear, currency)}
@@ -186,7 +225,7 @@ export function AnnualBreakdownHistory({ kinds, years, netByYear, currency }: Pr
                     label={k.label}
                     kind={k.kind}
                     byYear={k.totalByYear}
-                    total={k.total}
+                    total={sumOverYears(k.totalByYear, years)}
                     years={years}
                     gridStyle={gridStyle}
                     currency={currency}
@@ -287,7 +326,8 @@ function downloadBreakdownCsv(
     rows.push([q(section), q(group), q(line), q(detail), money(total), ...byYear(rec)].join(","));
 
   // Summary block first, in the order the sticky strip shows it.
-  for (const k of kinds) push("Summary", "", k.label, "", k.total, k.totalByYear);
+  const sum = (rec: Record<number, number>) => sumOverYears(rec, years);
+  for (const k of kinds) push("Summary", "", k.label, "", sum(k.totalByYear), k.totalByYear);
   const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0);
   push("Summary", "", "Net", "", netTotal, netByYear);
 
@@ -296,12 +336,12 @@ function downloadBreakdownCsv(
       // A kind that is one unnamed group doesn't get a subtotal row of its
       // own on screen either — it would just restate the section.
       if (k.groups.length > 1) {
-        push(k.label, g.label, "Subtotal", "", g.total, g.subtotalByYear);
+        push(k.label, g.label, "Subtotal", "", sum(g.subtotalByYear), g.subtotalByYear);
       }
       for (const l of g.lines) {
-        push(k.label, k.groups.length > 1 ? g.label : "", l.label, "", l.total, l.byYear);
+        push(k.label, k.groups.length > 1 ? g.label : "", l.label, "", sum(l.byYear), l.byYear);
         for (const d of l.details ?? []) {
-          push(k.label, k.groups.length > 1 ? g.label : "", l.label, d.label, d.total, d.byYear);
+          push(k.label, k.groups.length > 1 ? g.label : "", l.label, d.label, sum(d.byYear), d.byYear);
         }
       }
     }
@@ -460,7 +500,7 @@ function Group({
             {group.label}
           </span>
           <span className="text-center text-[18px] font-bold tabular-nums">
-            {formatMoney(group.total, currency)}
+            {formatMoney(sumOverYears(group.subtotalByYear, years), currency)}
           </span>
           {years.map((y) => {
             const v = group.subtotalByYear[y] ?? 0;
@@ -516,7 +556,7 @@ function LineRow({
           {hasDetails ? <Chevron open={expanded} small /> : null}
           <span className="truncate">{line.label}</span>
         </span>
-        <span className="text-center text-[18px] tabular-nums">{formatMoney(line.total, currency)}</span>
+        <span className="text-center text-[18px] tabular-nums">{formatMoney(sumOverYears(line.byYear, years), currency)}</span>
         {years.map((y) => {
           const v = line.byYear[y] ?? 0;
           const key = `${rowKey}|${y}`;
@@ -542,7 +582,7 @@ function LineRow({
           <span className="truncate pl-12 text-[13px] leading-tight text-muted">
             └ {d.label}
           </span>
-          <span className="text-center text-[16px] font-medium tabular-nums text-muted">{formatMoney(d.total, currency)}</span>
+          <span className="text-center text-[16px] font-medium tabular-nums text-muted">{formatMoney(sumOverYears(d.byYear, years), currency)}</span>
           {years.map((y) => {
             const v = d.byYear[y] ?? 0;
             return (

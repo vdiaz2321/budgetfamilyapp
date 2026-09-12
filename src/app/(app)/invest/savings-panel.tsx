@@ -285,7 +285,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
           <span className="font-bold tabular-nums" style={{ color: totalRoom > 0 ? "var(--viz-savings)" : "var(--positive)" }}>
             {totalRoom > 0 ? formatSavingsMoney(totalRoom, currency) : "All maxed"}
           </span>
-          {totalRoom > 0 ? <span className="text-muted">still allowed for {year}</span> : null}
+          {totalRoom > 0 ? <span className="text-muted">room left for {year}</span> : null}
         </span>
       </button>
 

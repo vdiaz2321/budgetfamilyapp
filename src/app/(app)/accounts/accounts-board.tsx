@@ -8,6 +8,7 @@ import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money"
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import { GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
 import {
   addAccount,
@@ -88,9 +89,17 @@ const MONTH_COLUMNS = 5;
 // assembled at runtime silently never gets any CSS.
 const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents"] as const;
 const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block"] as const;
-const monthTier = (i: number) => (i === 0 ? MONTH_TIER[0] : i <= 2 ? MONTH_TIER[1] : MONTH_TIER[2]);
-const monthHeadTier = (i: number) =>
-  i === 0 ? MONTH_HEAD_TIER[0] : i <= 2 ? MONTH_HEAD_TIER[1] : MONTH_HEAD_TIER[2];
+// Both take the column's DISTANCE FROM THE ANCHOR (the selected period), not
+// its raw index. Months read oldest -> newest so time runs left to right like
+// the Annual Overview's Months table, which puts the anchor last — but the
+// columns worth keeping on a narrow popup are still the ones nearest it.
+const monthTier = (distance: number) =>
+  distance === 0 ? MONTH_TIER[0] : distance <= 2 ? MONTH_TIER[1] : MONTH_TIER[2];
+const monthHeadTier = (distance: number) =>
+  distance === 0 ? MONTH_HEAD_TIER[0] : distance <= 2 ? MONTH_HEAD_TIER[1] : MONTH_HEAD_TIER[2];
+// The anchor is the newest column, i.e. the last one.
+const anchorIdx = (months: string[]) => months.length - 1;
+const distFromAnchor = (months: string[], i: number) => months.length - 1 - i;
 // Row grids: name + 1 money column when narrow, + 3 at 560px, + 5 at 860px.
 const ROW_GRID =
   "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem]";
@@ -393,8 +402,10 @@ export function AccountsBoard({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   };
   const anchorMonth = periodSnapshotMonth ?? historyMonths[0];
+  // Oldest first: shiftMonth walks BACK from the anchor, so the window is
+  // built in reverse and the anchor month lands in the final column.
   const displayMonths: string[] = Array.from({ length: MONTH_COLUMNS }, (_, i) =>
-    shiftMonth(anchorMonth, i),
+    shiftMonth(anchorMonth, MONTH_COLUMNS - 1 - i),
   );
   // Resolve an account's balance for the currently-selected period: the
   // historical snapshot if one exists for that month, otherwise the live
@@ -469,18 +480,23 @@ export function AccountsBoard({
   // Prior debt totals for the "% vs last period" subtitle. Both direct (debt_loan
   // accounts) and budget-debt subcategories have their own snapshot tables now,
   // so both contribute to the prior baseline when snapshots exist. Anything
-  // without a prior snapshot falls back to its current balance so
-  // newly-tracked debts don't fabricate a swing.
+  // WITHOUT a prior snapshot is left out of the baseline entirely — the same
+  // rule priorAssets above already uses, and for the same reason.
+  //
+  // This used to add the debt's CURRENT balance to the PRIOR total instead,
+  // which counted a debt that didn't exist yet as though it had already been
+  // there at today's size. "1163 Venture V" ($667, first snapshot July) was
+  // being added to June, so Q3-vs-Q2 read "$2,436 · 48% less" when the real
+  // movement was "$1,769 · 40% less". Comparing only the debts present in
+  // both periods is the one option that never invents a figure; `covered`
+  // below still suppresses the delta when nothing overlaps.
   const debtLoanAccounts = active.filter((a) => a.kind === "debt_loan");
   const priorDirectDebt = (() => {
     let sum = 0;
     let covered = 0;
     for (const a of debtLoanAccounts) {
       const p = priorBalanceOf(a);
-      if (p == null) {
-        sum += Math.abs(balanceOf(a));
-        continue;
-      }
+      if (p == null) continue;
       sum += Math.abs(p);
       covered += 1;
     }
@@ -492,10 +508,7 @@ export function AccountsBoard({
     for (const a of debtLoanAccounts) {
       if (isDebtExcludedFromNetWorth(a.subtype)) continue;
       const p = priorBalanceOf(a);
-      if (p == null) {
-        sum += Math.abs(balanceOf(a));
-        continue;
-      }
+      if (p == null) continue;
       sum += Math.abs(p);
       covered += 1;
     }
@@ -507,10 +520,7 @@ export function AccountsBoard({
     for (const d of budgetDebts) {
       if (isDebtLoanLinked(d)) continue;
       const p = priorDebtBalanceOf(d);
-      if (p == null) {
-        sum += debtBalanceOf(d);
-        continue;
-      }
+      if (p == null) continue;
       sum += p;
       covered += 1;
     }
@@ -522,10 +532,7 @@ export function AccountsBoard({
     for (const d of budgetDebts) {
       if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
       const p = priorDebtBalanceOf(d);
-      if (p == null) {
-        sum += debtBalanceOf(d);
-        continue;
-      }
+      if (p == null) continue;
       sum += p;
       covered += 1;
     }
@@ -596,6 +603,11 @@ export function AccountsBoard({
     ),
   );
 
+  useRegisterMobilePageActions([
+    { label: "Add account", onSelect: () => setAddOpen(true) },
+    { label: "Transfer Funds", onSelect: () => setTransferOpen(true) },
+  ]);
+
   return (
     <SubtypeOptionsContext.Provider value={knownSubtypes}>
     <div className="mx-auto w-full max-w-[110rem] space-y-4">
@@ -604,19 +616,23 @@ export function AccountsBoard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-bold">Accounts</h1>
         {/* Actions sit immediately left of the period picker so the header
-            carries every page-level control in one row. */}
+            carries every page-level control in one row. Below md they move
+            into the ⋯ menu instead (registered above), so on a phone the
+            header doesn't spend a whole row on two buttons. */}
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             onClick={() => setTransferOpen(true)}
-            className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+            // Secondary: outlined, so Add account is the one filled button.
+            // Two filled buttons side by side read as equal weight.
+            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
           >
             Transfer Funds
           </button>
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
           >
             Add account
           </button>
@@ -665,43 +681,50 @@ export function AccountsBoard({
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 px-3 sm:gap-3 sm:px-0">
-        <SummaryStat
-          label="Assets"
-          value={assets}
-          currency={currency}
-          tone="text-positive"
-          delta={deltaPct(assets, priorAssets)}
-          deltaAmount={priorAssets == null ? null : assets - priorAssets}
-          deltaGoodWhen="up"
-          priorLabel={priorPeriodLabel}
-        />
-        <SummaryStat
-          label="Debts"
-          value={debtsTotal}
-          currency={currency}
-          tone="text-negative"
-          delta={deltaPct(debtsTotal, priorDebts)}
-          deltaAmount={priorDebts == null ? null : debtsTotal - priorDebts}
-          deltaGoodWhen="down"
-          priorLabel={priorPeriodLabel}
-        />
-        <SummaryStat
-          label="Net worth"
-          value={net}
-          currency={currency}
-          tone={net >= 0 ? "text-foreground" : "text-negative"}
-          hint={mortgageExcluded ? "Mortgage excluded" : undefined}
-          delta={deltaPct(net, priorNet)}
-          deltaAmount={priorNet == null ? null : net - priorNet}
-          deltaGoodWhen="up"
-          priorLabel={priorPeriodLabel}
-        />
+      {/* Net worth is the number this page is opened for, so it leads at
+          hero size; Assets and Debts are its two inputs, a smaller two-up
+          beside it on desktop and beneath it on a phone. */}
+      <div className="flex flex-col px-3 sm:flex-row sm:items-center sm:px-0">
+        <div className="min-w-0 sm:flex-1">
+          <SummaryStat
+            variant="hero"
+            label="Net worth"
+            value={net}
+            currency={currency}
+            tone={net >= 0 ? "text-foreground" : "text-negative"}
+            hint={mortgageExcluded ? "Mortgage excluded" : undefined}
+            delta={deltaPct(net, priorNet)}
+            deltaAmount={priorNet == null ? null : net - priorNet}
+            deltaGoodWhen="up"
+            priorLabel={priorPeriodLabel}
+          />
+        </div>
+        <div className="grid grid-cols-2 divide-x divide-line border-t border-line sm:w-[26rem] sm:shrink-0 sm:border-l sm:border-t-0">
+          <SummaryStat
+            label="Assets"
+            value={assets}
+            currency={currency}
+            tone="text-positive"
+            delta={deltaPct(assets, priorAssets)}
+            deltaAmount={priorAssets == null ? null : assets - priorAssets}
+            deltaGoodWhen="up"
+            priorLabel={priorPeriodLabel}
+          />
+          <SummaryStat
+            label="Debts"
+            value={debtsTotal}
+            currency={currency}
+            tone="text-negative"
+            delta={deltaPct(debtsTotal, priorDebts)}
+            deltaAmount={priorDebts == null ? null : debtsTotal - priorDebts}
+            deltaGoodWhen="down"
+            priorLabel={priorPeriodLabel}
+          />
+        </div>
       </div>
 
-      {/* 2×2: Banking + Debts on the left, Investments + Kids Funding on the right.
-          Two independent flex columns so opening one card doesn't leave dead space next to it.
-          Collapsing the section hides these; the summary tiles above stay. */}
+      {/* Account groups, one row each. Collapsing the section hides these;
+          the summary tiles above stay. */}
       {overviewOpen ? (() => {
         const items = [
           ...assetSections.map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
@@ -713,12 +736,13 @@ export function AccountsBoard({
             .filter((s) => accounts.some((a) => s.match(a)) || s.key === "kids")
             .map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
         ];
-        const leftKeys = new Set(["banking", "loans"]);
-        const left = items.filter((i) => leftKeys.has(i.section.key));
-        const right = items.filter((i) => !leftKeys.has(i.section.key));
+        const cardsSection = creditSections.find((cs) => cs.key === "credit");
+        const openCards = cardsSection ? accounts.filter((acct) => cardsSection.match(acct)) : [];
+        // Same figure as "Total CC owed" on the Credit Cards card.
+        const cardsOwed = openCards.reduce((sum, acct) => sum + (acct.owedCents ?? 0), 0);
         const renderCard = ({ section, extras }: (typeof items)[number]) => (
+          <div key={section.key} className="border-t border-line">
           <AccountSection
-            key={section.key}
             section={section}
             accounts={accounts.filter((a) => section.match(a))}
             extraDebts={extras}
@@ -733,12 +757,63 @@ export function AccountsBoard({
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
             headerBadge={section.kidsGroup ? "Not in net worth" : undefined}
+            assetsTotalCents={assets}
           />
+          </div>
         );
         return (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-            <div className="flex flex-1 flex-col gap-3">{left.map(renderCard)}</div>
-            <div className="flex flex-1 flex-col gap-3">{right.map(renderCard)}</div>
+          // Side by side in `items` order — Banking | Investments, Property |
+          // Debts, Kids Funding — so five groups take three rows, not five.
+          // Every row is half width, the last one included: a full-width Kids
+          // Funding row stretched its bar and amount across the whole card.
+          // One column on a phone.
+          // Every cell carries its own top hairline so the two in a row read
+          // as one line broken by the gutter.
+          <div className="@container">
+            <div className="grid grid-cols-1 @[40rem]:grid-cols-2 @[40rem]:gap-x-6">
+              {items.map(renderCard)}
+              {cardsSection && openCards.length > 0 ? (
+                // Credit Cards as the sixth group, so every account group has
+                // a row here and the grid comes out even. Its accounts live in
+                // the Credit Cards card below; the row jumps there (opening it
+                // if collapsed) rather than opening a popup of its own. The
+                // owed total is statement balances, which Net Worth doesn't
+                // count — payoff debt on a card is already in Debts.
+                <div className="border-t border-line">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (collapsed[cardsSection.key]) toggleSection(cardsSection.key);
+                      // Scroll after the expand has rendered: a collapsed card
+                      // leaves the page too short to bring it to the top.
+                      requestAnimationFrame(() =>
+                        requestAnimationFrame(() =>
+                          document.getElementById("credit-cards")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                        ),
+                      );
+                    }}
+                    className="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-3 py-3 text-left transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cardsSection.dot}`} />
+                      <span className="shrink-0 font-semibold leading-tight">{cardsSection.label}</span>
+                      <svg
+                        width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                        className="shrink-0 -rotate-90 text-muted"
+                        aria-hidden
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </span>
+                    <span className={`text-right text-sm font-bold tabular-nums ${cardsOwed > 0 ? "text-negative" : ""}`}>
+                      {formatMoney(cardsOwed, currency)}
+                    </span>
+                    <span className="col-span-2 text-right text-[11px] text-muted">Not in net worth</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         );
       })() : null}
@@ -815,7 +890,7 @@ function CreditCardListSection({
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
 
   return (
-    <section id={isMain ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section id={isMain ? "credit-cards" : undefined} className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {/* Mobile puts the title and chevron on their own row and drops the
           link + total underneath; below ~400px they cannot share a line
           without the chip sitting on top of the title. */}
@@ -832,11 +907,6 @@ function CreditCardListSection({
             <span className="text-base font-bold sm:text-lg">{section.label}</span>
           </span>
         </button>
-        {/* The row itself is the button now, so say so — a card with no visible
-            control needs one line telling you it is one. */}
-        {open && accounts.length > 0 ? (
-          <span className="order-1 min-w-0 flex-1 text-[11px] text-muted">Click on card to make payment</span>
-        ) : null}
         {/* ml-auto pins this group right even when collapsed — the hint
             above used to be the only spacer, so it slid left without it. */}
         <div className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:ml-auto sm:w-auto sm:justify-end">
@@ -880,8 +950,12 @@ function CreditCardListSection({
           // screen. Ragged last rows are why these are ringed tiles with a
           // gap rather than a hairline grid. One line per card — name, holder,
           // owed, Pay; the annual fee lives on /travel with the rest of the
-          // card's detail.
-          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 sm:grid-cols-2 sm:px-6 md:grid-cols-3">
+          // card's detail. Columns follow the card's own width, not the
+          // window's — the sidebar takes a different share of the screen per
+          // device. Three across only from a 70rem card: names alone fit from
+          // ~56rem, but a long name like "1002 Hilton Aspire Amex V" also
+          // needs room for an owed amount beside it.
+          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:px-6 @[70rem]:grid-cols-3">
             {accounts.map((a) => (
               <li key={a.id}>
                 {/* An open card is the whole row: thirteen Pay pills read as a
@@ -891,26 +965,41 @@ function CreditCardListSection({
                   <button
                     type="button"
                     onClick={() => setPayCardFor(a)}
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left ring-1 ring-line transition hover:bg-black/5 hover:ring-black/25 dark:hover:bg-white/10 dark:hover:ring-white/30"
+                    // A soft fill instead of a ring: the tile shape still
+                    // handles the ragged last row, without a border inside
+                    // the card's own border.
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-2 text-left transition hover:bg-black/[0.08] dark:bg-white/[0.04] dark:hover:bg-white/[0.1]"
                   >
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
-                    {/* Red is for money actually owed. A paid-off card reading
-                        in red made twelve settled cards look like twelve
-                        problems. */}
-                    <span
-                      className={`shrink-0 text-sm font-semibold tabular-nums ${
-                        (a.owedCents ?? 0) > 0 ? "text-negative" : "text-muted"
-                      }`}
+                    {/* Red is for money actually owed. A settled card prints
+                        nothing at all — twelve rows of "$0.00" buried the one
+                        card that actually owes money. */}
+                    {(a.owedCents ?? 0) > 0 ? (
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-negative">
+                        {formatMoney(a.owedCents ?? 0, currency)}
+                      </span>
+                    ) : null}
+                    {/* The chevron says "opens something", the same cue the
+                        account-group rows use — it replaces the old "Click on
+                        card to make payment" note in the header. Closed cards
+                        get none. */}
+                    <svg
+                      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      className="shrink-0 -rotate-90 text-muted"
+                      aria-hidden
                     >
-                      {formatMoney(a.owedCents ?? 0, currency)}
-                    </span>
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
                   </button>
                 ) : (
-                  <div className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 ring-1 ring-line">
+                  <div className="flex w-full items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{a.name}</span>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-muted">
-                      {formatMoney(a.owedCents ?? 0, currency)}
-                    </span>
+                    {(a.owedCents ?? 0) > 0 ? (
+                      <span className="shrink-0 text-sm font-semibold tabular-nums text-muted">
+                        {formatMoney(a.owedCents ?? 0, currency)}
+                      </span>
+                    ) : null}
                   </div>
                 )}
               </li>
@@ -1107,6 +1196,7 @@ function deltaPct(current: number, prior: number | null): number | null {
 }
 
 function SummaryStat({
+  variant = "compact",
   label,
   value,
   currency,
@@ -1117,6 +1207,7 @@ function SummaryStat({
   deltaGoodWhen,
   priorLabel,
 }: {
+  variant?: "hero" | "compact";
   label: string;
   value: number;
   currency: string;
@@ -1141,17 +1232,22 @@ function SummaryStat({
   // headline and the delta amount.
   const wholeDollar = (cents: number) => formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "");
   const amountStr = deltaAmount != null ? wholeDollar(Math.abs(deltaAmount)) : null;
+  const hero = variant === "hero";
+  const noteSize = hero ? "text-xs" : "text-[10px]";
+  // No ring of its own: ringed tiles inside the already-ringed "Net Worth &
+  // Accounts" card stacked two borders deep on the same white surface. The
+  // parent separates them with a hairline instead.
   return (
-    <div className="flex min-w-0 flex-col items-center rounded-2xl bg-surface px-2 py-2.5 text-center shadow-sm ring-1 ring-black/5 sm:px-4 sm:py-3 dark:ring-white/10">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">{label}</p>
-      <p className={`mt-0.5 truncate text-xs font-bold tabular-nums sm:text-lg ${tone}`}>
+    <div className={`flex min-w-0 flex-col ${hero ? "py-3 sm:py-2 sm:pr-4" : "px-3 py-2.5 first:pl-0 sm:px-4 sm:first:pl-4"}`}>
+      <p className={`${hero ? "text-[11px]" : "text-[10px] sm:text-[11px]"} font-medium uppercase tracking-wide text-muted`}>{label}</p>
+      <p className={`mt-0.5 truncate font-bold tabular-nums ${hero ? "text-3xl sm:text-4xl" : "text-base sm:text-lg"} ${tone}`}>
         {wholeDollar(value)}
       </p>
       {delta != null && priorLabel ? (
         flat ? (
-          <p className="mt-0.5 text-[10px] text-muted">about the same as {priorLabel}</p>
+          <p className={`mt-0.5 ${noteSize} text-muted`}>about the same as {priorLabel}</p>
         ) : (
-          <p className="mt-0.5 text-[10px] leading-tight">
+          <p className={`mt-0.5 ${noteSize} leading-tight`}>
             <span className={good ? "font-semibold text-positive" : "font-semibold text-negative"}>
               {amountStr ? `${amountStr} · ` : ""}
               {Math.abs(delta).toFixed(0)}% {delta > 0 ? "more" : "less"}
@@ -1160,7 +1256,7 @@ function SummaryStat({
           </p>
         )
       ) : null}
-      {hint ? <p className="text-[10px] text-muted">{hint}</p> : null}
+      {hint ? <p className={`${noteSize} text-muted`}>{hint}</p> : null}
     </div>
   );
 }
@@ -1233,6 +1329,7 @@ function AccountSection({
   legacy = false,
   extraDebts = [],
   headerBadge,
+  assetsTotalCents,
 }: {
   section: Section;
   accounts: AccountData[];
@@ -1248,6 +1345,8 @@ function AccountSection({
   legacy?: boolean;
   extraDebts?: BudgetDebt[];
   headerBadge?: string;
+  // Total assets, for the "% of assets" line under the amount. Omitted → no line.
+  assetsTotalCents?: number;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -1302,6 +1401,17 @@ function AccountSection({
   const extraDebtsTotal = extraDebts.reduce((sum, d) => sum + d.balanceCents, 0);
   const total = accountsTotal + extraDebtsTotal;
 
+  // Share of total assets, shown under the amount. Under 10% keeps one
+  // decimal so a small debt reads "0.6%" instead of rounding to nothing.
+  // Zero shows nothing. Kids Funding isn't part of assets, so it says so.
+  const shareLabel = (() => {
+    if (assetsTotalCents == null || assetsTotalCents <= 0) return null;
+    if (section.kidsGroup) return "Not in net worth";
+    const pct = (Math.abs(total) / assetsTotalCents) * 100;
+    if (pct === 0) return null;
+    return `${pct < 10 ? pct.toFixed(1).replace(/\.0$/, "") : pct.toFixed(0)}% of assets`;
+  })();
+
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
   const reorder = (fromId: string, toId: string) => {
@@ -1322,7 +1432,7 @@ function AccountSection({
   const { dragOverId, startDrag } = usePointerReorder("account", reorder);
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+    <section className="bg-surface">
       {/* Header */}
       {/* Full-row click target — tapping anywhere on the tile (label OR
           amount) opens the section's popup. The Debt/Loan Page link stops
@@ -1342,11 +1452,14 @@ function AccountSection({
           if (open) setEditingId(null);
           onToggle();
         }}
-        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 transition hover:bg-black/[0.02] dark:hover:bg-white/[0.04]"
+        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-3 py-3 transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
       >
-        <div className="flex min-w-0 items-center gap-2.5">
+        {/* The group name never truncates — at half width "Debts" plus its
+            Debt/Loan Page link fit with 0px to spare and the name was the part
+            that gave way ("De…"). The link gives way first instead. */}
+        <div className="flex min-w-0 items-center gap-2">
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-          <span className="truncate font-semibold leading-tight">{section.label}</span>
+          <span className="shrink-0 font-semibold leading-tight">{section.label}</span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
@@ -1359,7 +1472,7 @@ function AccountSection({
             <Link
               href="/snowball"
               onClick={(e) => e.stopPropagation()}
-              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
+              className="min-w-0 truncate rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
             >
               Debt/Loan Page →
             </Link>
@@ -1372,6 +1485,9 @@ function AccountSection({
         >
           {formatMoney(total, currency)}
         </span>
+        {shareLabel ? (
+          <span className="col-span-2 text-right text-[11px] tabular-nums text-muted">{shareLabel}</span>
+        ) : null}
       </div>
 
       {open ? (
@@ -1424,7 +1540,7 @@ function AccountSection({
               <div className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 <span />
                 {historyMonths.map((m, i) => (
-                  <span key={m} className={`text-right ${monthHeadTier(i)}`}>
+                  <span key={m} className={`text-right ${monthHeadTier(distFromAnchor(historyMonths, i))}`}>
                     {monthAbbr(m)}
                   </span>
                 ))}
@@ -1443,7 +1559,7 @@ function AccountSection({
                 {historyMonths.map((m, i) => (
                   <span
                     key={m}
-                    className={`justify-self-stretch text-right ${monthHeadTier(i)}`}
+                    className={`justify-self-stretch text-right ${monthHeadTier(distFromAnchor(historyMonths, i))}`}
                   >
                     {monthAbbr(m)}
                   </span>
@@ -1486,18 +1602,10 @@ function AccountSection({
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
                   {/* Same as account rows: each column reads the snapshot for
                       whichever month the header is currently showing. */}
-                  <SumCell
-                    pickKey={`d:${d.subcategoryId}:${historyMonths[0]}`}
-                    cents={d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents}
-                  >
-                    <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
-                      {formatMoney(d.balancesByMonth?.[historyMonths[0]] ?? d.balanceCents, currency)}
-                    </span>
-                  </SumCell>
-                  {historyMonths.slice(1).map((m, idx) => {
+                  {historyMonths.slice(0, -1).map((m, idx) => {
                     const v = d.balancesByMonth?.[m] ?? null;
                     return (
-                      <div key={m} className={monthTier(idx + 1)}>
+                      <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
                         <SumCell pickKey={`d:${d.subcategoryId}:${m}`} cents={v}>
                         <span className="flex w-full justify-end">
                           {v != null ? (
@@ -1511,6 +1619,14 @@ function AccountSection({
                       </div>
                     );
                   })}
+                  <SumCell
+                    pickKey={`d:${d.subcategoryId}:${historyMonths[anchorIdx(historyMonths)]}`}
+                    cents={d.balancesByMonth?.[historyMonths[anchorIdx(historyMonths)]] ?? d.balanceCents}
+                  >
+                    <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
+                      {formatMoney(d.balancesByMonth?.[historyMonths[anchorIdx(historyMonths)]] ?? d.balanceCents, currency)}
+                    </span>
+                  </SumCell>
                 </li>
               ))}
             </ul>
@@ -1640,26 +1756,42 @@ function AccountRow({
 
         {allowBuckets && bucketCount > 0 ? (
           <>
-            <SumCell pickKey={`a:${account.id}:${historyMonths[0]}`} cents={balanceFor(account, 0) ?? account.balanceCents}>
-              <DerivedBalance balanceCents={balanceFor(account, 0) ?? account.balanceCents} currency={currency} />
-            </SumCell>
-            {historyMonths.slice(1).map((m, idx) => (
-              <div key={m} className={monthTier(idx + 1)}>
-                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx + 1)}>
+            {historyMonths.slice(0, -1).map((m, idx) => (
+              <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
+                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx)}>
                   <DerivedBalance
-                    balanceCents={balanceFor(account, idx + 1) ?? 0}
+                    balanceCents={balanceFor(account, idx) ?? 0}
                     currency={currency}
-                    muted={balanceFor(account, idx + 1) == null}
+                    muted={balanceFor(account, idx) == null}
                   />
                 </SumCell>
               </div>
             ))}
+            <SumCell
+              pickKey={`a:${account.id}:${historyMonths[anchorIdx(historyMonths)]}`}
+              cents={balanceFor(account, anchorIdx(historyMonths)) ?? account.balanceCents}
+            >
+              <DerivedBalance balanceCents={balanceFor(account, anchorIdx(historyMonths)) ?? account.balanceCents} currency={currency} />
+            </SumCell>
           </>
         ) : (
           <>
+            {historyMonths.slice(0, -1).map((m, idx) => (
+              <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
+                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx)}>
+                  <HistoricBalanceInput
+                    accountId={account.id}
+                    month={m}
+                    balanceCents={balanceFor(account, idx)}
+                    currency={currency}
+                    liability={section.liability}
+                  />
+                </SumCell>
+              </div>
+            ))}
             <SumCell
-              pickKey={`a:${account.id}:${historyMonths[0]}`}
-              cents={isPastPeriod ? balanceFor(account, 0) : account.balanceCents}
+              pickKey={`a:${account.id}:${historyMonths[anchorIdx(historyMonths)]}`}
+              cents={isPastPeriod ? balanceFor(account, anchorIdx(historyMonths)) : account.balanceCents}
             >
               {isPastPeriod ? (
                 // The column is headed with a past month, so writing here has to
@@ -1668,8 +1800,8 @@ function AccountRow({
                 // today's balance when edited.
                 <HistoricBalanceInput
                   accountId={account.id}
-                  month={historyMonths[0]}
-                  balanceCents={balanceFor(account, 0)}
+                  month={historyMonths[anchorIdx(historyMonths)]}
+                  balanceCents={balanceFor(account, anchorIdx(historyMonths))}
                   currency={currency}
                   liability={section.liability}
                 />
@@ -1682,19 +1814,6 @@ function AccountRow({
                 />
               )}
             </SumCell>
-            {historyMonths.slice(1).map((m, idx) => (
-              <div key={m} className={monthTier(idx + 1)}>
-                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx + 1)}>
-                  <HistoricBalanceInput
-                    accountId={account.id}
-                    month={m}
-                    balanceCents={balanceFor(account, idx + 1)}
-                    currency={currency}
-                    liability={section.liability}
-                  />
-                </SumCell>
-              </div>
-            ))}
           </>
         )}
         <span className="hidden @[560px]:block" aria-hidden />
@@ -1850,27 +1969,8 @@ function BucketRow({
           {bucket.name}
         </button>
       </div>
-      <SumCell
-        pickKey={`b:${bucket.id}:${historyMonths[0]}`}
-        cents={isPastPeriod ? cellFor(historyMonths[0]) : bucket.balanceCents}
-      >
-        {isPastPeriod ? (
-          // Same rule as the account row above: the column is headed with a past
-          // month, so the edit has to land on that month's bucket_snapshot. The
-          // live input would show today's figure under an AUG heading and write
-          // today's balance when edited.
-          <HistoricBucketBalanceInput
-            bucketId={bucket.id}
-            month={historyMonths[0]}
-            balanceCents={cellFor(historyMonths[0])}
-            currency={currency}
-          />
-        ) : (
-          <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
-        )}
-      </SumCell>
-      {historyMonths.slice(1).map((m, idx) => (
-        <div key={m} className={monthTier(idx + 1)}>
+      {historyMonths.slice(0, -1).map((m, idx) => (
+        <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
           <SumCell pickKey={`b:${bucket.id}:${m}`} cents={cellFor(m)}>
             <HistoricBucketBalanceInput
               bucketId={bucket.id}
@@ -1881,6 +1981,25 @@ function BucketRow({
           </SumCell>
         </div>
       ))}
+      <SumCell
+        pickKey={`b:${bucket.id}:${historyMonths[anchorIdx(historyMonths)]}`}
+        cents={isPastPeriod ? cellFor(historyMonths[anchorIdx(historyMonths)]) : bucket.balanceCents}
+      >
+        {isPastPeriod ? (
+          // Same rule as the account row above: the column is headed with a past
+          // month, so the edit has to land on that month's bucket_snapshot. The
+          // live input would show today's figure under an AUG heading and write
+          // today's balance when edited.
+          <HistoricBucketBalanceInput
+            bucketId={bucket.id}
+            month={historyMonths[anchorIdx(historyMonths)]}
+            balanceCents={cellFor(historyMonths[anchorIdx(historyMonths)])}
+            currency={currency}
+          />
+        ) : (
+          <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
+        )}
+      </SumCell>
       </div>
       {editing ? (
         <BucketEditPanel

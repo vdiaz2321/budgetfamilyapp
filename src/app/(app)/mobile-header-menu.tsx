@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { clearSessionUiState } from "@/lib/use-session-collapse";
 import { readThemeMode, resolveTheme, type ThemeMode } from "@/app/theme-init";
+import { useMobilePageActions } from "@/lib/mobile-page-actions";
 
 const THEME_LABEL: Record<ThemeMode, string> = {
   light: "Light",
@@ -25,6 +26,7 @@ export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
   const [themeMounted, setThemeMounted] = useState(false);
   const [pending, start] = useTransition();
   const rootRef = useRef<HTMLDivElement>(null);
+  const pageActions = useMobilePageActions();
 
   useEffect(() => {
     const onScroll = () => setAtTop(window.scrollY < 56);
@@ -81,7 +83,7 @@ export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Settings"
+        aria-label="Menu"
         className="flex h-7 w-7 items-center justify-center text-foreground transition hover:text-brand"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -96,6 +98,27 @@ export function MobileHeaderMenu({ userEmail }: { userEmail: string }) {
           role="menu"
           className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-line bg-surface text-foreground shadow-lg ring-1 ring-black/10 dark:ring-white/10"
         >
+          {/* The current page's own actions (e.g. Transfer Funds / Add account
+              on Accounts) lead the menu, above the app-wide settings. */}
+          {pageActions.length > 0 ? (
+            <div className="border-b border-line py-1">
+              {pageActions.map((action) => (
+                <button
+                  key={action.label}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    action.onSelect();
+                  }}
+                  className="flex w-full items-center px-3 py-3 text-left text-sm font-semibold text-foreground transition hover:bg-brand-soft/30"
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           <div className="border-b border-line px-3 py-2.5">
             <p className="truncate text-xs text-muted">Signed in as</p>
             <p className="truncate text-sm font-semibold">{userEmail}</p>

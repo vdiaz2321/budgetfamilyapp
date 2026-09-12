@@ -35,7 +35,11 @@ const kindPillStyle = (kind: CategoryKind): React.CSSProperties => ({
   color: `color-mix(in srgb, ${KIND_VAR[kind]} 75%, var(--foreground))`,
 });
 
-const GRID ="grid-cols-[5rem_2rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
+// 3.25rem, not 2rem, for the checkbox column: the track was sized for the
+// checkbox itself, but it also carries the "CLEAR" / "SELECT" header, which
+// needs 35px and 40px at 11px uppercase + tracking-wide. At 2rem (32px) that
+// label painted out of its own track and into the Amount column beside it.
+const GRID ="grid-cols-[5rem_3.25rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
 const CalendarIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -584,11 +588,6 @@ export function TransactionsTable({
                 type="button"
                 onClick={cycleDateSort}
                 className="flex w-full items-center justify-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted hover:text-primary"
-                title={
-                  dateSort === "asc"
-                    ? "Oldest first — click for newest first"
-                    : "Newest first — click for oldest first"
-                }
               >
                 Date
                 <span className="text-[10px] leading-none">
@@ -1100,7 +1099,6 @@ function TxCard({
               </span>
               <span
                 aria-label={tx.cleared ? "Cleared" : "Not cleared"}
-                title={tx.cleared ? "Cleared" : "Not cleared"}
                 className={`inline-flex h-3 w-3 items-center justify-center rounded-full text-[7px] font-bold leading-none ring-1 ${
                   tx.cleared
                     ? "bg-positive text-white ring-positive"

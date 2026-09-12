@@ -20,6 +20,7 @@ import {
   resolveContributedCents,
   signedContributionCents,
 } from "@/lib/fund-contributions";
+import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { throwIfAny } from "@/lib/supabase-result";
 import { CAP_KIND_LABEL, capKindFor, resolveRetirementKind } from "@/lib/retirement-kind";
 
@@ -93,13 +94,13 @@ export default async function InvestPage({
   const [
     { data: allAccountRows, error: allAccountRowsError },
     { data: bucketRows, error: bucketRowsError },
-    { data: accSnaps, error: accSnapsError },
-    { data: bucketSnaps, error: bucketSnapsError },
+    accSnaps,
+    bucketSnaps,
     { data: contribRows, error: contribRowsError },
     { data: monthContribRows, error: monthContribRowsError },
     { data: yearRows, error: yearRowsError },
     { data: savingsGoals, error: savingsGoalsError },
-    { data: savingsTx, error: savingsTxError },
+    savingsTx,
     { data: plans, error: plansError },
     { data: payees, error: payeesError },
     { data: incomeActuals, error: incomeActualsError },
@@ -120,16 +121,29 @@ export default async function InvestPage({
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
-    supabase
-      .from("account_snapshots")
-      .select("month, account_id, balance_cents")
-      .eq("household_id", household.id)
-      .order("month"),
-    supabase
-      .from("bucket_snapshots")
-      .select("month, bucket_id, balance_cents")
-      .eq("household_id", household.id)
-      .order("month"),
+    // Paged, like the same reads on Accounts: these two cover ALL history and
+    // grow by one row per account/bucket per month, so they cross PostgREST's
+    // 1000-row cap (~2029 at the current rate) and would then silently return
+    // a truncated set — no error, just year-end balances and cash-reserve
+    // sparklines quietly missing their oldest months.
+    fetchAllRows<{ month: string; account_id: string; balance_cents: number }>((from, to) =>
+      supabase
+        .from("account_snapshots")
+        .select("month, account_id, balance_cents")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("account_id")
+        .range(from, to),
+    ),
+    fetchAllRows<{ month: string; bucket_id: string; balance_cents: number }>((from, to) =>
+      supabase
+        .from("bucket_snapshots")
+        .select("month, bucket_id, balance_cents")
+        .eq("household_id", household.id)
+        .order("month")
+        .order("bucket_id")
+        .range(from, to),
+    ),
     supabase
       .from("v_investment_contributions")
       .select("account_id, bucket_id, year, net_contribution_cents")
@@ -150,13 +164,26 @@ export default async function InvestPage({
           .select("subcategory_id, goal_cents, start_cents, monthly_contribution_cents, target_date")
           .eq("household_id", household.id)
       : Promise.resolve({ data: [], error: null }),
+    // Every savings transaction ever, with no date bound — paged for the same
+    // reason as the snapshots above.
     savingsSubIds.length
-      ? supabase
-          .from("transactions")
-          .select("id, subcategory_id, amount_cents, is_withdrawal, payee_id, occurred_on, account_id")
-          .eq("household_id", household.id)
-          .in("subcategory_id", savingsSubIds)
-      : Promise.resolve({ data: [], error: null }),
+      ? fetchAllRows<{
+          id: string; subcategory_id: string; amount_cents: number;
+          // NOT NULL in the schema (0 null rows), and the callers below
+          // already rely on that — keeping it non-nullable here preserves
+          // exactly the type this read had before it was paged.
+          is_withdrawal: boolean; payee_id: string | null;
+          occurred_on: string; account_id: string | null;
+        }>((from, to) =>
+          supabase
+            .from("transactions")
+            .select("id, subcategory_id, amount_cents, is_withdrawal, payee_id, occurred_on, account_id")
+            .eq("household_id", household.id)
+            .in("subcategory_id", savingsSubIds)
+            .order("id")
+            .range(from, to),
+        )
+      : Promise.resolve([]),
     savingsSubIds.length
       ? supabase
           .from("budget_plans")
@@ -194,13 +221,10 @@ export default async function InvestPage({
   throwIfAny({
     allAccountRows: allAccountRowsError,
     bucketRows: bucketRowsError,
-    accSnaps: accSnapsError,
-    bucketSnaps: bucketSnapsError,
     contribRows: contribRowsError,
     monthContribRows: monthContribRowsError,
     yearRows: yearRowsError,
     savingsGoals: savingsGoalsError,
-    savingsTx: savingsTxError,
     plans: plansError,
     payees: payeesError,
     incomeActuals: incomeActualsError,

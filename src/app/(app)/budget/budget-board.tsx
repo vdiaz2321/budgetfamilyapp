@@ -1165,13 +1165,16 @@ function SummaryHeroCard({
   const toneClasses = TONE_CLASSES[tone];
 
   return (
-    <div className="-mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
+    <div className="@container -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
       <div className="px-6 pb-5 pt-5">
-        {/* Desktop packs the four figures into a tight 2x2 on the left and
-            stacks the progress cards down the right, so the old dead gutter
-            between the left and right money columns disappears. Below md it
-            falls back to the previous stacked layout. */}
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)] md:gap-x-8">
+        {/* Wide packs the four figures into a tight 2x2 on the left and stacks
+            the progress cards down the right; narrow falls back to stacking.
+            The split is a CONTAINER query, not `md:`. The card only gets the
+            left pane, which is far narrower than the window — at a 1060px
+            window this card is 472px, `md:` had already fired, and the first
+            track took its 24rem maximum and left the progress cards 56px to
+            render "Bills & Expenses $6,503.29 / Spent $1,146.47" in. */}
+        <div className="grid grid-cols-1 gap-5 @3xl:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)] @3xl:gap-x-8">
         <div className="flex min-w-0 flex-col">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:gap-x-8">
           <div className="min-w-0">
@@ -1246,7 +1249,7 @@ function SummaryHeroCard({
         </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:mt-0 md:grid-cols-1 md:content-start">
+        <div className="grid grid-cols-1 gap-2.5 @xl:grid-cols-2 @3xl:mt-0 @3xl:grid-cols-1 @3xl:content-start">
           <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
           <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} />
           <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--viz-bills)]" fillClass="bg-[color:var(--viz-bills)]" currency={currency} />
