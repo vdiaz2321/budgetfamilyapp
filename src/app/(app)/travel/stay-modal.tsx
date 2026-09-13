@@ -44,6 +44,12 @@ export function StayModal({
   // records points is assumed to have spent them; unticking it turns the
   // figure into "this is what it would have cost on points".
   const [pointsUsed, setPointsUsed] = useState(stay ? stay.pointsUsed : true);
+  // Paid with the card's free-night certificate instead. The two are
+  // exclusive: ticking one unticks the other.
+  const [freeNightUsed, setFreeNightUsed] = useState(stay?.freeNightUsed ?? false);
+  const [freeNightPoints, setFreeNightPoints] = useState(
+    stay?.freeNightPoints ? String(stay.freeNightPoints) : preset?.freeNightPointsLimit ? String(preset.freeNightPointsLimit) : "",
+  );
   const storedMicros = stay?.pointsValueMicros ?? (stay ? null : preset?.pointsValueMicros ?? null);
   const [pointsValue, setPointsValue] = useState(() =>
     storedMicros ? rateDisplay(storedMicros) : "",
@@ -77,6 +83,7 @@ export function StayModal({
     const next = cards.find((c) => c.id === nextId) ?? null;
     if (!next) return;
     if (!holder.trim() && next.holder) setHolder(next.holder);
+    if (!freeNightPoints.trim() && next.freeNightPointsLimit) setFreeNightPoints(String(next.freeNightPointsLimit));
     if (!pointsValue.trim() && next.pointsValueMicros) {
       setPointsValue(rateDisplay(next.pointsValueMicros));
       setExactRate(rateExact(next.pointsValueMicros));
@@ -122,10 +129,11 @@ export function StayModal({
   const creditTyped = Math.round((Number(hotelCredit.replace(/[$,\s]/g, "")) || 0) * 100);
   // Points the card has actually lent this stay — none of them, on a stay
   // whose points figure is a what-if, so the preview matches what saving does.
+  // An imported stay never took points off a card, so saving it moves none.
   const alreadyDrawn = stay && !stay.cancelledAt && stay.accountId === accountId
     ? { points: stay.pointsUsed ? stay.pointsCost : 0, credit: stay.hotelCreditCents }
     : { points: 0, credit: 0 };
-  const draw = card
+  const draw = card && (!stay || stay.movesCardPoints)
     ? {
         points: (pointsUsed ? pointsTyped : 0) - alreadyDrawn.points,
         credit: creditTyped - alreadyDrawn.credit,
@@ -263,11 +271,62 @@ export function StayModal({
           </Field>
         </div>
 
+        {/* The free-night certificate, laid out like the card's own Edit form
+             (Free-night point value, Booked / check-in). Ticking it stamps the
+             card's Booked date with this stay's check-in and takes no points. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4">
+          <Field label="Free night">
+            <span className="flex h-[34px] items-center">
+              <span className="flex items-center gap-1.5 text-xs font-semibold">
+                <input
+                  type="checkbox"
+                  name="freeNightUsed"
+                  checked={freeNightUsed}
+                  onChange={(e) => {
+                    setFreeNightUsed(e.target.checked);
+                    if (e.target.checked) setPointsUsed(false);
+                  }}
+                  className="h-4 w-4 accent-[var(--brand)]"
+                />
+                Free night used
+              </span>
+            </span>
+          </Field>
+          <Field label="Free-night max pts">
+            <input
+              type="number"
+              name="freeNightPoints"
+              min="0"
+              step="1"
+              value={freeNightPoints}
+              onChange={(e) => setFreeNightPoints(e.target.value)}
+              disabled={!freeNightUsed}
+              placeholder={freeNightUsed ? "0" : ""}
+              className={`${inputClass} disabled:opacity-50`}
+            />
+          </Field>
+          {freeNightUsed ? (
+            <p className="col-span-2 self-center text-[11px] font-medium text-muted">
+              {card
+                ? <>Saving sets <span className="font-semibold text-foreground">{card.name}</span>&apos;s Booked date to {checkIn || "the check-in date"}. No points come off the card.</>
+                : "Pick the card whose certificate paid for this night."}
+              {freeNightUsed && Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints) ? (
+                <span className="mt-0.5 block text-negative">
+                  The room ({pointsTyped.toLocaleString()} pts) is over the free-night max.
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+
         {/* The five figures are all short — points, a rate, three money
              amounts — so they ride on one line instead of eating five rows
              of the form. Two per row at 375px, where five would be unreadable. */}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
-          <Field label={pointsUsed ? "Points used" : "Points it would've cost"}>
+          {/* Unticked labels stay as short as the ticked ones: the longer
+              "Points it would've cost" wrapped to two lines and pushed its box
+              below Hotel cost and Pocket cost in the same row. */}
+          <Field label={pointsUsed ? "Points used" : "Pts if used"}>
             <input
               type="number"
               name="pointsCost"
@@ -286,7 +345,10 @@ export function StayModal({
                 type="checkbox"
                 name="pointsUsed"
                 checked={pointsUsed}
-                onChange={(e) => setPointsUsed(e.target.checked)}
+                onChange={(e) => {
+                  setPointsUsed(e.target.checked);
+                  if (e.target.checked) setFreeNightUsed(false);
+                }}
                 className="h-3.5 w-3.5 accent-[var(--brand)]"
               />
               Pts used
@@ -299,7 +361,7 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
-          <Field label={pointsUsed ? "Value per point" : "Value per point (if used)"}>
+          <Field label={pointsUsed ? "Value per point" : "Value per pt"}>
             <input
               value={pointsValue}
               onChange={(e) => {
@@ -360,7 +422,7 @@ export function StayModal({
             />
           </Field>
 
-          <Field label={`Hotel credit used (${currencySymbol(currency)})`}>
+          <Field label={`Hotel credit (${currencySymbol(currency)})`}>
             <input
               name="hotelCredit"
               value={hotelCredit}

@@ -13,7 +13,7 @@ export default async function TravelPage() {
     supabase
       .from("travel_stays")
       .select(
-        "id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_used, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, breakfast_included, cancelled_at, reward_activity_id",
+        "id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_used, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, breakfast_included, cancelled_at, reward_activity_id, free_night_used, free_night_points, moves_card_points",
       )
       .eq("household_id", household.id)
       .order("check_in", { ascending: false }),
@@ -73,6 +73,9 @@ export default async function TravelPage() {
     breakfastIncluded: s.breakfast_included ?? false,
     cancelledAt: s.cancelled_at ?? null,
     rewardActivityId: s.reward_activity_id ?? null,
+    freeNightUsed: s.free_night_used ?? false,
+    freeNightPoints: s.free_night_points ?? null,
+    movesCardPoints: s.moves_card_points ?? false,
   }));
 
   return (

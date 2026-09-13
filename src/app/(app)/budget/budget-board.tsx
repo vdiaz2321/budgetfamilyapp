@@ -1454,6 +1454,7 @@ function RolloverFooter({
 }) {
   const [copyPending, startCopy] = useTransition();
   const [undoPending, startUndo] = useTransition();
+  const [confirming, setConfirming] = useState(false);
   const [snapshot, setSnapshot] = useState<
     Array<{ subcategory_id: string; planned_cents: number | null }> | null
   >(null);
@@ -1484,24 +1485,49 @@ function RolloverFooter({
             >
               {undoPending ? "Undoing…" : `↩ Undo ${shortMonth(prevMonthLabel)} plan roll-in`}
             </button>
-          ) : (
-            <form
-              action={(fd) =>
-                startCopy(async () => {
-                  const res = await copyPlansFromPreviousMonth(fd);
-                  if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
-                })
-              }
-            >
-              <input type="hidden" name="month" value={monthFirstOfMonth} />
+          ) : confirming ? (
+            // Roll-in overwrites this month's plans, and the button sits right
+            // under the Planned figure where it kept getting hit by mistake —
+            // so it asks once, inline, before touching anything.
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-foreground">
+                Replace this month&apos;s plan with {shortMonth(prevMonthLabel)}&apos;s?
+              </span>
+              <form
+                action={(fd) =>
+                  startCopy(async () => {
+                    const res = await copyPlansFromPreviousMonth(fd);
+                    setConfirming(false);
+                    if (res && res.snapshot.length > 0) setSnapshot(res.snapshot);
+                  })
+                }
+              >
+                <input type="hidden" name="month" value={monthFirstOfMonth} />
+                <button
+                  type="submit"
+                  disabled={copyPending}
+                  className="shrink-0 whitespace-nowrap rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+                >
+                  {copyPending ? "Copying…" : "Yes, roll in"}
+                </button>
+              </form>
               <button
-                type="submit"
+                type="button"
                 disabled={copyPending}
+                onClick={() => setConfirming(false)}
                 className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
               >
-                {copyPending ? "Copying…" : `↓ Roll in ${shortMonth(prevMonthLabel)} plan`}
+                Cancel
               </button>
-            </form>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              {`↓ Roll in ${shortMonth(prevMonthLabel)} plan`}
+            </button>
           )}
     </div>
   );

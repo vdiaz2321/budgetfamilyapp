@@ -38,6 +38,7 @@ export default async function AccountsPage() {
     bktSnapshotRows,
     debtSnapshotRows,
     cardPaymentRows,
+    { data: eoyHistoryRow, error: eoyHistoryError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -129,13 +130,22 @@ export default async function AccountsPage() {
         .order("id")
         .range(from, to),
     ),
+    // Last year's closing net worth for the "EOY <year>" hero tile. Only the
+    // fallback: the board derives it from Dec snapshots when they exist, the
+    // same precedence /networth uses (snapshots win over imported history).
+    supabase
+      .from("networth_history")
+      .select("savings_cents, bank_cents, stocks_cents, debt_cents")
+      .eq("household_id", household.id)
+      .eq("month", `${Number(currentMonth.slice(0, 4)) - 1}-12-01`)
+      .maybeSingle(),
   ]);
   // cardDetails and rewardActivities are deliberately NOT in this list: both
   // have a fallback below for the case where the migration behind them hasn't
   // been applied yet, and throwIfAny would throw before either could run —
   // the two recoveries underneath were unreachable code. Every other read
   // still fails the page loudly rather than rendering a misleading $0.
-  throwIfAny({ rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, });
+  throwIfAny({ eoyHistory: eoyHistoryError, rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, });
 
   // "That column/table isn't there yet" — the only failures these two reads
   // are allowed to swallow. Anything else (auth, network, RLS) still throws,
@@ -395,6 +405,11 @@ export default async function AccountsPage() {
       nonCardAccounts={nonCardAccounts}
       historyMonths={[currentMonth, prevMonth, prev2Month]}
       cardPayments={cardPayments}
+      eoyHistoryNetCents={
+        eoyHistoryRow
+          ? eoyHistoryRow.savings_cents + eoyHistoryRow.bank_cents + eoyHistoryRow.stocks_cents - eoyHistoryRow.debt_cents
+          : null
+      }
     />
   );
 }

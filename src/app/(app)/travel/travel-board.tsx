@@ -527,6 +527,11 @@ export function TravelBoard({
                               ? s.pointsCost.toLocaleString()
                               : `(${s.pointsCost.toLocaleString()})`
                             : DASH}
+                          {s.freeNightUsed ? (
+                            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--viz-bills)" }}>
+                              Free night
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-2 py-2 text-center tabular-nums text-muted">
                           {(() => {
@@ -618,6 +623,11 @@ export function TravelBoard({
                           >
                             {s.pointsCost > 0 ? s.pointsCost.toLocaleString() : "—"}
                           </span>
+                          {s.freeNightUsed ? (
+                            <span className="block text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--viz-bills)" }}>
+                              Free night
+                            </span>
+                          ) : null}
                         </span>
                         <span>
                           <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel credit</span>
@@ -770,7 +780,9 @@ export function TravelBoard({
                plain card list and the Pay Card flow. */}
           <CreditCardSections />
 
-          {/* ---- The reservations themselves, with the filters that drive them
+          {/* ---- The points ledger, above the reservations log it pays for. */}
+          <RewardsPointsLog />
+
           {/* ---- The reservations themselves, with the filters that drive them
                and what the current selection adds up to. The same body is
                rendered twice: inline in the page column, and — on a wide
@@ -812,10 +824,6 @@ export function TravelBoard({
           >
             {reservations}
           </Panel>
-
-          {/* ---- The points those stays were paid with, right under the log
-               that spends them. */}
-          <RewardsPointsLog />
 
           {/* ---- The two charts side by side. They are drawn narrow by
                design, so half a row suits them; the summary tables below are

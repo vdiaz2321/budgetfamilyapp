@@ -35,6 +35,13 @@ export type TravelStay = {
   // Set when the stay's points were deducted from a card's balance. Its
   // presence is what locks the points fields against later editing.
   rewardActivityId: string | null;
+  // Paid with the card's free-night certificate. Sets that card's Booked date;
+  // takes no points. freeNightPoints is the certificate's cap for this stay.
+  freeNightUsed: boolean;
+  freeNightPoints: number | null;
+  // True only for stays created in the app. Imported stays never took points
+  // off a card, so editing them must not move a balance.
+  movesCardPoints: boolean;
 };
 
 export type PocketPaidWith = "card" | "points" | "credit";

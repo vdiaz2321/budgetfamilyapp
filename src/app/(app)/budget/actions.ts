@@ -1821,9 +1821,12 @@ export async function copyPlansFromPreviousMonth(
       planned_cents: existingMap.has(id) ? (existingMap.get(id) ?? null) : null,
     }));
 
-    await supabase
-      .from("budget_plans")
-      .upsert(rows, { onConflict: "household_id,month,subcategory_id" });
+    unwrap(
+      await supabase
+        .from("budget_plans")
+        .upsert(rows, { onConflict: "household_id,month,subcategory_id" }),
+      "budget_plans roll-in",
+    );
   }
 
   revalidatePath("/budget");
@@ -1837,8 +1840,11 @@ export async function restorePlansSnapshot(
   const { supabase, householdId } = await requireHousehold();
   if (!/^\d{4}-\d{2}-01$/.test(month)) return;
 
+  // A row that existed at $0 is restored to $0, not skipped. Skipping it left
+  // Military Pay at August's $8,293.33 after an Undo, because September plans
+  // it at $0 until the month-end paycheck lands.
   const toUpsert = snapshot
-    .filter((s) => s.planned_cents != null && s.planned_cents > 0)
+    .filter((s) => s.planned_cents != null)
     .map((s) => ({
       household_id: householdId,
       month,
@@ -1848,17 +1854,23 @@ export async function restorePlansSnapshot(
   const toDelete = snapshot.filter((s) => s.planned_cents == null).map((s) => s.subcategory_id);
 
   if (toUpsert.length > 0) {
-    await supabase
-      .from("budget_plans")
-      .upsert(toUpsert, { onConflict: "household_id,month,subcategory_id" });
+    unwrap(
+      await supabase
+        .from("budget_plans")
+        .upsert(toUpsert, { onConflict: "household_id,month,subcategory_id" }),
+      "budget_plans undo",
+    );
   }
   if (toDelete.length > 0) {
-    await supabase
-      .from("budget_plans")
-      .delete()
-      .eq("household_id", householdId)
-      .eq("month", month)
-      .in("subcategory_id", toDelete);
+    unwrap(
+      await supabase
+        .from("budget_plans")
+        .delete()
+        .eq("household_id", householdId)
+        .eq("month", month)
+        .in("subcategory_id", toDelete),
+      "budget_plans undo",
+    );
   }
 
   revalidatePath("/budget");

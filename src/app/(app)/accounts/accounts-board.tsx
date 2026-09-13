@@ -90,16 +90,16 @@ const MONTH_COLUMNS = 5;
 const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents"] as const;
 const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block"] as const;
 // Both take the column's DISTANCE FROM THE ANCHOR (the selected period), not
-// its raw index. Months read oldest -> newest so time runs left to right like
-// the Annual Overview's Months table, which puts the anchor last — but the
-// columns worth keeping on a narrow popup are still the ones nearest it.
+// its raw index. Months read newest -> oldest (Victor wants the current month
+// first), so the anchor is column 0 and a narrow popup keeps the columns
+// nearest it.
 const monthTier = (distance: number) =>
   distance === 0 ? MONTH_TIER[0] : distance <= 2 ? MONTH_TIER[1] : MONTH_TIER[2];
 const monthHeadTier = (distance: number) =>
   distance === 0 ? MONTH_HEAD_TIER[0] : distance <= 2 ? MONTH_HEAD_TIER[1] : MONTH_HEAD_TIER[2];
-// The anchor is the newest column, i.e. the last one.
-const anchorIdx = (months: string[]) => months.length - 1;
-const distFromAnchor = (months: string[], i: number) => months.length - 1 - i;
+// The anchor is the newest column, i.e. the first one.
+// A column's index is therefore also its distance from the anchor.
+const ANCHOR_IDX = 0;
 // Row grids: name + 1 money column when narrow, + 3 at 560px, + 5 at 860px.
 const ROW_GRID =
   "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem]";
@@ -169,6 +169,9 @@ type Props = {
   // Payments made TO cards — feeds the read-only "Card payments" report at
   // the bottom of the Credit Cards section. Never used for balances.
   cardPayments?: CardPayment[];
+  // Last year's Dec net worth from the imported history; used only when no
+  // Dec snapshots exist for that year.
+  eoyHistoryNetCents?: number | null;
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -362,6 +365,7 @@ export function AccountsBoard({
   nonCardAccounts = [],
   historyMonths,
   cardPayments = [],
+  eoyHistoryNetCents = null,
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -402,10 +406,9 @@ export function AccountsBoard({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   };
   const anchorMonth = periodSnapshotMonth ?? historyMonths[0];
-  // Oldest first: shiftMonth walks BACK from the anchor, so the window is
-  // built in reverse and the anchor month lands in the final column.
+  // Newest first: the anchor month is the first column, older months follow.
   const displayMonths: string[] = Array.from({ length: MONTH_COLUMNS }, (_, i) =>
-    shiftMonth(anchorMonth, MONTH_COLUMNS - 1 - i),
+    shiftMonth(anchorMonth, i),
   );
   // Resolve an account's balance for the currently-selected period: the
   // historical snapshot if one exists for that month, otherwise the live
@@ -550,6 +553,35 @@ export function AccountsBoard({
     ? null
     : priorAssets - priorCountedDebt;
 
+  // Last year's closing net worth. Dec snapshots win when there are any (same
+  // counting rules as `net` above); before per-account tracking the imported
+  // history's December row stands in, as it does on /networth.
+  const eoyYear = new Date().getFullYear() - 1;
+  const eoyMonth = `${eoyYear}-12-01`;
+  const eoyNet = (() => {
+    let sum = 0;
+    let covered = 0;
+    for (const a of assetAccounts) {
+      const b = a.balancesByMonth?.[eoyMonth];
+      if (b == null) continue;
+      sum += b;
+      covered += 1;
+    }
+    for (const a of debtLoanAccounts) {
+      const b = a.balancesByMonth?.[eoyMonth];
+      if (b == null || isDebtExcludedFromNetWorth(a.subtype)) continue;
+      sum -= Math.abs(b);
+      covered += 1;
+    }
+    for (const d of budgetDebts) {
+      const b = d.balancesByMonth?.[eoyMonth];
+      if (b == null || isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
+      sum -= b;
+      covered += 1;
+    }
+    return covered > 0 ? sum : eoyHistoryNetCents;
+  })();
+
   const assetSections = SECTIONS.filter((s) => !s.liability && !s.creditCard && !s.kidsGroup);
   const kidsSections = SECTIONS.filter((s) => s.kidsGroup);
   const creditSections = SECTIONS.filter((s) => s.creditCard);
@@ -681,11 +713,38 @@ export function AccountsBoard({
         </button>
       </div>
 
-      {/* Net worth is the number this page is opened for, so it leads at
-          hero size; Assets and Debts are its two inputs, a smaller two-up
-          beside it on desktop and beneath it on a phone. */}
-      <div className="flex flex-col px-3 sm:flex-row sm:items-center sm:px-0">
-        <div className="min-w-0 sm:flex-1">
+      {/* Assets and Debts are Net worth's two inputs, so they read first and
+          Net worth lands beside last year's close for the comparison. Two-up
+          on a phone (inputs, then the two net worths); four across once the
+          card is wide enough for the hero figures. */}
+      <div className="grid grid-cols-2 border-t border-line lg:grid-cols-4 lg:border-t-0">
+        <div className="border-b border-r border-line lg:border-b-0">
+          <SummaryStat
+            variant="hero"
+            label="Assets"
+            value={assets}
+            currency={currency}
+            tone="text-positive"
+            delta={deltaPct(assets, priorAssets)}
+            deltaAmount={priorAssets == null ? null : assets - priorAssets}
+            deltaGoodWhen="up"
+            priorLabel={priorPeriodLabel}
+          />
+        </div>
+        <div className="border-b border-line lg:border-b-0 lg:border-r">
+          <SummaryStat
+            variant="hero"
+            label="Debts"
+            value={debtsTotal}
+            currency={currency}
+            tone="text-negative"
+            delta={deltaPct(debtsTotal, priorDebts)}
+            deltaAmount={priorDebts == null ? null : debtsTotal - priorDebts}
+            deltaGoodWhen="down"
+            priorLabel={priorPeriodLabel}
+          />
+        </div>
+        <div className="border-r border-line">
           <SummaryStat
             variant="hero"
             label="Net worth"
@@ -699,27 +758,28 @@ export function AccountsBoard({
             priorLabel={priorPeriodLabel}
           />
         </div>
-        <div className="grid grid-cols-2 divide-x divide-line border-t border-line sm:w-[26rem] sm:shrink-0 sm:border-l sm:border-t-0">
-          <SummaryStat
-            label="Assets"
-            value={assets}
-            currency={currency}
-            tone="text-positive"
-            delta={deltaPct(assets, priorAssets)}
-            deltaAmount={priorAssets == null ? null : assets - priorAssets}
-            deltaGoodWhen="up"
-            priorLabel={priorPeriodLabel}
-          />
-          <SummaryStat
-            label="Debts"
-            value={debtsTotal}
-            currency={currency}
-            tone="text-negative"
-            delta={deltaPct(debtsTotal, priorDebts)}
-            deltaAmount={priorDebts == null ? null : debtsTotal - priorDebts}
-            deltaGoodWhen="down"
-            priorLabel={priorPeriodLabel}
-          />
+        <div>
+          {eoyNet == null ? (
+            <SummaryStat variant="hero" label={`EOY ${eoyYear} net worth`} value={0} currency={currency} tone="text-muted" hint="No record for December" />
+          ) : (
+            <SummaryStat
+              variant="hero"
+              label={`EOY ${eoyYear} net worth`}
+              value={eoyNet}
+              currency={currency}
+              tone={eoyNet >= 0 ? "text-foreground" : "text-negative"}
+              hint={
+                // Same treatment as the other tiles' deltas: the change in
+                // bold green/red, the words around it muted.
+                <>
+                  <span className={`font-semibold ${net >= eoyNet ? "text-positive" : "text-negative"}`}>
+                    {net >= eoyNet ? "Up" : "Down"} {formatMoney(Math.round(Math.abs(net - eoyNet) / 100) * 100, currency).replace(/\.00$/, "")}
+                  </span>{" "}
+                  this year
+                </>
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -762,16 +822,15 @@ export function AccountsBoard({
           </div>
         );
         return (
-          // Side by side in `items` order — Banking | Investments, Property |
-          // Debts, Kids Funding — so five groups take three rows, not five.
-          // Every row is half width, the last one included: a full-width Kids
-          // Funding row stretched its bar and amount across the whole card.
-          // One column on a phone.
+          // Assets first, then what's owed, then Kids Funding — three across
+          // on a wide card (Banking | Investments | Property, Debts | Credit
+          // Cards | Kids Funding), two across on a narrower one, one on a phone.
           // Every cell carries its own top hairline so the two in a row read
           // as one line broken by the gutter.
           <div className="@container">
-            <div className="grid grid-cols-1 @[40rem]:grid-cols-2 @[40rem]:gap-x-6">
-              {items.map(renderCard)}
+            <div className="grid grid-cols-1 @[40rem]:grid-cols-2 @[40rem]:gap-x-6 @[60rem]:grid-cols-3">
+              {items.filter((it) => !it.section.liability && !it.section.kidsGroup).map(renderCard)}
+              {items.filter((it) => it.section.liability).map(renderCard)}
               {cardsSection && openCards.length > 0 ? (
                 // Credit Cards as the sixth group, so every account group has
                 // a row here and the grid comes out even. Its accounts live in
@@ -813,6 +872,7 @@ export function AccountsBoard({
                   </button>
                 </div>
               ) : null}
+              {items.filter((it) => it.section.kidsGroup).map(renderCard)}
             </div>
           </div>
         );
@@ -952,10 +1012,10 @@ function CreditCardListSection({
           // owed, Pay; the annual fee lives on /travel with the rest of the
           // card's detail. Columns follow the card's own width, not the
           // window's — the sidebar takes a different share of the screen per
-          // device. Three across only from a 70rem card: names alone fit from
-          // ~56rem, but a long name like "1002 Hilton Aspire Amex V" also
-          // needs room for an owed amount beside it.
-          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:px-6 @[70rem]:grid-cols-3">
+          // device. Three across from a 56rem card, four from 72rem — a
+          // long name like "1002 Hilton Aspire Amex V" still needs room for
+          // an owed amount beside it.
+          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:px-6 @[56rem]:grid-cols-3 @[72rem]:grid-cols-4">
             {accounts.map((a) => (
               <li key={a.id}>
                 {/* An open card is the whole row: thirteen Pay pills read as a
@@ -1212,7 +1272,7 @@ function SummaryStat({
   value: number;
   currency: string;
   tone: string;
-  hint?: string;
+  hint?: React.ReactNode;
   delta?: number | null;
   // Absolute dollar change vs the same prior period the % is computed against.
   // Rendered alongside the % so the user sees both "how much" and "how much of".
@@ -1238,9 +1298,9 @@ function SummaryStat({
   // Accounts" card stacked two borders deep on the same white surface. The
   // parent separates them with a hairline instead.
   return (
-    <div className={`flex min-w-0 flex-col ${hero ? "py-3 sm:py-2 sm:pr-4" : "px-3 py-2.5 first:pl-0 sm:px-4 sm:first:pl-4"}`}>
+    <div className="flex h-full min-w-0 flex-col items-center justify-center px-3 py-2.5 text-center sm:px-4">
       <p className={`${hero ? "text-[11px]" : "text-[10px] sm:text-[11px]"} font-medium uppercase tracking-wide text-muted`}>{label}</p>
-      <p className={`mt-0.5 truncate font-bold tabular-nums ${hero ? "text-3xl sm:text-4xl" : "text-base sm:text-lg"} ${tone}`}>
+      <p className={`mt-0.5 max-w-full truncate font-bold tabular-nums ${hero ? "text-2xl sm:text-3xl xl:text-4xl" : "text-base sm:text-lg"} ${tone}`}>
         {wholeDollar(value)}
       </p>
       {delta != null && priorLabel ? (
@@ -1540,7 +1600,7 @@ function AccountSection({
               <div className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 <span />
                 {historyMonths.map((m, i) => (
-                  <span key={m} className={`text-right ${monthHeadTier(distFromAnchor(historyMonths, i))}`}>
+                  <span key={m} className={`text-right ${monthHeadTier(i)}`}>
                     {monthAbbr(m)}
                   </span>
                 ))}
@@ -1559,7 +1619,7 @@ function AccountSection({
                 {historyMonths.map((m, i) => (
                   <span
                     key={m}
-                    className={`justify-self-stretch text-right ${monthHeadTier(distFromAnchor(historyMonths, i))}`}
+                    className={`justify-self-stretch text-right ${monthHeadTier(i)}`}
                   >
                     {monthAbbr(m)}
                   </span>
@@ -1602,10 +1662,18 @@ function AccountSection({
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
                   {/* Same as account rows: each column reads the snapshot for
                       whichever month the header is currently showing. */}
-                  {historyMonths.slice(0, -1).map((m, idx) => {
+                  <SumCell
+                    pickKey={`d:${d.subcategoryId}:${historyMonths[ANCHOR_IDX]}`}
+                    cents={d.balancesByMonth?.[historyMonths[ANCHOR_IDX]] ?? d.balanceCents}
+                  >
+                    <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
+                      {formatMoney(d.balancesByMonth?.[historyMonths[ANCHOR_IDX]] ?? d.balanceCents, currency)}
+                    </span>
+                  </SumCell>
+                  {historyMonths.slice(1).map((m, j) => {
                     const v = d.balancesByMonth?.[m] ?? null;
                     return (
-                      <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
+                      <div key={m} className={monthTier(j + 1)}>
                         <SumCell pickKey={`d:${d.subcategoryId}:${m}`} cents={v}>
                         <span className="flex w-full justify-end">
                           {v != null ? (
@@ -1619,14 +1687,6 @@ function AccountSection({
                       </div>
                     );
                   })}
-                  <SumCell
-                    pickKey={`d:${d.subcategoryId}:${historyMonths[anchorIdx(historyMonths)]}`}
-                    cents={d.balancesByMonth?.[historyMonths[anchorIdx(historyMonths)]] ?? d.balanceCents}
-                  >
-                    <span className="w-full text-right text-sm font-semibold tabular-nums text-negative">
-                      {formatMoney(d.balancesByMonth?.[historyMonths[anchorIdx(historyMonths)]] ?? d.balanceCents, currency)}
-                    </span>
-                  </SumCell>
                 </li>
               ))}
             </ul>
@@ -1756,42 +1816,29 @@ function AccountRow({
 
         {allowBuckets && bucketCount > 0 ? (
           <>
-            {historyMonths.slice(0, -1).map((m, idx) => (
-              <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
-                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx)}>
+            <SumCell
+              pickKey={`a:${account.id}:${historyMonths[ANCHOR_IDX]}`}
+              cents={balanceFor(account, ANCHOR_IDX) ?? account.balanceCents}
+            >
+              <DerivedBalance balanceCents={balanceFor(account, ANCHOR_IDX) ?? account.balanceCents} currency={currency} />
+            </SumCell>
+            {historyMonths.slice(1).map((m, j) => (
+              <div key={m} className={monthTier(j + 1)}>
+                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, j + 1)}>
                   <DerivedBalance
-                    balanceCents={balanceFor(account, idx) ?? 0}
+                    balanceCents={balanceFor(account, j + 1) ?? 0}
                     currency={currency}
-                    muted={balanceFor(account, idx) == null}
+                    muted={balanceFor(account, j + 1) == null}
                   />
                 </SumCell>
               </div>
             ))}
-            <SumCell
-              pickKey={`a:${account.id}:${historyMonths[anchorIdx(historyMonths)]}`}
-              cents={balanceFor(account, anchorIdx(historyMonths)) ?? account.balanceCents}
-            >
-              <DerivedBalance balanceCents={balanceFor(account, anchorIdx(historyMonths)) ?? account.balanceCents} currency={currency} />
-            </SumCell>
           </>
         ) : (
           <>
-            {historyMonths.slice(0, -1).map((m, idx) => (
-              <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
-                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, idx)}>
-                  <HistoricBalanceInput
-                    accountId={account.id}
-                    month={m}
-                    balanceCents={balanceFor(account, idx)}
-                    currency={currency}
-                    liability={section.liability}
-                  />
-                </SumCell>
-              </div>
-            ))}
             <SumCell
-              pickKey={`a:${account.id}:${historyMonths[anchorIdx(historyMonths)]}`}
-              cents={isPastPeriod ? balanceFor(account, anchorIdx(historyMonths)) : account.balanceCents}
+              pickKey={`a:${account.id}:${historyMonths[ANCHOR_IDX]}`}
+              cents={isPastPeriod ? balanceFor(account, ANCHOR_IDX) : account.balanceCents}
             >
               {isPastPeriod ? (
                 // The column is headed with a past month, so writing here has to
@@ -1800,8 +1847,8 @@ function AccountRow({
                 // today's balance when edited.
                 <HistoricBalanceInput
                   accountId={account.id}
-                  month={historyMonths[anchorIdx(historyMonths)]}
-                  balanceCents={balanceFor(account, anchorIdx(historyMonths))}
+                  month={historyMonths[ANCHOR_IDX]}
+                  balanceCents={balanceFor(account, ANCHOR_IDX)}
                   currency={currency}
                   liability={section.liability}
                 />
@@ -1814,6 +1861,19 @@ function AccountRow({
                 />
               )}
             </SumCell>
+            {historyMonths.slice(1).map((m, j) => (
+              <div key={m} className={monthTier(j + 1)}>
+                <SumCell pickKey={`a:${account.id}:${m}`} cents={balanceFor(account, j + 1)}>
+                  <HistoricBalanceInput
+                    accountId={account.id}
+                    month={m}
+                    balanceCents={balanceFor(account, j + 1)}
+                    currency={currency}
+                    liability={section.liability}
+                  />
+                </SumCell>
+              </div>
+            ))}
           </>
         )}
         <span className="hidden @[560px]:block" aria-hidden />
@@ -1969,8 +2029,27 @@ function BucketRow({
           {bucket.name}
         </button>
       </div>
-      {historyMonths.slice(0, -1).map((m, idx) => (
-        <div key={m} className={monthTier(distFromAnchor(historyMonths, idx))}>
+      <SumCell
+        pickKey={`b:${bucket.id}:${historyMonths[ANCHOR_IDX]}`}
+        cents={isPastPeriod ? cellFor(historyMonths[ANCHOR_IDX]) : bucket.balanceCents}
+      >
+        {isPastPeriod ? (
+          // Same rule as the account row above: the column is headed with a past
+          // month, so the edit has to land on that month's bucket_snapshot. The
+          // live input would show today's figure under an AUG heading and write
+          // today's balance when edited.
+          <HistoricBucketBalanceInput
+            bucketId={bucket.id}
+            month={historyMonths[ANCHOR_IDX]}
+            balanceCents={cellFor(historyMonths[ANCHOR_IDX])}
+            currency={currency}
+          />
+        ) : (
+          <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
+        )}
+      </SumCell>
+      {historyMonths.slice(1).map((m, j) => (
+        <div key={m} className={monthTier(j + 1)}>
           <SumCell pickKey={`b:${bucket.id}:${m}`} cents={cellFor(m)}>
             <HistoricBucketBalanceInput
               bucketId={bucket.id}
@@ -1981,25 +2060,6 @@ function BucketRow({
           </SumCell>
         </div>
       ))}
-      <SumCell
-        pickKey={`b:${bucket.id}:${historyMonths[anchorIdx(historyMonths)]}`}
-        cents={isPastPeriod ? cellFor(historyMonths[anchorIdx(historyMonths)]) : bucket.balanceCents}
-      >
-        {isPastPeriod ? (
-          // Same rule as the account row above: the column is headed with a past
-          // month, so the edit has to land on that month's bucket_snapshot. The
-          // live input would show today's figure under an AUG heading and write
-          // today's balance when edited.
-          <HistoricBucketBalanceInput
-            bucketId={bucket.id}
-            month={historyMonths[anchorIdx(historyMonths)]}
-            balanceCents={cellFor(historyMonths[anchorIdx(historyMonths)])}
-            currency={currency}
-          />
-        ) : (
-          <BucketBalanceInput id={bucket.id} balanceCents={bucket.balanceCents} currency={currency} />
-        )}
-      </SumCell>
       </div>
       {editing ? (
         <BucketEditPanel

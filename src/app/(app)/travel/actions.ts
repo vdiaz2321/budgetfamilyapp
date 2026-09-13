@@ -56,13 +56,21 @@ type RewardDraw = { accountId: string | null; points: number; credit: number };
 // what it draws now and posts the difference to the card's rewards ledger, so
 // the Accounts balances always match the Travel Log. A spend is a negative
 // delta; handing points back is a positive one.
+//
+// A stay keeps ONE ledger row (travel_stays.reward_activity_id). A change on
+// the same card is folded into that row instead of stacking a new one on every
+// save — correcting a typo used to leave a +15,700 and a -11,700 behind a net
+// +4,000. The AFTER UPDATE trigger moves the card's balance by the difference,
+// and a row whose net comes back to zero is deleted (the DELETE trigger hands
+// back what it held). Returns the row that now stands for the stay, or null.
 async function syncRewardLedger(
   supabase: SupabaseClient,
   householdId: string,
   before: RewardDraw,
   after: RewardDraw,
   meta: { occurredOn: string; bookedOn: string | null; note: string },
-): Promise<{ error: string | null; activityId?: string }> {
+  stayActivityId: string | null = null,
+): Promise<{ error: string | null; activityId: string | null }> {
   const moves: Array<{ accountId: string; points: number; credit: number }> = [];
 
   if (before.accountId && before.accountId !== after.accountId) {
@@ -80,7 +88,35 @@ async function syncRewardLedger(
     if (points || credit) moves.push({ accountId: after.accountId, points, credit });
   }
 
-  let activityId: string | undefined;
+  // Nothing moved: the stay keeps whatever row it already had.
+  if (moves.length === 0) return { error: null, activityId: stayActivityId };
+
+  const linked = stayActivityId
+    ? unwrap(
+        await supabase
+          .from("credit_card_reward_activities")
+          .select("id, account_id, points_delta, hotel_credit_delta_cents")
+          .eq("id", stayActivityId)
+          .eq("household_id", householdId)
+          .maybeSingle(),
+        "credit_card_reward_activities",
+      )
+    : null;
+
+  // Only the first draw on a stay is a booking. A later correction (an
+  // imported stay whose points are fixed, say) must not stamp the card's
+  // "Booked" date.
+  const firstDraw = !before.points && !before.credit;
+  const shape = (points: number, credit: number, stamp: boolean) => {
+    const refund = points > 0 || credit > 0;
+    return {
+      activity_type: refund ? "reward_refund" : points < 0 ? "free_night_booking" : "hotel_credit_redemption",
+      booked_on: refund || !stamp ? null : meta.bookedOn,
+      note: refund ? `${meta.note} (returned)` : meta.note,
+    };
+  };
+
+  let activityId: string | null = linked?.id ?? null;
   for (const move of moves) {
     // A card can't go below what it holds, so check before drawing on it.
     if (move.points < 0 || move.credit < 0) {
@@ -93,47 +129,103 @@ async function syncRewardLedger(
           .maybeSingle(),
         "credit_card_details",
       );
-      if (!details) return { error: "That card has no rewards details to draw from." };
+      if (!details) return { error: "That card has no rewards details to draw from.", activityId: null };
       if (-move.points > (details.current_points ?? 0)) {
         return {
           error: `That card only has ${(details.current_points ?? 0).toLocaleString()} points available.`,
+          activityId: null,
         };
       }
       if (-move.credit > (details.free_night_credit_cents ?? 0)) {
         return {
           error: `That card only has ${formatCents(details.free_night_credit_cents ?? 0)} of hotel credit available.`,
+          activityId: null,
         };
       }
     }
 
-    const refund = move.points > 0 || move.credit > 0;
+    if (linked && linked.account_id === move.accountId) {
+      const points = linked.points_delta + move.points;
+      const credit = Number(linked.hotel_credit_delta_cents) + move.credit;
+      if (!points && !credit) {
+        const { error } = await supabase
+          .from("credit_card_reward_activities")
+          .delete()
+          .eq("id", linked.id)
+          .eq("household_id", householdId);
+        if (error) {
+          console.error("[syncRewardLedger:fold-delete]", error);
+          return { error: `Couldn't update that card's rewards — ${error.message}`, activityId: null };
+        }
+        if (activityId === linked.id) activityId = null;
+      } else {
+        const { error } = await supabase
+          .from("credit_card_reward_activities")
+          .update({ ...shape(points, credit, false), occurred_on: meta.occurredOn, points_delta: points, hotel_credit_delta_cents: credit })
+          .eq("id", linked.id)
+          .eq("household_id", householdId);
+        if (error) {
+          console.error("[syncRewardLedger:fold]", error);
+          return { error: `Couldn't update that card's rewards — ${error.message}`, activityId: null };
+        }
+      }
+      continue;
+    }
+
     const { data, error } = await supabase
       .from("credit_card_reward_activities")
       .insert({
         household_id: householdId,
         account_id: move.accountId,
-        activity_type: refund
-          ? "reward_refund"
-          : move.points < 0
-            ? "free_night_booking"
-            : "hotel_credit_redemption",
         occurred_on: meta.occurredOn,
         points_delta: move.points,
         hotel_credit_delta_cents: move.credit,
-        // Only a booking stamps the card's "benefit used" date.
-        booked_on: refund ? null : meta.bookedOn,
-        note: refund ? `${meta.note} (returned)` : meta.note,
+        ...shape(move.points, move.credit, firstDraw),
       })
       .select("id")
       .single();
     if (error) {
       console.error("[syncRewardLedger]", error);
-      return { error: `Couldn't update that card's rewards — ${error.message}` };
+      return { error: `Couldn't update that card's rewards — ${error.message}`, activityId: null };
     }
-    if (!refund && !activityId) activityId = data.id;
+    // The stay's row is the one on the card it is on now.
+    if (move.accountId === after.accountId || !activityId) activityId = data.id;
   }
 
   return { error: null, activityId };
+}
+
+// A free-night certificate is a status on the card, not points: using one
+// sets the card's Booked date to the stay's check-in. Moving the certificate
+// off a stay (unticked, another card, a new date, cancelled, deleted) clears
+// the old stamp — but only when the card still shows THIS stay's date, so a
+// date typed on the card by hand is never wiped.
+async function syncFreeNightStamp(
+  supabase: SupabaseClient,
+  householdId: string,
+  before: { accountId: string | null; checkIn: string } | null,
+  after: { accountId: string | null; checkIn: string } | null,
+) {
+  const same = before && after && before.accountId === after.accountId && before.checkIn === after.checkIn;
+  if (same) return null;
+  if (before?.accountId) {
+    const { error } = await supabase
+      .from("credit_card_details")
+      .update({ benefit_used_on: null, updated_at: new Date().toISOString() })
+      .eq("account_id", before.accountId)
+      .eq("household_id", householdId)
+      .eq("benefit_used_on", before.checkIn);
+    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
+  }
+  if (after?.accountId) {
+    const { error } = await supabase
+      .from("credit_card_details")
+      .update({ benefit_used_on: after.checkIn, updated_at: new Date().toISOString() })
+      .eq("account_id", after.accountId)
+      .eq("household_id", householdId);
+    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
+  }
+  return null;
 }
 
 export async function saveTravelStay(formData: FormData) {
@@ -150,7 +242,11 @@ export async function saveTravelStay(formData: FormData) {
   // Points only leave a card when they were actually redeemed. On a stay
   // recorded to compare against cash, the figure is a what-if and must not
   // reach the reward ledger.
-  const pointsUsed = formData.get("pointsUsed") === "on" && pointsCost > 0;
+  // A free night is paid by the certificate, so its points figure is only
+  // ever a what-if — the two can't both be true.
+  const freeNightUsed = formData.get("freeNightUsed") === "on";
+  const freeNightPoints = int(formData, "freeNightPoints") || null;
+  const pointsUsed = formData.get("pointsUsed") === "on" && pointsCost > 0 && !freeNightUsed;
   const pointsDrawn = pointsUsed ? pointsCost : 0;
   const hotelCredit = Math.max(0, displayToCents(String(formData.get("hotelCredit") ?? "0")));
   const pocketCost = Math.max(0, displayToCents(String(formData.get("pocketCost") ?? "0")));
@@ -159,7 +255,7 @@ export async function saveTravelStay(formData: FormData) {
   // whatever the numbers say. Money paid means the card; nothing paid means
   // the points or the night credit covered it.
   const pocketPaidWith =
-    pocketCost > 0 ? "card" : pointsDrawn > 0 ? "points" : hotelCredit > 0 ? "credit" : "card";
+    pocketCost > 0 ? "card" : pointsDrawn > 0 || freeNightUsed ? "points" : hotelCredit > 0 ? "credit" : "card";
 
   if (!propertyName) return { error: "Enter the hotel or apartment name." };
   if (!isDate(checkIn)) return { error: "Enter a valid check-in date." };
@@ -194,6 +290,8 @@ export async function saveTravelStay(formData: FormData) {
     pocket_paid_with: pocketPaidWith,
     remarks: text(formData, "remarks"),
     breakfast_included: formData.get("breakfastIncluded") === "on",
+    free_night_used: freeNightUsed,
+    free_night_points: freeNightUsed ? freeNightPoints : null,
     updated_at: new Date().toISOString(),
   };
 
@@ -204,7 +302,7 @@ export async function saveTravelStay(formData: FormData) {
     const prev = unwrap(
       await supabase
         .from("travel_stays")
-        .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at")
+        .select("account_id, check_in, points_cost, points_used, hotel_credit_cents, cancelled_at, reward_activity_id, moves_card_points, free_night_used")
         .eq("id", id)
         .eq("household_id", householdId)
         .maybeSingle(),
@@ -222,24 +320,39 @@ export async function saveTravelStay(formData: FormData) {
           credit: prev.hotel_credit_cents ?? 0,
         };
 
-    const sync = await syncRewardLedger(
-      supabase,
-      householdId,
-      before,
-      { accountId, points: pointsDrawn, credit: hotelCredit },
-      { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
-    );
-    if (sync.error) return { error: sync.error };
+    // Imported stays never took their points off a card, so editing one
+    // fixes the record only — see 20260913140000.
+    let activityId = prev.reward_activity_id;
+    if (prev.moves_card_points) {
+      const sync = await syncRewardLedger(
+        supabase,
+        householdId,
+        before,
+        { accountId, points: pointsDrawn, credit: hotelCredit },
+        { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
+        prev.reward_activity_id,
+      );
+      if (sync.error) return { error: sync.error };
+      activityId = sync.activityId;
+    }
 
     const { error } = await supabase
       .from("travel_stays")
-      .update(row)
+      .update({ ...row, reward_activity_id: activityId })
       .eq("id", id)
       .eq("household_id", householdId);
     if (error) {
       console.error("[saveTravelStay:update]", error);
       return { error: `Couldn't save that stay — ${error.message}` };
     }
+    // A cancelled stay holds no certificate until it is restored.
+    const stampError = await syncFreeNightStamp(
+      supabase,
+      householdId,
+      prev.free_night_used && !prev.cancelled_at ? { accountId: prev.account_id, checkIn: prev.check_in } : null,
+      freeNightUsed && !prev.cancelled_at ? { accountId, checkIn } : null,
+    );
+    if (stampError) return { error: stampError };
     revalidate();
     return { error: null };
   }
@@ -257,10 +370,14 @@ export async function saveTravelStay(formData: FormData) {
 
   const { error } = await supabase
     .from("travel_stays")
-    .insert({ ...row, reward_activity_id: sync.activityId ?? null });
+    .insert({ ...row, reward_activity_id: sync.activityId ?? null, moves_card_points: true });
   if (error) {
     console.error("[saveTravelStay:insert]", error);
     return { error: `Couldn't save that stay — ${error.message}` };
+  }
+  if (freeNightUsed) {
+    const stampError = await syncFreeNightStamp(supabase, householdId, null, { accountId, checkIn });
+    if (stampError) return { error: stampError };
   }
   revalidate();
   return { error: null };
@@ -277,7 +394,7 @@ export async function deleteTravelStay(formData: FormData) {
   const stay = unwrap(
     await supabase
       .from("travel_stays")
-      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on")
+      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on, reward_activity_id, moves_card_points, free_night_used")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -285,7 +402,16 @@ export async function deleteTravelStay(formData: FormData) {
   );
   if (!stay) return { error: "That stay was not found." };
 
-  if (!stay.cancelled_at) {
+  if (!stay.cancelled_at && stay.free_night_used) {
+    const stampError = await syncFreeNightStamp(
+      supabase,
+      householdId,
+      { accountId: stay.account_id, checkIn: stay.check_in },
+      null,
+    );
+    if (stampError) return { error: stampError };
+  }
+  if (!stay.cancelled_at && stay.moves_card_points) {
     const sync = await syncRewardLedger(
       supabase,
       householdId,
@@ -300,6 +426,7 @@ export async function deleteTravelStay(formData: FormData) {
         bookedOn: null,
         note: stay.property_name,
       },
+      stay.reward_activity_id,
     );
     if (sync.error) return { error: sync.error };
   }
@@ -367,7 +494,7 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
   const stay = unwrap(
     await supabase
       .from("travel_stays")
-      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on")
+      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on, reward_activity_id, moves_card_points, free_night_used")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -383,22 +510,37 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
   const none = { accountId: stay.account_id, points: 0, credit: 0 };
   const full = { accountId: stay.account_id, ...drawn };
 
-  const sync = await syncRewardLedger(
-    supabase,
-    householdId,
-    cancelled ? full : none,
-    cancelled ? none : full,
-    {
-      occurredOn: stay.reserved_on ?? stay.check_in,
-      bookedOn: cancelled ? null : stay.check_in,
-      note: stay.property_name,
-    },
-  );
-  if (sync.error) return { error: sync.error };
+  let activityId = stay.reward_activity_id;
+  if (stay.moves_card_points) {
+    const sync = await syncRewardLedger(
+      supabase,
+      householdId,
+      cancelled ? full : none,
+      cancelled ? none : full,
+      {
+        occurredOn: stay.reserved_on ?? stay.check_in,
+        bookedOn: cancelled ? null : stay.check_in,
+        note: stay.property_name,
+      },
+      stay.reward_activity_id,
+    );
+    if (sync.error) return { error: sync.error };
+    activityId = sync.activityId;
+  }
+  if (stay.free_night_used) {
+    const stamp = { accountId: stay.account_id, checkIn: stay.check_in };
+    const stampError = await syncFreeNightStamp(
+      supabase,
+      householdId,
+      cancelled ? stamp : null,
+      cancelled ? null : stamp,
+    );
+    if (stampError) return { error: stampError };
+  }
 
   const { error } = await supabase
     .from("travel_stays")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null })
+    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) {

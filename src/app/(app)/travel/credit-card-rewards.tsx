@@ -26,6 +26,7 @@ import {
   deleteAccount,
   deleteCreditCardRewardActivity,
   logCreditCardRewardActivity,
+  updateCreditCardRewardActivity,
   reopenCard,
   reorderAccounts,
   updateAccount,
@@ -60,8 +61,8 @@ const RewardFocusContext = React.createContext<{
 }>({ focusCardId: null, requestFocus: () => {}, clearFocus: () => {} });
 
 // The two halves of the rewards block are rendered in two different places on
-// /travel — the card sections above the Hotel Reservations Log, the points
-// ledger below it — so the provider holds the shared data and state and the
+// /travel — the card sections and the points ledger, both above the Hotel
+// Reservations Log — so the provider holds the shared data and state and the
 // two pieces below pull what they need out of it.
 const RewardsDataContext = React.createContext<{
   accounts: AccountData[];
@@ -487,7 +488,16 @@ function CreditCardSection({
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
         <div className="px-4 py-4 sm:px-6 sm:py-5">
-          <div className="flex flex-wrap items-center gap-2">
+          {/* The whole header row toggles, not just the title text and the
+              chevron — a click in the empty space beside the chips did
+              nothing. The chips and the calculator link keep their own jobs. */}
+          <div
+            className="flex cursor-pointer flex-wrap items-center gap-2"
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest("button, a")) return;
+              onToggle();
+            }}
+          >
             <button
               type="button"
               onClick={onToggle}
@@ -1029,8 +1039,11 @@ function RewardsActivityLedger({
   // reference data, not something to scan on every visit; sessionStorage still
   // carries whatever it was last set to while moving around the app.
   const [openState, setOpenState] = useSessionCollapse("travel-rewards-activity-open", () => ({ open: false }));
-  const { requestFocus } = React.useContext(RewardFocusContext);
   const open = openState.open;
+  // Held by id and looked up in the live list, so deleting from inside the
+  // popup closes it with the row instead of leaving a form for a gone entry.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editingEntry = editingId ? entries.find((e) => e.id === editingId) ?? null : null;
 
   return (
     <section>
@@ -1076,31 +1089,183 @@ function RewardsActivityLedger({
         </p>
       ) : (
         <ul className="divide-y divide-line bg-background/70">
-          {visibleEntries.map((entry) => (
-            <li key={entry.id} className="grid grid-cols-[4.75rem_minmax(0,1fr)_auto_auto] items-center gap-2 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] dark:hover:bg-white/[0.04]">
-              {/* The row is the way back to the card that made the entry:
-                  clicking it opens that card's rewards log and scrolls to it,
-                  instead of leaving you to hunt for the card by hand. Only the
-                  reading cells are the button — Delete keeps its own hit
-                  area, and a <button> can't nest inside another one. */}
+          {visibleEntries.map((entry) => {
+            const amount = (
+              <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
+                {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
+              </span>
+            );
+            const detail = `${labels[entry.type]}${entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}${entry.note ? ` · ${entry.note}` : ""}`;
+            return (
+            <li key={entry.id} className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] sm:gap-2 dark:hover:bg-white/[0.04]">
+              {/* Every row opens the edit popup. It used to jump to the card
+                  and open its "Log points" form, which read as a new entry
+                  instead of the one you clicked. Delete keeps its own hit
+                  area — a <button> can't nest inside another one. */}
               <button
                 type="button"
-                onClick={() => requestFocus(entry.cardId)}
-                className="col-span-4 grid cursor-pointer grid-cols-[4.75rem_minmax(0,1fr)_auto] items-center gap-2 text-left sm:col-span-4 sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto] sm:contents"
+                onClick={() => setEditingId(entry.id)}
+                className="min-w-0 flex-1 cursor-pointer text-left sm:contents"
               >
-                <span className="text-muted tabular-nums">{entry.occurredOn}</span>
-                <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
-                <span className="min-w-0 truncate text-muted">{labels[entry.type]}{entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}{entry.note ? ` · ${entry.note}` : ""}</span>
-                <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
-                  {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
+                {/* Phone: card and amount on one line, date and detail under
+                    it — four cells in a row left no room for the card name. */}
+                <span className="block min-w-0 sm:hidden">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
+                    {amount}
+                  </span>
+                  <span className="mt-0.5 block truncate text-muted">
+                    <span className="tabular-nums">{entry.occurredOn}</span> · {detail}
+                  </span>
                 </span>
+                <span className="hidden text-muted tabular-nums sm:block">{entry.occurredOn}</span>
+                <span className="hidden min-w-0 truncate font-semibold sm:block">{entry.cardName}</span>
+                <span className="hidden min-w-0 truncate text-muted sm:block">{detail}</span>
+                <span className="hidden sm:block">{amount}</span>
               </button>
-              <RewardActivityRowActions entry={entry} />
+              <RewardActivityRowActions entry={entry} compact />
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
+      {editingEntry ? (
+        <EditRewardActivityModal
+          // Keyed so opening a different row starts from that row's values.
+          key={editingEntry.id}
+          entry={editingEntry}
+          onDone={() => setEditingId(null)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+// Only hand-logged points entries are editable; hotel credit and free nights
+// belong to a stay and are corrected there.
+const EDITABLE_TYPES = new Set<RewardActivity["type"]>(["points_redemption", "points_earned", "reward_refund"]);
+
+function EditRewardActivityModal({
+  entry,
+  onDone,
+}: {
+  entry: RewardActivity & { cardName: string; cardId: string };
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const { accounts } = useRewardsData();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [direction, setDirection] = useState<"used" | "earned" | "returned">(
+    entry.type === "points_earned" ? "earned" : entry.type === "reward_refund" ? "returned" : "used",
+  );
+  const [points, setPoints] = useState(String(Math.abs(entry.pointsDelta)));
+  const current = accounts.find((a) => a.id === entry.cardId)?.cardDetails?.currentPoints ?? 0;
+  // The balance with this entry taken back out — what an edited "used"
+  // figure is allowed to spend.
+  const withoutEntry = current - entry.pointsDelta;
+
+  // A free-night or hotel-credit booking is written by a stay; its points
+  // are changed by editing that stay, which posts the difference itself.
+  if (!EDITABLE_TYPES.has(entry.type)) {
+    return (
+      <ModalShell title={`Edit · ${entry.cardName}`} onClose={onDone} mobileAlign="top">
+        <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] text-sm">
+          <p>
+            This entry was made by a hotel stay{entry.note ? ` (${entry.note})` : ""}. To change its points, open that stay
+            in the <span className="font-semibold">Hotel Reservations Log</span> and edit it there.
+          </p>
+          <button type="button" onClick={onDone} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong">
+            OK
+          </button>
+        </div>
+      </ModalShell>
+    );
+  }
+
+  return (
+    <ModalShell title={`Edit · ${entry.cardName}`} onClose={onDone} mobileAlign="top">
+      <div className="px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
+        <form
+          // onSubmit, not `action`: a rejected save must keep what was typed.
+          onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            start(async () => {
+              setError(null);
+              const result = await updateCreditCardRewardActivity(formData);
+              if (result?.error) setError(result.error);
+              else {
+                router.refresh();
+                onDone();
+              }
+            });
+          }}
+          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+        >
+          <input type="hidden" name="activityId" value={entry.id} />
+          <input
+            type="hidden"
+            name="activityType"
+            value={direction === "used" ? "points_redemption" : direction === "earned" ? "points_earned" : "reward_refund"}
+          />
+          <div className="sm:col-span-2">
+            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Direction</span>
+            <div className="inline-flex rounded-md ring-1 ring-line">
+              {(["used", "earned", "returned"] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={direction === option}
+                  onClick={() => setDirection(option)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                    direction === option ? "" : "text-foreground hover:bg-black/5 dark:hover:bg-white/10"
+                  }`}
+                  style={direction === option ? softPill(DIRECTION_TONE[option]) : undefined}
+                >
+                  {option === "used" ? "Points used" : option === "earned" ? "Points earned" : "Points refunded"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <LabeledInput label="Activity date" name="occurredOn" type="date" defaultValue={entry.occurredOn} />
+          <LabeledInput
+            label={
+              direction === "used"
+                ? `Points used · ${Math.max(0, withoutEntry).toLocaleString()} available`
+                : direction === "earned"
+                  ? "Points earned"
+                  : "Points returned"
+            }
+            name="pointsUsed"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="0"
+            value={points}
+            onChange={(e) => setPoints(e.target.value)}
+          />
+          <div className="sm:col-span-2">
+            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Note (optional)</label>
+            <input
+              name="note"
+              defaultValue={entry.note ?? ""}
+              placeholder="Hotel, trip, confirmation, or redemption details"
+              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </div>
+          {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
+            <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60">
+              {pending ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </form>
+        <div className="mt-3 flex justify-end border-t border-line pt-3">
+          <RewardActivityRowActions entry={entry} compact />
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -1229,10 +1394,9 @@ function CreditCardPanel({
   const bank = cardBank(card) || null;
   // One card showing any reward figure turns the metric grid on for that row;
   // plain cards (no points, no night credit) keep the single identity line.
-  // "Booked" only means something on a card that carries a free-night / hotel
-  // credit — on a plain points card the column is noise, so it holds its grid
-  // slot but prints nothing.
-  const hasNightCredit = Boolean(d?.freeNightCreditCents || d?.freeNightPointsLimit);
+  // "Booked" stays out of sight until a date is filled in — a "Booked —" on
+  // every night-credit card read as a missing value rather than "not yet".
+  // It still holds its grid slot so the columns stay in register.
   const hasMetrics = Boolean(
     d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit
       || d.freeNightExpiresOn || d.benefitUsedOn || d.charging),
@@ -1344,7 +1508,7 @@ function CreditCardPanel({
                   </span>
                 ) : null}
               </MetricCell>
-              <MetricCell label="Booked" omit={!hasNightCredit}>
+              <MetricCell label="Booked" omit={!d?.benefitUsedOn}>
                 {d?.benefitUsedOn ? (
                   <span
                     className={`tabular-nums font-semibold ${

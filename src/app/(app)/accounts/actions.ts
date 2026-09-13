@@ -799,6 +799,105 @@ export async function logCreditCardRewardActivity(formData: FormData) {
   return { error: null };
 }
 
+// Correct a hand-logged ledger entry in place: date, direction, points, note.
+// The AFTER UPDATE trigger (20260913120000) hands back what the old row did
+// and applies the new amount in the same transaction, so the card's balance
+// moves by exactly the difference. Stay-owned entries stay with the stay, for
+// the same reason they can't be deleted here.
+export async function updateCreditCardRewardActivity(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const activityId = String(formData.get("activityId") ?? "");
+  const activityType = String(formData.get("activityType") ?? "");
+  const occurredOn = String(formData.get("occurredOn") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim() || null;
+  if (!activityId) return { error: "Reward activity was not found." };
+
+  const returning = activityType === "reward_refund";
+  const adding = activityType === "points_earned" || returning;
+  if (activityType !== "points_redemption" && !adding) {
+    return { error: "Choose a valid reward activity." };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) {
+    return { error: "Enter a valid activity date." };
+  }
+
+  const existing = unwrap(
+    await supabase
+      .from("credit_card_reward_activities")
+      .select("id, account_id, activity_type, points_delta")
+      .eq("id", activityId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "credit_card_reward_activities",
+  );
+  if (!existing) return { error: "Reward activity was not found." };
+  if (!["points_redemption", "points_earned", "reward_refund"].includes(existing.activity_type)) {
+    return { error: "Only points entries can be edited here." };
+  }
+
+  const stay = unwrap(
+    await supabase
+      .from("travel_stays")
+      .select("id, property_name")
+      .eq("household_id", householdId)
+      .eq("reward_activity_id", activityId)
+      .maybeSingle(),
+    "travel_stays",
+  );
+  if (stay) {
+    return {
+      error: `That entry belongs to the stay "${stay.property_name}" — edit it in the Travel Log and the points follow.`,
+    };
+  }
+
+  const points = Math.max(0, Math.trunc(Number(String(formData.get("pointsUsed") ?? "0").replace(/,/g, "")) || 0));
+  if (points <= 0) {
+    return {
+      error: returning
+        ? "Enter the points that were returned."
+        : adding
+          ? "Enter the points you earned."
+          : "Enter the points you used.",
+    };
+  }
+
+  if (!adding) {
+    const details = unwrap(
+      await supabase
+        .from("credit_card_details")
+        .select("current_points")
+        .eq("account_id", existing.account_id)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "credit_card_details",
+    );
+    if (!details) return { error: "Card details were not found." };
+    // What the card would hold with this entry taken back out.
+    const available = (details.current_points ?? 0) - existing.points_delta;
+    if (points > available) {
+      return { error: `That is more points than this card has (${available.toLocaleString()} without this entry).` };
+    }
+  }
+
+  const { error } = await supabase
+    .from("credit_card_reward_activities")
+    .update({
+      activity_type: returning ? "reward_refund" : adding ? "points_earned" : "points_redemption",
+      occurred_on: occurredOn,
+      points_delta: adding ? points : -points,
+      note,
+    })
+    .eq("id", activityId)
+    .eq("household_id", householdId);
+  if (error) {
+    console.error("[updateCreditCardRewardActivity]", error);
+    return { error: `Couldn't save that activity — ${error.message}` };
+  }
+  revalidate();
+  revalidatePath("/travel");
+  return { error: null };
+}
+
 // Undo a ledger entry outright. The AFTER DELETE trigger
 // (20260907140000) hands back whatever the row took, so a mistyped redemption
 // can be removed instead of being papered over by retyping Current points.
