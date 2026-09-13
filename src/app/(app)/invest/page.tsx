@@ -252,7 +252,7 @@ export default async function InvestPage({
 
   const bucketsByAccount = new Map<
     string,
-    { id: string; name: string; balanceCents: number; taxTreatment: string | null }[]
+    { id: string; name: string; holder: string | null; balanceCents: number; taxTreatment: string | null }[]
   >();
   for (const b of bucketRows ?? []) {
     if (!investIds.has(b.account_id)) continue;
@@ -260,6 +260,7 @@ export default async function InvestPage({
     arr.push({
       id: b.id,
       name: b.name,
+      holder: ((b as { holder?: string | null }).holder ?? "").trim() || null,
       balanceCents: b.balance_cents ?? 0,
       taxTreatment: (b as { tax_treatment?: string | null }).tax_treatment ?? null,
     });
@@ -454,6 +455,9 @@ export default async function InvestPage({
       return {
         id: b.id,
         name: b.name,
+        // A bucket's own holder wins over the account's (one Fidelity login
+        // holds both Vic's and Jo's Roth).
+        holder: b.holder ?? (a.holder?.trim() || null),
         balanceCents: b.balanceCents,
         taxTreatment: b.taxTreatment,
         cells,

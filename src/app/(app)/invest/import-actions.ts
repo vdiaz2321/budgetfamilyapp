@@ -551,6 +551,11 @@ export async function saveManualPositions(formData: FormData) {
       const name = (holding.securityName ?? "").trim();
       const marketValue = parseMoney(holding.marketValue);
       if ((!symbol && !name) || marketValue == null) return null;
+      // Gain/loss follows from value and cost basis, so a typed cost basis
+      // fills both instead of leaving the table's gain columns blank.
+      const marketValueCents = toCents(marketValue)!;
+      const costBasisCents = toCents(parseMoney(holding.costBasis));
+      const gainCents = costBasisCents == null ? null : marketValueCents - costBasisCents;
       return {
         household_id: householdId,
         account_id: accountId,
@@ -561,10 +566,11 @@ export async function saveManualPositions(formData: FormData) {
         asset_class: null,
         quantity: parseQuantity(holding.quantity),
         price_cents: null,
-        market_value_cents: toCents(marketValue),
-        cost_basis_cents: toCents(parseMoney(holding.costBasis)),
-        unrealized_gain_cents: null,
-        unrealized_gain_percent: null,
+        market_value_cents: marketValueCents,
+        cost_basis_cents: costBasisCents,
+        unrealized_gain_cents: gainCents,
+        unrealized_gain_percent:
+          gainCents == null || !costBasisCents ? null : Math.round((gainCents / costBasisCents) * 10000) / 100,
         entry_source: "manual",
       };
     })

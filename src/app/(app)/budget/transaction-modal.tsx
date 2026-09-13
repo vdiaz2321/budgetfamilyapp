@@ -112,24 +112,27 @@ export function TransactionModal({
   const [isRefund, setIsRefund] = useState<boolean>(
     editTx != null && editTx.amountCents < 0,
   );
-  // Splits-on-edit: when enabled, the modal switches to the same multi-item
-  // flow used when adding a new transaction. Saving with 2+ items replaces
-  // the original tx with N new ones (delete + insert × N) that all share the
-  // same date / account / payee / memo.
-  const [splittingMode, setSplittingMode] = useState<boolean>(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? initialAccountId ?? "");
   const availableBuckets = bucketsByAccount[selectedAccountId] ?? [];
   const [selectedBucketId, setSelectedBucketId] = useState<string>("");
   const formRef = useRef<HTMLFormElement>(null);
   const amountRef = useRef<HTMLInputElement>(null);
-  const [autoFillSubId, setAutoFillSubId] = useState<string | null>(null);
   const [convertedCents, setConvertedCents] = useState<number | null>(null);
 
-  // Split state — for NEW transactions only. Edit mode keeps the existing single-item flow.
-  const [totalCents, setTotalCents] = useState(editTx?.amountCents ?? initialAmountCents ?? 0);
-  const [splits, setSplits] = useState<SplitEntry[]>(() =>
-    initialSubId ? [{ subId: initialSubId, amountCents: editTx?.amountCents ?? initialAmountCents ?? 0 }] : []
+  // Split state — add and edit share the same picker. On edit it's seeded
+  // with the transaction's own item; saving with 2+ items replaces the
+  // original tx with N new ones (delete + insert × N) that all share the same
+  // date / account / payee / memo. Refunds are stored negative but typed
+  // positive, so the seed uses the absolute amount.
+  const [totalCents, setTotalCents] = useState(
+    editTx ? Math.abs(editTx.amountCents) : initialAmountCents ?? 0,
   );
+  const [splits, setSplits] = useState<SplitEntry[]>(() => {
+    const seedSubId = editTx ? editTx.subId : initialSubId;
+    return seedSubId
+      ? [{ subId: seedSubId, amountCents: editTx ? Math.abs(editTx.amountCents) : initialAmountCents ?? 0 }]
+      : [];
+  });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   // Why the save button wouldn't fire. The footer button used to be silently
@@ -151,26 +154,18 @@ export function TransactionModal({
   // When exactly one item is selected, auto-fill it with the full total so the
   // user doesn't have to re-enter it after changing the amount or removing splits.
   useEffect(() => {
-    // On edit, we still let the single-item sync happen when the user is
-    // building up a split (splittingMode true) so the initial entry mirrors
-    // the entered total.
-    if (isEdit && !splittingMode) return;
     if (splits.length !== 1) return;
     if (splits[0].amountCents === totalCents) return;
     // Keep the single selected item synchronized with the entered total.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSplits([{ subId: splits[0].subId, amountCents: totalCents }]);
-  }, [isEdit, splittingMode, splits, totalCents]);
+  }, [splits, totalCents]);
 
   function handlePayeeMatch(item: PayeeLineItem) {
     if (item.subcategoryId) {
       const kind = subOptions.find((s) => s.id === item.subcategoryId)?.kind;
       if (kind) setTxType(kind);
-      setAutoFillSubId(item.subcategoryId);
-      // Also seed the splits if not yet set
-      if (!isEdit) {
-        setSplits([{ subId: item.subcategoryId, amountCents: item.amountCents ?? totalCents }]);
-      }
+      setSplits([{ subId: item.subcategoryId, amountCents: item.amountCents ?? totalCents }]);
     }
     if (item.amountCents != null && amountRef.current) {
       amountRef.current.value = centsToDisplay(item.amountCents);
@@ -179,9 +174,11 @@ export function TransactionModal({
   }
 
   // When txType changes, clear splits (stale subcategories no longer valid).
+  // Only when the list actually changes (Income ↔ Expense) — re-tapping the
+  // active Expense tab on an edit mustn't wipe the item it already has.
   function handleTypeChange(kind: CategoryKind) {
+    if ((kind === "income") !== (txType === "income")) setSplits([]);
     setTxType(kind);
-    if (!isEdit) setSplits([]);
   }
 
   function handlePickerConfirm(selectedIds: string[]) {
@@ -235,9 +232,7 @@ export function TransactionModal({
     const messages: string[] = [];
     const fields = new Set<string>();
     const splitIds = new Set<string>();
-    const usesSplits = !isEdit || splittingMode;
-
-    if (usesSplits ? splits.length === 0 : !String(fd.get("subcategoryId") ?? "").trim()) {
+    if (splits.length === 0) {
       messages.push("Budget Items — pick at least one item.");
       fields.add("subcategory");
     }
@@ -267,7 +262,7 @@ export function TransactionModal({
       fields.add("payee");
     }
 
-    if (usesSplits && splits.length > 1) {
+    if (splits.length > 1) {
       const blank = splits.filter((sp) => sp.amountCents <= 0);
       for (const sp of blank) {
         splitIds.add(sp.subId);
@@ -309,10 +304,9 @@ export function TransactionModal({
       if (isEdit) {
         // Splits-on-edit: replace the original transaction with N new ones
         // that all share the same date/account/payee/memo but each get their
-        // own subcategory + amount. Only kicks in when the user opted into
-        // splittingMode AND picked 2+ items. One-item saves stay as a plain
-        // update so ids and audit trails don't churn.
-        if (splittingMode && splits.length > 1 && editTx) {
+        // own subcategory + amount. One-item saves stay as a plain update so
+        // ids and audit trails don't churn.
+        if (splits.length > 1 && editTx) {
           const deleteFd = new FormData();
           deleteFd.set("id", editTx.id);
           await deleteTransaction(deleteFd);
@@ -326,13 +320,9 @@ export function TransactionModal({
             await addTransaction(sfd);
             saved++;
           }
-        } else if (splittingMode && splits.length === 1) {
-          // Split flow settled back to a single item — update the existing
-          // row to that sub + amount instead of doing a delete+insert.
+        } else {
           fd.set("subcategoryId", splits[0].subId);
           fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
-          await updateTransaction(fd);
-        } else {
           await updateTransaction(fd);
         }
         onClose();
@@ -501,70 +491,48 @@ export function TransactionModal({
                 invalid={missingAmount}
               />
 
-              {/* Budget item: single select for edit (unless the user opts
-                  into splittingMode via "+ Add split"), multi-select for new. */}
-              {isEdit && !splittingMode ? (
-                <div className="flex flex-col gap-1">
-                  <BudgetItemField
-                    key={txType + "-" + (autoFillSubId ?? "")}
-                    kindLabel={KIND_TAB[txType]}
-                    options={options}
-                    showLabel={false}
-                    defaultValue={
-                      autoFillSubId ??
-                      (editTx && editTx.kind === txType ? editTx.subId ?? "" : "")
-                    }
-                    defaultIsWithdrawal={editTx?.isWithdrawal ?? false}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Seed the split list with the existing single-item so the
-                      // picker opens showing what's already there, then let the
-                      // user add more. Save will replace this tx with N new ones.
-                      const currentSubId = editTx && editTx.kind === txType ? editTx.subId ?? "" : "";
-                      setSplits(
-                        currentSubId
-                          ? [{ subId: currentSubId, amountCents: totalCents }]
-                          : [],
-                      );
-                      setSplittingMode(true);
-                      setPickerOpen(true);
-                    }}
-                    className="text-left text-xs font-semibold text-foreground/70 hover:text-foreground px-1"
-                  >
-                    + Add split
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-1">
+              {/* Budget item: the same searchable picker for add and edit. */}
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className={
+                    "w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+                    (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
+                  }
+                >
+                  {splits.length === 0
+                    ? <span className="text-muted">Budget Items</span>
+                    : splits.length === 1
+                      ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
+                      : <span>{splits.length} items</span>
+                  }
+                </button>
+                {splits.length === 1 && (
                   <button
                     type="button"
                     onClick={() => setPickerOpen(true)}
-                    className={
-                      "w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
-                      (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
-                    }
+                    className="text-left text-xs font-semibold text-brand px-1"
                   >
-                    {splits.length === 0
-                      ? <span className="text-muted">Budget Items</span>
-                      : splits.length === 1
-                        ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
-                        : <span>{splits.length} items</span>
-                    }
+                    + Add Split
                   </button>
-                  {splits.length === 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setPickerOpen(true)}
-                      className="text-left text-xs font-semibold text-brand px-1"
-                    >
-                      + Add Split
-                    </button>
-                  )}
-                </div>
-              )}
+                )}
+              </div>
             </div>
+
+            {/* Edit-only: a single item tied to a savings bucket can be marked
+                as money coming back out of that bucket. */}
+            {isEdit && splits.length === 1 && options.find((o) => o.id === splits[0].subId)?.linkedBucketId ? (
+              <label className="-mt-2 flex items-center gap-2 px-1 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  name="isWithdrawal"
+                  defaultChecked={editTx?.isWithdrawal ?? false}
+                  className="h-4 w-4 rounded accent-[var(--brand)]"
+                />
+                This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a purchase)
+              </label>
+            ) : null}
 
             {/* Account — full width, sits above Payee/Date so the name has
                 the whole row and isn't cut off on mobile. */}
@@ -641,7 +609,7 @@ export function TransactionModal({
             </div>
 
             {/* Split rows — only shown when 2+ splits exist */}
-            {(!isEdit || splittingMode) && splits.length > 1 && (
+            {splits.length > 1 && (
               <SplitRows
                 splits={splits}
                 options={options}
@@ -1387,58 +1355,6 @@ function PayeeField({
             );
           })}
         </ul>
-      ) : null}
-    </div>
-  );
-}
-
-// Single-select field used only in edit mode.
-function BudgetItemField({
-  kindLabel,
-  options,
-  defaultValue,
-  defaultIsWithdrawal,
-  showLabel = true,
-}: {
-  kindLabel: string;
-  options: SubOption[];
-  defaultValue: string;
-  defaultIsWithdrawal: boolean;
-  showLabel?: boolean;
-}) {
-  const [subId, setSubId] = useState(defaultValue);
-  const linkedBucketId = options.find((o) => o.id === subId)?.linkedBucketId;
-
-  return (
-    <div>
-      {showLabel ? <p className="mb-1.5 text-sm font-bold">Budget Items</p> : null}
-      <select
-        name="subcategoryId"
-        required
-        value={subId}
-        onChange={(e) => setSubId(e.target.value)}
-        className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
-      >
-        <option value="" disabled>Choose Budget Item…</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>{o.name}</option>
-        ))}
-      </select>
-      {options.length === 0 ? (
-        <p className="mt-1 text-xs text-muted">
-          No {kindLabel} items yet — add one on the budget first.
-        </p>
-      ) : null}
-      {linkedBucketId ? (
-        <label className="mt-2 flex items-center gap-2 text-xs text-muted">
-          <input
-            type="checkbox"
-            name="isWithdrawal"
-            defaultChecked={defaultIsWithdrawal}
-            className="h-4 w-4 rounded accent-[var(--brand)]"
-          />
-          This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a purchase)
-        </label>
       ) : null}
     </div>
   );

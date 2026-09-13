@@ -45,7 +45,7 @@ export function CostBars({
   return (
     <div>
       <div className="mb-4 flex items-center justify-center gap-5 text-[11px] font-medium text-muted">
-        <Key color="var(--viz-spending)" label="Hotel cost" />
+        <Key color="var(--viz-soft)" label="Hotel cost" />
         <Key color="var(--viz-debt)" label="Pocket cost" />
       </div>
 
@@ -85,7 +85,7 @@ export function CostBars({
                 <div className="flex h-full items-end justify-center gap-1">
                   <div
                     className="w-[38%] max-w-[16px] rounded-t-[4px]"
-                    style={{ height: `${pct(y.hotel)}%`, backgroundColor: "var(--viz-spending)" }}
+                    style={{ height: `${pct(y.hotel)}%`, backgroundColor: "var(--viz-soft)" }}
                   />
                   <div
                     className="w-[38%] max-w-[16px] rounded-t-[4px]"
@@ -102,7 +102,7 @@ export function CostBars({
                     <p className="mt-0.5 flex items-center gap-1.5 tabular-nums">
                       <span
                         className="h-2 w-2 shrink-0 rounded-sm"
-                        style={{ backgroundColor: "var(--viz-spending)" }}
+                        style={{ backgroundColor: "var(--viz-soft)" }}
                       />
                       <span className="font-semibold">{formatMoney(y.hotel, currency)}</span>
                       <span className="text-muted">hotel cost</span>

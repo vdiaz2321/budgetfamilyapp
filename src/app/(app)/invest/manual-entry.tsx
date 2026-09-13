@@ -259,7 +259,7 @@ export function AddHoldingsForm({
 
       <div className="mt-3 space-y-2">
         {rows.map((row, index) => (
-          <div key={index} className="grid grid-cols-2 gap-2 sm:grid-cols-[7rem_1fr_8rem_7rem]">
+          <div key={index} className="grid grid-cols-2 gap-2 sm:grid-cols-[7rem_1fr_8rem_8rem_7rem]">
             <label className={labelClass}>
               Ticker
               <input value={row.symbol} onChange={(event) => update(index, { symbol: event.target.value })} autoComplete="off" className={`${fieldClass} uppercase`} />
@@ -269,8 +269,12 @@ export function AddHoldingsForm({
               <input value={row.securityName} onChange={(event) => update(index, { securityName: event.target.value })} autoComplete="off" className={fieldClass} />
             </label>
             <label className={labelClass}>
-              Value
+              Current value
               <input value={row.marketValue} onChange={(event) => update(index, { marketValue: event.target.value })} inputMode="decimal" placeholder="0.00" autoComplete="off" className={fieldClass} />
+            </label>
+            <label className={labelClass}>
+              Cost basis
+              <input value={row.costBasis} onChange={(event) => update(index, { costBasis: event.target.value })} inputMode="decimal" placeholder="0.00" autoComplete="off" className={fieldClass} />
             </label>
             <label className={labelClass}>
               Shares

@@ -31,7 +31,7 @@ The helper returns `{ supabase, user, profile, household }`. Household includes 
 Victor has repeatedly rejected purple/indigo and amber-orange in the app's visualizations and stat displays. Read this before styling any chart, stat card, badge, progress bar, subtitle text, filter chip, or category dot — anywhere you'd otherwise reach for `text-brand`, `bg-brand`, `bg-brand-soft`, `--brand`, `text-accent`, `--cat-orange`, `--cat-bills` (amber), or `--cat-expenses` (amber). These are all violations in a stat/chart context.
 
 **Use the `--viz-*` palette instead** (declared in `src/app/globals.css`, both light and dark blocks):
-- `--viz-income` (deep navy) + `--viz-spending` (light blue) — the income/spending bar pair
+- `--viz-income` (deep navy) + `--viz-spending` (soft cool red) — the income/spending bar pair; `--viz-soft` (light blue) for neutral secondary bars
 - `--viz-savings` (blue-700), `--viz-bills` (teal-600), `--viz-expenses` (sky-400), `--viz-debt` (rose-600) — flow colors
 - `--viz-grid` (chart gridlines), `--viz-sel` (selected-period wash)
 

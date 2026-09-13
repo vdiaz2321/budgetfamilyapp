@@ -19,6 +19,8 @@ import type { InvestAccount } from "./invest-board";
 type Props = {
   accounts: InvestAccount[];
   onClose: () => void;
+  /** Called after a successful import, with a one-line summary for the page. */
+  onImported: (summary: string) => void;
 };
 
 const POSITION_LABELS: Record<keyof PositionMapping, string> = {
@@ -68,7 +70,7 @@ function validRowCount(kind: ImportKind, headers: string[], rows: string[][], ma
   ).length;
 }
 
-export function ImportInvestmentModal({ accounts, onClose }: Props) {
+export function ImportInvestmentModal({ accounts, onClose, onImported }: Props) {
   const [kind, setKind] = useState<ImportKind>("positions");
   const [fileName, setFileName] = useState("");
   const [csvText, setCsvText] = useState("");
@@ -81,7 +83,6 @@ export function ImportInvestmentModal({ accounts, onClose }: Props) {
   const [asOfDate, setAsOfDate] = useState(today());
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{ imported: number; skipped: number; appended?: number; replaced?: number } | null>(null);
 
   const selectedAccount = accounts.find((account) => account.id === accountId) ?? null;
   const selectedBuckets = selectedAccount?.buckets ?? [];
@@ -103,7 +104,6 @@ export function ImportInvestmentModal({ accounts, onClose }: Props) {
     setRows(parsed.rows);
     setMapping(guessMapping(kind, parsed.headers));
     setError(null);
-    setSaved(null);
     const lowerName = file.name.toLowerCase();
     if (lowerName.includes("fidelity")) setProvider("Fidelity");
     else if (lowerName.includes("schwab")) setProvider("Charles Schwab");
@@ -192,12 +192,20 @@ export function ImportInvestmentModal({ accounts, onClose }: Props) {
 
           {headers.length > 0 ? <ImportPreview kind={kind} headers={headers} rows={rows} mapping={mapping} /> : null}
           {error ? <p className="text-sm font-medium text-negative">{error}</p> : null}
-          {saved ? <p className="rounded-lg bg-positive/10 px-3 py-2 text-sm font-medium text-positive">Imported {saved.imported} rows{saved.appended != null ? ` · added ${saved.appended} new · replaced ${saved.replaced ?? 0}` : ""}{saved.skipped ? ` · skipped ${saved.skipped} unreadable rows` : ""}.</p> : null}
 
           <form action={(formData) => start(async () => {
             const result = await commitInvestmentImport(formData);
             if (result?.error) setError(result.error);
-            else if (result) setSaved({ imported: result.imported ?? 0, skipped: result.skipped ?? 0, appended: result.appended, replaced: result.replaced });
+            // Success closes the modal — the imported rows show up in the tables behind it.
+            else if (result) {
+              const imported = result.imported ?? 0;
+              onImported(
+                `Imported ${imported} row${imported === 1 ? "" : "s"}` +
+                  (result.appended != null ? ` · added ${result.appended} new · replaced ${result.replaced ?? 0}` : "") +
+                  (result.skipped ? ` · skipped ${result.skipped} unreadable row${result.skipped === 1 ? "" : "s"}` : "") +
+                  ".",
+              );
+            }
           })} className="flex items-center justify-end gap-2 border-t border-line pt-4">
             <input type="hidden" name="csvText" value={csvText} />
             <input type="hidden" name="fileName" value={fileName} />

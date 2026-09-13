@@ -35,6 +35,7 @@ export type YearCell = {
 export type BucketRow = {
   id: string;
   name: string;
+  holder: string | null;
   balanceCents: number;
   /** Stored tax override; null = infer from the name. */
   taxTreatment: string | null;
@@ -229,6 +230,7 @@ export function InvestBoard({
   const [showGuide, setShowGuide] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [importNote, setImportNote] = useState<string | null>(null);
   const [openTax, setOpenTax] = useState<TaxTreatment | null>(null);
   const [showAllocationRows, setShowAllocationRows] = useState(true);
 
@@ -647,14 +649,18 @@ export function InvestBoard({
             />
           )}
           {showImport && (
-            <ImportInvestmentModal accounts={accounts} onClose={() => setShowImport(false)} />
+            <ImportInvestmentModal
+              accounts={accounts}
+              onClose={() => setShowImport(false)}
+              onImported={(summary) => { setShowImport(false); setImportNote(summary); }}
+            />
           )}
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
             <div className="border-t border-foreground/10" />
             <YearByYear accounts={accounts} years={years} currency={currency} />
           </div>
-          <ImportedSnapshots imports={imports} accounts={accounts} currency={currency} onImport={() => setShowImport(true)} />
+          <ImportedSnapshots imports={imports} accounts={accounts} currency={currency} onImport={() => { setImportNote(null); setShowImport(true); }} importNote={importNote} onDismissNote={() => setImportNote(null)} />
         </>
       )}
     </div>
@@ -672,33 +678,56 @@ type View = "holdings" | "performance";
  * because it is a different shape of data (one row per month, not per fund),
  * picked with the account dropdown beside the toggle.
  */
-function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports: InvestmentImportView[]; accounts: InvestAccount[]; currency: string; onImport: () => void }) {
+function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, onDismissNote }: { imports: InvestmentImportView[]; accounts: InvestAccount[]; currency: string; onImport: () => void; importNote: string | null; onDismissNote: () => void }) {
   const [view, setView] = useState<View>("holdings");
   const [addingHoldings, setAddingHoldings] = useState(false);
   const [addingMonth, setAddingMonth] = useState(false);
 
+  // Only accounts/buckets with something on file (holdings or months, imported
+  // or typed) are listed. A brand-new one is started from Add month, whose own
+  // Account/Bucket pickers still offer every investment account.
   const performanceLedgers = imports.filter((item) => item.importKind === "performance");
-  const [ledgerId, setLedgerId] = useState(performanceLedgers[0]?.id ?? "");
-  const ledger = performanceLedgers.find((item) => item.id === ledgerId) ?? performanceLedgers[0] ?? null;
+  const onFile = new Set(imports.map((item) => `${item.accountId}:${item.bucketId ?? ""}`));
+  const allDestinations = accounts.flatMap((account) =>
+    account.buckets.length > 0
+      ? account.buckets.map((bucket) => ({ key: `${account.id}:${bucket.id}`, accountId: account.id, bucketId: bucket.id, label: bucket.name, group: account.isKids ? `${account.name} · Kids Funding` : account.name }))
+      : [{ key: `${account.id}:`, accountId: account.id, bucketId: null as string | null, label: account.name, group: account.isKids ? "Kids Funding" : "Accounts" }],
+  );
+  const destinations = allDestinations.filter((d) => onFile.has(d.key));
+  const destinationGroups = [...new Set(destinations.map((d) => d.group))];
+  const [destKey, setDestKey] = useState(() => {
+    const first = performanceLedgers[0];
+    return first ? `${first.accountId}:${first.bucketId ?? ""}` : destinations[0]?.key ?? "";
+  });
+  const destination = destinations.find((d) => d.key === destKey) ?? destinations[0] ?? null;
+  const ledger = destination
+    ? performanceLedgers.find((item) => item.accountId === destination.accountId && (item.bucketId ?? null) === destination.bucketId) ?? null
+    : null;
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex flex-col items-start gap-3 border-b border-line bg-brand-soft/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Holdings &amp; history</h2>
-          <p className="mt-0.5 text-xs text-muted">What each brokerage holds and how its balance moved, kept separate from your live account balance.</p>
+          <h2 className="text-sm lg:text-base font-semibold">Holdings &amp; history</h2>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => { setAddingHoldings((current) => !current); setAddingMonth(false); }}
-            className="rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand/90"
+            className="rounded-lg bg-brand px-3 py-2 text-xs lg:text-sm font-semibold text-white transition hover:bg-brand/90"
           >
             {addingHoldings ? "Close" : "Add holdings"}
           </button>
-          <button type="button" onClick={onImport} className="rounded-lg bg-black/5 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20">Import CSV</button>
+          <button type="button" onClick={onImport} className="rounded-lg bg-black/5 px-3 py-2 text-xs lg:text-sm font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20">Import CSV</button>
         </div>
       </div>
+
+      {importNote ? (
+        <div className="flex items-center justify-between gap-3 border-b border-line bg-positive/10 px-4 py-2">
+          <p className="text-sm lg:text-base font-medium text-positive">{importNote}</p>
+          <button type="button" onClick={onDismissNote} aria-label="Dismiss" className="rounded px-1.5 text-lg leading-none text-positive/70 hover:bg-positive/15 hover:text-positive">×</button>
+        </div>
+      ) : null}
 
       {addingHoldings ? (
         <div className="border-b border-line bg-background/40 px-4 py-3">
@@ -713,8 +742,10 @@ function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports:
               key={option}
               type="button"
               onClick={() => setView(option)}
-              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                view === option ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-black/5 dark:hover:bg-white/10"
+              className={`rounded-md px-3 py-1.5 text-xs lg:text-sm font-semibold transition ${
+                view === option
+                  ? "bg-sky-100 text-sky-900 ring-1 ring-sky-300 dark:bg-sky-900/50 dark:text-sky-100 dark:ring-sky-700"
+                  : "text-muted hover:bg-sky-50 hover:text-sky-900 dark:hover:bg-sky-900/30 dark:hover:text-sky-100"
               }`}
             >
               {option === "holdings" ? "Holdings" : "Monthly performance"}
@@ -724,21 +755,25 @@ function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports:
 
         {view === "performance" ? (
           <div className="flex flex-wrap items-center gap-2">
-            {performanceLedgers.length > 1 ? (
+            {destinations.length > 0 ? (
               <select
-                value={ledger?.id ?? ""}
-                onChange={(event) => setLedgerId(event.target.value)}
-                className="rounded-md bg-background px-2 py-1.5 text-xs text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                value={destination?.key ?? ""}
+                onChange={(event) => { setDestKey(event.target.value); setAddingMonth(false); }}
+                className="rounded-md bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
-                {performanceLedgers.map((item) => (
-                  <option key={item.id} value={item.id}>{ledgerLabel(item.accountName, item.bucketName)}</option>
+                {destinationGroups.map((group) => (
+                  <optgroup key={group} label={group}>
+                    {destinations.filter((d) => d.group === group).map((d) => (
+                      <option key={d.key} value={d.key}>{d.label}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             ) : null}
             <button
               type="button"
               onClick={() => setAddingMonth((current) => !current)}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand/90"
+              className="rounded-md bg-brand px-3 py-1.5 text-xs lg:text-sm font-semibold text-white transition hover:bg-brand/90"
             >
               {addingMonth ? "Close" : "Add month"}
             </button>
@@ -756,8 +791,9 @@ function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports:
                 accounts={accounts}
                 imports={imports}
                 currency={currency}
-                defaultAccountId={ledger?.accountId}
-                defaultBucketId={ledger?.bucketId ?? ""}
+                key={destination?.key}
+                defaultAccountId={destination?.accountId}
+                defaultBucketId={destination?.bucketId ?? ""}
                 onDone={() => setAddingMonth(false)}
               />
             </div>
@@ -765,15 +801,15 @@ function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports:
           {ledger ? (
             <>
               <div className="px-4 py-2.5">
-                <span className="text-xs text-muted">
+                <span className="text-xs lg:text-sm text-muted">
                   {ledgerLabel(ledger.accountName, ledger.bucketName)} · {ledger.performance.length} month{ledger.performance.length === 1 ? "" : "s"}
                 </span>
               </div>
               <ImportedPerformanceTable rows={ledger.performance} currency={currency} />
             </>
           ) : (
-            <p className="px-4 py-5 text-sm text-muted">
-              No monthly history yet. Use <span className="font-medium text-foreground">Add month</span> to record an account&apos;s month-end balance.
+            <p className="px-4 py-5 text-sm lg:text-base text-muted">
+              No monthly history for {destination?.label ?? "this account"} yet. Use <span className="font-medium text-foreground">Add month</span>{" "}to record an account&apos;s month-end balance.
             </p>
           )}
         </>
@@ -785,18 +821,30 @@ function ImportedSnapshots({ imports, accounts, currency, onImport }: { imports:
 function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerformanceImportRow[]; currency: string }) {
   return (
     <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
-      <table className="min-w-full text-xs">
-        <thead className="sticky top-0 bg-surface text-left text-[10px] uppercase tracking-wide text-muted">
-          <tr><th className="px-3 py-2 text-center">Month</th><th className="px-3 py-2 text-center">Beginning balance</th><th className="px-3 py-2 text-center">Market change</th><th className="px-3 py-2 text-center">Dividends</th><th className="px-3 py-2 text-center">Withdrawal</th><th className="px-3 py-2 text-center">Ending balance</th></tr>
+      <table className="min-w-full text-xs lg:text-sm">
+        <thead className="sticky top-0 bg-surface text-left text-[10px] lg:text-xs uppercase tracking-wide text-muted">
+          <tr><th className="px-3 py-2 text-center">Month</th><th className="px-3 py-2 text-center">Beginning balance</th><th className="px-3 py-2 text-center">Market change</th><th className="px-3 py-2 text-center">Dividends</th><th className="px-3 py-2 text-center">Withdrawal</th><th className="px-3 py-2 text-center">Ending balance</th><th className="px-3 py-2 text-center">% Growth</th></tr>
         </thead>
         <tbody className="divide-y divide-line">
           {rows.map((row) => <tr key={row.asOfDate}>
-            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-medium text-muted dark:bg-white/10">Manual</span> : null}</td>
+            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] lg:text-xs font-medium text-muted dark:bg-white/10">Manual</span> : null}</td>
             <td className="px-3 py-2 text-center tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(-(row.withdrawalsCents ?? 0))}`}>{row.withdrawalsCents == null ? "—" : formatMoney(row.withdrawalsCents, currency)}</td>
             <td className="px-3 py-2 text-center font-medium tabular-nums">{formatMoney(row.endingBalanceCents, currency)}</td>
+            {(() => {
+              // Straight beginning → ending change, so withdrawals and deposits
+              // move it too, not just the market.
+              const begin = row.beginningBalanceCents;
+              if (begin == null || begin === 0) return <td className="px-3 py-2 text-center tabular-nums text-muted">—</td>;
+              const pct = ((row.endingBalanceCents - begin) / Math.abs(begin)) * 100;
+              return (
+                <td className={`px-3 py-2 text-center tabular-nums ${gainTone(pct)}`}>
+                  {pct > 0 ? "+" : ""}{pct.toFixed(2)}%
+                </td>
+              );
+            })()}
           </tr>)}
         </tbody>
       </table>
@@ -1025,7 +1073,7 @@ function PerformanceChart({
                 />
                 <text
                   x={PAD.left - 6} y={y + 4}
-                  textAnchor="end" fontSize="9" fill="currentColor" opacity="0.4"
+                  textAnchor="end" fontSize="14" fill="currentColor" opacity="0.55"
                 >
                   {fmtTick(t)}
                 </text>
@@ -1119,7 +1167,7 @@ function PerformanceChart({
                 {rects.length > 0 ? (
                   <text
                     x={cx} y={totalTopY - 4}
-                    textAnchor="middle" fontSize="9.5" fontWeight="600"
+                    textAnchor="middle" fontSize="14" fontWeight="600"
                     fill="currentColor" opacity="0.7" pointerEvents="none"
                   >
                     {fmtBarTotal(b)}
@@ -1127,8 +1175,8 @@ function PerformanceChart({
                 ) : null}
                 {/* X-axis label */}
                 <text
-                  x={cx} y={PAD.top + chartH + 14}
-                  textAnchor="middle" fontSize="10" fill="currentColor" opacity="0.45"
+                  x={cx} y={PAD.top + chartH + 20}
+                  textAnchor="middle" fontSize="15" fill="currentColor" opacity="0.6"
                 >
                   {b.year}
                 </text>
@@ -1304,13 +1352,13 @@ function PerfTable({
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <h2 className="flex flex-1 items-center gap-2 text-sm font-bold">
+        <h2 className="flex flex-1 items-center gap-2 text-sm lg:text-base font-bold">
           {title}
-          <span className="rounded bg-black/5 px-1.5 py-0.5 text-xs font-semibold text-muted dark:bg-white/10">{year}</span>
-          <span className="text-xs font-normal text-muted">{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0)} account{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0) === 1 ? "" : "s"}</span>
+          <span className="rounded bg-black/5 px-1.5 py-0.5 text-xs lg:text-sm font-semibold text-muted dark:bg-white/10">{year}</span>
+          <span className="text-xs lg:text-sm font-normal text-muted">{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0)} account{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0) === 1 ? "" : "s"}</span>
         </h2>
         {collapsed && (
-          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs tabular-nums text-muted">
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs lg:text-sm tabular-nums text-muted">
             <span>Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
             <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
             {endAny && <span>Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
@@ -1318,13 +1366,13 @@ function PerfTable({
         )}
       </button>
       {reorderError && !collapsed ? (
-        <p className="border-b border-line/70 px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
+        <p className="border-b border-line/70 px-4 py-1.5 text-xs lg:text-sm font-medium text-negative">{reorderError}</p>
       ) : null}
       {collapsed ? null : <>
       <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
+        <table className="w-full text-[13px] lg:text-[15px]">
           <thead>
-            <tr className="text-[11px] font-medium text-muted">
+            <tr className="text-[11px] lg:text-[13px] font-medium text-muted">
               <th className="sticky left-0 z-10 bg-surface py-2 pl-3 pr-2 text-left">Account</th>
               {showStart ? <th className="px-2 py-2 text-center">Start</th> : null}
               <th className="px-2 py-2 text-center">Contrib</th>
@@ -1389,15 +1437,15 @@ function PerfTable({
                         >
                           <span className={`font-medium ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
                           {a.subtype ? (
-                            <span className="text-[11px] text-muted">{a.subtype}</span>
+                            <span className="text-[11px] lg:text-[13px] text-muted">{a.subtype}</span>
                           ) : null}
                           {a.holder ? (
-                            <span className="rounded bg-background px-1 text-[10px] font-medium text-muted ring-1 ring-line">
+                            <span className="rounded bg-background px-1 text-[10px] lg:text-xs font-medium text-muted ring-1 ring-line">
                               {a.holder}
                             </span>
                           ) : null}
                           {hasBuckets ? (
-                            <span className="rounded bg-brand-soft/70 px-1 text-[10px] font-medium text-brand ring-1 ring-brand/20">
+                            <span className="rounded bg-brand-soft/70 px-1 text-[10px] lg:text-xs font-medium text-brand ring-1 ring-brand/20">
                               {a.buckets.length} bucket{a.buckets.length === 1 ? "" : "s"}
                             </span>
                           ) : null}
@@ -1407,11 +1455,11 @@ function PerfTable({
                     {showStart ? (
                       <td className="px-1 py-1">
                         {hasBuckets ? (
-                          <span className="block text-center text-[13px] tabular-nums text-muted">
+                          <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                             {eff.startBalanceCents ? formatMoney(eff.startBalanceCents, currency) : null}
                           </span>
                         ) : (
-                          <span className="block text-center text-[13px] tabular-nums text-muted">
+                          <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                             {parentCell?.startBalanceCents ? formatMoney(parentCell.startBalanceCents, currency) : null}
                           </span>
                         )}
@@ -1419,7 +1467,7 @@ function PerfTable({
                     ) : null}
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className="block text-center text-[13px] tabular-nums font-medium">
+                        <span className="block text-center text-[13px] lg:text-[15px] tabular-nums font-medium">
                           {eff.contributedCents ? formatMoney(eff.contributedCents, currency) : null}
                         </span>
                       ) : (
@@ -1428,11 +1476,11 @@ function PerfTable({
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-center text-[13px] tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {eff.endBalanceCents ? formatMoney(eff.endBalanceCents, currency) : null}
                         </span>
                       ) : (
-                        <span className={`block text-center text-[13px] tabular-nums font-medium ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums font-medium ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                         </span>
                       )}
@@ -1440,7 +1488,7 @@ function PerfTable({
                     <td className="relative px-1 py-1">
                       {eff.accruedManual ? <PinnedMark /> : null}
                       {hasBuckets ? (
-                        <span className={`block text-center text-[13px] tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
                         </span>
                       ) : (
@@ -1449,7 +1497,7 @@ function PerfTable({
                     </td>
                     {showClose ? (
                       <td className="px-1 py-1">
-                        <span className="block text-center text-[13px] tabular-nums text-muted">
+                        <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                           {eff.closeBalanceCents == null ? null : formatMoney(eff.closeBalanceCents, currency)}
                         </span>
                       </td>
@@ -1464,11 +1512,11 @@ function PerfTable({
                           account level has any non-zero value — otherwise buckets
                           alone are enough and the row would be pure noise). */}
                       {(parentCell?.contributedCents || parentCell?.accruedCents || parentCell?.startBalanceCents || parentCell?.endBalanceCents) ? (
-                        <tr className="border-t border-line/40 bg-background/30 text-xs">
+                        <tr className="border-t border-line/40 bg-background/30 text-xs lg:text-sm">
                           <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-muted italic">Account (unallocated / seed)</td>
                           {showStart ? (
                             <td className="px-1 py-1">
-                              <span className="block text-center text-[13px] tabular-nums text-muted">
+                              <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                                 {parentCell?.startBalanceCents ? formatMoney(parentCell.startBalanceCents, currency) : null}
                               </span>
                             </td>
@@ -1477,7 +1525,7 @@ function PerfTable({
                             <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
                           <td className="px-1 py-1">
-                            <span className={`block text-center text-[13px] tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                            <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                               {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                             </span>
                           </td>
@@ -1486,7 +1534,7 @@ function PerfTable({
                           </td>
                           {showClose ? (
                             <td className="px-1 py-1">
-                              <span className="block text-center text-[13px] tabular-nums text-muted">
+                              <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                                 {parentCell?.closeBalanceCents == null ? null : formatMoney(parentCell.closeBalanceCents, currency)}
                               </span>
                             </td>
@@ -1497,13 +1545,13 @@ function PerfTable({
                       {a.buckets.map((b) => {
                         const bc = b.cells[year];
                         return (
-                          <tr key={b.id} className="border-t border-line/40 bg-background/20 text-[13px]">
+                          <tr key={b.id} className="border-t border-line/40 bg-background/20 text-[13px] lg:text-[15px]">
                             <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-foreground/80">
                               <span className="text-brand-strong">↳</span> <span className="ml-1">{b.name}</span>
                             </td>
                             {showStart ? (
                               <td className="px-1 py-1">
-                                <span className="block text-center text-[13px] tabular-nums text-muted">
+                                <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                                   {bc?.startBalanceCents ? formatMoney(bc.startBalanceCents, currency) : null}
                                 </span>
                               </td>
@@ -1512,7 +1560,7 @@ function PerfTable({
                               <LedgerCell compact cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
                             <td className="px-1 py-1">
-                              <span className={`block text-center text-[13px] tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                              <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents ? formatMoney(bc.endBalanceCents, currency) : null}
                               </span>
                             </td>
@@ -1522,7 +1570,7 @@ function PerfTable({
                             </td>
                             {showClose ? (
                               <td className="px-1 py-1">
-                                <span className="block text-center text-[13px] tabular-nums text-muted">
+                                <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
                                   {bc?.closeBalanceCents == null ? null : formatMoney(bc.closeBalanceCents, currency)}
                                 </span>
                               </td>
@@ -1569,9 +1617,8 @@ function PerfTable({
       </div>
         {/* Outside the scroll box, so on a phone it doesn't slide off with the
             money columns and leave a blank band under the table. */}
-        <p className="border-t border-line/60 px-4 py-2 text-[11px] text-muted">
-          {showClose ? "Start (1 Jan), Current and EOY (31 Dec)" : "Start (1 Jan) and Current"} come from the Accounts page; Contrib comes from your transactions.
-          Gains = Current − Start − Contrib. Type in a Gains cell to set your own; ✎ marks those.
+        <p className="border-t border-line/60 px-4 py-2 text-[11px] lg:text-[13px] text-muted">
+          Comes from Accounts page: Contrib comes from your transactions. Gains = Current − Start − Contrib.
         </p>
       </>}
     </section>
@@ -1603,7 +1650,7 @@ function LedgerCell({
   // A zero contribution prints nothing: "$0.00" on most rows buried the few
   // accounts that actually received money this year.
   return (
-    <span className={`flex items-center justify-center gap-1 px-1 text-center tabular-nums ${compact ? "text-[13px]" : "text-sm"} ${tone ?? ""}`}>
+    <span className={`flex items-center justify-center gap-1 px-1 text-center tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} ${tone ?? ""}`}>
       {cents ? formatMoney(cents, currency) : null}
     </span>
   );
@@ -1619,7 +1666,7 @@ function LedgerCell({
  */
 function PinnedMark() {
   return (
-    <span aria-label="typed by hand" className="pointer-events-none absolute right-1 top-0 text-[10px] leading-none text-muted">
+    <span aria-label="typed by hand" className="pointer-events-none absolute right-1 top-0 text-[10px] lg:text-xs leading-none text-muted">
       ✎
     </span>
   );
@@ -1671,9 +1718,9 @@ function EditCell({
       className="flex w-full items-center justify-center gap-px"
     >
       {negative && !editing ? (
-        <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px]" : "text-sm"} ${tone}`}>-</span>
+        <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} ${tone}`}>-</span>
       ) : null}
-      <span className={`pointer-events-none select-none text-muted ${compact ? "text-[13px]" : "text-sm"}`}>{currencySymbol(currency)}</span>
+      <span className={`pointer-events-none select-none text-muted ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"}`}>{currencySymbol(currency)}</span>
       <input type="hidden" name="accountId" value={accountId} />
       {bucketId ? <input type="hidden" name="bucketId" value={bucketId} /> : null}
       <input type="hidden" name="year" value={year} />
@@ -1711,7 +1758,7 @@ function EditCell({
         // Left-aligned inside its own box so the digits sit against the "$".
         // The form centres the pair, so the cell still reads centred; centring
         // the text as well pushed the number away from the symbol.
-        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-left tabular-nums ${compact ? "text-[13px]" : "text-sm"} transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
+        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-left tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1772,13 +1819,13 @@ function YearByYear({
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-        <h2 className="text-sm font-bold">Year by year</h2>
+        <h2 className="text-sm lg:text-base font-bold">Year by year</h2>
       </button>
       {open ? (
         <div className="overflow-x-auto border-t border-line">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm lg:text-base">
             <thead>
-              <tr className="text-[11px] uppercase tracking-wide text-muted">
+              <tr className="text-[11px] lg:text-[13px] uppercase tracking-wide text-muted">
                 <th className="px-4 py-2 text-left font-semibold">Account</th>
                 <th className="px-3 py-2 text-left font-semibold">Metric</th>
                 {desc.map((y) => (
@@ -1789,18 +1836,18 @@ function YearByYear({
             <tbody>
               <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setMineCollapsed((c) => !c)}>
                 <td className="bg-background/60 px-4 py-1.5">
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] lg:text-[13px] font-semibold uppercase tracking-wide text-muted">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${mineCollapsed ? "" : "rotate-90"}`} aria-hidden><path d="M9 6l6 6-6 6" /></svg>
                     Investments
                   </span>
                 </td>
-                <td className="bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain + EOY</td>
+                <td className="bg-background/60 px-3 py-1.5 text-[11px] lg:text-xs text-muted">Contributed + Gain + EOY</td>
                 {desc.map((y) => {
                   const contrib = mine.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                   const gain = mine.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                   const eoy = sumClose(mine, y);
                   return (
-                    <td key={y} className="bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
+                    <td key={y} className="bg-background/60 px-3 py-1.5 whitespace-nowrap text-center text-[11px] lg:text-xs tabular-nums text-muted">
                       <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>{" / "}<span>{eoy == null ? "—" : formatMoney(eoy, currency)}</span>
                     </td>
                   );
@@ -1819,18 +1866,18 @@ function YearByYear({
               {kids.length > 0 && (
                 <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setKidsCollapsed((c) => !c)}>
                   <td className="border-t-2 border-line bg-background/60 px-4 py-1.5">
-                    <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] lg:text-[13px] font-semibold uppercase tracking-wide text-muted">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${kidsCollapsed ? "" : "rotate-90"}`} aria-hidden><path d="M9 6l6 6-6 6" /></svg>
                       Kids Funding
                     </span>
                   </td>
-                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] text-muted">Contributed + Gain + EOY</td>
+                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] lg:text-xs text-muted">Contributed + Gain + EOY</td>
                   {desc.map((y) => {
                     const contrib = kids.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                     const gain = kids.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                     const eoy = sumClose(kids, y);
                     return (
-                      <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-center text-[11px] tabular-nums text-muted">
+                      <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 whitespace-nowrap text-center text-[11px] lg:text-xs tabular-nums text-muted">
                         <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>{" / "}<span>{eoy == null ? "—" : formatMoney(eoy, currency)}</span>
                       </td>
                     );
@@ -1893,7 +1940,7 @@ function YByAccountRows({
             ) : null}
             {account.name}
             {hasBuckets ? (
-              <span className="rounded bg-brand-soft/40 px-1.5 py-0.5 text-[10px] font-normal text-muted">
+              <span className="rounded bg-brand-soft/40 px-1.5 py-0.5 text-[10px] lg:text-xs font-normal text-muted">
                 {account.buckets.length} bucket{account.buckets.length === 1 ? "" : "s"}
               </span>
             ) : null}
@@ -1941,31 +1988,31 @@ function YByAccountRows({
         ? account.buckets.map((b) => (
             <Fragment key={b.id}>
               <tr className="border-t border-line/40 bg-background/30">
-                <td rowSpan={3} className="px-4 py-1.5 pl-10 align-top text-sm text-muted">↳ {b.name}</td>
-                <td className="px-3 py-1 text-sm text-muted">Contributed</td>
+                <td rowSpan={3} className="px-4 py-1.5 pl-10 align-top text-sm lg:text-base text-muted">↳ {b.name}</td>
+                <td className="px-3 py-1 text-sm lg:text-base text-muted">Contributed</td>
                 {desc.map((y) => (
-                  <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
+                  <td key={y} className="px-3 py-1 text-center text-sm lg:text-base tabular-nums text-muted">
                     {formatMoney(b.cells[y]?.contributedCents ?? 0, currency)}
                   </td>
                 ))}
               </tr>
               <tr className="bg-background/30">
-                <td className="px-3 py-1 text-sm text-muted">Gain</td>
+                <td className="px-3 py-1 text-sm lg:text-base text-muted">Gain</td>
                 {desc.map((y) => {
                   const g = b.cells[y]?.accruedCents ?? 0;
                   return (
-                    <td key={y} className={`px-3 py-1 text-center text-sm tabular-nums ${gainTone(g)}`}>
+                    <td key={y} className={`px-3 py-1 text-center text-sm lg:text-base tabular-nums ${gainTone(g)}`}>
                       <EditCell accountId={account.id} bucketId={b.id} year={y} field="accrued" cents={g} currency={currency} tone={gainTone(g)} />
                     </td>
                   );
                 })}
               </tr>
               <tr className="bg-background/30">
-                <td className="px-3 py-1 text-sm text-muted">EOY</td>
+                <td className="px-3 py-1 text-sm lg:text-base text-muted">EOY</td>
                 {desc.map((y) => {
                   const close = b.cells[y]?.closeBalanceCents ?? null;
                   return (
-                    <td key={y} className="px-3 py-1 text-center text-sm tabular-nums text-muted">
+                    <td key={y} className="px-3 py-1 text-center text-sm lg:text-base tabular-nums text-muted">
                       {close == null ? "—" : formatMoney(close, currency)}
                     </td>
                   );

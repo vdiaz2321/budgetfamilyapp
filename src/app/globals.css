@@ -42,7 +42,8 @@
      label, so color is never the only cue). Intentionally avoids indigo and
      the amber/orange pair used elsewhere — those read as noisy at chart scale. */
   --viz-income: #1e3a8a;   /* blue-900 — deep navy */
-  --viz-spending: #93c5fd; /* blue-300 — light blue */
+  --viz-spending: #fca5b5; /* soft cool red (rose-300) */
+  --viz-soft: #93c5fd;     /* blue-300 — light blue (FI + travel bars) */
   --viz-savings: #1d4ed8;  /* blue-700 (dark) */
   --viz-bills: #0d9488;    /* teal-600 */
   --viz-expenses: #38bdf8; /* sky-400 (light) */
@@ -90,7 +91,8 @@
   /* Chart palette, dark: same hues pulled toward the dim canvas. The bar pair
      inverts its lightness order so both stay visible on a dark surface. */
   --viz-income: #a8c4ff;
-  --viz-spending: #4f6ec4;
+  --viz-spending: #b85f74;
+  --viz-soft: #4f6ec4;
   --viz-savings: #6d8fe0;
   --viz-bills: #4fb8ab;
   --viz-expenses: #8ed3f5;

@@ -198,7 +198,7 @@ export function FiSection({
           {/* Portfolio today × withdrawal rate — what today's assets could pay
               out each year if he stopped working now. */}
           <Figure
-            label="Portfolio could pay / yr"
+            label="Could pay"
             value={`${formatMoney(fi.sustainableSpendCents, currency)}/yr`}
             tone="text-foreground"
           />
@@ -480,7 +480,7 @@ function FiChart({
                   className="w-full rounded-t-[2px] transition-opacity group-hover:opacity-80"
                   style={{
                     height: `${Math.max(1, (y.endCents / max) * 100)}%`,
-                    backgroundColor: y.independent ? "var(--positive)" : "var(--viz-spending)",
+                    backgroundColor: y.independent ? "var(--positive)" : "var(--viz-soft)",
                     outline: i === selectedIndex ? "2px solid var(--foreground)" : undefined,
                     outlineOffset: i === selectedIndex ? "1px" : undefined,
                   }}
@@ -596,7 +596,7 @@ function FiChart({
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block h-2 w-2.5 rounded-[1px]"
-            style={{ backgroundColor: "var(--viz-spending)" }}
+            style={{ backgroundColor: "var(--viz-soft)" }}
           />
           Portfolio at year end
         </span>
