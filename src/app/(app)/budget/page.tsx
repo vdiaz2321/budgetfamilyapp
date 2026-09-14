@@ -6,6 +6,7 @@ import { BudgetBoard } from "./budget-board";
 import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import { throwIfAny } from "@/lib/supabase-result";
+import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -50,6 +51,7 @@ export default async function BudgetPage({
     categories,
     { data: rolloverRows, error: rolloverRowsError },
     actualsSinceAnchor,
+    { data: cardOwedRows, error: cardOwedError },
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -95,7 +97,7 @@ export default async function BudgetPage({
       .eq("household_id", household.id),
     supabase
       .from("accounts")
-      .select("id, name, kind, holder, is_kids_account, sort_order, active")
+      .select("id, name, kind, holder, is_kids_account, sort_order, active, current_balance_cents")
       .eq("household_id", household.id)
       .eq("active", true)
       .order("sort_order")
@@ -158,8 +160,13 @@ export default async function BudgetPage({
         .order("subcategory_id")
         .range(from, to),
     ),
+    // Owed per card for the transaction modal's account picker.
+    supabase
+      .from("v_card_balances")
+      .select("account_id, owed_cents")
+      .eq("household_id", household.id),
   ]);
-  throwIfAny({ subs: subsError, plans: plansError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, subscriptionPlans: subscriptionPlansError, rolloverRows: rolloverRowsError });
+  throwIfAny({ subs: subsError, plans: plansError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, subscriptionPlans: subscriptionPlansError, rolloverRows: rolloverRowsError, cardOwed: cardOwedError });
 
   // ---- Split the two-month reads back into the shapes the page works with.
   const txRows = (txWindow ?? []).filter((t) => t.occurred_on >= month.firstOfMonth);
@@ -589,6 +596,7 @@ export default async function BudgetPage({
   };
   // Property accounts are a place, not somewhere money comes from: they are
   // offered as the transaction's Property tag instead of in the account picker.
+  const cardOwed = cardOwedMap(cardOwedRows);
   const propertyOptions: AccountOption[] = (accounts ?? [])
     .filter((a) => a.kind === "property" && a.active !== false)
     .map((a) => ({ id: a.id, name: a.name }));
@@ -599,6 +607,7 @@ export default async function BudgetPage({
         ? `${a.name} (${a.holder})`
         : a.name,
     group: accountGroupFor(a),
+    balanceCents: pickerBalanceCents(a, cardOwed),
   }));
 
   // Liability accounts a Budget debt can link to (credit cards, loans).

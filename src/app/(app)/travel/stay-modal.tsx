@@ -40,10 +40,9 @@ export function StayModal({
   const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
   const [brand, setBrand] = useState(stay?.brand ?? "");
   const [points, setPoints] = useState(stay?.pointsCost ? String(stay.pointsCost) : "");
-  // Whether the points figure is a redemption or a what-if. A new stay that
-  // records points is assumed to have spent them; unticking it turns the
-  // figure into "this is what it would have cost on points".
-  const [pointsUsed, setPointsUsed] = useState(stay ? stay.pointsUsed : true);
+  // Whether the points figure is a redemption or a what-if. A new stay starts
+  // unticked — nothing leaves a card until "Pts used" is ticked on purpose.
+  const [pointsUsed, setPointsUsed] = useState(stay ? stay.pointsUsed : false);
   // Paid with the card's free-night certificate instead. The two are
   // exclusive: ticking one unticks the other.
   const [freeNightUsed, setFreeNightUsed] = useState(stay?.freeNightUsed ?? false);
@@ -258,7 +257,7 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
-          <Field label="Card name (if not linked)">
+          <Field label="Card used (if not linked)">
             <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} className={inputClass} />
           </Field>
           <Field label="Card owner">
@@ -271,27 +270,10 @@ export function StayModal({
           </Field>
         </div>
 
-        {/* The free-night certificate, laid out like the card's own Edit form
-             (Free-night point value, Booked / check-in). Ticking it stamps the
-             card's Booked date with this stay's check-in and takes no points. */}
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4">
-          <Field label="Free night">
-            <span className="flex h-[34px] items-center">
-              <span className="flex items-center gap-1.5 text-xs font-semibold">
-                <input
-                  type="checkbox"
-                  name="freeNightUsed"
-                  checked={freeNightUsed}
-                  onChange={(e) => {
-                    setFreeNightUsed(e.target.checked);
-                    if (e.target.checked) setPointsUsed(false);
-                  }}
-                  className="h-4 w-4 accent-[var(--brand)]"
-                />
-                Free night used
-              </span>
-            </span>
-          </Field>
+        {/* The six figures are all short — the free-night cap, points, a
+             rate, three money amounts — so they ride on one line instead of
+             eating six rows of the form. Two per row at 375px. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-6">
           <Field label="Free-night max pts">
             <input
               type="number"
@@ -301,28 +283,13 @@ export function StayModal({
               value={freeNightPoints}
               onChange={(e) => setFreeNightPoints(e.target.value)}
               disabled={!freeNightUsed}
+              // Out of the Tab order: Card owner tabs straight to Points used.
+              // Still reachable by click when a free night is ticked.
+              tabIndex={-1}
               placeholder={freeNightUsed ? "0" : ""}
               className={`${inputClass} disabled:opacity-50`}
             />
           </Field>
-          {freeNightUsed ? (
-            <p className="col-span-2 self-center text-[11px] font-medium text-muted">
-              {card
-                ? <>Saving sets <span className="font-semibold text-foreground">{card.name}</span>&apos;s Booked date to {checkIn || "the check-in date"}. No points come off the card.</>
-                : "Pick the card whose certificate paid for this night."}
-              {freeNightUsed && Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints) ? (
-                <span className="mt-0.5 block text-negative">
-                  The room ({pointsTyped.toLocaleString()} pts) is over the free-night max.
-                </span>
-              ) : null}
-            </p>
-          ) : null}
-        </div>
-
-        {/* The five figures are all short — points, a rate, three money
-             amounts — so they ride on one line instead of eating five rows
-             of the form. Two per row at 375px, where five would be unreadable. */}
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
           {/* Unticked labels stay as short as the ticked ones: the longer
               "Points it would've cost" wrapped to two lines and pushed its box
               below Hotel cost and Pocket cost in the same row. */}
@@ -336,23 +303,6 @@ export function StayModal({
               onChange={(e) => setPoints(e.target.value)}
               className={inputClass}
             />
-            {/* The one switch that says whether those points actually left the
-                card. Unticked, the stay was paid in cash and the figure is
-                only there to compare the two — it never reaches a total or
-                the card's balance. */}
-            <label className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold">
-              <input
-                type="checkbox"
-                name="pointsUsed"
-                checked={pointsUsed}
-                onChange={(e) => {
-                  setPointsUsed(e.target.checked);
-                  if (e.target.checked) setFreeNightUsed(false);
-                }}
-                className="h-3.5 w-3.5 accent-[var(--brand)]"
-              />
-              Pts used
-            </label>
             {/* Whether the night fits inside the card's yearly certificate. */}
             {overAllotment > 0 ? (
               <span className="mt-0.5 block text-[10px] font-medium text-negative">
@@ -435,7 +385,48 @@ export function StayModal({
 
         {/* The flag sits beside the note it used to be written inside — the
             log's B'fast column and filter read it instead of the text. */}
-        <div className="flex items-end gap-3 sm:col-span-2">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3 sm:col-span-2 sm:flex-nowrap">
+          {/* Free night and points are either/or: ticking one clears the
+              other. Ticking free night stamps the card's Booked date with this
+              stay's check-in and takes no points. */}
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+            <input
+              type="checkbox"
+              name="freeNightUsed"
+              checked={freeNightUsed}
+              onChange={(e) => {
+                setFreeNightUsed(e.target.checked);
+                if (e.target.checked) setPointsUsed(false);
+              }}
+              className="h-4 w-4 accent-[var(--brand)]"
+            />
+            <span>
+              Free night
+              <br />
+              used
+            </span>
+          </label>
+          {/* The one switch that says whether those points actually left the
+              card. Unticked, the stay was paid in cash and the figure is
+              only there to compare the two — it never reaches a total or
+              the card's balance. */}
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+            <input
+              type="checkbox"
+              name="pointsUsed"
+              checked={pointsUsed}
+              onChange={(e) => {
+                setPointsUsed(e.target.checked);
+                if (e.target.checked) setFreeNightUsed(false);
+              }}
+              className="h-4 w-4 accent-[var(--brand)]"
+            />
+            <span>
+              Pts
+              <br />
+              used
+            </span>
+          </label>
           <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
             <input
               type="checkbox"
@@ -451,10 +442,23 @@ export function StayModal({
               incl
             </span>
           </label>
-          <Field label="Remarks" className="min-w-0 flex-1">
+          <Field label="Remarks" className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
             <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
           </Field>
         </div>
+
+        {freeNightUsed && (card || (Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints))) ? (
+          <p className="sm:col-span-2 -mt-1 text-[11px] font-medium text-muted">
+            {card ? (
+              <>Saving sets <span className="font-semibold text-foreground">{card.name}</span>&apos;s Booked date to {checkIn || "the check-in date"}. No points come off the card.</>
+            ) : null}
+            {Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints) ? (
+              <span className="mt-0.5 block text-negative">
+                The room ({pointsTyped.toLocaleString()} pts) is over the free-night max.
+              </span>
+            ) : null}
+          </p>
+        ) : null}
 
         {/* Above the buttons, not below them. Rendered after the footer row
             it sat ~4px under the fold on a 375x812 phone, so a blocked save

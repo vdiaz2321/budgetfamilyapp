@@ -537,46 +537,26 @@ export function TransactionModal({
             {/* Account — full width, sits above Payee/Date so the name has
                 the whole row and isn't cut off on mobile. */}
             <div>
-              <input type="hidden" name="accountId" value={selectedAccountId} className="sm:hidden" />
+              <input type="hidden" name="accountId" value={selectedAccountId} />
+              {/* The app's own picker at every width, not a native <select>:
+                  the list needs search and each account's owed/balance. */}
               <button
                 type="button"
                 onClick={() => setAccountPickerOpen(true)}
                 className={
-                  "flex w-full items-center justify-between gap-2 rounded-xl bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand sm:hidden " +
+                  "flex w-full items-center justify-between gap-2 rounded-xl bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand " +
                   (missingAccount ? "ring-2 ring-negative" : "ring-1 ring-line")
                 }
               >
                 <span className={`min-w-0 flex-1 truncate ${selectedAccountId ? "text-foreground" : "text-muted"}`}>
                   {selectedAccountId
-                    ? filteredAccounts.find((account) => account.id === selectedAccountId)?.name ?? "Accounts"
+                    ? accountOptions.find((account) => account.id === selectedAccountId)?.name ?? "Accounts"
                     : "Accounts"}
                 </span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
-                  <path d="m9 18 6-6-6-6" />
+                  <path d="m6 9 6 6 6-6" />
                 </svg>
               </button>
-              <select
-                name="accountId"
-                value={selectedAccountId}
-                onChange={(e) => {
-                  setSelectedAccountId(e.target.value);
-                  setSelectedBucketId("");
-                  clearErrors();
-                }}
-                className={
-                  "hidden w-full rounded-xl bg-background px-2 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand sm:block sm:px-3 " +
-                  (missingAccount ? "ring-2 ring-negative" : "ring-1 ring-line")
-                }
-              >
-                <option value="">Accounts</option>
-                {accountGroups.map((g) => (
-                  <optgroup key={g} label={g}>
-                    {accountByGroup.get(g)!.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
               {txType === "debt" ? (
                 <p className="mt-1 px-1 text-[11px] text-muted">
                   Paying off a credit card? Use <span className="font-semibold">Pay Card</span> on the Accounts page.
@@ -1005,9 +985,9 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
   );
 }
 
-// Mobile uses an app-controlled picker instead of the browser's native
-// <select> sheet. iOS controls the native sheet's typography, while this keeps
-// account names compact and lets the list scroll independently of the form.
+// The account picker, laid out like BudgetItemPicker: full screen on a phone,
+// a centred dialog on desktop, with search and each account's figure on the
+// right — Owed for a credit card, Balance for a bank account.
 function AccountPicker({
   accountGroups,
   accountByGroup,
@@ -1021,8 +1001,27 @@ function AccountPicker({
   onSelect: (accountId: string) => void;
   onClose: () => void;
 }) {
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const q = search.trim().toLowerCase();
+
+  // Straight into the search box on desktop. Not on a phone, where focusing
+  // throws the keyboard over half the list before anything is typed.
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 640px)").matches) searchRef.current?.focus();
+  }, []);
+
+  const groups = accountGroups
+    .map((group) => ({
+      group,
+      accounts: (accountByGroup.get(group) ?? []).filter((a) => !q || a.name.toLowerCase().includes(q)),
+    }))
+    .filter((g) => g.accounts.length > 0);
+  const firstMatch = groups[0]?.accounts[0];
+
   return (
-    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:hidden">
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface pt-[max(env(safe-area-inset-top),1.75rem)] sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4 sm:pt-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
       <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
         <button type="button" onClick={onClose} className="text-sm font-medium text-muted hover:text-foreground">
           Cancel
@@ -1030,35 +1029,73 @@ function AccountPicker({
         <h2 className="text-base font-bold">Choose account</h2>
         <span className="w-12" aria-hidden />
       </div>
+
+      <div className="shrink-0 border-b border-line px-4 py-2">
+        <div className="relative">
+          <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input
+            ref={searchRef}
+            type="search"
+            placeholder="Search accounts…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter takes the top match, so typing "sapp" then Enter picks the card.
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (firstMatch) onSelect(firstMatch.id);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+              }
+            }}
+            className="w-full rounded-xl bg-background py-2 pl-9 pr-3 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm"
+          />
+        </div>
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
-        {accountGroups.map((group) => (
+        {groups.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted">No accounts found</p>
+        ) : null}
+        {groups.map(({ group, accounts }) => (
           <div key={group}>
-            <div className="border-b border-line/40 bg-background/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
-              {group}
+            <div className="flex items-center justify-between border-b border-line/40 bg-background/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              <span>{group}</span>
+              <span>{group === "Credit Cards" ? "Owed" : "Balance"}</span>
             </div>
-            {accountByGroup.get(group)?.map((account) => {
+            {accounts.map((account) => {
               const selected = account.id === selectedAccountId;
+              const cents = account.balanceCents;
               return (
                 <button
                   key={account.id}
                   type="button"
                   onClick={() => onSelect(account.id)}
-                  className="flex w-full items-center gap-4 border-b border-line/40 px-4 py-4 text-left active:bg-brand-soft/40"
+                  className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left transition hover:bg-black/[0.03] active:bg-brand-soft/40 dark:hover:bg-white/[0.06] ${selected ? "bg-black/[0.04] dark:bg-white/[0.08]" : ""}`}
                 >
-                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
                     {selected ? (
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="m2 6 3 3 5-5" />
                       </svg>
                     ) : null}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-lg font-medium">{account.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{account.name}</span>
+                  {cents != null ? (
+                    <span className="shrink-0 text-sm tabular-nums text-muted">
+                      {(cents < 0 ? "−$" : "$") + (Math.abs(cents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }
@@ -1293,6 +1330,10 @@ function PayeeField({
       setHighlighted((h) => (h <= 0 ? matches.length - 1 : h - 1));
     } else if (e.key === "Enter" && highlighted >= 0) {
       e.preventDefault();
+      select(matches[highlighted].name);
+    } else if (e.key === "Tab" && highlighted >= 0) {
+      // Tab takes the arrowed-to suggestion too, then moves on as usual —
+      // otherwise the blur threw the highlighted pick away.
       select(matches[highlighted].name);
     } else if (e.key === "Escape") {
       setOpen(false);

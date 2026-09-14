@@ -343,7 +343,7 @@ export function TransactionsTable({
         </div>
 
       {/* Date range — searches across months instead of just the one selected above */}
-        <div className="order-3 grid w-full grid-cols-[1fr_1fr_auto] items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:flex sm:w-auto sm:gap-1.5">
+        <div className="order-4 grid w-full grid-cols-[1fr_1fr_auto] items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:order-3 sm:flex sm:w-auto sm:gap-1.5">
         <div className="relative min-w-0 sm:w-40 sm:flex-none">
           {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-muted">From</span> : null}
           <input
@@ -412,7 +412,7 @@ export function TransactionsTable({
         <button
           type="button"
           onClick={() => openModal("new")}
-          className="order-2 flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white hover:shadow-sm sm:px-3"
+          className="order-3 flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white hover:shadow-sm sm:order-2 sm:px-3"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
             <path d="M12 5v14M5 12h14" />
@@ -421,9 +421,9 @@ export function TransactionsTable({
         </button>
         {/* Filter chip: show only rows still un-reconciled (cleared=false).
             Uses viz-savings blue when active so it never reads as
-            purple/brand. Sits right after +Transaction so on mobile it
-            wraps onto the same first row; on desktop it moves to the
-            right of the date pill (order-4). */}
+            purple/brand. On mobile it sits between Select and +Transaction
+            (order-3) on the first row; on desktop it moves to the right of
+            the date pill (order-4). */}
         <button
           type="button"
           aria-pressed={uncleredOnly}

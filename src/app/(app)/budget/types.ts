@@ -133,6 +133,9 @@ export type AccountOption = {
   id: string;
   name: string;
   group?: string;
+  // Shown in the transaction modal's account picker: what a card owes, or
+  // what a bank account holds.
+  balanceCents?: number;
 };
 
 // A bucket the transaction modal can attribute an investment contribution to,

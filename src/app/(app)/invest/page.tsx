@@ -22,6 +22,7 @@ import {
 } from "@/lib/fund-contributions";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { throwIfAny } from "@/lib/supabase-result";
+import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 import { CAP_KIND_LABEL, capKindFor, resolveRetirementKind } from "@/lib/retirement-kind";
 
 export const metadata = { title: "Invest / Savings · Capitall" };
@@ -106,6 +107,7 @@ export default async function InvestPage({
     { data: incomeActuals, error: incomeActualsError },
     { data: essentialActuals, error: essentialActualsError },
     { data: storedCapRows, error: storedCapRowsError },
+    { data: cardOwedRows, error: cardOwedError },
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -217,6 +219,11 @@ export default async function InvestPage({
       .from("contribution_caps")
       .select("tax_year, elective_deferral_cents, ira_cents")
       .eq("household_id", household.id),
+    // Owed per card for the withdrawal modal's account picker.
+    supabase
+      .from("v_card_balances")
+      .select("account_id, owed_cents")
+      .eq("household_id", household.id),
   ]);
   throwIfAny({
     allAccountRows: allAccountRowsError,
@@ -230,6 +237,7 @@ export default async function InvestPage({
     incomeActuals: incomeActualsError,
     essentialActuals: essentialActualsError,
     storedCapRows: storedCapRowsError,
+    cardOwed: cardOwedError,
   });
 
   const allAccounts = allAccountRows ?? [];
@@ -875,6 +883,7 @@ export default async function InvestPage({
       id: account.id,
       name: account.name,
       group: account.kind === "credit_card" ? "Credit Cards" : "Banking",
+      balanceCents: pickerBalanceCents(account, cardOwedMap(cardOwedRows)),
     }));
 
   const goalBySub = new Map((savingsGoals ?? []).map((g) => [g.subcategory_id, g]));

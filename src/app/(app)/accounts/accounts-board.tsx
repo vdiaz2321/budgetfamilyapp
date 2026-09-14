@@ -818,6 +818,8 @@ export function AccountsBoard({
             onToggleBuckets={toggleBuckets}
             headerBadge={section.kidsGroup ? "Not in net worth" : undefined}
             assetsTotalCents={assets}
+            onAddAccount={() => setAddOpen(true)}
+            onTransfer={() => setTransferOpen(true)}
           />
           </div>
         );
@@ -1111,7 +1113,7 @@ function TransferModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
@@ -1390,6 +1392,8 @@ function AccountSection({
   extraDebts = [],
   headerBadge,
   assetsTotalCents,
+  onAddAccount,
+  onTransfer,
 }: {
   section: Section;
   accounts: AccountData[];
@@ -1407,6 +1411,10 @@ function AccountSection({
   headerBadge?: string;
   // Total assets, for the "% of assets" line under the amount. Omitted → no line.
   assetsTotalCents?: number;
+  // The page header's two actions, repeated in the popup so a transfer or a
+  // new account doesn't mean closing the section first. They open above it.
+  onAddAccount?: () => void;
+  onTransfer?: () => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
@@ -1573,6 +1581,7 @@ function AccountSection({
             ) : null
           }
           headerActions={
+          <>
           <button
             type="button"
             aria-pressed={sumMode}
@@ -1585,6 +1594,25 @@ function AccountSection({
           >
             {sumMode ? "Done adding up" : "Add up values"}
           </button>
+          {onTransfer ? (
+            <button
+              type="button"
+              onClick={onTransfer}
+              className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              Transfer Funds
+            </button>
+          ) : null}
+          {onAddAccount ? (
+            <button
+              type="button"
+              onClick={onAddAccount}
+              className="shrink-0 whitespace-nowrap rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-strong"
+            >
+              Add account
+            </button>
+          ) : null}
+          </>
           }
         >
         <SumSelectContext.Provider value={{ mode: sumMode, picks: sumPicks, toggle: toggleSumPick, refresh: refreshSumPick }}>
@@ -2832,7 +2860,7 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
   const section = choices.find((choice) => choice.key === sectionKey) ?? null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/35 p-0 sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true" aria-labelledby="add-account-title">
+    <div className="fixed inset-0 z-[60] flex items-end bg-black/35 p-0 sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true" aria-labelledby="add-account-title">
       <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-surface shadow-2xl sm:max-w-xl sm:rounded-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface px-5 py-4">
           <div>

@@ -4,6 +4,7 @@ import { resolveMonth } from "@/lib/month";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { TransactionsTable } from "./transactions-table";
 import { throwIfAny } from "@/lib/supabase-result";
+import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 
 export const metadata = { title: "Transactions · Capitall" };
 
@@ -91,7 +92,7 @@ export default async function TransactionsPage({
   };
   const transactionRowsPromise = loadTransactions();
 
-  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, { data: planRows, error: planRowsError }, { data: actualRows, error: actualRowsError }] =
+  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, { data: planRows, error: planRowsError }, { data: actualRows, error: actualRowsError }, { data: cardOwedRows, error: cardOwedError }] =
     await Promise.all([
       supabase
         .from("subcategories")
@@ -107,7 +108,7 @@ export default async function TransactionsPage({
         .eq("household_id", household.id),
       supabase
         .from("accounts")
-        .select("id, name, kind, is_kids_account, sort_order")
+        .select("id, name, kind, is_kids_account, sort_order, current_balance_cents")
         .eq("household_id", household.id)
         .eq("active", true)
         .order("sort_order")
@@ -140,8 +141,13 @@ export default async function TransactionsPage({
         .select("subcategory_id, actual_cents")
         .eq("household_id", household.id)
         .eq("month", month.firstOfMonth),
+      // Owed per card for the transaction modal's account picker.
+      supabase
+        .from("v_card_balances")
+        .select("account_id, owed_cents")
+        .eq("household_id", household.id),
     ]);
-  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, planRows: planRowsError, actualRows: actualRowsError });
+  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, planRows: planRowsError, actualRows: actualRowsError, cardOwed: cardOwedError });
 
   const plannedBySub = new Map<string, number>(
     (planRows ?? []).map((p) => [p.subcategory_id as string, p.planned_cents ?? 0]),
@@ -180,6 +186,7 @@ export default async function TransactionsPage({
   };
   // Property accounts are a place, not somewhere money comes from: they are
   // offered as the transaction's Property tag instead of in the account picker.
+  const cardOwed = cardOwedMap(cardOwedRows);
   const propertyOptions: AccountOption[] = (accounts ?? [])
     .filter((a) => a.kind === "property")
     .map((a) => ({ id: a.id, name: a.name }));
@@ -189,6 +196,7 @@ export default async function TransactionsPage({
       id: a.id,
       name: a.name,
       group: accountGroupFor(a),
+      balanceCents: pickerBalanceCents(a, cardOwed),
     }));
 
   // Buckets grouped by parent account, restricted to investment accounts —

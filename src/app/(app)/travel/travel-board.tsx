@@ -735,12 +735,19 @@ export function TravelBoard({
                           and the details sit under it, the way the mobile
                           card already reads. */}
                       <span className="flex min-w-0 flex-1 flex-col gap-y-0.5">
-                        <span className="truncate text-sm font-semibold">{s.propertyName}</span>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-sm font-semibold">{s.propertyName}</span>
+                          {/* Same chip as the card panel's "Owner:" / "Bank:". */}
+                          {s.brand ? (
+                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                              Booked Thru: <span className="text-slate-700 dark:text-slate-200">{s.brand}</span>
+                            </span>
+                          ) : null}
+                        </span>
                         <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
                           <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
                           <span className="tabular-nums">{s.nights}n</span>
                           {s.city ? <span>{s.city}</span> : null}
-                          {s.brand ? <span>{s.brand}</span> : null}
                           {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
                         </span>
                       </span>
