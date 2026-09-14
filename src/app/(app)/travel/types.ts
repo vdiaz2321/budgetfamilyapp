@@ -68,6 +68,7 @@ export type TravelCard = {
   // picked: the dollar night credit, and the yearly free-night points cap.
   freeNightCreditCents: number | null;
   freeNightPointsLimit: number | null;
+  freeNightCategoryMax: number | null;
 };
 
 // What the room would have cost minus what actually left the wallet. This is

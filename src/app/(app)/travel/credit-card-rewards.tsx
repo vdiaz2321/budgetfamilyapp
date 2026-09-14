@@ -11,8 +11,9 @@
 import { useRouter } from "next/navigation";
 import React, { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
+import { evaluateExpression, hasOperator } from "@/lib/math-expression";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { GripHandle, LabeledInput, PayCardModal, StatTile, usePointerReorder } from "../accounts/shared-ui";
+import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, StatTile, usePointerReorder } from "../accounts/shared-ui";
 import {
   CREDIT_SECTIONS,
   type AccountData,
@@ -124,6 +125,7 @@ export function CreditCardRewardsProvider({
       pointsValueMicros: c.cardDetails?.pointsValueMicros ?? null,
       freeNightCreditCents: c.cardDetails?.freeNightCreditCents ?? null,
       freeNightPointsLimit: c.cardDetails?.freeNightPointsLimit ?? null,
+      freeNightCategoryMax: c.cardDetails?.freeNightCategoryMax ?? null,
     }));
 
   const rewardEntries = accounts
@@ -268,7 +270,7 @@ function CreditCardSection({
   const hasUnbookedNight = (a: AccountData) => {
     const d = a.cardDetails;
     if (!d) return false;
-    if (!d.freeNightCreditCents && !d.freeNightPointsLimit) return false;
+    if (!d.freeNightCreditCents && !d.freeNightPointsLimit && !d.freeNightCategoryMax) return false;
     if (d.benefitUsedOn) return false;
     if (d.freeNightExpiresOn && d.freeNightExpiresOn < sectionToday) return false;
     return true;
@@ -987,10 +989,13 @@ function GroupChevron({ open }: { open: boolean }) {
 
 function MetricCell({
   label,
+  mobileLabel,
   children,
   omit = false,
 }: {
   label: string;
+  // Shorter label for phones, where a two-word label wraps in the narrow cell.
+  mobileLabel?: string;
   children: React.ReactNode;
   // `omit` = the metric doesn't apply to this card at all (not just blank):
   // the cell keeps its grid slot on wide screens so neighbouring cards stay in
@@ -1004,7 +1009,14 @@ function MetricCell({
   if (omit) return <span aria-hidden className="hidden min-[420px]:block" />;
   return (
     <span className={`min-w-0 text-center ${empty ? "hidden min-[420px]:block" : "block"}`}>
-      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {mobileLabel ? (
+          <>
+            <span className="sm:hidden">{mobileLabel}</span>
+            <span className="hidden sm:inline">{label}</span>
+          </>
+        ) : label}
+      </span>
       <span className="block truncate text-[12px] leading-tight">
         {empty ? <span className="text-muted/60">&mdash;</span> : children}
       </span>
@@ -1191,6 +1203,7 @@ function EditRewardActivityModal({
           onSubmit={(e) => {
             e.preventDefault();
             const formData = new FormData(e.currentTarget);
+            formData.set("pointsUsed", resolvePoints(points));
             start(async () => {
               setError(null);
               const result = await updateCreditCardRewardActivity(formData);
@@ -1238,12 +1251,9 @@ function EditRewardActivityModal({
                   : "Points returned"
             }
             name="pointsUsed"
-            type="number"
-            min="1"
-            step="1"
             placeholder="0"
-            value={points}
-            onChange={(e) => setPoints(e.target.value)}
+            hint={pointsBalanceHint(Math.max(0, withoutEntry), direction, points)}
+            {...pointsCalcProps(points, setPoints)}
           />
           <div className="sm:col-span-2">
             <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Note (optional)</label>
@@ -1398,7 +1408,7 @@ function CreditCardPanel({
   // every night-credit card read as a missing value rather than "not yet".
   // It still holds its grid slot so the columns stay in register.
   const hasMetrics = Boolean(
-    d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit
+    d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightCategoryMax
       || d.freeNightExpiresOn || d.benefitUsedOn || d.charging),
   );
 
@@ -1409,7 +1419,7 @@ function CreditCardPanel({
       className={`${expanded ? "bg-background/60" : "hover:bg-background/40"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
     >
       {/* Collapsed row */}
-      <div className="flex items-center">
+      <div className="relative flex items-center">
         {!isArchived && onDragStart ? (
           <span className="flex-none pl-2 py-2">
             <GripHandle onMouseDown={onDragStart} size="sm" />
@@ -1427,7 +1437,7 @@ function CreditCardPanel({
             clearFocus();
           }
         }}
-        className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left`}
+        className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left ${d?.cardUrl && !hasMetrics ? "min-h-[3.75rem]" : ""}`}
         aria-expanded={expanded}
       >
         <span className="min-w-0 flex-1">
@@ -1493,15 +1503,17 @@ function CreditCardPanel({
                 ) : null}
               </MetricCell>
               <MetricCell label="Night credit">
-                {(d?.freeNightCreditCents || d?.freeNightPointsLimit) ? (
+                {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax) ? (
                   <span className="tabular-nums font-bold" style={{ color: "var(--viz-savings)" }}>
                     {d?.freeNightCreditCents
                       ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
-                      : `${d.freeNightPointsLimit!.toLocaleString()} pts`}
+                      : d?.freeNightPointsLimit
+                        ? `${d.freeNightPointsLimit.toLocaleString()} pts`
+                        : `Cat 1\u2013${d!.freeNightCategoryMax}`}
                   </span>
                 ) : null}
               </MetricCell>
-              <MetricCell label={fnExpired ? "Expired" : "Expires"}>
+              <MetricCell label={fnExpired ? "Benefit Expired" : "Benefit Expires"} mobileLabel="Benefit Exp.">
                 {d?.freeNightExpiresOn ? (
                   <span className={`tabular-nums ${fnExpiresColor}`}>
                     {d.freeNightExpiresOn.replace(/-/g, "\u2011")}
@@ -1537,6 +1549,20 @@ function CreditCardPanel({
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
+        {/* Visit site sits on the collapsed row, under the balance, so a saved
+            link is visible without opening the card. It can't live inside the
+            row's toggle button (a link in a button is invalid), so it is
+            overlaid on the balance column: right-3 + chevron + gap. */}
+        {d?.cardUrl ? (
+          <a
+            href={externalCardUrl(d.cardUrl)}
+            target="_blank"
+            rel="noreferrer"
+            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-8 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-[11px] font-semibold text-brand transition-colors hover:border-brand hover:bg-brand-soft dark:bg-slate-950"
+          >
+            Visit site <span aria-hidden>↗</span>
+          </a>
+        ) : null}
       </div>
 
       {expanded ? (
@@ -1555,16 +1581,6 @@ function CreditCardPanel({
               </svg>
               Edit
             </button>
-            {d?.cardUrl ? (
-              <a
-                href={externalCardUrl(d.cardUrl)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-line bg-background px-1.5 py-1.5 text-[11px] font-semibold text-brand transition-colors hover:border-brand hover:bg-brand-soft sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
-              >
-                <span className="sm:hidden">Site</span><span className="hidden sm:inline">Visit site</span> <span aria-hidden>↗</span>
-              </a>
-            ) : null}
             {!isArchived && !card.dateClosed ? (
               <button
                 type="button"
@@ -1692,6 +1708,52 @@ function softPill(tone: string): React.CSSProperties {
   };
 }
 
+// The points field doubles as a calculator: type "271842-268244" and Enter
+// (or leaving the field) swaps in 3,598. Enter only calculates when there is
+// math to do — on a plain number it submits the form as usual.
+function resolvePoints(raw: string): string {
+  if (!hasOperator(raw)) return raw;
+  const value = evaluateExpression(raw);
+  return value === null ? raw : String(Math.round(value));
+}
+
+// The balance the card will land on once this entry saves, shown under the
+// points field as soon as it holds a usable number (typed or calculated).
+function pointsBalanceHint(
+  startingPoints: number,
+  direction: "used" | "earned" | "returned",
+  raw: string,
+): React.ReactNode {
+  const amount = evaluateExpression(raw);
+  if (amount === null || amount <= 0) return undefined;
+  const rounded = Math.round(amount);
+  const after = direction === "used" ? startingPoints - rounded : startingPoints + rounded;
+  return (
+    <>
+      New balance:{" "}
+      <span className={`font-semibold tabular-nums ${after < 0 ? "text-negative" : "text-foreground"}`}>
+        {after.toLocaleString()} pts
+      </span>
+    </>
+  );
+}
+
+function pointsCalcProps(points: string, setPoints: (value: string) => void) {
+  return {
+    type: "text",
+    autoComplete: "off",
+    value: points,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setPoints(e.target.value),
+    onBlur: () => setPoints(resolvePoints(points)),
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && hasOperator(points)) {
+        e.preventDefault();
+        setPoints(resolvePoints(points));
+      }
+    },
+  } as const;
+}
+
 function RewardActivityForm({
   card,
   currency,
@@ -1737,6 +1799,7 @@ function RewardActivityForm({
         onSubmit={(e) => {
           e.preventDefault();
           const formData = new FormData(e.currentTarget);
+          formData.set("pointsUsed", resolvePoints(points));
           start(async () => {
             setError(null);
             const result = await logCreditCardRewardActivity(formData);
@@ -1798,12 +1861,9 @@ function RewardActivityForm({
                 : `Points returned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
           }
           name="pointsUsed"
-          type="number"
-          min="1"
-          step="1"
           placeholder="0"
-          value={points}
-          onChange={(e) => setPoints(e.target.value)}
+          hint={pointsBalanceHint(d?.currentPoints ?? 0, direction, points)}
+          {...pointsCalcProps(points, setPoints)}
         />
         <div className="sm:col-span-2">
           <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Note (optional)</label>
@@ -1916,7 +1976,7 @@ function EditCreditCardForm({
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
               <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
               <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-              <LabeledInput label="Free-night point value" name="freeNightPointsLimit" type="number" step="1" defaultValue={d?.freeNightPointsLimit ?? ""} />
+              <FreeNightCapField pointsLimit={d?.freeNightPointsLimit ?? null} categoryMax={d?.freeNightCategoryMax ?? null} />
               <LabeledInput label="Booked / check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
               <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />

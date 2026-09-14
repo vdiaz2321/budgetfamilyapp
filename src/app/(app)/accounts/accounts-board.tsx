@@ -9,7 +9,7 @@ import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
-import { GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
+import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "./shared-ui";
 import {
   addAccount,
   addCreditCardWithDetails,
@@ -760,11 +760,11 @@ export function AccountsBoard({
         </div>
         <div>
           {eoyNet == null ? (
-            <SummaryStat variant="hero" label={`EOY ${eoyYear} net worth`} value={0} currency={currency} tone="text-muted" hint="No record for December" />
+            <SummaryStat variant="hero" label={`Net Worth: ${eoyYear}`} value={0} currency={currency} tone="text-muted" hint="No record for December" />
           ) : (
             <SummaryStat
               variant="hero"
-              label={`EOY ${eoyYear} net worth`}
+              label={`Net Worth: ${eoyYear}`}
               value={eoyNet}
               currency={currency}
               tone={eoyNet >= 0 ? "text-foreground" : "text-negative"}
@@ -774,8 +774,8 @@ export function AccountsBoard({
                 <>
                   <span className={`font-semibold ${net >= eoyNet ? "text-positive" : "text-negative"}`}>
                     {net >= eoyNet ? "Up" : "Down"} {formatMoney(Math.round(Math.abs(net - eoyNet) / 100) * 100, currency).replace(/\.00$/, "")}
-                  </span>{" "}
-                  this year
+                  </span>
+                  <span className="block">since Dec {eoyYear}</span>
                 </>
               }
             />
@@ -796,10 +796,6 @@ export function AccountsBoard({
             .filter((s) => accounts.some((a) => s.match(a)) || s.key === "kids")
             .map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
         ];
-        const cardsSection = creditSections.find((cs) => cs.key === "credit");
-        const openCards = cardsSection ? accounts.filter((acct) => cardsSection.match(acct)) : [];
-        // Same figure as "Total CC owed" on the Credit Cards card.
-        const cardsOwed = openCards.reduce((sum, acct) => sum + (acct.owedCents ?? 0), 0);
         const renderCard = ({ section, extras }: (typeof items)[number]) => (
           <div key={section.key} className="border-t border-line">
           <AccountSection
@@ -825,55 +821,16 @@ export function AccountsBoard({
         );
         return (
           // Assets first, then what's owed, then Kids Funding — three across
-          // on a wide card (Banking | Investments | Property, Debts | Credit
-          // Cards | Kids Funding), two across on a narrower one, one on a phone.
+          // on a wide card (Banking | Investments | Property, Debts | Kids
+          // Funding), two across on a narrower one, one on a phone. Credit
+          // Cards has no row here: statement balances aren't in net worth, so
+          // the Credit Cards card below carries that note under its total.
           // Every cell carries its own top hairline so the two in a row read
           // as one line broken by the gutter.
           <div className="@container">
             <div className="grid grid-cols-1 @[40rem]:grid-cols-2 @[40rem]:gap-x-6 @[60rem]:grid-cols-3">
               {items.filter((it) => !it.section.liability && !it.section.kidsGroup).map(renderCard)}
               {items.filter((it) => it.section.liability).map(renderCard)}
-              {cardsSection && openCards.length > 0 ? (
-                // Credit Cards as the sixth group, so every account group has
-                // a row here and the grid comes out even. Its accounts live in
-                // the Credit Cards card below; the row jumps there (opening it
-                // if collapsed) rather than opening a popup of its own. The
-                // owed total is statement balances, which Net Worth doesn't
-                // count — payoff debt on a card is already in Debts.
-                <div className="border-t border-line">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (collapsed[cardsSection.key]) toggleSection(cardsSection.key);
-                      // Scroll after the expand has rendered: a collapsed card
-                      // leaves the page too short to bring it to the top.
-                      requestAnimationFrame(() =>
-                        requestAnimationFrame(() =>
-                          document.getElementById("credit-cards")?.scrollIntoView({ behavior: "smooth", block: "start" }),
-                        ),
-                      );
-                    }}
-                    className="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-3 py-3 text-left transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cardsSection.dot}`} />
-                      <span className="shrink-0 font-semibold leading-tight">{cardsSection.label}</span>
-                      <svg
-                        width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                        className="shrink-0 -rotate-90 text-muted"
-                        aria-hidden
-                      >
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </span>
-                    <span className={`text-right text-sm font-bold tabular-nums ${cardsOwed > 0 ? "text-negative" : ""}`}>
-                      {formatMoney(cardsOwed, currency)}
-                    </span>
-                    <span className="col-span-2 text-right text-[11px] text-muted">Not in net worth</span>
-                  </button>
-                </div>
-              ) : null}
               {items.filter((it) => it.section.kidsGroup).map(renderCard)}
             </div>
           </div>
@@ -907,7 +864,6 @@ export function AccountsBoard({
               cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
               currency={currency}
               storageKey="accounts-card-payments-open"
-              showChart={false}
             />
           </div>
         ) : null}
@@ -985,6 +941,7 @@ function CreditCardListSection({
           <span className="block text-sm font-bold tabular-nums text-negative sm:text-base">
             {formatMoney(totalOwed, currency)}
           </span>
+          <span className="block text-[11px] text-muted">Not in net worth</span>
         </span>
         </div>
         <button
@@ -1307,18 +1264,22 @@ function SummaryStat({
       </p>
       {delta != null && priorLabel ? (
         flat ? (
-          <p className={`mt-0.5 ${noteSize} text-muted`}>about the same as {priorLabel}</p>
+          <p className={`mt-0.5 ${noteSize} leading-tight text-muted`}>
+            about the same
+            <span className="block">as {priorLabel}</span>
+          </p>
         ) : (
           <p className={`mt-0.5 ${noteSize} leading-tight`}>
             <span className={good ? "font-semibold text-positive" : "font-semibold text-negative"}>
               {amountStr ? `${amountStr} · ` : ""}
               {Math.abs(delta).toFixed(0)}% {delta > 0 ? "more" : "less"}
-            </span>{" "}
-            <span className="text-muted">than {priorLabel}</span>
+            </span>
+            {/* Its own line, so "August 2026" never splits across two. */}
+            <span className="block text-muted">than {priorLabel}</span>
           </p>
         )
       ) : null}
-      {hint ? <p className={`${noteSize} text-muted`}>{hint}</p> : null}
+      {hint ? <p className={`mt-0.5 ${noteSize} leading-tight text-muted`}>{hint}</p> : null}
     </div>
   );
 }
@@ -2605,7 +2566,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
                 <LabeledInput label="Current points" name="currentPoints" type="text" placeholder="0" />
                 <LabeledInput label="Total Hotel Credits Anv" name="freeNightCredit" type="number" step="0.01" prefix="$" />
                 <LabeledInput label="Free Night / Credits Exp" name="freeNightExpires" type="date" />
-                <LabeledInput label="Up to Anv Pts / Free Night" name="freeNightPointsLimit" type="number" step="1" />
+                <FreeNightCapField pointsLimit={null} categoryMax={null} />
                 <LabeledInput label="Booked" name="benefitUsedOn" type="date" />
                 <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" />
                 <LabeledInput label="Card URL" name="cardUrl" type="url" placeholder="https://issuer.com/card" />

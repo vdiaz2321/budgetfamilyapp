@@ -1,6 +1,5 @@
 import type { CategoryKind } from "@/lib/categories";
 import type { Granularity } from "./period";
-import type { CardPayment } from "@/components/card-payments-ledger";
 
 export type { Granularity };
 
@@ -84,6 +83,4 @@ export type InsightsData = {
   currency: string;
   // Card payments report — all-time, with its own year filter, so it is not
   // sliced by the page's period picker.
-  cardPayments: CardPayment[];
-  cardNames: Record<string, string>;
 };

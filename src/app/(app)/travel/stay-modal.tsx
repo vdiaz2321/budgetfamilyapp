@@ -240,18 +240,28 @@ export function StayModal({
             </select>
             {/* What this card still has to spend, the moment you pick it. */}
             {card ? (
-              <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-semibold">
-                <span style={{ color: "var(--viz-savings)" }}>
+              // One line under the picker: the field is ~173px wide on desktop,
+              // so the caps are short ("35k pt night cap") and anything that
+              // still doesn't fit is cut with an ellipsis rather than wrapped.
+              <span className="mt-1 flex min-w-0 flex-nowrap gap-x-2 overflow-hidden whitespace-nowrap text-[10px] font-semibold">
+                <span className="shrink-0" style={{ color: "var(--viz-savings)" }}>
                   {card.currentPoints.toLocaleString()} pts
                 </span>
                 {card.freeNightCreditCents ? (
-                  <span style={{ color: "var(--viz-bills)" }}>
-                    {formatMoney(card.freeNightCreditCents, currency)} night credit
+                  <span className="min-w-0 truncate" style={{ color: "var(--viz-bills)" }}>
+                    {formatMoney(card.freeNightCreditCents, currency).replace(/\.00$/, "")} night credit
                   </span>
                 ) : null}
                 {card.freeNightPointsLimit ? (
-                  <span className="text-muted">
-                    {card.freeNightPointsLimit.toLocaleString()} pt free-night cap
+                  <span className="min-w-0 truncate text-muted">
+                    {card.freeNightPointsLimit % 1000 === 0
+                      ? `${card.freeNightPointsLimit / 1000}k`
+                      : card.freeNightPointsLimit.toLocaleString()}{" "}
+                    pt night cap
+                  </span>
+                ) : card.freeNightCategoryMax ? (
+                  <span className="min-w-0 truncate text-muted">
+                    Cat 1&ndash;{card.freeNightCategoryMax} night
                   </span>
                 ) : null}
               </span>
@@ -274,7 +284,20 @@ export function StayModal({
              rate, three money amounts — so they ride on one line instead of
              eating six rows of the form. Two per row at 375px. */}
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-6">
-          <Field label="Free-night max pts">
+          {/* A category-capped certificate (World of Hyatt) has no points
+              ceiling to type — the field shows the category instead, read-only,
+              and the stay saves no free-night points. */}
+          {card?.freeNightCategoryMax && !card.freeNightPointsLimit && !freeNightPoints.trim() ? (
+            <Field label="Free-night max">
+              <input
+                value={`Cat 1\u2013${card.freeNightCategoryMax}`}
+                readOnly
+                tabIndex={-1}
+                className={`${inputClass} ${freeNightUsed ? "" : "opacity-50"}`}
+              />
+            </Field>
+          ) : (
+          <Field label="Free-night max">
             <input
               type="number"
               name="freeNightPoints"
@@ -290,6 +313,7 @@ export function StayModal({
               className={`${inputClass} disabled:opacity-50`}
             />
           </Field>
+          )}
           {/* Unticked labels stay as short as the ticked ones: the longer
               "Points it would've cost" wrapped to two lines and pushed its box
               below Hotel cost and Pocket cost in the same row. */}

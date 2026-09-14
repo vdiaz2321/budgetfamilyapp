@@ -47,6 +47,7 @@ export default async function TravelPage() {
       pointsValueMicros: a.cardDetails?.pointsValueMicros ?? null,
       freeNightCreditCents: a.cardDetails?.freeNightCreditCents ?? null,
       freeNightPointsLimit: a.cardDetails?.freeNightPointsLimit ?? null,
+      freeNightCategoryMax: a.cardDetails?.freeNightCategoryMax ?? null,
     }));
 
   const rows: TravelStay[] = (stays.data ?? []).map((s) => ({

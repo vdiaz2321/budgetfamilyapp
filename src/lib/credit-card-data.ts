@@ -48,7 +48,7 @@ export async function loadCreditCardBoardData(
         .order("name"),
       supabase
         .from("credit_card_details")
-        .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence")
+        .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, free_night_category_max, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence")
         .eq("household_id", householdId),
       supabase
         .from("credit_card_reward_activities")
@@ -133,6 +133,7 @@ export async function loadCreditCardBoardData(
       freeNightCreditCents: d.free_night_credit_cents ?? null,
       freeNightExpiresOn: d.free_night_expires_on ?? null,
       freeNightPointsLimit: d.free_night_points_limit ?? null,
+      freeNightCategoryMax: d.free_night_category_max ?? null,
       benefitUsedOn: d.benefit_used_on ?? null,
       spendingLimitCents: d.spending_limit_cents ?? null,
       remarks: d.remarks ?? null,

@@ -679,7 +679,17 @@ export async function upsertCardDetails(formData: FormData) {
     fees_paid_cents: optCents("feesPaid") ?? 0,
     free_night_credit_cents: optCents("freeNightCredit"),
     free_night_expires_on: optDate("freeNightExpires"),
-    free_night_points_limit: optInt("freeNightPointsLimit") || null,
+    free_night_points_limit: formData.get("freeNightCapKind") === "category" ? null : optInt("freeNightPointsLimit") || null,
+    // Only forms with the Points | Category switch send freeNightCapKind.
+    // Anything else leaves the column out, so it can't wipe a saved category.
+    ...(formData.has("freeNightCapKind")
+      ? {
+          free_night_category_max:
+            formData.get("freeNightCapKind") === "category"
+              ? Math.min(8, Math.max(1, optInt("freeNightCategoryMax") || 0)) || null
+              : null,
+        }
+      : {}),
     benefit_used_on: optDate("benefitUsedOn"),
     spending_limit_cents: optCents("spendingLimit"),
     remarks: optText("remarks"),
@@ -699,6 +709,7 @@ export async function upsertCardDetails(formData: FormData) {
       const rowWithout = { ...row } as Record<string, unknown>;
       delete rowWithout.benefit_used_on;
       delete rowWithout.free_night_points_limit;
+      delete rowWithout.free_night_category_max;
       delete rowWithout.rewards_category;
       delete rowWithout.rewards_program;
       delete rowWithout.points_value_micros;

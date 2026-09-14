@@ -35,8 +35,8 @@ export type CardPayment = {
  * card: what a month of carrying this card actually costs, and what the year
  * adds up to, before deciding to open another one.
  *
- * Shared by the Accounts page (inside the Credit Cards section) and Insights.
- * `storageKey` keeps their collapse states independent.
+ * Lives on the Accounts page, under the Credit Cards section. It used to be
+ * on Insights too; `storageKey` is kept so a page could host it again.
  */
 export function CardPaymentsLedger({
   payments,
@@ -49,8 +49,7 @@ export function CardPaymentsLedger({
   cardNames: Record<string, string>;
   currency: string;
   storageKey: string;
-  // Accounts renders the table only — that page is already dense with cards,
-  // and the chart lives on Insights where trends belong.
+  // On by default: Accounts is the only home now, so the chart shows there.
   showChart?: boolean;
 }) {
   const [view, setView] = useState<"month" | "year">("month");
@@ -68,11 +67,10 @@ export function CardPaymentsLedger({
   const year = years.includes(yearState) ? yearState : years[0] ?? String(new Date().getFullYear());
 
   const inScope = view === "month" ? payments.filter((p) => p.date.slice(0, 4) === year) : payments;
-  // Months run Jan -> Dec, the same direction as the Annual Overview's Months
-  // table, so the two pages read the same way. Years stay newest-first, which
-  // is how Annual's own Breakdown orders them. In the current year the months
-  // that haven't happened yet are dropped rather than shown as a row of
-  // leading dashes.
+  // Newest first in both views: the month just paid sits beside Annual Total
+  // (Sep, Aug, … Jan), the same way years run newest-first. In the current
+  // year the months that haven't happened yet are dropped rather than shown as
+  // a row of empty columns.
   const now = new Date();
   const lastMonthShown =
     view === "month" && year === String(now.getFullYear()) ? now.getMonth() + 1 : 12;
@@ -80,6 +78,7 @@ export function CardPaymentsLedger({
     view === "month"
       ? PAYMENT_MONTHS.slice(0, lastMonthShown)
           .map((label, i) => ({ key: String(i + 1).padStart(2, "0"), label }))
+          .reverse()
       : years.map((y) => ({ key: y, label: y }));
   const columnOf = (p: CardPayment) => (view === "month" ? p.date.slice(5, 7) : p.date.slice(0, 4));
   // With one year of history the year column would just repeat Total, so it
@@ -122,20 +121,18 @@ export function CardPaymentsLedger({
   })();
   const perMonth = (cents: number) => Math.round(cents / Math.max(1, elapsedMonths));
 
-  // Months now run Jan -> Dec, which puts the ones you just paid at the far
-  // right — off-screen on a phone. So the month view opens scrolled to that
-  // end instead of the left. The year view is still newest-first, where the
-  // left edge is already the useful one.
+  // Both views are newest-first, so the useful edge is the left one — reset
+  // there when the view or year changes rather than keeping an old scroll.
   const scrollBoxRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const box = scrollBoxRef.current;
     if (!box) return;
-    box.scrollLeft = view === "month" ? box.scrollWidth : 0;
+    box.scrollLeft = 0;
   }, [view, year, payments]);
 
-  // Time runs left to right in the chart. The month columns already do, so
-  // only the newest-first year view needs flipping for it.
-  const chartBars = (view === "month" ? columns : [...columns].reverse()).map((c) => ({
+  // Newest first, matching the table columns under it — the bar for the
+  // month just paid sits on the left edge.
+  const chartBars = columns.map((c) => ({
     key: c.key,
     label: c.label,
     value: columnTotal(c.key),
@@ -237,8 +234,8 @@ export function CardPaymentsLedger({
       ) : (
         <>
           {/* One bar per period — a single series, so no legend: the section
-              title names it. Same figures as the All cards row below, drawn
-              oldest to newest. */}
+              title names it. Same figures as the All cards row below, in the
+              same newest-first order. */}
           {/* A chart of one bar says nothing the tile above it doesn't. */}
           {showChart && chartBars.length > 1 ? (
           <div className="border-b border-line px-4 py-3">

@@ -2,7 +2,6 @@ import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { InsightsBoard } from "./insights-board";
-import type { CardPayment } from "@/components/card-payments-ledger";
 import {
   bucketLabel,
   currentPeriodKey,
@@ -87,7 +86,6 @@ export default async function InsightsPage({
     { data: accounts, error: accountsError },
     txRows,
     { data: annualRows, error: annualRowsError },
-    cardPaymentRows,
   ] = await Promise.all([
     supabase.from("subcategories").select("id, name, category_id").eq("household_id", household.id),
     supabase.from("payees").select("id, name").eq("household_id", household.id),
@@ -117,20 +115,6 @@ export default async function InsightsPage({
       .from("annual_breakdown_history")
       .select("year, kind, line_label, amount_cents")
       .eq("household_id", household.id),
-    // Card payments, all-time — the Card payments report carries its own year
-    // filter, so it deliberately ignores the page's period picker. Read-only.
-    fetchAllRows<{
-      id: string; occurred_on: string; amount_cents: number; memo: string | null;
-      account_id: string | null; paid_to_account_id: string | null; movement_type: string | null;
-    }>((from, to) =>
-      supabase
-        .from("transactions")
-        .select("id, occurred_on, amount_cents, memo, account_id, paid_to_account_id, movement_type")
-        .eq("household_id", household.id)
-        .not("paid_to_account_id", "is", null)
-        .order("id")
-        .range(from, to),
-    ),
   ]);
   throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, annualRows: annualRowsError });
 
@@ -355,27 +339,6 @@ export default async function InsightsPage({
       .slice(0, 6);
   }
 
-  // Payments made TO a credit card. `movement_type` is null on rows written
-  // before that column existed, so fall back to the register's rule: the
-  // destination account is a credit card.
-  const cardAccounts = (accounts ?? []).filter((a) => a.kind === "credit_card");
-  const cardIds = new Set(cardAccounts.map((a) => a.id));
-  const cardPayments: CardPayment[] = cardPaymentRows
-    .filter(
-      (t) =>
-        t.paid_to_account_id &&
-        cardIds.has(t.paid_to_account_id) &&
-        (t.movement_type === "card_payment" || t.movement_type == null),
-    )
-    .map((t) => ({
-      id: t.id,
-      date: t.occurred_on,
-      amountCents: t.amount_cents,
-      cardId: t.paid_to_account_id as string,
-      fromAccountId: t.account_id ?? null,
-      memo: t.memo ?? null,
-    }));
-
   const data: InsightsData = {
     granularity,
     periodKey,
@@ -391,8 +354,6 @@ export default async function InsightsPage({
     purchases: detailAvailable ? purchases : [],
     detailAvailable,
     currency: household.currency,
-    cardPayments,
-    cardNames: Object.fromEntries(cardAccounts.map((a) => [a.id, a.name])),
   };
 
   return <InsightsBoard data={data} />;

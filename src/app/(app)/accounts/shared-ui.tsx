@@ -380,3 +380,52 @@ export function usePointerReorder(kind: string, onReorder: (fromId: string, toId
 
   return { dragOverId, startDrag };
 }
+
+// A free night is capped one of two ways: a points ceiling (Marriott, IHG) or
+// a top hotel category (World of Hyatt's "Category 1–4" night). The switch
+// picks which; the server clears the other so a card never carries both.
+export function FreeNightCapField({ pointsLimit, categoryMax }: { pointsLimit: number | null; categoryMax: number | null }) {
+  const [kind, setKind] = useState<"points" | "category">(categoryMax && !pointsLimit ? "category" : "points");
+  return (
+    <div className="block">
+      <div className="mb-0.5 flex items-center justify-between gap-2">
+        <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">Free night up to</span>
+        <div className="inline-flex rounded-md text-[10px] font-semibold ring-1 ring-line">
+          {(["points", "category"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={kind === option}
+              onClick={() => setKind(option)}
+              className={`rounded-md px-2 py-0.5 transition ${kind === option ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-black/5 dark:hover:bg-white/10"}`}
+            >
+              {option === "points" ? "Points" : "Category"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <input type="hidden" name="freeNightCapKind" value={kind} />
+      {kind === "points" ? (
+        <input
+          name="freeNightPointsLimit"
+          type="number"
+          step="1"
+          min="0"
+          defaultValue={pointsLimit ?? ""}
+          placeholder="35000"
+          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+      ) : (
+        <select
+          name="freeNightCategoryMax"
+          defaultValue={String(categoryMax ?? 4)}
+          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        >
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+            <option key={n} value={n}>{n === 1 ? "Category 1" : `Category 1\u2013${n}`}</option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}

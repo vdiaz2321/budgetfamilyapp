@@ -43,6 +43,9 @@ export type CardDetails = {
   freeNightCreditCents: number | null;
   freeNightExpiresOn: string | null;
   freeNightPointsLimit: number | null;
+  // Top hotel category a free-night certificate covers (4 = "Cat 1–4", the
+  // World of Hyatt night). Used instead of the points cap, never with it.
+  freeNightCategoryMax: number | null;
   benefitUsedOn: string | null;
   spendingLimitCents: number | null;
   remarks: string | null;
