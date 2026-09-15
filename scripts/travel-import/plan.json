@@ -1,0 +1,2932 @@
+[
+  {
+    "name": "Greece · May 2027",
+    "startOn": "2027-05-28",
+    "endOn": "2027-05-31",
+    "source": "Europe log · Greece - 28 May - 31 May 2027",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [],
+    "rentals": [],
+    "misc": {
+      "restaurants": {
+        "usd": 84000,
+        "eur": 78000,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 30000,
+        "eur": 22500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $60.00",
+          "Entertainment $60.00",
+          "Entertainment $60.00",
+          "Entertainment $60.00",
+          "Entertainment $60.00"
+        ]
+      }
+    },
+    "flags": [
+      "This block is a copy of the Portugal plan (Lisbon/Porto flights, 2 Apr dates). Only its planned restaurant and entertainment budget is imported — re-enter flights and hotels once booked."
+    ],
+    "sheetTotal": 253000,
+    "skippedHotelRows": [],
+    "status": "planned",
+    "importTotal": 114000,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 114000
+    }
+  },
+  {
+    "name": "Portugal · Mar 2027",
+    "startOn": "2027-03-28",
+    "endOn": "2027-04-02",
+    "source": "Europe log · Portugal - 29 Mar - 2 Apr 2027",
+    "flights": [
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2027-03-28",
+            "from": "STR",
+            "to": "Lisbon",
+            "departs": "06:25",
+            "arrives": "08:25"
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 16200,
+            "fareEurCents": 13999
+          },
+          {
+            "name": "Johana",
+            "fareCents": 16200,
+            "fareEurCents": 13999
+          },
+          {
+            "name": "Leo",
+            "fareCents": 16200,
+            "fareEurCents": 13999
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 16200,
+            "fareEurCents": 13999
+          },
+          {
+            "name": "Ben",
+            "fareCents": 16200,
+            "fareEurCents": 13999
+          }
+        ],
+        "fareTypes": [
+          "Adult",
+          "Adult",
+          "Adult",
+          "Children",
+          "Children"
+        ],
+        "remarks": "Imported from sheet (Pending)"
+      },
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2027-04-02",
+            "from": "Porto",
+            "to": "STR",
+            "departs": "09:15",
+            "arrives": "12:50"
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 26000,
+            "fareEurCents": 22499
+          },
+          {
+            "name": "Johana",
+            "fareCents": 26000,
+            "fareEurCents": 22499
+          },
+          {
+            "name": "Leo",
+            "fareCents": 26000,
+            "fareEurCents": 22499
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 26000,
+            "fareEurCents": 22499
+          },
+          {
+            "name": "Ben",
+            "fareCents": 26000,
+            "fareEurCents": 22499
+          }
+        ],
+        "fareTypes": [
+          "Adult",
+          "Adult",
+          "Adult",
+          "Children",
+          "Children"
+        ],
+        "remarks": "Imported from sheet (Pending)"
+      }
+    ],
+    "newStays": [
+      {
+        "name": "IHG - Príncipe Real",
+        "checkIn": "2027-03-28",
+        "nights": 3,
+        "hotelCents": 41700,
+        "pocketCents": 41700,
+        "points": false,
+        "remarks": "Jo #86707641 (28 Mar) / Vic (29 Mar) #47281941 - (31 Mar) #27998760; Vic #28480160 (28 - 31 Mar) - Refund by Mar 21, 2027"
+      },
+      {
+        "name": "bnapartments Trindade",
+        "checkIn": "2027-03-31",
+        "nights": 2,
+        "hotelCents": 17313,
+        "pocketCents": 17313,
+        "points": false,
+        "remarks": "Cancellation until Mar 28 on Expedia"
+      }
+    ],
+    "linkedStays": [],
+    "rentals": [],
+    "misc": {
+      "restaurants": {
+        "usd": 84000,
+        "eur": 78000,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00",
+          "Restaurant $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 30000,
+        "eur": 22500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $60.00",
+          "Entertainment $60.00",
+          "Entertainment $60.00",
+          "Entertainment $60.00",
+          "Entertainment $60.00"
+        ]
+      }
+    },
+    "flags": [
+      "STR to Lisbon (Eurowings): the sheet lists a second fare option beside this one — only the first is imported.",
+      "IHG - Príncipe Real: a second room was booked with points — only the paid room ($417.00) is imported. Add the points room from the Stay form so its points come off the right card."
+    ],
+    "sheetTotal": 384013,
+    "skippedHotelRows": [],
+    "status": "planned",
+    "importTotal": 384013,
+    "parts": {
+      "flights": 211000,
+      "stays": 59013,
+      "rentals": 0,
+      "misc": 114000
+    }
+  },
+  {
+    "name": "Spain · Dec 2026",
+    "startOn": "2026-12-16",
+    "endOn": "2026-12-26",
+    "source": "Spain log · Spain Trip (16 Dec 26) - (26 Dec 26)",
+    "flights": [
+      {
+        "airline": "Vueling",
+        "legs": [
+          {
+            "flightOn": "2026-12-16",
+            "from": "Stuttgart",
+            "to": "Barcelona",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Johana",
+            "fareCents": 14764,
+            "fareEurCents": 12400
+          },
+          {
+            "name": "Ben",
+            "fareCents": 14764,
+            "fareEurCents": 12400
+          }
+        ],
+        "remarks": "Imported from sheet"
+      },
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2026-12-16",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": null,
+            "arrives": null
+          },
+          {
+            "flightOn": "2026-12-26",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Johana",
+            "fareCents": 37600,
+            "fareEurCents": 32050
+          },
+          {
+            "name": "Ben",
+            "fareCents": 37600,
+            "fareEurCents": 32050
+          }
+        ],
+        "remarks": "Imported from sheet"
+      },
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2026-12-16",
+            "number": "EW 2536",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": "17:00",
+            "arrives": "19:45"
+          },
+          {
+            "flightOn": "2026-12-26",
+            "number": "EW 2537",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": "09:25",
+            "arrives": "12:15"
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 26267,
+            "fareEurCents": 22398
+          },
+          {
+            "name": "Leo",
+            "fareCents": 26267,
+            "fareEurCents": 22398
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 26267,
+            "fareEurCents": 22398
+          }
+        ],
+        "remarks": "Imported from sheet; flight details from the Eurowings receipt (paid Amex, €671.94)",
+        "bookingCode": "YQGCPH",
+        "reservedOn": "2026-01-23"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "102f374e-d712-4cf7-9fb1-1c2cd789d74a",
+        "checkIn": "2026-12-18",
+        "nights": 1,
+        "name": "Gran Hotel Miramar Malaga",
+        "city": "Malaga, Spain",
+        "pocket": 5300,
+        "pax": 2
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "restaurants": {
+        "usd": 50700,
+        "eur": 42800,
+        "eurKnown": true,
+        "rows": [
+          "Food (BCN) $240.00",
+          "Restaurants $267.00"
+        ]
+      },
+      "cash": {
+        "usd": 47800,
+        "eur": 40000,
+        "eurKnown": true,
+        "rows": [
+          "Cash (BCN) $240.00",
+          "Euros on Hand $238.00"
+        ]
+      },
+      "other": {
+        "usd": 106000,
+        "eur": 90000,
+        "eurKnown": true,
+        "rows": [
+          "Christmas gifts $586.00",
+          "Thank-you cash to family for hosting $474.00"
+        ]
+      },
+      "groceries": {
+        "usd": 11900,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Grocery $119.00"
+        ]
+      }
+    },
+    "flags": [
+      "Vueling mom / Ben: flight dates set to the trip's first/last day and the $295.27 split evenly across 2 — adjust per person.",
+      "Eurowings mom / Ben: flight dates set to the trip's first/last day and the $752.00 split evenly across 2 — adjust per person."
+    ],
+    "sheetTotal": 405227,
+    "skippedHotelRows": [
+      "Resort $53.00 — matches Gran Hotel Miramar's $53 pocket cost"
+    ],
+    "status": "planned",
+    "importTotal": 405229,
+    "parts": {
+      "flights": 183529,
+      "stays": 5300,
+      "rentals": 0,
+      "misc": 216400
+    }
+  },
+  {
+    "name": "Colmar · Nov 2026",
+    "startOn": "2026-11-26",
+    "endOn": "2026-11-27",
+    "source": "Europe log · Colmar - 26 - 27 Nov 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "e9b747db-99ac-4bba-a7a2-0b8a4b061946",
+        "checkIn": "2026-11-26",
+        "nights": 1,
+        "name": "Hotel Babylon Royal",
+        "city": "Colmar, FR",
+        "pocket": 23100,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 5500,
+        "eur": 4800,
+        "eurKnown": true,
+        "rows": [
+          "Drive to Colmar $55.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 21500,
+        "eur": 18500,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $115.00",
+          "Restaurant $100.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 16000,
+        "eur": 12500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $100.00",
+          "Entertainment $60.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 66100,
+    "skippedHotelRows": [
+      "another hotel (2026-11-28) — no cost and no matching stay"
+    ],
+    "status": "planned",
+    "importTotal": 66100,
+    "parts": {
+      "flights": 0,
+      "stays": 23100,
+      "rentals": 0,
+      "misc": 43000
+    }
+  },
+  {
+    "name": "Munich / Dachau · Sep 2026",
+    "startOn": "2026-09-04",
+    "endOn": "2026-09-05",
+    "source": "Europe log · Munich/Dachau - 4 - 5 Sep 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "36398953-e05d-4537-86dc-9fe349a545d6",
+        "checkIn": "2026-09-04",
+        "nights": 1,
+        "name": "Hilton Munich City West",
+        "city": "Munich, GM",
+        "pocket": 0,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 6500,
+        "eur": 5500,
+        "eurKnown": true,
+        "rows": [
+          "Drive to Dachau $65.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 28000,
+        "eur": 23000,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $140.00",
+          "Restaurant $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 20000,
+        "eur": 16500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $100.00",
+          "Entertainment $100.00"
+        ]
+      },
+      "parking": {
+        "usd": 2900,
+        "eur": 2500,
+        "eurKnown": true,
+        "rows": [
+          "Parking at hotel $29.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 57400,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 57400,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 57400
+    }
+  },
+  {
+    "name": "Oberstdorf · Aug 2026",
+    "startOn": "2026-08-10",
+    "endOn": "2026-08-14",
+    "source": "Europe log · Oberstdorf, GM 10 Aug 26 -- 14 Aug 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "2bdf67a7-fd0f-4fe2-8895-689688232630",
+        "checkIn": "2026-08-10",
+        "nights": 2,
+        "name": "Oberstdorf (Sudio apartment)",
+        "city": "Oberstdorf, GM",
+        "pocket": 0,
+        "pax": 4
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 6500,
+        "eur": 5500,
+        "eurKnown": true,
+        "rows": [
+          "Fuel $65.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 24000,
+        "eur": 20000,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $100.00",
+          "Restaurant $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 45800,
+        "eur": 40750,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $125.00",
+          "Entertainment $168.00",
+          "Neuschwanstein (2nd amount) $65.00",
+          "Entertainment $100.00"
+        ]
+      }
+    },
+    "flags": [
+      "“Neuschwanstein”: an amount sat in the Start/End Time columns ($65.00) — counted under entertainment."
+    ],
+    "sheetTotal": 69800,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 76300,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 76300
+    }
+  },
+  {
+    "name": "Dornbirn · Jul 2026",
+    "startOn": "2026-07-23",
+    "endOn": "2026-07-25",
+    "source": "Europe log · Dornbirn - 23 Jul -- 24 Jul 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "6aa45512-d676-4deb-851f-3f91d12e8e76",
+        "checkIn": "2026-07-23",
+        "nights": 2,
+        "name": "Four Points by Sheraton (Marriott)",
+        "city": "Dornbirn, GM",
+        "pocket": 26700,
+        "pax": 3
+      },
+      {
+        "id": "86f55b69-d120-4ce6-baee-5b25373689db",
+        "checkIn": "2026-07-23",
+        "nights": 2,
+        "name": "Four Points by Sheraton (Marriott)",
+        "city": "Dornbirn, GM",
+        "pocket": 0,
+        "pax": 2
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 6500,
+        "eur": 5500,
+        "eurKnown": true,
+        "rows": [
+          "Fuel $65.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 56738,
+        "eur": 46900,
+        "eurKnown": true,
+        "rows": [
+          "Hotel breakfast $67.38",
+          "Restaurant $180.00",
+          "Restaurant $180.00",
+          "Restaurant $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 35000,
+        "eur": 30500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $100.00",
+          "Santis gandola lift $150.00",
+          "Entertainment $100.00"
+        ]
+      },
+      "parking": {
+        "usd": 3600,
+        "eur": 3000,
+        "eurKnown": true,
+        "rows": [
+          "Hotel Parking $36.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 127938,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 128538,
+    "parts": {
+      "flights": 0,
+      "stays": 26700,
+      "rentals": 0,
+      "misc": 101838
+    }
+  },
+  {
+    "name": "Berlin · Jul 2026",
+    "startOn": "2026-07-05",
+    "endOn": "2026-07-09",
+    "source": "Europe log · Berlin- 5 Jul -- 9 Jul 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "b6d99e4e-7515-4187-8b5e-21a58f5782b1",
+        "checkIn": "2026-07-05",
+        "nights": 1,
+        "name": "B&B Hotel Berlin-Potsdamer Platz",
+        "city": "Berlin, GM",
+        "pocket": 0,
+        "pax": 4
+      },
+      {
+        "id": "ec8d6702-c09b-4265-a5da-77342117c5f6",
+        "checkIn": "2026-07-06",
+        "nights": 1,
+        "name": "Homaris Rummelsburg Studios",
+        "city": "Berlin, GM",
+        "pocket": 21900,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "transport": {
+        "usd": 24457,
+        "eur": 19300,
+        "eurKnown": true,
+        "rows": [
+          "Train to Berlin Hbf $100.57",
+          "Bus ticket Berlin $18.00",
+          "VVS (Amex card) $13.00",
+          "Train to Stuttgart Hbf $100.00",
+          "VVS (Amex card) $13.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 74000,
+        "eur": 67300,
+        "eurKnown": true,
+        "rows": [
+          "Hotel breakfast / taxes $55.00",
+          "Restaurant $147.00",
+          "Restaurant $150.00",
+          "Restaurant $155.00",
+          "Restaurant $123.00",
+          "Restaurant $110.00"
+        ]
+      },
+      "cash": {
+        "usd": 12000,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Euros $120.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 35500,
+        "eur": 29700,
+        "eurKnown": true,
+        "rows": [
+          "Berlin Welcome Card $91.00",
+          "Entertainment $14.00",
+          "Deutschland Musuem $63.00",
+          "Cinemaxx (Theater) $47.00",
+          "Neues Musuem $72.00",
+          "Zoo Tierpark $68.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 167857,
+    "skippedHotelRows": [
+      "Homaris Rummelsburg (2026-07-07) — no cost and no matching stay"
+    ],
+    "status": "actual",
+    "importTotal": 167857,
+    "parts": {
+      "flights": 0,
+      "stays": 21900,
+      "rentals": 0,
+      "misc": 145957
+    }
+  },
+  {
+    "name": "Croatia · Jun 2026",
+    "startOn": "2026-06-14",
+    "endOn": "2026-06-19",
+    "source": "Europe log · Croatia - 14 Jun -- 19 Jun 2026",
+    "flights": [
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2026-06-14",
+            "from": "STR",
+            "to": "Split",
+            "departs": "15:25",
+            "arrives": "16:55"
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 11800,
+            "fareEurCents": 10000
+          },
+          {
+            "name": "Johana",
+            "fareCents": 11800,
+            "fareEurCents": 10000
+          },
+          {
+            "name": "Leo",
+            "fareCents": 11800,
+            "fareEurCents": 10000
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 9500,
+            "fareEurCents": 8000
+          },
+          {
+            "name": "Ben",
+            "fareCents": 9500,
+            "fareEurCents": 8000
+          }
+        ],
+        "fareTypes": [
+          "Eurowings",
+          "Adult",
+          "",
+          "Children",
+          ""
+        ],
+        "remarks": "Imported from sheet (Paid)"
+      },
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2026-06-19",
+            "from": "Split",
+            "to": "STR",
+            "departs": "12:05",
+            "arrives": "13:40"
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 14000,
+            "fareEurCents": 12000
+          },
+          {
+            "name": "Johana",
+            "fareCents": 14000,
+            "fareEurCents": 12000
+          },
+          {
+            "name": "Leo",
+            "fareCents": 14000,
+            "fareEurCents": 12000
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 11300,
+            "fareEurCents": 9600
+          },
+          {
+            "name": "Ben",
+            "fareCents": 11300,
+            "fareEurCents": 9600
+          }
+        ],
+        "fareTypes": [
+          "Eurowings",
+          "Adult",
+          "",
+          "Children",
+          ""
+        ],
+        "remarks": "Imported from sheet (Paid)"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "fae45a59-6bc7-4b43-bbcf-2fd0d0307bfc",
+        "checkIn": "2026-06-14",
+        "nights": 1,
+        "name": "Apartment at Split",
+        "city": "Split, Croatia",
+        "pocket": 0,
+        "pax": 5
+      },
+      {
+        "id": "c19be20f-3b49-450f-8247-3229b4e882f5",
+        "checkIn": "2026-06-15",
+        "nights": 1,
+        "name": "Villa Daniela (Bol)",
+        "city": "Bol, Croatia",
+        "pocket": 20800,
+        "pax": 5
+      },
+      {
+        "id": "cbbc68b1-8c0e-459c-b94c-b13ea3ce7506",
+        "checkIn": "2026-06-17",
+        "nights": 1,
+        "name": "Villa Ivanka Trogir",
+        "city": "Trogir, Croatia",
+        "pocket": 3500,
+        "pax": 4
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "transport": {
+        "usd": 34179,
+        "eur": 29500,
+        "eurKnown": true,
+        "rows": [
+          "Bus ride to hotel $58.00",
+          "Ferry to Bol $101.07",
+          "Ferry to Split $101.72",
+          "Ferry to Trogir $50.00",
+          "Bus $9.00",
+          "Bus ride to airport $9.00",
+          "VVS $13.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 94300,
+        "eur": 88600,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $140.00",
+          "Restaurant $196.00",
+          "Restaurant $169.00",
+          "Restaurant $189.00",
+          "Restaurant $235.00",
+          "Restaurant $14.00"
+        ]
+      },
+      "cash": {
+        "usd": 12000,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Euros $120.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 24695,
+        "eur": 21300,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $6.95",
+          "Entertainment $42.00",
+          "Entertainment $100.00",
+          "Entertainment $28.00",
+          "Entertainment $70.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 311396,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 308474,
+    "parts": {
+      "flights": 119000,
+      "stays": 24300,
+      "rentals": 0,
+      "misc": 165174
+    }
+  },
+  {
+    "name": "Prague · May 2026",
+    "startOn": "2026-05-22",
+    "endOn": "2026-05-25",
+    "source": "Europe log · Prague Trip 22 - 25 May 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "86e85f19-9b9f-45c1-b72d-6281f107ae0b",
+        "checkIn": "2026-05-22",
+        "nights": 1,
+        "name": "Holiday Inn Nurnberg",
+        "city": "Nurnberg, GM",
+        "pocket": 0,
+        "pax": 4
+      },
+      {
+        "id": "dcbffd1a-8956-4635-a937-7a069998367e",
+        "checkIn": "2026-05-23",
+        "nights": 1,
+        "name": "Holiday Inn Prague",
+        "city": "Prague, Czech",
+        "pocket": 0,
+        "pax": 3
+      },
+      {
+        "id": "baf6d4c3-5eb8-4c1e-bff5-05c8d42291ba",
+        "checkIn": "2026-05-23",
+        "nights": 1,
+        "name": "Holiday Inn Prague",
+        "city": "Prague, Czech",
+        "pocket": 0,
+        "pax": 2
+      },
+      {
+        "id": "2d0f2431-030a-43b2-ab1d-614d9f1e86f0",
+        "checkIn": "2026-05-24",
+        "nights": 1,
+        "name": "Hampton Regensburg",
+        "city": "Regensburg, GM",
+        "pocket": 0,
+        "pax": 2
+      },
+      {
+        "id": "9ef209d6-92e1-48a2-b599-8da767c58b10",
+        "checkIn": "2026-05-24",
+        "nights": 1,
+        "name": "Hampton Regensburg",
+        "city": "Regensburg, GM",
+        "pocket": 0,
+        "pax": 3
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "groceries": {
+        "usd": 13700,
+        "eur": 11800,
+        "eurKnown": true,
+        "rows": [
+          "Resturants/Groceries $137.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 18400,
+        "eur": 15800,
+        "eurKnown": true,
+        "rows": [
+          "Musuems $16.00",
+          "Entertainment $43.00",
+          "Entertainment $70.00",
+          "Entertainment zoo $55.00"
+        ]
+      },
+      "parking": {
+        "usd": 6650,
+        "eur": 5900,
+        "eurKnown": true,
+        "rows": [
+          "Parking $23.00",
+          "Parking $26.00",
+          "Parking $17.50"
+        ]
+      },
+      "fuel_tolls": {
+        "usd": 16314,
+        "eur": 14030,
+        "eurKnown": true,
+        "rows": [
+          "Fuel $85.84",
+          "Czech Vignette $14.30",
+          "Fuel $63.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 45041,
+        "eur": 38700,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $188.00",
+          "Resturants $174.00",
+          "Resturants $88.41"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 100105,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 100105,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 100105
+    }
+  },
+  {
+    "name": "Salzburg · Mar 2026",
+    "startOn": "2026-03-30",
+    "endOn": "2026-04-05",
+    "source": "Europe log · Salzburg - 30 Mar -- 5 Apr 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "975bd1d0-328e-40b0-aba2-a5f616c6434f",
+        "checkIn": "2026-03-30",
+        "nights": 1,
+        "name": "Westin Marriott Munich",
+        "city": "Munich, GM",
+        "pocket": 0,
+        "pax": 3
+      },
+      {
+        "id": "b8bc31ba-0f9a-4d24-9572-6f0ca563940b",
+        "checkIn": "2026-03-30",
+        "nights": 1,
+        "name": "Westin Marriott Munich",
+        "city": "Munich, GM",
+        "pocket": 15000,
+        "pax": 2
+      },
+      {
+        "id": "c845dd04-b3e6-434d-b367-37252d075c96",
+        "checkIn": "2026-03-31",
+        "nights": 1,
+        "name": "Hotel Hohenstauffen",
+        "city": "Salzburg, Austria",
+        "pocket": 0,
+        "pax": 3
+      },
+      {
+        "id": "5728c2ae-f81e-47fa-b55d-3cb208fb67c8",
+        "checkIn": "2026-04-01",
+        "nights": 1,
+        "name": "Hotel Schwabenwirt",
+        "city": "Berchtesgaden, GM",
+        "pocket": 0,
+        "pax": 4
+      },
+      {
+        "id": "ba8b0dd3-dcc1-41fa-ab26-e19466ea9f0a",
+        "checkIn": "2026-04-02",
+        "nights": 1,
+        "name": "Edelweiss Resort",
+        "city": "Garmisch, GM",
+        "pocket": 0,
+        "pax": 4
+      },
+      {
+        "id": "e6d8e4fd-b46f-4724-b927-588dbb52441c",
+        "checkIn": "2026-04-03",
+        "nights": 1,
+        "name": "Apartment (Bad Wörishofen)",
+        "city": "Bad Worishofen, GM",
+        "pocket": 17800,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "parking": {
+        "usd": 4200,
+        "eur": 3500,
+        "eurKnown": true,
+        "rows": [
+          "Munich (2nd amount) $42.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 88900,
+        "eur": 77100,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment / Wow $103.00",
+          "Salzburg / Entertainment $100.00",
+          "Entertainment $160.00",
+          "Entertainment $60.00",
+          "ThermaBad or skyline park $236.00",
+          "Legoland $230.00"
+        ]
+      },
+      "transport": {
+        "usd": 2400,
+        "eur": 2000,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment / Wow (2nd amount) $24.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 81200,
+        "eur": 74400,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant / Food $130.00",
+          "Restaurant / Food $174.00",
+          "Restaurant / Food $161.00",
+          "Garmisch Breakfast $40.00",
+          "Restaurant / Food $140.00",
+          "Restaurant / Food $118.00",
+          "Restaurant / Food $49.00"
+        ]
+      },
+      "fuel_tolls": {
+        "usd": 14128,
+        "eur": 13100,
+        "eurKnown": true,
+        "rows": [
+          "Fuel $28.27",
+          "Fuel $57.51",
+          "Fuel $55.50"
+        ]
+      }
+    },
+    "flags": [
+      "“Munich”: an amount sat in the Start/End Time columns ($42.00) — counted under parking.",
+      "“Entertainment / Wow”: an amount sat in the Start/End Time columns ($24.00) — counted under transport."
+    ],
+    "sheetTotal": 217028,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 223628,
+    "parts": {
+      "flights": 0,
+      "stays": 32800,
+      "rentals": 0,
+      "misc": 190828
+    }
+  },
+  {
+    "name": "Mainz · Mar 2026",
+    "startOn": "2026-03-06",
+    "endOn": "2026-03-08",
+    "source": "Europe log · Mainz Trip 6 -8 Mar 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "74f07e1a-a8c1-44b1-9b6e-ad0b1069ddcc",
+        "checkIn": "2026-03-06",
+        "nights": 1,
+        "name": "Me and All Hotel Mainz",
+        "city": "Mainz, GM",
+        "pocket": 0,
+        "pax": 2
+      },
+      {
+        "id": "a9ca6138-e75a-4489-97e0-b7a679831557",
+        "checkIn": "2026-03-06",
+        "nights": 1,
+        "name": "Me and All Hotel Mainz",
+        "city": "Mainz, GM",
+        "pocket": 0,
+        "pax": 3
+      },
+      {
+        "id": "0ed24bff-87a1-4b29-9307-1ba0f81b9c34",
+        "checkIn": "2026-03-07",
+        "nights": 1,
+        "name": "NH Mannheim Viernheim",
+        "city": "Viernheim, GM",
+        "pocket": 0,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 4700,
+        "eur": 4200,
+        "eurKnown": true,
+        "rows": [
+          "Drive $47.00"
+        ]
+      },
+      "groceries": {
+        "usd": 10100,
+        "eur": 8500,
+        "eurKnown": true,
+        "rows": [
+          "Resturants/Groceries $101.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 39200,
+        "eur": 33500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $60.00",
+          "Entertainment skydiving $226.00",
+          "Entertainment Miramar Pool $106.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 24600,
+        "eur": 21100,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $156.00",
+          "Resturants $90.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 78600,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 78600,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 78600
+    }
+  },
+  {
+    "name": "Lake Titisee · Feb 2026",
+    "startOn": "2026-02-13",
+    "endOn": "2026-02-15",
+    "source": "Europe log · Lake Titisee Trip 13 -15 Feb 2026",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "6e0d6830-fc1a-472d-a2ca-656d31443460",
+        "checkIn": "2026-02-13",
+        "nights": 2,
+        "name": "Vogelnescht19 (Lake Titisee)",
+        "city": "Lake Titisee, GM",
+        "pocket": 0,
+        "pax": 4
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 5000,
+        "eur": 4500,
+        "eurKnown": true,
+        "rows": [
+          "Drive $50.00"
+        ]
+      },
+      "groceries": {
+        "usd": 21500,
+        "eur": 18300,
+        "eurKnown": true,
+        "rows": [
+          "Resturants/Groceries $75.00",
+          "Resturants/Groceries $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 27700,
+        "eur": 23500,
+        "eurKnown": true,
+        "rows": [
+          "Thermabad $171.00",
+          "Sled $26.00",
+          "Indoor course $80.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 54200,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 54200,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 54200
+    }
+  },
+  {
+    "name": "Spain · Dec 2025",
+    "startOn": "2025-12-17",
+    "endOn": "2025-12-26",
+    "source": "Spain log · Spain Trip (17 Dec 25) - (26 Dec 25)",
+    "flights": [
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2025-12-17",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": null,
+            "arrives": null
+          },
+          {
+            "flightOn": "2025-12-26",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Johana",
+            "fareCents": 34750,
+            "fareEurCents": 32050
+          },
+          {
+            "name": "Ben",
+            "fareCents": 34750,
+            "fareEurCents": 32050
+          }
+        ],
+        "remarks": "Imported from sheet"
+      },
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2025-12-17",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": null,
+            "arrives": null
+          },
+          {
+            "flightOn": "2025-12-26",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 26433,
+            "fareEurCents": 24400
+          },
+          {
+            "name": "Leo",
+            "fareCents": 26433,
+            "fareEurCents": 24400
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 26433,
+            "fareEurCents": 24400
+          }
+        ],
+        "remarks": "Imported from sheet"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "7df9e436-2adb-4fe0-9418-9ad43924aeda",
+        "checkIn": "2025-12-18",
+        "nights": 1,
+        "name": "Gran Hotel Miramar Malaga",
+        "city": "Malaga, Spain",
+        "pocket": 3600,
+        "pax": 2
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "other": {
+        "usd": 106000,
+        "eur": 90000,
+        "eurKnown": true,
+        "rows": [
+          "Christmas gifts $586.00",
+          "Thank-you cash to family for hosting $474.00"
+        ]
+      },
+      "cash": {
+        "usd": 23800,
+        "eur": 20000,
+        "eurKnown": true,
+        "rows": [
+          "Euros on Hand $238.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 26700,
+        "eur": 22800,
+        "eurKnown": true,
+        "rows": [
+          "Restaurants $267.00"
+        ]
+      },
+      "groceries": {
+        "usd": 11900,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Grocery $119.00"
+        ]
+      }
+    },
+    "flags": [
+      "Eurowings mom / Ben: flight dates set to the trip's first/last day and the $695.00 split evenly across 2 — adjust per person.",
+      "Eurowings Dad / Leo / Hannah: flight dates set to the trip's first/last day and the $793.00 split evenly across 3 — adjust per person."
+    ],
+    "sheetTotal": 317200,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 320799,
+    "parts": {
+      "flights": 148799,
+      "stays": 3600,
+      "rentals": 0,
+      "misc": 168400
+    }
+  },
+  {
+    "name": "Frankfurt / Weinheim · Oct 2025",
+    "startOn": "2025-10-11",
+    "endOn": "2025-10-13",
+    "source": "Europe log · Frankfurt / Weinheim Trip 11 -13 Oct 2025",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "1b57d71f-869c-4515-b145-5dc6fce9e276",
+        "checkIn": "2025-10-11",
+        "nights": 1,
+        "name": "Hilton Frankfurt Gravenbruch",
+        "city": "Frankfurt, GM",
+        "pocket": 15200,
+        "pax": 5
+      },
+      {
+        "id": "2517ea53-ac71-498f-86c0-04f4bec9ba90",
+        "checkIn": "2025-10-12",
+        "nights": 1,
+        "name": "NH Mannheim-Viernheim",
+        "city": "Veirnheim, GM",
+        "pocket": 0,
+        "pax": null
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 4400,
+        "eur": 3800,
+        "eurKnown": true,
+        "rows": [
+          "Drive $44.00"
+        ]
+      },
+      "groceries": {
+        "usd": 16300,
+        "eur": 14000,
+        "eurKnown": true,
+        "rows": [
+          "Resturants/Groceries $163.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 16200,
+        "eur": 14500,
+        "eurKnown": true,
+        "rows": [
+          "Nature Musuem $35.00",
+          "Entertainment / Water Park $127.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 12300,
+        "eur": 10900,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $112.00",
+          "Resturants $11.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 64200,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 64400,
+    "parts": {
+      "flights": 0,
+      "stays": 15200,
+      "rentals": 0,
+      "misc": 49200
+    }
+  },
+  {
+    "name": "Frankfurt / Speyer · Aug 2025",
+    "startOn": "2025-08-30",
+    "endOn": "2025-09-01",
+    "source": "Europe log · Frankfurt / Speyer Trip 30 - 1 Aug/Sep 2025",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "0450c0c7-0fd9-4590-9f96-878c093f9ab9",
+        "checkIn": "2025-08-30",
+        "nights": 1,
+        "name": "Hilton Frankfurt Gravenbruch",
+        "city": "Frankfurt, GM",
+        "pocket": 10500,
+        "pax": 5
+      },
+      {
+        "id": "883c3a32-a871-4f1e-8bc8-0a4293dc1743",
+        "checkIn": "2025-08-31",
+        "nights": 1,
+        "name": "Hotel Löwengarten (Delta Stay)",
+        "city": "Speyer, GM",
+        "pocket": 8300,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 5000,
+        "eur": 4500,
+        "eurKnown": true,
+        "rows": [
+          "Drive $50.00"
+        ]
+      },
+      "groceries": {
+        "usd": 12500,
+        "eur": 11000,
+        "eurKnown": true,
+        "rows": [
+          "Resturants/Groceries $125.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 21700,
+        "eur": 18500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $21.00",
+          "Entertainment / Holiday park $196.00"
+        ]
+      },
+      "other": {
+        "usd": 6800,
+        "eur": 5200,
+        "eurKnown": true,
+        "rows": [
+          "Souvenirs $23.00",
+          "Ludswigburg $45.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 26900,
+        "eur": 23000,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $176.00",
+          "Resturants $93.00"
+        ]
+      }
+    },
+    "flags": [
+      "“Ludswigburg” ($45.00) didn't match a category — put under Gifts & other."
+    ],
+    "sheetTotal": 91700,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 91700,
+    "parts": {
+      "flights": 0,
+      "stays": 18800,
+      "rentals": 0,
+      "misc": 72900
+    }
+  },
+  {
+    "name": "Lake Constance / Italy · Jul 2025",
+    "startOn": "2025-07-04",
+    "endOn": "2025-07-11",
+    "source": "Europe log · Lake Constance / Italy 4 - 11 July 2025",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "a461f5ba-30df-4cee-9797-b16cd6eaf6ab",
+        "checkIn": "2025-07-04",
+        "nights": 2,
+        "name": "Gute Laune Lake Constance",
+        "city": "Lake Constance, GM",
+        "pocket": 43500,
+        "pax": 5
+      },
+      {
+        "id": "d8ebb7f2-a680-4ec6-8007-149250672278",
+        "checkIn": "2025-07-06",
+        "nights": 1,
+        "name": "Hotel Tautermann",
+        "city": "Innsbruck, Austria",
+        "pocket": 20000,
+        "pax": 4
+      },
+      {
+        "id": "d3c2e67c-b70e-42bb-b29c-7cedbfb5b2c6",
+        "checkIn": "2025-07-07",
+        "nights": 2,
+        "name": "Garda View Apartment",
+        "city": "Lake Garda, IT",
+        "pocket": 36800,
+        "pax": 4
+      },
+      {
+        "id": "013ea960-2916-4d48-ae24-0f44e9939300",
+        "checkIn": "2025-07-09",
+        "nights": 1,
+        "name": "Ferienwohnung Kerschbaumer",
+        "city": "Noslach, Austria",
+        "pocket": 25000,
+        "pax": 4
+      },
+      {
+        "id": "e6293598-0ece-4409-b963-5fbc67f7dfa7",
+        "checkIn": "2025-07-10",
+        "nights": 1,
+        "name": "Hampton Munich City West",
+        "city": "Munich, GM",
+        "pocket": 0,
+        "pax": 2
+      },
+      {
+        "id": "ebe59c48-ab12-4ac0-9bf7-70be6ed07137",
+        "checkIn": "2025-07-10",
+        "nights": 1,
+        "name": "Hampton Munich City West",
+        "city": "Munich, GM",
+        "pocket": 12800,
+        "pax": 3
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 26000,
+        "eur": 20900,
+        "eurKnown": true,
+        "rows": [
+          "Drive / Fuel (Lake) $40.00",
+          "Drive / Fuel to Innsbruck $40.00",
+          "Tolls $30.00",
+          "Fuel $71.00",
+          "Tolls $12.00",
+          "Tolls $14.00",
+          "Drive back home/ fuel $53.00"
+        ]
+      },
+      "cash": {
+        "usd": 7100,
+        "eur": 6000,
+        "eurKnown": true,
+        "rows": [
+          "Cash $71.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 34900,
+        "eur": 29250,
+        "eurKnown": true,
+        "rows": [
+          "Monkey Salem $60.00",
+          "Entertainment $60.00",
+          "Entertainment $21.00",
+          "Entertainment $60.00",
+          "Entertainment $21.00",
+          "Entertainment $106.00",
+          "Musuem Art $21.00"
+        ]
+      },
+      "groceries": {
+        "usd": 24500,
+        "eur": 20000,
+        "eurKnown": true,
+        "rows": [
+          "Groceries $64.00",
+          "Groceries $58.00",
+          "Groceries $66.00",
+          "Groceries $57.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 80355,
+        "eur": 70600,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $116.00",
+          "Restaurant $136.28",
+          "Restaurant $112.00",
+          "Restaurant $165.00",
+          "Restaurant $88.00",
+          "Restaurant $76.27",
+          "Restaurant $110.00"
+        ]
+      },
+      "parking": {
+        "usd": 2100,
+        "eur": 1550,
+        "eurKnown": true,
+        "rows": [
+          "Parking $5.00",
+          "Parking $13.00",
+          "Entertainment/parking $3.00"
+        ]
+      },
+      "transport": {
+        "usd": 2200,
+        "eur": 1800,
+        "eurKnown": true,
+        "rows": [
+          "Public transport $22.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 317743,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 315255,
+    "parts": {
+      "flights": 0,
+      "stays": 138100,
+      "rentals": 0,
+      "misc": 177155
+    }
+  },
+  {
+    "name": "Lake Titisee · Jun 2025",
+    "startOn": "2025-06-19",
+    "endOn": "2025-06-21",
+    "source": "Europe log · Lake Titisee Trip 19 - 21 June 2025",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "30f17582-c7c0-427d-935e-968bf5a0ba6c",
+        "checkIn": "2025-06-19",
+        "nights": 2,
+        "name": "Lake Titisee apartment",
+        "city": "Lake Titisee, GM",
+        "pocket": 23200,
+        "pax": 4
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 5000,
+        "eur": 4500,
+        "eurKnown": true,
+        "rows": [
+          "Drive $50.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 32000,
+        "eur": 26500,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $110.00",
+          "Resturants $110.00",
+          "Resturants $100.00"
+        ]
+      },
+      "cash": {
+        "usd": 11000,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Cash $110.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 17500,
+        "eur": 16000,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment / park $55.00",
+          "Entertainment / Pool $120.00"
+        ]
+      },
+      "groceries": {
+        "usd": 10000,
+        "eur": 8500,
+        "eurKnown": true,
+        "rows": [
+          "Groceries $100.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 100000,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 98700,
+    "parts": {
+      "flights": 0,
+      "stays": 23200,
+      "rentals": 0,
+      "misc": 75500
+    }
+  },
+  {
+    "name": "Augsburg / Munich · May 2025",
+    "startOn": "2025-05-24",
+    "endOn": "2025-05-26",
+    "source": "Europe log · Augsburg / Munich Trip 24 - 26 May 2025",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "25c99ea8-d9bd-412f-b2ed-c7ec4b912373",
+        "checkIn": "2025-05-24",
+        "nights": 1,
+        "name": "Garner Augsburg Nord (IHG)",
+        "city": "Augsburg, GM",
+        "pocket": 10000,
+        "pax": 3
+      },
+      {
+        "id": "6b899b6f-0d49-41e7-a9c7-541078d35404",
+        "checkIn": "2025-05-24",
+        "nights": 1,
+        "name": "Garner Augsburg Nord (IHG)",
+        "city": "Augsburg, GM",
+        "pocket": 7300,
+        "pax": 2
+      },
+      {
+        "id": "9bcf7b50-157b-466d-863e-cf431a1f46e1",
+        "checkIn": "2025-05-25",
+        "nights": 1,
+        "name": "Courtyard Munich City Center",
+        "city": "Munich, GM",
+        "pocket": 11200,
+        "pax": 2
+      },
+      {
+        "id": "4d70b952-90ad-4b49-ab29-b009eff859a5",
+        "checkIn": "2025-05-25",
+        "nights": 1,
+        "name": "Courtyard Munich City Center",
+        "city": "Munich, GM",
+        "pocket": 0,
+        "pax": 3
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 4400,
+        "eur": 3800,
+        "eurKnown": true,
+        "rows": [
+          "Drive to Ulm/Augsburg $44.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 23000,
+        "eur": 20000,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $80.00",
+          "Resturants $80.00",
+          "Resturants $70.00"
+        ]
+      },
+      "cash": {
+        "usd": 11000,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Cash $110.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 5500,
+        "eur": 4500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $55.00"
+        ]
+      },
+      "groceries": {
+        "usd": 10000,
+        "eur": 8500,
+        "eurKnown": true,
+        "rows": [
+          "Groceries $100.00"
+        ]
+      },
+      "parking": {
+        "usd": 3600,
+        "eur": 3100,
+        "eurKnown": true,
+        "rows": [
+          "Parking $36.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 86100,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 86000,
+    "parts": {
+      "flights": 0,
+      "stays": 28500,
+      "rentals": 0,
+      "misc": 57500
+    }
+  },
+  {
+    "name": "Amsterdam Rodeo · Apr 2025",
+    "startOn": "2025-04-01",
+    "endOn": "2025-04-06",
+    "source": "Europe log · Amsterdam Rodeo 1 - 6 APR 2025",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "e827efa1-f42a-4710-ae18-daad34eec1cc",
+        "checkIn": "2025-04-01",
+        "nights": 1,
+        "name": "Terrace&Parking-Limp56",
+        "city": "Luxembourg, LM",
+        "pocket": 23000,
+        "pax": 4
+      },
+      {
+        "id": "ef64d1aa-da3b-4ce0-8829-01dba4e173fd",
+        "checkIn": "2025-04-02",
+        "nights": 1,
+        "name": "YOOMA Urban Lodge",
+        "city": "Brussels, BG",
+        "pocket": 3400,
+        "pax": 5
+      },
+      {
+        "id": "50fd0fa9-642b-4f21-a0ed-d90f7f746c78",
+        "checkIn": "2025-04-03",
+        "nights": 1,
+        "name": "Hampton by Hilton Amsterdam",
+        "city": "Amsterdam, ND",
+        "pocket": 0,
+        "pax": 3
+      },
+      {
+        "id": "b8ad8e30-3830-4866-b24b-61cf68830aa8",
+        "checkIn": "2025-04-03",
+        "nights": 1,
+        "name": "Hampton by Hilton Amsterdam",
+        "city": "Amsterdam, ND",
+        "pocket": 14500,
+        "pax": 2
+      },
+      {
+        "id": "3da17f10-de09-4476-bcd0-0351100192cb",
+        "checkIn": "2025-04-04",
+        "nights": 1,
+        "name": "Holiday Inn Dusseldorf Toulouser All",
+        "city": "Dusseldorf, GM",
+        "pocket": 12000,
+        "pax": 4
+      },
+      {
+        "id": "545014a4-21a7-4889-a1ad-f07808175e70",
+        "checkIn": "2025-04-05",
+        "nights": 1,
+        "name": "Lindner Hotel Frankfurt Main Plaza",
+        "city": "Frankfurt, GM",
+        "pocket": 0,
+        "pax": 3
+      },
+      {
+        "id": "ff72f937-34fe-4257-9bfe-2fc244ceca59",
+        "checkIn": "2025-04-05",
+        "nights": 1,
+        "name": "Lindner Hotel Frankfurt Main Plaza",
+        "city": "Frankfurt, GM",
+        "pocket": 11500,
+        "pax": 2
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 31515,
+        "eur": 28200,
+        "eurKnown": true,
+        "rows": [
+          "Drive / Fuel (Luxemburg) $41.46",
+          "Fuel $50.69",
+          "LEZ Fee $76.00",
+          "Drive / Fuel (Amsterdam) $70.00",
+          "Drive / Fuel (Dusseldorf) $22.00",
+          "Drive / Fuel (Frankfurt) $55.00"
+        ]
+      },
+      "cash": {
+        "usd": 14000,
+        "eur": 12300,
+        "eurKnown": true,
+        "rows": [
+          "Cash $140.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 54578,
+        "eur": 48900,
+        "eurKnown": true,
+        "rows": [
+          "Homburg Cave $22.00",
+          "Bastogne War Museum $86.66",
+          "Entertainment $78.85",
+          "Keukenhof Tulip $86.00",
+          "Entertainment $140.00",
+          "Aquarium $28.00",
+          "Entertainment $46.86",
+          "Zoo $32.22",
+          "Entertainment $25.19"
+        ]
+      },
+      "parking": {
+        "usd": 13401,
+        "eur": 11600,
+        "eurKnown": true,
+        "rows": [
+          "Parking $37.01",
+          "Parking $40.00",
+          "Parking $26.00",
+          "Parking $31.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 34999,
+        "eur": 33100,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $59.00",
+          "Restaurant $134.00",
+          "Restaurant $83.00",
+          "Restaurant $73.99"
+        ]
+      },
+      "groceries": {
+        "usd": 9231,
+        "eur": 8000,
+        "eurKnown": true,
+        "rows": [
+          "Supermarket $40.00",
+          "Supermarket $52.31"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 223324,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 222124,
+    "parts": {
+      "flights": 0,
+      "stays": 64400,
+      "rentals": 0,
+      "misc": 157724
+    }
+  },
+  {
+    "name": "Garmisch / Austria · Dec 2024",
+    "startOn": "2024-12-26",
+    "endOn": "2024-12-29",
+    "source": "Europe log · Garmisch - Austria Trip 26 - 28 Dec 2024",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "056818b8-3182-4998-bab1-d315731ca31a",
+        "checkIn": "2024-12-26",
+        "nights": 2,
+        "name": "Stressless Apartment",
+        "city": "Garmisch, GM",
+        "pocket": 39000,
+        "pax": 5
+      },
+      {
+        "id": "7a56d64c-e326-4453-846a-43284c7f7462",
+        "checkIn": "2024-12-28",
+        "nights": 1,
+        "name": "das flax allgäu",
+        "city": "Dietmannsried, GM",
+        "pocket": 18600,
+        "pax": 5
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 7797,
+        "eur": 7000,
+        "eurKnown": true,
+        "rows": [
+          "Drive $77.97"
+        ]
+      },
+      "entertainment": {
+        "usd": 45300,
+        "eur": 42900,
+        "eurKnown": true,
+        "rows": [
+          "THERME Bad Wörishofen $100.00",
+          "Ski Lifts $69.00",
+          "Ski Lifts / non $41.00",
+          "Ski Lesson $160.00",
+          "Reptile Zoo $47.00",
+          "Donaubad Pool $36.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 35595,
+        "eur": 33000,
+        "eurKnown": true,
+        "rows": [
+          "Resturants $100.00",
+          "Resturants $126.00",
+          "Resturants $19.95",
+          "Resturants $110.00"
+        ]
+      },
+      "cash": {
+        "usd": 11000,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Cash $110.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 156492,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 157292,
+    "parts": {
+      "flights": 0,
+      "stays": 57600,
+      "rentals": 0,
+      "misc": 99692
+    }
+  },
+  {
+    "name": "Spain · Summer 2024",
+    "startOn": "2024-06-28",
+    "endOn": "2024-07-10",
+    "source": "Spain log · Spain Trip 28 June - 10 July 2024",
+    "flights": [
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2024-06-28",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": null,
+            "arrives": null
+          },
+          {
+            "flightOn": "2024-07-10",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 30100,
+            "fareEurCents": 29300
+          },
+          {
+            "name": "Johana",
+            "fareCents": 30100,
+            "fareEurCents": 29300
+          },
+          {
+            "name": "Leo",
+            "fareCents": 30100,
+            "fareEurCents": 29300
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 30100,
+            "fareEurCents": 29300
+          },
+          {
+            "name": "Ben",
+            "fareCents": 30100,
+            "fareEurCents": 29300
+          }
+        ],
+        "remarks": "Imported from sheet"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "deaa7f80-0f15-4c6e-be9a-e7c61af6d96c",
+        "checkIn": "2024-07-02",
+        "nights": 1,
+        "name": "Crisol Guadalupe",
+        "city": "Granda, Spain",
+        "pocket": 8900,
+        "pax": null
+      },
+      {
+        "id": "543725e7-6243-420b-86c9-28af963f64c7",
+        "checkIn": "2024-07-03",
+        "nights": 1,
+        "name": "Westin Marriott Madrid",
+        "city": "Madrid, Spain",
+        "pocket": 5000,
+        "pax": null
+      },
+      {
+        "id": "08e9f8ac-b540-430c-afcf-75efff702188",
+        "checkIn": "2024-07-04",
+        "nights": 1,
+        "name": "Alcorcon Madrid",
+        "city": "Madrid, Spain",
+        "pocket": 0,
+        "pax": null
+      },
+      {
+        "id": "2fd0a1a0-20ef-410f-b2c9-4971b10dc28c",
+        "checkIn": "2024-07-05",
+        "nights": 1,
+        "name": "Eurostars Maimónides",
+        "city": "Cordoba, Spain",
+        "pocket": 10200,
+        "pax": null
+      }
+    ],
+    "rentals": [
+      {
+        "company": "Malagacar.com",
+        "bookingCode": "1545374",
+        "pickupOn": "2024-06-28",
+        "returnOn": "2024-07-10",
+        "costCents": 23100,
+        "costEurCents": 22000
+      }
+    ],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 15200,
+        "eur": 14800,
+        "eurKnown": true,
+        "rows": [
+          "Fuel $152.00"
+        ]
+      },
+      "other": {
+        "usd": 103000,
+        "eur": 95500,
+        "eurKnown": true,
+        "rows": [
+          "Summer Camp $451.00",
+          "1July expenses $55.00",
+          "Granda $66.00",
+          "Madrid $250.00",
+          "Cordoba $130.00",
+          "6/9July expenses $78.00"
+        ]
+      },
+      "cash": {
+        "usd": 48900,
+        "eur": 46000,
+        "eurKnown": true,
+        "rows": [
+          "Euros on Hand $270.00",
+          "Wise Euros $219.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 23500,
+        "eur": 22500,
+        "eurKnown": true,
+        "rows": [
+          "Restaurants $235.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 11100,
+        "eur": 10500,
+        "eurKnown": true,
+        "rows": [
+          "Entertainment $111.00"
+        ]
+      }
+    },
+    "flags": [
+      "Eurowings Family: flight dates set to the trip's first/last day and the $1,505.00 split evenly across 5 — adjust per person.",
+      "Rental car pick-up/return set to the trip's dates — adjust if different."
+    ],
+    "sheetTotal": 398800,
+    "skippedHotelRows": [
+      "Granda Hotel $90.00 — covered by the stays already logged",
+      "Madrid Hotel $43.00 — covered by the stays already logged",
+      "Cordoba Hotel $102.00 — covered by the stays already logged"
+    ],
+    "status": "actual",
+    "importTotal": 399400,
+    "parts": {
+      "flights": 150500,
+      "stays": 24100,
+      "rentals": 23100,
+      "misc": 201700
+    }
+  },
+  {
+    "name": "Rhine / Cologne / Frankfurt · Jun 2024",
+    "startOn": "2024-06-19",
+    "endOn": "2024-06-22",
+    "source": "Europe log · Rhine/Cologne/Frankfurt 19 - 21 June 2024",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "399ef841-dc8e-48e7-b831-575ff8208934",
+        "checkIn": "2024-06-19",
+        "nights": 1,
+        "name": "TraumWohnung-Rhein",
+        "city": "Oberwesel, GM",
+        "pocket": 13500,
+        "pax": 5
+      },
+      {
+        "id": "e12ff64c-9d71-4410-9364-8dc40d6d25f2",
+        "checkIn": "2024-06-20",
+        "nights": 1,
+        "name": "Lindner Hotel Cologne Am Dom",
+        "city": "Cologne, GM",
+        "pocket": 0,
+        "pax": null
+      },
+      {
+        "id": "53788a6c-8395-48a5-90c3-f8b5198af49f",
+        "checkIn": "2024-06-21",
+        "nights": 1,
+        "name": "Holiday Inn Express Frankfurt - Messe",
+        "city": "Frankfurt, GM",
+        "pocket": 0,
+        "pax": 4
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 6000,
+        "eur": 5000,
+        "eurKnown": true,
+        "rows": [
+          "Drive / Fuel $60.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 34000,
+        "eur": 33500,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $70.00",
+          "Restaurant $70.00",
+          "Restaurant $70.00",
+          "Restaurant $60.00",
+          "Resturants $70.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 53500,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 53500,
+    "parts": {
+      "flights": 0,
+      "stays": 13500,
+      "rentals": 0,
+      "misc": 40000
+    }
+  },
+  {
+    "name": "Switzerland · May 2024",
+    "startOn": "2024-05-24",
+    "endOn": "2024-05-27",
+    "source": "Europe log · Switzerland Trip 24 - 27 May 2024",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "61bdc2c1-83be-42e9-b172-e828619899ef",
+        "checkIn": "2024-05-24",
+        "nights": 1,
+        "name": "Hotel Spatz",
+        "city": "Lucerne, Switzerland",
+        "pocket": 34700,
+        "pax": null
+      },
+      {
+        "id": "f8ddd99c-895e-488f-8295-bdeaf925ec0b",
+        "checkIn": "2024-05-25",
+        "nights": 1,
+        "name": "Swiss Lodge Hotel Bernerhof",
+        "city": "Wengen, Switzerland",
+        "pocket": 24300,
+        "pax": 4
+      },
+      {
+        "id": "7247dd6b-49a5-4c30-8ec2-4d87a2abffe1",
+        "checkIn": "2024-05-26",
+        "nights": 1,
+        "name": "ibis Zürich City West",
+        "city": "Zurich, Switzerland",
+        "pocket": 21500,
+        "pax": 4
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "transport": {
+        "usd": 62286,
+        "eur": 55200,
+        "eurKnown": true,
+        "rows": [
+          "Stuttgart - Lucern $82.86",
+          "Lucern - Wengen $190.00",
+          "Interlaken Express $92.00",
+          "Wengen - Zurich $190.00",
+          "Tram $18.00",
+          "Zurich - Stuttgart $50.00"
+        ]
+      },
+      "cash": {
+        "usd": 8800,
+        "eur": 7200,
+        "eurKnown": true,
+        "rows": [
+          "Cash $88.00"
+        ]
+      },
+      "other": {
+        "usd": 1200,
+        "eur": 900,
+        "eurKnown": true,
+        "rows": [
+          "Locker $12.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 50100,
+        "eur": 42000,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $112.00",
+          "Luzern $43.00",
+          "Interlaken $40.00",
+          "Resturants (Lauterbrunnen) $96.00",
+          "Wengen $40.00",
+          "Resturants (Zurich) $100.00",
+          "Lunch $70.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 20700,
+        "eur": 19500,
+        "eurKnown": true,
+        "rows": [
+          "Eiger Express Lift $207.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 229586,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 223586,
+    "parts": {
+      "flights": 0,
+      "stays": 80500,
+      "rentals": 0,
+      "misc": 143086
+    }
+  },
+  {
+    "name": "Spring Break · Mar 2024",
+    "startOn": "2024-03-22",
+    "endOn": "2024-03-30",
+    "source": "Europe log · Spring Break 22 - 30 March 2024",
+    "flights": [],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "db9da14e-4c9d-4548-b187-c6354a5a76d0",
+        "checkIn": "2024-03-26",
+        "nights": 1,
+        "name": "Hampton by Hilton Konstanz",
+        "city": "Konstanz, GM",
+        "pocket": 12200,
+        "pax": null
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "fuel_tolls": {
+        "usd": 12200,
+        "eur": 10800,
+        "eurKnown": true,
+        "rows": [
+          "Drive / Fuel $45.00",
+          "Drive / Fuel $42.00",
+          "Drive / Fuel $35.00"
+        ]
+      },
+      "entertainment": {
+        "usd": 22700,
+        "eur": 20600,
+        "eurKnown": true,
+        "rows": [
+          "Legoland $195.00",
+          "Donabaud Pool $32.00"
+        ]
+      },
+      "restaurants": {
+        "usd": 19000,
+        "eur": 17500,
+        "eurKnown": true,
+        "rows": [
+          "Restaurant $60.00",
+          "Restaurant $60.00",
+          "Restaurant $70.00"
+        ]
+      }
+    },
+    "flags": [],
+    "sheetTotal": 67000,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 66100,
+    "parts": {
+      "flights": 0,
+      "stays": 12200,
+      "rentals": 0,
+      "misc": 53900
+    }
+  },
+  {
+    "name": "Spain · Summer 2023",
+    "startOn": "2023-06-19",
+    "endOn": "2023-07-31",
+    "source": "Spain log · Spain Trip 19 June - 31 July 2023",
+    "flights": [
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2023-06-19",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": null,
+            "arrives": null
+          },
+          {
+            "flightOn": "2023-07-31",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 24200,
+            "fareEurCents": 22740
+          },
+          {
+            "name": "Johana",
+            "fareCents": 24200,
+            "fareEurCents": 22740
+          },
+          {
+            "name": "Leo",
+            "fareCents": 24200,
+            "fareEurCents": 22740
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 24200,
+            "fareEurCents": 22740
+          },
+          {
+            "name": "Ben",
+            "fareCents": 24200,
+            "fareEurCents": 22740
+          }
+        ],
+        "remarks": "Imported from sheet"
+      },
+      {
+        "airline": "Eurowings",
+        "legs": [
+          {
+            "flightOn": "2023-06-19",
+            "from": "Stuttgart",
+            "to": "Málaga",
+            "departs": null,
+            "arrives": null
+          },
+          {
+            "flightOn": "2023-07-31",
+            "from": "Málaga",
+            "to": "Stuttgart",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 30200,
+            "fareEurCents": 26200
+          }
+        ],
+        "remarks": "Imported from sheet"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [
+      {
+        "id": "ac8e1aeb-6092-45d0-959e-ac594b7cff47",
+        "checkIn": "2023-07-25",
+        "nights": 1,
+        "name": "Hotel Giralda Center (Seville)",
+        "city": "Seville, Spain",
+        "pocket": 8000,
+        "pax": null
+      },
+      {
+        "id": "ccdaa76c-28bb-4ab4-b49b-826ec581672f",
+        "checkIn": "2023-07-26",
+        "nights": 1,
+        "name": "Mr & Mrs Smith Gravina 51",
+        "city": "Seville, Spain",
+        "pocket": 0,
+        "pax": null
+      }
+    ],
+    "rentals": [],
+    "misc": {
+      "other": {
+        "usd": 162000,
+        "eur": 150400,
+        "eurKnown": true,
+        "rows": [
+          "Euros Sent $1,150.00",
+          "Summer Camp $470.00"
+        ]
+      },
+      "cash": {
+        "usd": 71900,
+        "eur": 60000,
+        "eurKnown": true,
+        "rows": [
+          "Euros on Hand $438.00",
+          "Euros $281.00"
+        ]
+      },
+      "transport": {
+        "usd": 10700,
+        "eur": 10000,
+        "eurKnown": true,
+        "rows": [
+          "Sevilla Travel $107.00"
+        ]
+      }
+    },
+    "flags": [
+      "Eurowings Family: flight dates set to the trip's first/last day and the $1,210.00 split evenly across 5 — adjust per person.",
+      "Eurowings Vic: flight dates set to the trip's first/last day and the $302.00 split evenly across 1 — adjust per person."
+    ],
+    "sheetTotal": 403800,
+    "skippedHotelRows": [
+      "Sevilla Hotel $80.00 — covered by the stays already logged"
+    ],
+    "status": "actual",
+    "importTotal": 403800,
+    "parts": {
+      "flights": 151200,
+      "stays": 8000,
+      "rentals": 0,
+      "misc": 244600
+    }
+  },
+  {
+    "name": "Spain · Dec 2018",
+    "startOn": "2018-12-01",
+    "endOn": "2018-12-31",
+    "source": "Spain log · Spain Trip Dec 2018",
+    "flights": [
+      {
+        "airline": "Delta",
+        "legs": [
+          {
+            "flightOn": "2018-12-01",
+            "from": "TPA",
+            "to": "Barcelona",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 175260,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 116000
+          },
+          {
+            "name": "Johana",
+            "fareCents": 175260,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 116000
+          },
+          {
+            "name": "Leo",
+            "fareCents": 175260,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 116000
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 175260,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 116000
+          },
+          {
+            "name": "Ben",
+            "fareCents": 175260,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 116000
+          }
+        ],
+        "cardLabel": "Delta",
+        "pointsValue": 0.0151,
+        "pocketCents": 28175,
+        "remarks": "Imported from sheet: 580,000 pts at $0.0151/pt, cash price $8,763.00"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [],
+    "rentals": [],
+    "misc": {},
+    "flags": [
+      "Delta points trip: 580,000 pts and the $8,763.00 cash price are split evenly across 5 passengers (the sheet has no per-person split). No card balance changes.",
+      "The sheet only says “Dec 2018” — the trip is dated 1–31 Dec 2018; set the real dates in the Trip Log."
+    ],
+    "sheetTotal": null,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 28175,
+    "parts": {
+      "flights": 28175,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 0
+    }
+  },
+  {
+    "name": "Panama · Dec 2017",
+    "startOn": "2017-12-13",
+    "endOn": "2017-12-27",
+    "source": "Spain log · Panama Trip Dec 13 - 27 2017",
+    "flights": [
+      {
+        "airline": "Airline (booked via Chase)",
+        "legs": [
+          {
+            "flightOn": "2017-12-13",
+            "from": "TPA",
+            "to": "Panama City",
+            "departs": null,
+            "arrives": null
+          }
+        ],
+        "passengers": [
+          {
+            "name": "Victor",
+            "fareCents": 45000,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 36000
+          },
+          {
+            "name": "Johana",
+            "fareCents": 45000,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 36000
+          },
+          {
+            "name": "Leo",
+            "fareCents": 45000,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 36000
+          },
+          {
+            "name": "Hannah",
+            "fareCents": 45000,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 36000
+          },
+          {
+            "name": "Ben",
+            "fareCents": 45000,
+            "fareEurCents": null,
+            "pointsUsed": true,
+            "pointsCost": 36000
+          }
+        ],
+        "cardLabel": "Chase",
+        "pointsValue": 0.0125,
+        "pocketCents": 0,
+        "remarks": "Imported from sheet: 180,000 pts at $0.0125/pt, cash price $2,250.00"
+      }
+    ],
+    "newStays": [],
+    "linkedStays": [],
+    "rentals": [],
+    "misc": {},
+    "flags": [
+      "Chase points trip: 180,000 pts and the $2,250.00 cash price are split evenly across 5 passengers (the sheet has no per-person split). No card balance changes."
+    ],
+    "sheetTotal": null,
+    "skippedHotelRows": [],
+    "status": "actual",
+    "importTotal": 0,
+    "parts": {
+      "flights": 0,
+      "stays": 0,
+      "rentals": 0,
+      "misc": 0
+    }
+  }
+]

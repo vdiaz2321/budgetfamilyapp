@@ -9,9 +9,8 @@ import { CreditCardRewardsProvider, CreditCardSections, RewardsPointsLog } from 
 import type { CreditCardBoardData } from "@/lib/credit-card-data";
 import { StayModal } from "./stay-modal";
 import { FlightModal } from "./flight-modal";
-import { FlightsPanel } from "./flights-panel";
 import { CarModal } from "./car-modal";
-import { CarsPanel } from "./cars-panel";
+import { TransportLogPanel } from "./transport-log-panel";
 import { TripLogPanel } from "./trip-log-panel";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
@@ -167,6 +166,15 @@ export function TravelBoard({
   const openList = !!listState.open;
   const setOpenList = (fn: (v: boolean) => boolean) =>
     setListState((s) => ({ open: fn(!!s.open) }));
+  // Each upcoming group (hotels, flights, rentals) folds on its own.
+  const [upcomingOpen, setUpcomingOpen] = useSessionCollapse("travel-upcoming", () => ({
+    hotels: true,
+    flights: true,
+    cars: true,
+  }));
+  const toggleUpcoming = (key: "hotels" | "flights" | "cars") =>
+    setUpcomingOpen((s) => ({ ...s, [key]: s[key] === false }));
+  const isUpcomingOpen = (key: "hotels" | "flights" | "cars") => upcomingOpen[key] !== false;
   // The reservations log opened in a popup, where the sheet's full column set
   // has room. Desktop only — see the button in the panel header.
   const [expanded, setExpanded] = useState(false);
@@ -427,6 +435,22 @@ export function TravelBoard({
   // The reservations filter bar, desktop table and mobile card list, built
   // once and rendered in both the inline panel and the full-width popup —
   // they read the same filter/sort state, so the two can never disagree.
+  // The year picker sits in the log's header, beside Open full width — the
+  // same place the Travel Log keeps its own.
+  const yearSelect = (
+    <select
+      aria-label="Hotel Reservations Log year"
+      value={year}
+      onChange={(e) => setYear(e.target.value)}
+      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    >
+      <option value={ALL}>All years</option>
+      {years.map((y) => (
+        <option key={y} value={y}>{y}</option>
+      ))}
+    </select>
+  );
+
   const reservations = (
     <>
               {/* Filters on the left, and the figures the header doesn't carry
@@ -434,19 +458,6 @@ export function TravelBoard({
                   not repeated here. */}
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* The year picker is the dropdown alone: it opens on the year
-                      you're in, and every other year (and all of them) is one
-                      click away without a row of chips across the page. */}
-                  <select
-                    value={year}
-                    onChange={(e) => setYear(e.target.value)}
-                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                  >
-                    <option value={ALL}>All years</option>
-                    {years.map((y) => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
                   <input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -777,6 +788,11 @@ export function TravelBoard({
           allBuckets={rewards.allBuckets}
           travelBrands={rewards.travelBrands}
         >
+          {/* ---- Travel & Credit Card Rewards: the points that pay for the
+               stays below. Moved here from /accounts — Accounts keeps the
+               plain card list and the Pay Card flow. */}
+          <CreditCardSections />
+
           {/* ---- What's still ahead. Sits above the archive because a booking
                you haven't taken yet is the thing you come here to check. */}
           {upcoming.length + upcomingFlights.length + upcomingCars.length > 0 ? (
@@ -784,10 +800,15 @@ export function TravelBoard({
               {/* One card, one group per kind of booking — each group names
                   what it holds instead of a single "Coming up". */}
               {upcoming.length > 0 ? (
-                <UpcomingHeader title="Hotel Reservations" count={upcoming.length} />
+                <UpcomingHeader
+                  title="Hotel Reservations"
+                  count={upcoming.length}
+                  open={isUpcomingOpen("hotels")}
+                  onToggle={() => toggleUpcoming("hotels")}
+                />
               ) : null}
               <ul className="divide-y divide-line">
-                {upcoming.map((s) => (
+                {(isUpcomingOpen("hotels") ? upcoming : []).map((s) => (
                   <li key={s.id}>
                     <button
                       type="button"
@@ -848,9 +869,15 @@ export function TravelBoard({
 
               {upcomingFlights.length > 0 ? (
                 <>
-                  <UpcomingHeader title="Flight Reservations" count={upcomingFlights.length} divided={upcoming.length > 0} />
+                  <UpcomingHeader
+                    title="Flight Reservations"
+                    count={upcomingFlights.length}
+                    divided={upcoming.length > 0}
+                    open={isUpcomingOpen("flights")}
+                    onToggle={() => toggleUpcoming("flights")}
+                  />
                   <ul className="divide-y divide-line">
-                    {upcomingFlights.map(({ flight: f, next }) => {
+                    {(isUpcomingOpen("flights") ? upcomingFlights : []).map(({ flight: f, next }) => {
                       const stops: string[] = [];
                       for (const leg of f.legs) {
                         if (leg.fromPlace && stops[stops.length - 1] !== leg.fromPlace) stops.push(leg.fromPlace);
@@ -899,9 +926,15 @@ export function TravelBoard({
 
               {upcomingCars.length > 0 ? (
                 <>
-                  <UpcomingHeader title="Rental Reservations" count={upcomingCars.length} divided={upcoming.length + upcomingFlights.length > 0} />
+                  <UpcomingHeader
+                    title="Rental Reservations"
+                    count={upcomingCars.length}
+                    divided={upcoming.length + upcomingFlights.length > 0}
+                    open={isUpcomingOpen("cars")}
+                    onToggle={() => toggleUpcoming("cars")}
+                  />
                   <ul className="divide-y divide-line">
-                    {upcomingCars.map((c) => (
+                    {(isUpcomingOpen("cars") ? upcomingCars : []).map((c) => (
                       <li key={c.id}>
                         <button
                           type="button"
@@ -952,20 +985,6 @@ export function TravelBoard({
           {trips.length > 0 ? (
             <TripLogPanel summaries={tripSummaries} currency={currency} onOpenTrip={setOpenTripId} />
           ) : null}
-          {flights.length > 0 ? (
-            <FlightsPanel flights={flights} currency={currency} onEdit={setEditingFlight} />
-          ) : null}
-          {carList.length > 0 ? (
-            <CarsPanel cars={carList} currency={currency} onEdit={setEditingCar} />
-          ) : null}
-
-          {/* ---- Travel & Credit Card Rewards: the points that pay for the
-               stays below. Moved here from /accounts — Accounts keeps the
-               plain card list and the Pay Card flow. */}
-          <CreditCardSections />
-
-          {/* ---- The points ledger, above the reservations log it pays for. */}
-          <RewardsPointsLog />
 
           {/* ---- The reservations themselves, with the filters that drive them
                and what the current selection adds up to. The same body is
@@ -980,15 +999,18 @@ export function TravelBoard({
             title="Hotel Reservations Log"
             meta={
               <HeaderTotals
-                count={`${filtered.length} shown`}
+                countLabel="Total hotels"
+                count={filtered.length}
                 spent={shownTotals.pocket}
                 saved={shownTotals.saved}
                 currency={currency}
               />
             }
             control={
-              /* Desktop only: on a phone the list below is already a card per
-                 stay, so there are no hidden columns for a popup to reveal. */
+              <span className="flex items-center gap-2">
+              {yearSelect}
+              {/* Desktop only: on a phone the list below is already a card per
+                  stay, so there are no hidden columns for a popup to reveal. */}
               <button
                 type="button"
                 onClick={() => setExpanded(true)}
@@ -1002,12 +1024,27 @@ export function TravelBoard({
                   <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
                 </svg>
               </button>
+              </span>
             }
             open={openList}
             onToggle={() => setOpenList((v) => !v)}
           >
             {reservations}
           </Panel>
+
+          {flights.length + carList.length > 0 ? (
+            <TransportLogPanel
+              flights={flights}
+              cars={carList}
+              currency={currency}
+              onEditFlight={setEditingFlight}
+              onEditCar={setEditingCar}
+            />
+          ) : null}
+
+
+          {/* ---- The points ledger behind the bookings above. */}
+          <RewardsPointsLog />
 
           {/* ---- The two charts side by side. They are drawn narrow by
                design, so half a row suits them; the summary tables below are
@@ -1033,7 +1070,8 @@ export function TravelBoard({
             title="Total Cost Saved by Year"
             meta={
               <HeaderTotals
-                count={`${byYear.length} year${byYear.length === 1 ? "" : "s"}`}
+                countLabel="Total years"
+                count={byYear.length}
                 spent={allTotals.spent}
                 saved={allTotals.saved}
                 currency={currency}
@@ -1094,7 +1132,8 @@ export function TravelBoard({
             title="Total Stays by Brand"
             meta={
               <HeaderTotals
-                count={`${brandTally.length} brand${brandTally.length === 1 ? "" : "s"}`}
+                countLabel="Total brands"
+                count={brandTally.length}
                 spent={tallyTotals.spent}
                 saved={tallyTotals.saved}
                 currency={currency}
@@ -1144,7 +1183,8 @@ export function TravelBoard({
             title="Total Stays by Rewards Card"
             meta={
               <HeaderTotals
-                count={`${cardTally.length} card${cardTally.length === 1 ? "" : "s"}`}
+                countLabel="Total cards"
+                count={cardTally.length}
                 spent={tallyTotals.spent}
                 saved={tallyTotals.saved}
                 currency={currency}
@@ -1203,13 +1243,15 @@ export function TravelBoard({
           className="sm:max-w-[96vw]"
           headerExtra={
             <HeaderTotals
-              count={`${filtered.length} shown`}
+              countLabel="Total hotels"
+                count={filtered.length}
               spent={shownTotals.pocket}
               saved={shownTotals.saved}
               currency={currency}
             />
           }
         >
+          <div className="flex justify-end border-b border-line px-4 py-2 sm:px-6">{yearSelect}</div>
           {reservations}
         </ModalShell>
       ) : null}
@@ -1291,13 +1333,45 @@ export function TravelBoard({
 }
 
 // The heading over one group in the upcoming card: what the group holds, and
-// how many of them are still ahead.
-function UpcomingHeader({ title, count, divided }: { title: string; count: number; divided?: boolean }) {
+// how many of them are still ahead. The whole line folds its group away.
+function UpcomingHeader({
+  title,
+  count,
+  divided,
+  open,
+  onToggle,
+}: {
+  title: string;
+  count: number;
+  divided?: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-6 ${divided ? "border-t" : ""}`}>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className={`flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-line px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${open ? "border-b" : ""} ${divided ? "border-t" : ""}`}
+    >
+      <svg
+        aria-hidden
+        viewBox="0 0 20 20"
+        className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M5 7.5 10 12.5 15 7.5" />
+      </svg>
       <h2 className="text-sm font-bold">{title}</h2>
-      <span className="text-xs tabular-nums text-muted">{count} coming up</span>
-    </div>
+      <span className="flex items-baseline gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Future bookings:</span>
+        <span className="text-sm font-bold tabular-nums">{count}</span>
+      </span>
+    </button>
   );
 }
 
@@ -1328,7 +1402,7 @@ function Panel({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className={`flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${control ? "pr-2" : ""}`}
+        className={`flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${control ? "pr-2" : ""}`}
       >
         <span className="flex items-center gap-2">
           <svg
@@ -1394,21 +1468,21 @@ function SortTh({
 }
 
 function HeaderTotals({
+  countLabel,
   count,
   spent,
   saved,
   currency,
 }: {
-  count: string;
+  countLabel: string;
+  count: number;
   spent: number;
   saved: number;
   currency: string;
 }) {
   return (
     <>
-      <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-semibold text-muted dark:bg-white/10">
-        {count}
-      </span>
+      <Figure label={countLabel} value={String(count)} tone="" />
       <Figure label="Total spent" value={formatMoney(spent, currency)} tone="text-negative" />
       <Figure label="Total saved" value={formatMoney(saved, currency)} tone="text-positive" />
     </>

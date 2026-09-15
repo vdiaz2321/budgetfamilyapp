@@ -8,6 +8,12 @@ import { sheetDate, type TripSummary } from "./trip-summary";
 import type { ExpenseCategory } from "./types";
 
 const ALL = "__all__";
+
+// The trip's name without the "· May 2027" the importer adds — the Dates
+// column already says when.
+function placeName(name: string): string {
+  return name.split(" · ")[0];
+}
 const DASH = "—";
 
 // The whole-trip columns, in the order a trip is paid for: getting there,
@@ -80,10 +86,9 @@ export function TripLogPanel({
       <table className="w-full min-w-[1400px] text-sm">
         <thead>
           <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-            <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Trip</th>
+            <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Travel location</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Dates</th>
             <th className="px-2 py-2 text-center font-semibold">Nights</th>
-            <th className="px-2 py-2 text-center font-semibold">Pax</th>
             {MONEY_COLUMNS.map((c) => (
               <th key={c.label} className="px-2 py-2 text-center font-semibold">{c.label}</th>
             ))}
@@ -100,13 +105,12 @@ export function TripLogPanel({
               className="cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
             >
               <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold">
-                <span className="block max-w-[14rem] truncate">{t.trip.name}</span>
+                <span className="block max-w-[14rem] truncate">{placeName(t.trip.name)}</span>
               </td>
               <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">
                 {t.start ? `${sheetDate(t.start)}${t.end && t.end !== t.start ? ` – ${sheetDate(t.end)}` : ""}` : DASH}
               </td>
               <td className="px-2 py-2 text-center tabular-nums">{t.nights ?? DASH}</td>
-              <td className="px-2 py-2 text-center tabular-nums">{t.pax ?? DASH}</td>
               {MONEY_COLUMNS.map((c) => (
                 <td key={c.label} className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{money(c.read(t))}</td>
               ))}
@@ -129,7 +133,6 @@ export function TripLogPanel({
               <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left">Total</td>
               <td className="px-2 py-2 text-center text-xs font-semibold text-muted">{shown.length} trips</td>
               <td className="px-2 py-2 text-center tabular-nums">{sum((t) => t.nights ?? 0)}</td>
-              <td />
               {MONEY_COLUMNS.map((c) => (
                 <td key={c.label} className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{money(sum(c.read))}</td>
               ))}
@@ -147,7 +150,7 @@ export function TripLogPanel({
 
   const yearSelect = (
     <select
-      aria-label="Trip Log year"
+      aria-label="Travel Log year"
       value={year}
       onChange={(e) => setYear(e.target.value)}
       className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
@@ -180,10 +183,11 @@ export function TripLogPanel({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">Trip Log</span>
+          <span className="text-sm font-bold">Travel Log</span>
         </button>
-        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-semibold text-muted dark:bg-white/10">
-          {shown.length} trip{shown.length === 1 ? "" : "s"}
+        <span className="flex items-baseline gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
+          <span className="text-sm font-bold tabular-nums">{shown.length}</span>
         </span>
         <span className="flex items-baseline gap-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
@@ -242,7 +246,7 @@ export function TripLogPanel({
       ) : null}
 
       {expanded ? (
-        <ModalShell title="Trip Log" onClose={() => setExpanded(false)} className="sm:max-w-[96vw]" headerExtra={yearSelect}>
+        <ModalShell title="Travel Log" onClose={() => setExpanded(false)} className="sm:max-w-[96vw]" headerExtra={yearSelect}>
           {table}
         </ModalShell>
       ) : null}

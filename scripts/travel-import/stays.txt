@@ -1,0 +1,79 @@
+a4e3a036-5b62-48fb-b6ca-f6b8930ab2c1|2022-08-19|1|Holiday Inn Resort|Panama City Beach|0|
+3127ea53-889b-4d6d-9cd8-7187d1dedf30|2022-10-15|1|Hilton Lodge at Gulf State Park|Gulf Shores|0|
+ce277052-bc53-4c8f-a8ca-a77d6b9e6152|2022-11-12|1|Hampton Inn Mobile-Daphne|Daphne|0|
+44865f37-ac8e-49d0-ac7b-fbd37687b00e|2022-11-25|1|Hotel Effie Sandestin|Miramar Beach|9800|
+b1fca555-d122-4a9d-94ac-edffafde241c|2023-02-25|1|Hilton Sandestin Resort|Miramar Beach|5000|
+ad9ead1e-c40c-444a-9127-ac96f23db3c1|2023-05-13|1|Hyatt Panama City|Panama City Beach|0|
+a42a463c-5bb6-4ac0-bfbc-07edc16abf71|2023-05-14|1|Holiday Inn Resort|Panama City Beach|0|
+1c886c25-5c04-43eb-a183-c1cbd3d7b5c5|2023-05-26|1|Springhill Suites Atlanta|Alanta|0|
+ac8e1aeb-6092-45d0-959e-ac594b7cff47|2023-07-25|1|Hotel Giralda Center (Seville)|Seville, Spain|8000|
+ccdaa76c-28bb-4ab4-b49b-826ec581672f|2023-07-26|1|Mr & Mrs Smith Gravina 51|Seville, Spain|0|
+db9da14e-4c9d-4548-b187-c6354a5a76d0|2024-03-26|1|Hampton by Hilton Konstanz|Konstanz, GM|12200|
+61bdc2c1-83be-42e9-b172-e828619899ef|2024-05-24|1|Hotel Spatz|Lucerne, Switzerland|34700|
+f8ddd99c-895e-488f-8295-bdeaf925ec0b|2024-05-25|1|Swiss Lodge Hotel Bernerhof|Wengen, Switzerland|24300|4
+7247dd6b-49a5-4c30-8ec2-4d87a2abffe1|2024-05-26|1|ibis Zürich City West|Zurich, Switzerland|21500|4
+1abde072-249f-4b45-8982-9cdadb0d45ab|2024-06-01|1|Aloft Strasbourg Etoile|Strasbourg, GM|0|4
+399ef841-dc8e-48e7-b831-575ff8208934|2024-06-19|1|TraumWohnung-Rhein|Oberwesel, GM|13500|5
+e12ff64c-9d71-4410-9364-8dc40d6d25f2|2024-06-20|1|Lindner Hotel Cologne Am Dom|Cologne, GM|0|
+53788a6c-8395-48a5-90c3-f8b5198af49f|2024-06-21|1|Holiday Inn Express Frankfurt - Messe|Frankfurt, GM|0|4
+deaa7f80-0f15-4c6e-be9a-e7c61af6d96c|2024-07-02|1|Crisol Guadalupe|Granda, Spain|8900|
+543725e7-6243-420b-86c9-28af963f64c7|2024-07-03|1|Westin Marriott Madrid|Madrid, Spain|5000|
+08e9f8ac-b540-430c-afcf-75efff702188|2024-07-04|1|Alcorcon Madrid|Madrid, Spain|0|
+2fd0a1a0-20ef-410f-b2c9-4971b10dc28c|2024-07-05|1|Eurostars Maimónides|Cordoba, Spain|10200|
+1f64e462-d90c-4ead-b218-fe8969f7b9b4|2024-08-30|1|Best Western Hotel Augusta|Augsburg, GM|1700|5
+bed81377-ce85-49fa-be95-d1e2418c42e7|2024-10-11|2|Sandvoss Tittisee|Friedenweiler, GM|30500|5
+c99ffd19-f1ca-40da-be63-9310e8e395d0|2024-11-29|1|Holiday Inn Express Offenburg|Offenburg, GM|0|2
+b873d90c-58a4-49be-93cd-3f85051ad90c|2024-11-29|1|Holiday Inn Express Offenburg|Offenburg, GM|0|2
+5d545fd2-1eed-4d9c-a94c-2ffb2dd359c0|2024-11-29|1|Holiday Inn Express Offenburg|Offenburg, GM|14500|3
+056818b8-3182-4998-bab1-d315731ca31a|2024-12-26|2|Stressless Apartment|Garmisch, GM|39000|5
+7a56d64c-e326-4453-846a-43284c7f7462|2024-12-28|1|das flax allgäu|Dietmannsried, GM|18600|5
+e827efa1-f42a-4710-ae18-daad34eec1cc|2025-04-01|1|Terrace&Parking-Limp56|Luxembourg, LM|23000|4
+ef64d1aa-da3b-4ce0-8829-01dba4e173fd|2025-04-02|1|YOOMA Urban Lodge|Brussels, BG|3400|5
+50fd0fa9-642b-4f21-a0ed-d90f7f746c78|2025-04-03|1|Hampton by Hilton Amsterdam|Amsterdam, ND|0|3
+b8ad8e30-3830-4866-b24b-61cf68830aa8|2025-04-03|1|Hampton by Hilton Amsterdam|Amsterdam, ND|14500|2
+3da17f10-de09-4476-bcd0-0351100192cb|2025-04-04|1|Holiday Inn Dusseldorf Toulouser All|Dusseldorf, GM|12000|4
+545014a4-21a7-4889-a1ad-f07808175e70|2025-04-05|1|Lindner Hotel Frankfurt Main Plaza|Frankfurt, GM|0|3
+ff72f937-34fe-4257-9bfe-2fc244ceca59|2025-04-05|1|Lindner Hotel Frankfurt Main Plaza|Frankfurt, GM|11500|2
+25c99ea8-d9bd-412f-b2ed-c7ec4b912373|2025-05-24|1|Garner Augsburg Nord (IHG)|Augsburg, GM|10000|3
+6b899b6f-0d49-41e7-a9c7-541078d35404|2025-05-24|1|Garner Augsburg Nord (IHG)|Augsburg, GM|7300|2
+9bcf7b50-157b-466d-863e-cf431a1f46e1|2025-05-25|1|Courtyard Munich City Center|Munich, GM|11200|2
+4d70b952-90ad-4b49-ab29-b009eff859a5|2025-05-25|1|Courtyard Munich City Center|Munich, GM|0|3
+30f17582-c7c0-427d-935e-968bf5a0ba6c|2025-06-19|2|Lake Titisee apartment|Lake Titisee, GM|23200|4
+a461f5ba-30df-4cee-9797-b16cd6eaf6ab|2025-07-04|2|Gute Laune Lake Constance|Lake Constance, GM|43500|5
+d8ebb7f2-a680-4ec6-8007-149250672278|2025-07-06|1|Hotel Tautermann|Innsbruck, Austria|20000|4
+d3c2e67c-b70e-42bb-b29c-7cedbfb5b2c6|2025-07-07|2|Garda View Apartment|Lake Garda, IT|36800|4
+013ea960-2916-4d48-ae24-0f44e9939300|2025-07-09|1|Ferienwohnung Kerschbaumer|Noslach, Austria|25000|4
+e6293598-0ece-4409-b963-5fbc67f7dfa7|2025-07-10|1|Hampton Munich City West|Munich, GM|0|2
+ebe59c48-ab12-4ac0-9bf7-70be6ed07137|2025-07-10|1|Hampton Munich City West|Munich, GM|12800|3
+0450c0c7-0fd9-4590-9f96-878c093f9ab9|2025-08-30|1|Hilton Frankfurt Gravenbruch|Frankfurt, GM|10500|5
+883c3a32-a871-4f1e-8bc8-0a4293dc1743|2025-08-31|1|Hotel Löwengarten (Delta Stay)|Speyer, GM|8300|5
+1b57d71f-869c-4515-b145-5dc6fce9e276|2025-10-11|1|Hilton Frankfurt Gravenbruch|Frankfurt, GM|15200|5
+2517ea53-ac71-498f-86c0-04f4bec9ba90|2025-10-12|1|NH Mannheim-Viernheim|Veirnheim, GM|0|
+5ef3e28b-6c60-4022-a89c-ad855916501f|2025-11-27|1|Aloft Strasbourg Etoile|Strasbourg, GM|0|4
+7df9e436-2adb-4fe0-9418-9ad43924aeda|2025-12-18|1|Gran Hotel Miramar Malaga|Malaga, Spain|3600|2
+6e0d6830-fc1a-472d-a2ca-656d31443460|2026-02-13|2|Vogelnescht19 (Lake Titisee)|Lake Titisee, GM|0|4
+74f07e1a-a8c1-44b1-9b6e-ad0b1069ddcc|2026-03-06|1|Me and All Hotel Mainz|Mainz, GM|0|2
+a9ca6138-e75a-4489-97e0-b7a679831557|2026-03-06|1|Me and All Hotel Mainz|Mainz, GM|0|3
+0ed24bff-87a1-4b29-9307-1ba0f81b9c34|2026-03-07|1|NH Mannheim Viernheim|Viernheim, GM|0|5
+975bd1d0-328e-40b0-aba2-a5f616c6434f|2026-03-30|1|Westin Marriott Munich|Munich, GM|0|3
+b8bc31ba-0f9a-4d24-9572-6f0ca563940b|2026-03-30|1|Westin Marriott Munich|Munich, GM|15000|2
+c845dd04-b3e6-434d-b367-37252d075c96|2026-03-31|1|Hotel Hohenstauffen|Salzburg, Austria|0|3
+5728c2ae-f81e-47fa-b55d-3cb208fb67c8|2026-04-01|1|Hotel Schwabenwirt|Berchtesgaden, GM|0|4
+ba8b0dd3-dcc1-41fa-ab26-e19466ea9f0a|2026-04-02|1|Edelweiss Resort|Garmisch, GM|0|4
+e6d8e4fd-b46f-4724-b927-588dbb52441c|2026-04-03|1|Apartment (Bad Wörishofen)|Bad Worishofen, GM|17800|5
+86e85f19-9b9f-45c1-b72d-6281f107ae0b|2026-05-22|1|Holiday Inn Nurnberg|Nurnberg, GM|0|4
+dcbffd1a-8956-4635-a937-7a069998367e|2026-05-23|1|Holiday Inn Prague|Prague, Czech|0|3
+baf6d4c3-5eb8-4c1e-bff5-05c8d42291ba|2026-05-23|1|Holiday Inn Prague|Prague, Czech|0|2
+2d0f2431-030a-43b2-ab1d-614d9f1e86f0|2026-05-24|1|Hampton Regensburg|Regensburg, GM|0|2
+9ef209d6-92e1-48a2-b599-8da767c58b10|2026-05-24|1|Hampton Regensburg|Regensburg, GM|0|3
+fae45a59-6bc7-4b43-bbcf-2fd0d0307bfc|2026-06-14|1|Apartment at Split|Split, Croatia|0|5
+c19be20f-3b49-450f-8247-3229b4e882f5|2026-06-15|1|Villa Daniela (Bol)|Bol, Croatia|20800|5
+cbbc68b1-8c0e-459c-b94c-b13ea3ce7506|2026-06-17|1|Villa Ivanka Trogir|Trogir, Croatia|3500|4
+b6d99e4e-7515-4187-8b5e-21a58f5782b1|2026-07-05|1|B&B Hotel Berlin-Potsdamer Platz|Berlin, GM|0|4
+ec8d6702-c09b-4265-a5da-77342117c5f6|2026-07-06|1|Homaris Rummelsburg Studios|Berlin, GM|21900|5
+6aa45512-d676-4deb-851f-3f91d12e8e76|2026-07-23|2|Four Points by Sheraton (Marriott)|Dornbirn, GM|26700|3
+86f55b69-d120-4ce6-baee-5b25373689db|2026-07-23|2|Four Points by Sheraton (Marriott)|Dornbirn, GM|0|2
+2bdf67a7-fd0f-4fe2-8895-689688232630|2026-08-10|2|Oberstdorf (Sudio apartment)|Oberstdorf, GM|0|4
+36398953-e05d-4537-86dc-9fe349a545d6|2026-09-04|1|Hilton Munich City West|Munich, GM|0|5
+e9b747db-99ac-4bba-a7a2-0b8a4b061946|2026-11-26|1|Hotel Babylon Royal|Colmar, FR|23100|5
+102f374e-d712-4cf7-9fb1-1c2cd789d74a|2026-12-18|1|Gran Hotel Miramar Malaga|Malaga, Spain|5300|2
