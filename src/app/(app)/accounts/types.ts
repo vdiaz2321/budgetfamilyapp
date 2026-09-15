@@ -69,7 +69,9 @@ export type RewardLogType =
   | "points_redemption"
   | "points_earned"
   | "hotel_credit_redemption"
-  | "free_night_booking";
+  | "free_night_booking"
+  | "flight_booking"
+  | "car_booking";
 
 export type RewardActivity = {
   id: string;

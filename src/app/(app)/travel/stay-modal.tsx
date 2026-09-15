@@ -6,7 +6,8 @@ import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
-import type { TravelBrand, TravelCard, TravelStay } from "./types";
+import { TripPicker, useTripChoice } from "./trip-picker";
+import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 
 const NO_CARD = "";
 
@@ -21,20 +22,30 @@ export function StayModal({
   brands,
   currency,
   defaultAccountId,
+  kindSwitch,
+  trips,
+  defaultTripId,
   onClose,
 }: {
   stay: TravelStay | null;
+  /** Omitted where the form opens outside the Travel Log (a card's panel):
+   *  no picker is shown and saving leaves the stay's trip as it was. */
+  trips?: TravelTrip[];
+  defaultTripId?: string | null;
   cards: TravelCard[];
   brands: TravelBrand[];
   currency: string;
   // Opened from a card's own panel on Accounts, the card is already known —
   // it starts selected, with the same fill-in a manual pick would do.
   defaultAccountId?: string;
+  /** The Stay | Flight switch, shown only when adding from the Travel Log. */
+  kindSwitch?: React.ReactNode;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [trip, setTrip] = useTripChoice(stay ? stay.tripId : defaultTripId);
   const [accountId, setAccountId] = useState(stay?.accountId ?? defaultAccountId ?? NO_CARD);
   const preset = defaultAccountId ? cards.find((c) => c.id === defaultAccountId) ?? null : null;
   const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
@@ -167,6 +178,8 @@ export function StayModal({
         }}
         className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
       >
+        {kindSwitch ? <div className="sm:col-span-2">{kindSwitch}</div> : null}
+        {trips ? <TripPicker trips={trips} value={trip} onChange={setTrip} hiddenInputs className="sm:col-span-2" /> : null}
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
         {stay?.cancelledAt ? (
           <p className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">

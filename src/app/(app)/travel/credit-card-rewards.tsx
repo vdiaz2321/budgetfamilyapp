@@ -1037,6 +1037,8 @@ function RewardsActivityLedger({
     points_earned: "Points earned",
     hotel_credit_redemption: "Hotel credit used",
     free_night_booking: "Free night booked",
+    flight_booking: "Flight booked",
+    car_booking: "Car booked",
     reward_refund: "Points refunded",
   };
   // Default to this year: the ledger is a running log and the rows worth
@@ -1777,6 +1779,8 @@ function RewardActivityForm({
     points_earned: "Points earned",
     hotel_credit_redemption: "Hotel credit used",
     free_night_booking: "Free night booked",
+    flight_booking: "Flight booked",
+    car_booking: "Car booked",
     reward_refund: "Points refunded",
   };
 

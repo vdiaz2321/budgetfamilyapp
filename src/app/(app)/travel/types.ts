@@ -3,6 +3,7 @@
 // x 1,000,000 ($0.006/pt -> 6000), matching credit_card_details.
 export type TravelStay = {
   id: string;
+  tripId: string | null;
   accountId: string | null;
   cardLabel: string | null;
   holder: string | null;
@@ -105,4 +106,128 @@ export function pointsValueCents(stay: TravelStay): number {
 
 export function stayYear(stay: TravelStay): string {
   return stay.checkIn.slice(0, 4);
+}
+
+// ---- Flights. One TravelFlight is one booking (one booking code): a round
+// trip on one receipt is one entry with two legs, costing one amount.
+export type FlightLeg = {
+  flightOn: string;
+  flightNumber: string | null;
+  fromPlace: string | null;
+  toPlace: string | null;
+  departsAt: string | null; // "HH:MM"
+  arrivesAt: string | null;
+};
+
+export type FlightPassenger = {
+  travellerId: string | null;
+  name: string;
+  // Each person's own fare — adult and child fares differ. Kept on a points
+  // ticket too, as what the seat would have cost in cash.
+  fareCents: number;
+  fareEurCents: number | null;
+  pointsUsed: boolean;
+  pointsCost: number;
+};
+
+export type TravelFlight = {
+  id: string;
+  tripId: string | null;
+  accountId: string | null;
+  cardLabel: string | null;
+  holder: string | null;
+  airline: string;
+  bookingCode: string | null;
+  reservedOn: string | null;
+  firstFlightOn: string;
+  pointsCost: number;
+  pointsUsed: boolean;
+  pointsValueMicros: number | null;
+  // The passengers' fares added up.
+  flightCostCents: number;
+  flightCostEurCents: number | null;
+  // False for flights brought in from the Google Sheet: editing one fixes the
+  // record and never moves a card's points.
+  movesCardPoints: boolean;
+  pocketCostCents: number;
+  remarks: string | null;
+  cancelledAt: string | null;
+  rewardActivityId: string | null;
+  legs: FlightLeg[];
+  passengers: FlightPassenger[];
+};
+
+// A first name on the managed family list the passenger picker offers.
+export type Traveller = { id: string; name: string };
+
+// ---- Cars: a rental booking, or a drive in the family car (fuel and tolls).
+export type CarKind = "rental" | "own_car";
+
+export type TravelCar = {
+  id: string;
+  tripId: string | null;
+  kind: CarKind;
+  company: string | null;
+  bookingCode: string | null;
+  reservedOn: string | null;
+  pickupOn: string;
+  pickupTime: string | null;
+  pickupPlace: string | null;
+  returnOn: string | null;
+  returnTime: string | null;
+  returnPlace: string | null;
+  accountId: string | null;
+  cardLabel: string | null;
+  holder: string | null;
+  pointsCost: number;
+  pointsUsed: boolean;
+  pointsValueMicros: number | null;
+  // Rental: the cash price. Own car: fuel and tolls.
+  costCents: number;
+  costEurCents: number | null;
+  movesCardPoints: boolean;
+  pocketCostCents: number;
+  remarks: string | null;
+  cancelledAt: string | null;
+  rewardActivityId: string | null;
+};
+
+// A trip: a name, and optionally its own dates. Without dates they are read
+// from the bookings in it. Totals always come from the bookings and expenses.
+export type TravelTrip = {
+  id: string;
+  name: string;
+  startOn: string | null;
+  endOn: string | null;
+  notes: string | null;
+};
+
+// A trip's day-to-day spending, one total per category for the whole trip.
+export const EXPENSE_CATEGORIES = [
+  { key: "restaurants", label: "Restaurants" },
+  { key: "groceries", label: "Groceries" },
+  { key: "entertainment", label: "Entertainment" },
+  { key: "transport", label: "Public transport" },
+  { key: "fuel_tolls", label: "Fuel & tolls" },
+  { key: "parking", label: "Parking" },
+  { key: "cash", label: "Cash / currency" },
+  { key: "other", label: "Gifts & other" },
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]["key"];
+
+export type TripExpense = {
+  tripId: string;
+  category: ExpenseCategory;
+  plannedCents: number | null;
+  plannedEurCents: number | null;
+  actualCents: number | null;
+  actualEurCents: number | null;
+  accountId: string | null;
+  note: string | null;
+};
+
+// What a category counts toward the trip: the real figure once there is one,
+// the estimate until then.
+export function expenseCents(e: TripExpense): number {
+  return e.actualCents ?? e.plannedCents ?? 0;
 }

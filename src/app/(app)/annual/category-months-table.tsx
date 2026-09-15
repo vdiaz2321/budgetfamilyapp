@@ -205,17 +205,20 @@ function Group({
         <>
           <div
             ref={headerRef}
-            className="sticky top-0 z-20 border-y border-line bg-surface"
-            style={{ overflowX: "hidden" }}
+            className="sticky z-20 border-y border-line bg-surface"
+            // Just below the pinned hero cards, which would otherwise cover it.
+            style={{ overflowX: "hidden", top: "var(--annual-hero-h, 0px)" }}
           >
             <div style={trackMinWidth(monthCount)}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle(monthCount)}>
                 <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
                   Annual Cat by Mos
                 </span>
-                <span className="text-center text-[13px] font-bold uppercase tracking-wide text-foreground">
-                  Total
-                </span>
+                <YearBand pad="-my-2">
+                  <span className="w-full text-center text-[13px] font-bold uppercase tracking-wide text-foreground">
+                    Year total
+                  </span>
+                </YearBand>
                 {monthLabels.map((m) => (
                   <span
                     key={m}
@@ -264,6 +267,7 @@ function Group({
                           </span>
                         )}
                       </span>
+                      <YearBand pad="-my-2">
                       <MoneyCell
                         empty={r.total === 0}
                         color={KIND_COLOR[group.kind]}
@@ -280,6 +284,7 @@ function Group({
                       >
                         {formatMoney(r.total, currency)}
                       </MoneyCell>
+                      </YearBand>
                       {visibleMonths(r.months, monthCount).map((v, i) => {
                         // visibleMonths slices to monthCount then reverses, so
                         // the leftmost rendered column is the newest month.
@@ -322,9 +327,11 @@ function Group({
                             >
                               {d.name}
                             </span>
-                            <span className="text-center text-[18px] font-medium tabular-nums text-muted">
-                              {formatMoney(d.total, currency)}
-                            </span>
+                            <YearBand pad="-my-1.5">
+                              <span className="w-full text-center text-[18px] font-medium tabular-nums text-muted">
+                                {formatMoney(d.total, currency)}
+                              </span>
+                            </YearBand>
                             {visibleMonths(d.months, monthCount).map((v, i) => (
                               <span key={i} className="text-center text-[18px] tabular-nums text-muted">
                                 {v !== 0 ? formatMoney(v, currency) : "—"}
@@ -344,9 +351,11 @@ function Group({
                 style={gridStyle(monthCount)}
               >
                 <span className="sticky left-0 z-10 bg-surface pl-4 text-[15px] font-bold">Total</span>
-                <span className="text-center text-[18px] font-bold tabular-nums">
-                  {formatMoney(group.total, currency)}
-                </span>
+                <YearBand pad="-my-2">
+                  <span className="w-full text-center text-[18px] font-bold tabular-nums">
+                    {formatMoney(group.total, currency)}
+                  </span>
+                </YearBand>
                 {visibleMonths(group.monthTotals, monthCount).map((v, i) => (
                   <span key={i} className="text-center text-[18px] font-bold tabular-nums">
                     {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
@@ -358,6 +367,22 @@ function Group({
         </>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The Total column is the whole year, not another month. A grey band running
+ * the full height of every row, with a rule on its right, sets it apart from
+ * the month columns. `pad` cancels the row's own vertical padding so the band
+ * meets the band in the row above instead of breaking into stripes.
+ */
+function YearBand({ pad, children }: { pad: "-my-2" | "-my-1.5"; children: React.ReactNode }) {
+  return (
+    <span
+      className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-black/[0.035] px-1 dark:bg-white/[0.05]`}
+    >
+      {children}
+    </span>
   );
 }
 

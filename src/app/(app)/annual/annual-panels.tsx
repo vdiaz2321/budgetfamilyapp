@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryKind } from "@/lib/categories";
 import { AnnualHero, type HeroFilter } from "./annual-hero";
 import { MonthsTable, type MonthRow } from "./months-table";
@@ -71,6 +71,22 @@ export function AnnualPanels({
   };
   const clear = () => setSelected(new Map());
 
+  // The hero is pinned at the top, so anything else that sticks (the month
+  // headers in Category by Months) has to stick just below it. Its height
+  // changes with the filter and with screen width, so it is measured.
+  const scopeRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const hero = heroRef.current;
+    const scope = scopeRef.current;
+    if (!hero || !scope) return;
+    const observer = new ResizeObserver(() => {
+      scope.style.setProperty("--annual-hero-h", `${hero.offsetHeight}px`);
+    });
+    observer.observe(hero);
+    return () => observer.disconnect();
+  }, []);
+
   const filter = useMemo<HeroFilter | null>(() => {
     if (selected.size === 0) return null;
 
@@ -140,8 +156,8 @@ export function AnnualPanels({
     <div className="space-y-4">
       {/* Sticky scope for the hero: it stays pinned across these three panels
           and scrolls away with the last of them. */}
-      <div className="space-y-4">
-        <div className="sticky top-0 z-30 bg-background pb-3 pt-2">
+      <div ref={scopeRef} className="space-y-4">
+        <div ref={heroRef} className="sticky top-0 z-30 bg-background pb-3 pt-2">
           <AnnualHero
             year={year}
             outflowKinds={outflowKinds}

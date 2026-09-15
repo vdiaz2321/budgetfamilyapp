@@ -8,6 +8,15 @@ import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
 import { CreditCardRewardsProvider, CreditCardSections, RewardsPointsLog } from "./credit-card-rewards";
 import type { CreditCardBoardData } from "@/lib/credit-card-data";
 import { StayModal } from "./stay-modal";
+import { FlightModal } from "./flight-modal";
+import { FlightsPanel } from "./flights-panel";
+import { CarModal } from "./car-modal";
+import { CarsPanel } from "./cars-panel";
+import { TripLogPanel } from "./trip-log-panel";
+import { TripDetailModal } from "./trip-detail-modal";
+import { MiscModal } from "./misc-modal";
+import { summarizeTrips } from "./trip-summary";
+import { KindSwitch, type TravelKind } from "./kind-switch";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
 import {
   effectivePointsValueMicros,
@@ -15,8 +24,13 @@ import {
   savedCents,
   stayYear,
   type TravelBrand,
+  type TravelCar,
   type TravelCard,
+  type TravelFlight,
   type TravelStay,
+  type TravelTrip,
+  type TripExpense,
+  type Traveller,
 } from "./types";
 
 const ALL = "__all__";
@@ -102,6 +116,11 @@ function coveredBy(stay: TravelStay): string {
 
 export function TravelBoard({
   stays,
+  flights,
+  cars: carList,
+  trips,
+  expenses,
+  travellers,
   cards,
   brands: brandList,
   currency,
@@ -109,6 +128,11 @@ export function TravelBoard({
   rewards,
 }: {
   stays: TravelStay[];
+  flights: TravelFlight[];
+  cars: TravelCar[];
+  trips: TravelTrip[];
+  expenses: TripExpense[];
+  travellers: Traveller[];
   cards: TravelCard[];
   brands: TravelBrand[];
   currency: string;
@@ -148,6 +172,27 @@ export function TravelBoard({
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
+  // Which form the Add button opens on. Remembered while the page is open, so
+  // logging three flights in a row doesn't mean flipping the switch each time.
+  const [addKind, setAddKind] = useState<TravelKind>("stay");
+  const [editingFlight, setEditingFlight] = useState<TravelFlight | null>(null);
+  const [editingCar, setEditingCar] = useState<TravelCar | null>(null);
+  // Set when Add was opened from a trip's own row: the new booking starts in it.
+  const [addTripId, setAddTripId] = useState<string | null>(null);
+  // The trip open in its own popup, from a Trip Log row.
+  const [openTripId, setOpenTripId] = useState<string | null>(null);
+  const tripSummaries = useMemo(
+    () => summarizeTrips(trips, stays, flights, carList, expenses),
+    [trips, stays, flights, carList, expenses],
+  );
+  const openTrip = tripSummaries.find((t) => t.trip.id === openTripId) ?? null;
+  const closeForms = () => {
+    setAdding(false);
+    setAddTripId(null);
+    setEditing(null);
+    setEditingFlight(null);
+    setEditingCar(null);
+  };
   const [linking, setLinking] = useState(false);
 
   // Everything but the Reservations list reads `live`: a cancelled booking was
@@ -235,6 +280,28 @@ export function TravelBoard({
         .sort((a, b) => a.checkIn.localeCompare(b.checkIn))
         .slice(0, 3),
     [live, today],
+  );
+  // Flights still to fly: a round trip stays listed until its last flight, and
+  // counts down to whichever flight is next.
+  const upcomingFlights = useMemo(
+    () =>
+      flights
+        .filter((f) => !f.cancelledAt)
+        .map((f) => ({ flight: f, next: f.legs.find((l) => l.flightOn >= today) ?? null }))
+        .filter((x): x is { flight: TravelFlight; next: TravelFlight["legs"][number] } => x.next !== null)
+        .sort((a, b) => a.next.flightOn.localeCompare(b.next.flightOn))
+        .slice(0, 3),
+    [flights, today],
+  );
+  // Rentals still to pick up or still out. Drives in the family car are not
+  // reservations, so they stay in the Cars Log only.
+  const upcomingCars = useMemo(
+    () =>
+      carList
+        .filter((c) => !c.cancelledAt && c.kind === "rental" && (c.returnOn ?? c.pickupOn) >= today)
+        .sort((a, b) => a.pickupOn.localeCompare(b.pickupOn))
+        .slice(0, 3),
+    [carList, today],
   );
 
   // The sheet's CC Info column, grouped: one row per distinct label, with the
@@ -659,7 +726,7 @@ export function TravelBoard({
              right — on a wide screen that put the primary button an entire
              page away from what it acts on. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-lg font-bold sm:text-xl">Hotel/Lodging Stays Log</h1>
+          <h1 className="text-lg font-bold sm:text-xl">Travel Log</h1>
           <div className="flex flex-wrap items-center gap-2">
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
@@ -681,7 +748,7 @@ export function TravelBoard({
               onClick={() => setAdding(true)}
               className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
             >
-              Add stay
+              Add
             </button>
           </div>
         </div>
@@ -712,14 +779,13 @@ export function TravelBoard({
         >
           {/* ---- What's still ahead. Sits above the archive because a booking
                you haven't taken yet is the thing you come here to check. */}
-          {upcoming.length > 0 ? (
+          {upcoming.length + upcomingFlights.length + upcomingCars.length > 0 ? (
             <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-6">
-                <h2 className="text-sm font-bold">Coming up</h2>
-                <span className="text-xs tabular-nums text-muted">
-                  {upcoming.length} booked
-                </span>
-              </div>
+              {/* One card, one group per kind of booking — each group names
+                  what it holds instead of a single "Coming up". */}
+              {upcoming.length > 0 ? (
+                <UpcomingHeader title="Hotel Reservations" count={upcoming.length} />
+              ) : null}
               <ul className="divide-y divide-line">
                 {upcoming.map((s) => (
                   <li key={s.id}>
@@ -779,7 +845,118 @@ export function TravelBoard({
                   </li>
                 ))}
               </ul>
+
+              {upcomingFlights.length > 0 ? (
+                <>
+                  <UpcomingHeader title="Flight Reservations" count={upcomingFlights.length} divided={upcoming.length > 0} />
+                  <ul className="divide-y divide-line">
+                    {upcomingFlights.map(({ flight: f, next }) => {
+                      const stops: string[] = [];
+                      for (const leg of f.legs) {
+                        if (leg.fromPlace && stops[stops.length - 1] !== leg.fromPlace) stops.push(leg.fromPlace);
+                        if (leg.toPlace) stops.push(leg.toPlace);
+                      }
+                      return (
+                        <li key={f.id}>
+                          <button
+                            type="button"
+                            onClick={() => setEditingFlight(f)}
+                            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+                          >
+                            <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+                              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
+                                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                  {f.airline}
+                                  {f.bookingCode ? <span className="text-slate-700 dark:text-slate-200"> · {f.bookingCode}</span> : null}
+                                </span>
+                              </span>
+                              {/* The next flight: its date, number, time and route. */}
+                              <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+                                <span className="tabular-nums">{sheetDate(next.flightOn)}</span>
+                                {next.flightNumber ? <span>{next.flightNumber}</span> : null}
+                                {next.departsAt ? <span className="tabular-nums">{next.departsAt}</span> : null}
+                                {next.fromPlace && next.toPlace ? <span>{next.fromPlace} → {next.toPlace}</span> : null}
+                                <span className="tabular-nums">{f.passengers.length} pax</span>
+                              </span>
+                            </span>
+                            <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
+                              <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} />
+                              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoney(f.flightCostCents, currency) : DASH} tone="" />
+                              <Figure
+                                label="Pocket cost"
+                                value={f.pocketCostCents > 0 ? formatMoney(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
+                                tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                              />
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              ) : null}
+
+              {upcomingCars.length > 0 ? (
+                <>
+                  <UpcomingHeader title="Rental Reservations" count={upcomingCars.length} divided={upcoming.length + upcomingFlights.length > 0} />
+                  <ul className="divide-y divide-line">
+                    {upcomingCars.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCar(c)}
+                          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+                        >
+                          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
+                              {c.bookingCode ? (
+                                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                                  Booking: <span className="text-slate-700 dark:text-slate-200">{c.bookingCode}</span>
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+                              <span className="tabular-nums">
+                                {sheetDate(c.pickupOn)}
+                                {c.returnOn && c.returnOn !== c.pickupOn ? ` – ${sheetDate(c.returnOn)}` : ""}
+                              </span>
+                              {c.pickupPlace ? <span>{c.pickupPlace}</span> : null}
+                            </span>
+                          </span>
+                          <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
+                            {/* Already picked up: nothing left to count down. */}
+                            <Figure
+                              label="Days away"
+                              value={c.pickupOn >= today ? String(daysUntil(today, c.pickupOn)) : "Out now"}
+                              tone=""
+                              style={{ color: "var(--viz-savings)" }}
+                            />
+                            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoney(c.costCents, currency) : DASH} tone="" />
+                            <Figure
+                              label="Pocket cost"
+                              value={c.pocketCostCents > 0 ? formatMoney(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
+                              tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                            />
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
             </section>
+          ) : null}
+
+          {trips.length > 0 ? (
+            <TripLogPanel summaries={tripSummaries} currency={currency} onOpenTrip={setOpenTripId} />
+          ) : null}
+          {flights.length > 0 ? (
+            <FlightsPanel flights={flights} currency={currency} onEdit={setEditingFlight} />
+          ) : null}
+          {carList.length > 0 ? (
+            <CarsPanel cars={carList} currency={currency} onEdit={setEditingCar} />
           ) : null}
 
           {/* ---- Travel & Credit Card Rewards: the points that pay for the
@@ -1041,18 +1218,85 @@ export function TravelBoard({
         <CardLinkModal rows={cardLabels} cards={cards} onClose={() => setLinking(false)} />
       ) : null}
 
-      {adding || editing ? (
+      {openTrip ? (
+        <TripDetailModal
+          summary={openTrip}
+          currency={currency}
+          onEditBooking={(b) =>
+            b.kind === "flight" ? setEditingFlight(b.flight) : b.kind === "stay" ? setEditing(b.stay) : setEditingCar(b.car)
+          }
+          onAddBooking={() => {
+            setAddTripId(openTrip.trip.id);
+            if (addKind === "misc") setAddKind("stay");
+            setAdding(true);
+          }}
+          onEditSpending={() => {
+            setAddTripId(openTrip.trip.id);
+            setAddKind("misc");
+            setAdding(true);
+          }}
+          onClose={() => setOpenTripId(null)}
+        />
+      ) : null}
+      {adding && addKind === "misc" ? (
+        <MiscModal
+          // Remounted per trip so opening another trip's spending starts fresh.
+          key={addTripId ?? "new"}
+          trips={trips}
+          expenses={expenses}
+          cards={cards}
+          currency={currency}
+          defaultTripId={addTripId}
+          kindSwitch={<KindSwitch value={addKind} onChange={setAddKind} />}
+          onClose={closeForms}
+        />
+      ) : null}
+      {editing || (adding && addKind === "stay") ? (
         <StayModal
           stay={editing}
           cards={cards}
           brands={brandList}
           currency={currency}
-          onClose={() => {
-            setAdding(false);
-            setEditing(null);
-          }}
+          trips={trips}
+          defaultTripId={addTripId}
+          kindSwitch={editing ? undefined : <KindSwitch value={addKind} onChange={setAddKind} />}
+          onClose={closeForms}
         />
       ) : null}
+      {editingFlight || (adding && addKind === "flight") ? (
+        <FlightModal
+          flight={editingFlight}
+          cards={cards}
+          travellers={travellers}
+          trips={trips}
+          defaultTripId={addTripId}
+          currency={currency}
+          kindSwitch={editingFlight ? undefined : <KindSwitch value={addKind} onChange={setAddKind} />}
+          onClose={closeForms}
+        />
+      ) : null}
+      {editingCar || (adding && addKind === "car") ? (
+        <CarModal
+          car={editingCar}
+          cards={cards}
+          trips={trips}
+          defaultTripId={addTripId}
+          currency={currency}
+          kindSwitch={editingCar ? undefined : <KindSwitch value={addKind} onChange={setAddKind} />}
+          onClose={closeForms}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// The heading over one group in the upcoming card: what the group holds, and
+// how many of them are still ahead.
+function UpcomingHeader({ title, count, divided }: { title: string; count: number; divided?: boolean }) {
+  return (
+    <div className={`flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-6 ${divided ? "border-t" : ""}`}>
+      <h2 className="text-sm font-bold">{title}</h2>
+      <span className="text-xs tabular-nums text-muted">{count} coming up</span>
     </div>
   );
 }
