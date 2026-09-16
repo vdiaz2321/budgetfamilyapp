@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
@@ -8,6 +8,7 @@ import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/l
 import { saveTripExpenses } from "./expense-actions";
 import { Field, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
+import type { Embed } from "./embedded-section";
 import { EXPENSE_CATEGORIES, type ExpenseCategory, type TravelCard, type TravelTrip, type TripExpense } from "./types";
 
 type Row = {
@@ -47,7 +48,7 @@ export function MiscModal({
   cards,
   defaultTripId,
   currency,
-  kindSwitch,
+  embed,
   onClose,
 }: {
   currency: string;
@@ -55,13 +56,16 @@ export function MiscModal({
   expenses: TripExpense[];
   cards: TravelCard[];
   defaultTripId?: string | null;
-  kindSwitch?: React.ReactNode;
+  /** Shown as a section of the Add Travel Log popup — see embedded-section.
+   *  Remount it (key) when the popup's trip changes, to load that trip's figures. */
+  embed?: Embed;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [trip, setTripChoice] = useTripChoice(defaultTripId);
+  const [ownTrip, setTripChoice] = useTripChoice(defaultTripId);
+  const trip = embed ? embed.trip : ownTrip;
   const current = trips.find((t) => t.id === trip.tripId) ?? null;
   const [startOn, setStartOn] = useState(current?.startOn ?? "");
   const [endOn, setEndOn] = useState(current?.endOn ?? "");
@@ -79,6 +83,25 @@ export function MiscModal({
     }
     setTripChoice(next);
   }
+
+  useEffect(() => {
+    if (!embed) return;
+    embed.register({
+      // Loaded figures and dates left as they were count as nothing typed.
+      isEmpty: () => {
+        const loaded = rowsFor(trip.tripId, expenses);
+        return (
+          startOn === (current?.startOn ?? "") &&
+          endOn === (current?.endOn ?? "") &&
+          rows.every((r, i) => JSON.stringify(r) === JSON.stringify(loaded[i]))
+        );
+      },
+      save: async () => {
+        const result = await saveTripExpenses({ ...trip, startOn, endOn, rows });
+        return { error: result.error ?? null };
+      },
+    });
+  });
 
   const update = (category: ExpenseCategory, patch: Partial<Row>) =>
     setRows((all) => all.map((r) => (r.category === category ? { ...r, ...patch } : r)));
@@ -115,11 +138,11 @@ export function MiscModal({
   );
   const headings = [`Planned (${currencySymbol(currency)})`, "Planned (€)", `Actual (${currencySymbol(currency)})`, "Actual (€)", "Card"];
 
-  return (
-    <ModalShell title="Trip spending" onClose={onClose} className="sm:max-w-4xl">
+  const body = (
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          if (embed) return;
           start(async () => {
             setError(null);
             const result = await saveTripExpenses({ ...trip, startOn, endOn, rows });
@@ -130,10 +153,9 @@ export function MiscModal({
             }
           });
         }}
-        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
+        className={`grid grid-cols-1 gap-3 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
       >
-        {kindSwitch}
-        <TripPicker trips={trips} value={trip} onChange={setTrip} />
+        {embed ? null : <TripPicker trips={trips} value={trip} onChange={setTrip} />}
 
         {/* The span these totals cover — the trip's own dates. */}
         <div className="grid grid-cols-2 gap-3 sm:max-w-md">
@@ -145,7 +167,7 @@ export function MiscModal({
           </Field>
         </div>
 
-        <section className="border-t border-line pt-3">
+        <section className={embed ? "" : "border-t border-line pt-3"}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-bold uppercase tracking-wide">Spending for the whole trip</h3>
             <div className="has-[.rounded-xl]:basis-full">
@@ -195,8 +217,9 @@ export function MiscModal({
           </div>
         </section>
 
-        {error ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
+        {error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
 
+        {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             Counts toward the trip{" "}
@@ -221,7 +244,12 @@ export function MiscModal({
             </button>
           </div>
         </div>
+        )}
       </form>
+  );
+  return embed ? body : (
+    <ModalShell title="Trip spending" onClose={onClose} className="sm:max-w-4xl">
+      {body}
     </ModalShell>
   );
 }

@@ -23,7 +23,7 @@ export function TransportLogPanel({
   onEditFlight: (flight: TravelFlight) => void;
   onEditCar: (car: TravelCar) => void;
 }) {
-  const [state, setState] = useSessionCollapse("travel-transport-log", () => ({ open: true }));
+  const [state, setState] = useSessionCollapse("travel-transport-log", () => ({ open: false }));
   const open = !!state.open;
   const total =
     flights.filter((f) => !f.cancelledAt).reduce((sum, f) => sum + f.pocketCostCents, 0) +

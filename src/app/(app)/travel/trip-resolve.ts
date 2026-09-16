@@ -15,7 +15,9 @@ export async function resolveTripId(
   tripId: string | null | undefined,
   newTripName: string | null | undefined,
 ): Promise<{ tripId: string | null; error: string | null }> {
-  const name = (newTripName ?? "").trim();
+  // Typed as "Greece - May 2027" (the placeholder in the field); stored with
+  // the middle dot every existing trip uses, so the reuse check below matches.
+  const name = (newTripName ?? "").trim().replace(/\s+[-–—·]\s+/g, " · ").replace(/\s+/g, " ");
   if (name) {
     const { data: existing, error: findError } = await supabase
       .from("travel_trips")

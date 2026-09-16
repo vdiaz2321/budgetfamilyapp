@@ -14,8 +14,8 @@ import { TransportLogPanel } from "./transport-log-panel";
 import { TripLogPanel } from "./trip-log-panel";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
-import { summarizeTrips } from "./trip-summary";
-import { KindSwitch, type TravelKind } from "./kind-switch";
+import { sheetDateRange, summarizeTrips } from "./trip-summary";
+import { AddTravelLogModal } from "./add-travel-log-modal";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
 import {
   effectivePointsValueMicros,
@@ -166,23 +166,24 @@ export function TravelBoard({
   const openList = !!listState.open;
   const setOpenList = (fn: (v: boolean) => boolean) =>
     setListState((s) => ({ open: fn(!!s.open) }));
-  // Each upcoming group (hotels, flights, rentals) folds on its own.
+  // Each upcoming group (hotels, flights, rentals) folds on its own. All start
+  // collapsed on a fresh login; sessionStorage keeps what you set after that.
   const [upcomingOpen, setUpcomingOpen] = useSessionCollapse("travel-upcoming", () => ({
-    hotels: true,
-    flights: true,
-    cars: true,
+    hotels: false,
+    flights: false,
+    cars: false,
   }));
   const toggleUpcoming = (key: "hotels" | "flights" | "cars") =>
-    setUpcomingOpen((s) => ({ ...s, [key]: s[key] === false }));
-  const isUpcomingOpen = (key: "hotels" | "flights" | "cars") => upcomingOpen[key] !== false;
+    setUpcomingOpen((s) => ({ ...s, [key]: !s[key] }));
+  const isUpcomingOpen = (key: "hotels" | "flights" | "cars") => !!upcomingOpen[key];
   // The reservations log opened in a popup, where the sheet's full column set
   // has room. Desktop only — see the button in the panel header.
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
-  // Which form the Add button opens on. Remembered while the page is open, so
-  // logging three flights in a row doesn't mean flipping the switch each time.
-  const [addKind, setAddKind] = useState<TravelKind>("stay");
+  // A trip row's "edit spending" opens the Misc form on its own, not the
+  // whole Add Travel Log popup.
+  const [spendingOnly, setSpendingOnly] = useState(false);
   const [editingFlight, setEditingFlight] = useState<TravelFlight | null>(null);
   const [editingCar, setEditingCar] = useState<TravelCar | null>(null);
   // Set when Add was opened from a trip's own row: the new booking starts in it.
@@ -196,6 +197,7 @@ export function TravelBoard({
   const openTrip = tripSummaries.find((t) => t.trip.id === openTripId) ?? null;
   const closeForms = () => {
     setAdding(false);
+    setSpendingOnly(false);
     setAddTripId(null);
     setEditing(null);
     setEditingFlight(null);
@@ -280,13 +282,13 @@ export function TravelBoard({
   );
 
   // Everything still ahead of you, soonest first. This is the one part of the
-  // log that answers "what's next" rather than "what happened".
+  // log that answers "what's next" rather than "what happened". Every upcoming
+  // booking is listed, so the header count matches the rows under it.
   const upcoming = useMemo(
     () =>
       live
         .filter((s) => s.checkIn >= today)
-        .sort((a, b) => a.checkIn.localeCompare(b.checkIn))
-        .slice(0, 3),
+        .sort((a, b) => a.checkIn.localeCompare(b.checkIn)),
     [live, today],
   );
   // Flights still to fly: a round trip stays listed until its last flight, and
@@ -297,8 +299,7 @@ export function TravelBoard({
         .filter((f) => !f.cancelledAt)
         .map((f) => ({ flight: f, next: f.legs.find((l) => l.flightOn >= today) ?? null }))
         .filter((x): x is { flight: TravelFlight; next: TravelFlight["legs"][number] } => x.next !== null)
-        .sort((a, b) => a.next.flightOn.localeCompare(b.next.flightOn))
-        .slice(0, 3),
+        .sort((a, b) => a.next.flightOn.localeCompare(b.next.flightOn)),
     [flights, today],
   );
   // Rentals still to pick up or still out. Drives in the family car are not
@@ -307,8 +308,7 @@ export function TravelBoard({
     () =>
       carList
         .filter((c) => !c.cancelledAt && c.kind === "rental" && (c.returnOn ?? c.pickupOn) >= today)
-        .sort((a, b) => a.pickupOn.localeCompare(b.pickupOn))
-        .slice(0, 3),
+        .sort((a, b) => a.pickupOn.localeCompare(b.pickupOn)),
     [carList, today],
   );
 
@@ -737,8 +737,17 @@ export function TravelBoard({
              right — on a wide screen that put the primary button an entire
              page away from what it acts on. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-lg font-bold sm:text-xl">Travel Log</h1>
+          {/* The page title and the Add action are one button — the heading
+              stays for screen readers only. */}
+          <h1 className="sr-only">Travel Log</h1>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="rounded-lg bg-brand px-4 py-2 text-base font-bold text-white transition hover:bg-brand-strong sm:text-lg"
+            >
+              Add Travel Log
+            </button>
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
                 it stays out of the way until a new unlinked stay appears. */}
@@ -754,13 +763,6 @@ export function TravelBoard({
                 </span>
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
-            >
-              Add
-            </button>
           </div>
         </div>
 
@@ -910,11 +912,14 @@ export function TravelBoard({
                             <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
                               <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} />
                               <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoney(f.flightCostCents, currency) : DASH} tone="" />
-                              <Figure
-                                label="Pocket cost"
-                                value={f.pocketCostCents > 0 ? formatMoney(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
-                                tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                              />
+                              {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
+                              {f.pocketCostCents !== f.flightCostCents ? (
+                                <Figure
+                                  label="Pocket cost"
+                                  value={f.pocketCostCents > 0 ? formatMoney(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
+                                  tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                                />
+                              ) : null}
                             </span>
                           </button>
                         </li>
@@ -952,8 +957,7 @@ export function TravelBoard({
                             </span>
                             <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
                               <span className="tabular-nums">
-                                {sheetDate(c.pickupOn)}
-                                {c.returnOn && c.returnOn !== c.pickupOn ? ` – ${sheetDate(c.returnOn)}` : ""}
+                                {sheetDateRange(c.pickupOn, c.returnOn)}
                               </span>
                               {c.pickupPlace ? <span>{c.pickupPlace}</span> : null}
                             </span>
@@ -967,11 +971,13 @@ export function TravelBoard({
                               style={{ color: "var(--viz-savings)" }}
                             />
                             <Figure label="Rental cost" value={c.costCents > 0 ? formatMoney(c.costCents, currency) : DASH} tone="" />
-                            <Figure
-                              label="Pocket cost"
-                              value={c.pocketCostCents > 0 ? formatMoney(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
-                              tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                            />
+                            {c.pocketCostCents !== c.costCents ? (
+                              <Figure
+                                label="Pocket cost"
+                                value={c.pocketCostCents > 0 ? formatMoney(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
+                                tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                              />
+                            ) : null}
                           </span>
                         </button>
                       </li>
@@ -1269,18 +1275,18 @@ export function TravelBoard({
           }
           onAddBooking={() => {
             setAddTripId(openTrip.trip.id);
-            if (addKind === "misc") setAddKind("stay");
+            setSpendingOnly(false);
             setAdding(true);
           }}
           onEditSpending={() => {
             setAddTripId(openTrip.trip.id);
-            setAddKind("misc");
+            setSpendingOnly(true);
             setAdding(true);
           }}
           onClose={() => setOpenTripId(null)}
         />
       ) : null}
-      {adding && addKind === "misc" ? (
+      {adding && spendingOnly ? (
         <MiscModal
           // Remounted per trip so opening another trip's spending starts fresh.
           key={addTripId ?? "new"}
@@ -1289,44 +1295,29 @@ export function TravelBoard({
           cards={cards}
           currency={currency}
           defaultTripId={addTripId}
-          kindSwitch={<KindSwitch value={addKind} onChange={setAddKind} />}
           onClose={closeForms}
         />
       ) : null}
-      {editing || (adding && addKind === "stay") ? (
-        <StayModal
-          stay={editing}
+      {adding && !spendingOnly ? (
+        <AddTravelLogModal
+          trips={trips}
           cards={cards}
           brands={brandList}
-          currency={currency}
-          trips={trips}
-          defaultTripId={addTripId}
-          kindSwitch={editing ? undefined : <KindSwitch value={addKind} onChange={setAddKind} />}
-          onClose={closeForms}
-        />
-      ) : null}
-      {editingFlight || (adding && addKind === "flight") ? (
-        <FlightModal
-          flight={editingFlight}
-          cards={cards}
           travellers={travellers}
-          trips={trips}
-          defaultTripId={addTripId}
+          expenses={expenses}
           currency={currency}
-          kindSwitch={editingFlight ? undefined : <KindSwitch value={addKind} onChange={setAddKind} />}
+          defaultTripId={addTripId}
           onClose={closeForms}
         />
       ) : null}
-      {editingCar || (adding && addKind === "car") ? (
-        <CarModal
-          car={editingCar}
-          cards={cards}
-          trips={trips}
-          defaultTripId={addTripId}
-          currency={currency}
-          kindSwitch={editingCar ? undefined : <KindSwitch value={addKind} onChange={setAddKind} />}
-          onClose={closeForms}
-        />
+      {editing ? (
+        <StayModal stay={editing} cards={cards} brands={brandList} currency={currency} trips={trips} onClose={closeForms} />
+      ) : null}
+      {editingFlight ? (
+        <FlightModal flight={editingFlight} cards={cards} travellers={travellers} trips={trips} currency={currency} onClose={closeForms} />
+      ) : null}
+      {editingCar ? (
+        <CarModal car={editingCar} cards={cards} trips={trips} currency={currency} onClose={closeForms} />
       ) : null}
     </div>
   );

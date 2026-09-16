@@ -211,7 +211,7 @@ export const EXPENSE_CATEGORIES = [
   { key: "fuel_tolls", label: "Fuel & tolls" },
   { key: "parking", label: "Parking" },
   { key: "cash", label: "Cash / currency" },
-  { key: "other", label: "Gifts & other" },
+  { key: "other", label: "Other" },
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]["key"];
 

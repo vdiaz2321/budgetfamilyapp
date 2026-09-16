@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { sheetDate, type Booking, type TripSummary } from "./trip-summary";
+import { sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES } from "./types";
 
 const DASH = "—";
@@ -67,8 +67,7 @@ export function TripDetailModal({
         <p className="flex flex-wrap items-baseline gap-x-3 text-xs text-muted">
           {t.start ? (
             <span className="tabular-nums">
-              {sheetDate(t.start)}
-              {t.end && t.end !== t.start ? ` – ${sheetDate(t.end)}` : ""}
+              {sheetDateRange(t.start, t.end)}
             </span>
           ) : (
             <span>No dates yet</span>
@@ -122,8 +121,7 @@ export function TripDetailModal({
                         </span>
                         <span className="text-[11px] text-muted">
                           <span className="tabular-nums">
-                            {sheetDate(b.start)}
-                            {b.end !== b.start ? ` – ${sheetDate(b.end)}` : ""}
+                            {sheetDateRange(b.start, b.end)}
                           </span>{" "}
                           · {b.detail}
                         </span>
@@ -242,7 +240,7 @@ export function TripDetailModal({
             </form>
           ) : mode === "delete" ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted">Delete this trip? Its bookings stay in their logs; its spending is removed.</span>
+              <span className="text-muted">Delete this trip and everything in it — its stays, flights, rentals and spending?</span>
               <button
                 type="button"
                 disabled={pending}

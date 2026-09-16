@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { sheetDate, type TripSummary } from "./trip-summary";
+import { sheetDateRange, type TripSummary } from "./trip-summary";
 import type { ExpenseCategory } from "./types";
 
 const ALL = "__all__";
+const YEAR_KEY = "travel-trip-log-year";
 
 // The trip's name without the "· May 2027" the importer adds — the Dates
 // column already says when.
@@ -16,12 +17,11 @@ function placeName(name: string): string {
 }
 const DASH = "—";
 
-// The whole-trip columns, in the order a trip is paid for: getting there,
-// sleeping, getting around, then the day-to-day spending.
+// The whole-trip columns: flights and hotels, the day-to-day spending, then
+// the rental last.
 const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number }[] = [
   { label: "Flights", read: (t) => t.flights },
   { label: "Hotels", read: (t) => t.hotels },
-  { label: "Rental", read: (t) => t.rentals },
   ...(
     [
       ["restaurants", "Restaurants"],
@@ -31,9 +31,10 @@ const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number }[] = [
       ["fuel_tolls", "Fuel & tolls"],
       ["parking", "Parking"],
       ["cash", "Cash"],
-      ["other", "Gifts & other"],
+      ["other", "Other"],
     ] as [ExpenseCategory, string][]
   ).map(([key, label]) => ({ label, read: (t: TripSummary) => t.misc[key] })),
+  { label: "Rental", read: (t) => t.rentals },
 ];
 
 /**
@@ -50,14 +51,40 @@ export function TripLogPanel({
   currency: string;
   onOpenTrip: (tripId: string) => void;
 }) {
-  const [state, setState] = useSessionCollapse("travel-trip-log", () => ({ open: true }));
+  const [state, setState] = useSessionCollapse("travel-trip-log", () => ({ open: false }));
   const open = !!state.open;
   const [expanded, setExpanded] = useState(false);
   const years = useMemo(
-    () => [...new Set(summaries.map((t) => t.start?.slice(0, 4)).filter(Boolean) as string[])].sort().reverse(),
+    // This year is always offered — it's the default even before its first trip.
+    () =>
+      [...new Set([String(new Date().getFullYear()), ...(summaries.map((t) => t.start?.slice(0, 4)).filter(Boolean) as string[])])]
+        .sort()
+        .reverse(),
     [summaries],
   );
-  const [year, setYear] = useState(ALL);
+  // This year on a fresh login; a year picked afterwards is remembered for the
+  // session (sessionStorage is wiped on login — see session-init.tsx).
+  const [year, setYear] = useState(() => String(new Date().getFullYear()));
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(YEAR_KEY);
+      // Client-only hydration; the first render uses this year to match the server.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setYear(saved);
+    } catch {
+      // sessionStorage unavailable — stays on this year.
+    }
+    setHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      window.sessionStorage.setItem(YEAR_KEY, year);
+    } catch {
+      // sessionStorage unavailable — the pick just won't persist.
+    }
+  }, [year, hydrated]);
   const shown = year === ALL ? summaries : summaries.filter((t) => t.start?.startsWith(year));
 
   const sum = (read: (t: TripSummary) => number) => shown.reduce((total, t) => total + read(t), 0);
@@ -108,7 +135,7 @@ export function TripLogPanel({
                 <span className="block max-w-[14rem] truncate">{placeName(t.trip.name)}</span>
               </td>
               <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">
-                {t.start ? `${sheetDate(t.start)}${t.end && t.end !== t.start ? ` – ${sheetDate(t.end)}` : ""}` : DASH}
+                {t.start ? sheetDateRange(t.start, t.end) : DASH}
               </td>
               <td className="px-2 py-2 text-center tabular-nums">{t.nights ?? DASH}</td>
               {MONEY_COLUMNS.map((c) => (

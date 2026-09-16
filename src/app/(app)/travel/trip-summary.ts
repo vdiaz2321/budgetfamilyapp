@@ -31,6 +31,15 @@ export function sheetDate(iso: string): string {
   return `${Number(d)}-${MONTHS[Number(m) - 1]}-${y.slice(2)}`;
 }
 
+/** "28-Mar – 2-Apr-27": the year once when both ends share it, on both ends
+ *  when the span crosses New Year, and a single date when they're the same. */
+export function sheetDateRange(start: string, end: string | null | undefined): string {
+  if (!end || end === start) return sheetDate(start);
+  if (start.slice(0, 4) !== end.slice(0, 4)) return `${sheetDate(start)} – ${sheetDate(end)}`;
+  const [, m, d] = start.split("-");
+  return `${Number(d)}-${MONTHS[Number(m) - 1]} – ${sheetDate(end)}`;
+}
+
 export function flightRoute(f: TravelFlight): string {
   const stops: string[] = [];
   for (const leg of f.legs) {

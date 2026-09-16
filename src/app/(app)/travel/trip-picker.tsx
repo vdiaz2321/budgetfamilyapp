@@ -24,14 +24,25 @@ export function TripPicker({
   onChange,
   hiddenInputs,
   className,
+  startNew,
 }: {
   trips: TravelTrip[];
   value: TripChoice;
   onChange: (next: TripChoice) => void;
   hiddenInputs?: boolean;
   className?: string;
+  // Opened from the page's Add button (not from a trip): start on "New trip"
+  // so the name box is ready; an existing trip is still one pick away.
+  startNew?: boolean;
 }) {
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(!!startNew);
+  // Newest trip first, and only this year's and upcoming ones — older trips
+  // are history, not somewhere a new booking goes. The trip already chosen
+  // (editing an old booking) always stays in the list.
+  const thisYear = String(new Date().getFullYear());
+  const shown = trips
+    .filter((t) => !t.startOn || t.startOn.slice(0, 4) >= thisYear || t.id === value.tripId)
+    .sort((a, b) => (b.startOn ?? "9999").localeCompare(a.startOn ?? "9999"));
 
   return (
     <div className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${className ?? ""}`}>
@@ -49,11 +60,11 @@ export function TripPicker({
           }}
           className={inputClass}
         >
+          <option value={NEW}>+ New trip…</option>
           <option value="">No trip</option>
-          {trips.map((t) => (
+          {shown.map((t) => (
             <option key={t.id} value={t.id}>{t.name}</option>
           ))}
-          <option value={NEW}>+ New trip…</option>
         </select>
       </Field>
       {creating ? (
@@ -66,6 +77,7 @@ export function TripPicker({
               if (e.key === "Enter") e.preventDefault();
             }}
             autoFocus
+            placeholder="Greece - May 2027"
             className={inputClass}
           />
         </Field>

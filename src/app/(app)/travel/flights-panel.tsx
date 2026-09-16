@@ -1,14 +1,8 @@
 "use client";
 
 import { formatMoney } from "@/lib/money";
+import { sheetDateRange } from "./trip-summary";
 import type { TravelFlight } from "./types";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-// Same 16-Dec-26 date style as the stays log.
-function sheetDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${Number(d)}-${MONTHS[Number(m) - 1]}-${y.slice(2)}`;
-}
 
 // "Stuttgart → Málaga → Stuttgart": each place once, in flying order. A gap
 // between legs (landing in one city, leaving from another) shows both.
@@ -61,8 +55,7 @@ export function FlightsList({
                 </span>
                 <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
                   <span className="tabular-nums">
-                    {sheetDate(first)}
-                    {last !== first ? ` – ${sheetDate(last)}` : ""}
+                    {sheetDateRange(first, last)}
                   </span>
                   <span>{f.passengers.map((p) => p.name).join(", ")}</span>
                 </span>
@@ -72,11 +65,14 @@ export function FlightsList({
                   <Figure label="Pts used" value={f.pointsCost.toLocaleString()} style={{ color: "var(--viz-savings)" }} />
                 ) : null}
                 <Figure label="Flight cost" value={formatMoney(f.flightCostCents, currency)} />
-                <Figure
-                  label="Pocket cost"
-                  value={formatMoney(f.pocketCostCents, currency)}
-                  className={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                />
+                {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
+                {f.pocketCostCents !== f.flightCostCents ? (
+                  <Figure
+                    label="Pocket cost"
+                    value={formatMoney(f.pocketCostCents, currency)}
+                    className={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                  />
+                ) : null}
               </span>
             </button>
           </li>

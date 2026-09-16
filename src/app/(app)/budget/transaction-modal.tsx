@@ -104,6 +104,9 @@ export function TransactionModal({
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
+  // Which footer button started the pending work, so only that one shows its
+  // "…ing" label (Clear → Clearing…) instead of every button saying Saving….
+  const [busy, setBusy] = useState<"save" | "clear" | "delete" | "toggle" | null>(null);
   const isEdit = editTx != null;
   const [txType, setTxType] = useState<CategoryKind>(editTx?.kind ?? initialKind ?? "expenses");
   // A refund is stored as a NEGATIVE amount on the same subcategory/account —
@@ -294,6 +297,7 @@ export function TransactionModal({
     setErrorFields(problems.fields);
     setErrorSplitIds(problems.splitIds);
     if (problems.messages.length > 0) return;
+    setBusy(fd.get("cleared") === "on" ? "clear" : "save");
     start(async () => {
       // A split writes one transaction per item, each its own server round
       // trip. If one throws — the payee or account lookup failing on a weak
@@ -470,7 +474,7 @@ export function TransactionModal({
               }}
             />
 
-            {/* Amount | Budget Item(s) */}
+            {/* Amount | Payee */}
             <div className="grid grid-cols-2 items-start gap-2">
               <AmountInput
                 inputRef={amountRef}
@@ -492,50 +496,18 @@ export function TransactionModal({
                 invalid={missingAmount}
               />
 
-              {/* Budget item: the same searchable picker for add and edit. */}
-              <div className="flex flex-col gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen(true)}
-                  className={
-                    "w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
-                    (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
-                  }
-                >
-                  {splits.length === 0
-                    ? <span className="text-muted">Budget Items</span>
-                    : splits.length === 1
-                      ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
-                      : <span>{splits.length} items</span>
-                  }
-                </button>
-                {splits.length === 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(true)}
-                    className="text-left text-xs font-semibold text-brand px-1"
-                  >
-                    + Add Split
-                  </button>
-                )}
-              </div>
+              <PayeeField
+                invalid={missingPayee}
+                onDirty={clearErrors}
+                placeholder={PAYEE_PLACEHOLDER[txType]}
+                defaultValue={editTx?.payee ?? initialPayee ?? ""}
+                payeeOptions={payeeOptions}
+                payeeLineItems={payeeLineItems}
+                onMatch={handlePayeeMatch}
+              />
             </div>
 
-            {/* Edit-only: a single item tied to a savings bucket can be marked
-                as money coming back out of that bucket. */}
-            {isEdit && splits.length === 1 && options.find((o) => o.id === splits[0].subId)?.linkedBucketId ? (
-              <label className="-mt-2 flex items-center gap-2 px-1 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  name="isWithdrawal"
-                  defaultChecked={editTx?.isWithdrawal ?? false}
-                  className="h-4 w-4 rounded accent-[var(--brand)]"
-                />
-                This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a purchase)
-              </label>
-            ) : null}
-
-            {/* Account — full width, sits above Payee/Date so the name has
+            {/* Account — full width, sits above Budget Items/Date so the name has
                 the whole row and isn't cut off on mobile. */}
             <div>
               <input type="hidden" name="accountId" value={selectedAccountId} />
@@ -565,17 +537,35 @@ export function TransactionModal({
               ) : null}
             </div>
 
-            {/* Payee | Date */}
+            {/* Budget Item(s) | Date */}
             <div className="grid grid-cols-[1fr_auto] items-start gap-2">
-              <PayeeField
-                invalid={missingPayee}
-                onDirty={clearErrors}
-                placeholder={PAYEE_PLACEHOLDER[txType]}
-                defaultValue={editTx?.payee ?? initialPayee ?? ""}
-                payeeOptions={payeeOptions}
-                payeeLineItems={payeeLineItems}
-                onMatch={handlePayeeMatch}
-              />
+              {/* Budget item: the same searchable picker for add and edit. */}
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className={
+                    "w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+                    (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
+                  }
+                >
+                  {splits.length === 0
+                    ? <span className="text-muted">Budget Items</span>
+                    : splits.length === 1
+                      ? <span>{options.find((o) => o.id === splits[0].subId)?.name ?? "1 item"}</span>
+                      : <span>{splits.length} items</span>
+                  }
+                </button>
+                {splits.length === 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="text-left text-xs font-semibold text-brand px-1"
+                  >
+                    + Add Split
+                  </button>
+                )}
+              </div>
               <input
                 name="date"
                 type="date"
@@ -588,6 +578,20 @@ export function TransactionModal({
                 }
               />
             </div>
+
+            {/* Edit-only: a single item tied to a savings bucket can be marked
+                as money coming back out of that bucket. */}
+            {isEdit && splits.length === 1 && options.find((o) => o.id === splits[0].subId)?.linkedBucketId ? (
+              <label className="-mt-2 flex items-center gap-2 px-1 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  name="isWithdrawal"
+                  defaultChecked={editTx?.isWithdrawal ?? false}
+                  className="h-4 w-4 rounded accent-[var(--brand)]"
+                />
+                This is a withdrawal — money coming out of the linked bucket (e.g. using savings for a purchase)
+              </label>
+            ) : null}
 
             {/* Split rows — only shown when 2+ splits exist */}
             {splits.length > 1 && (
@@ -704,44 +708,52 @@ export function TransactionModal({
                 disabled={pending}
                 className="whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
               >
-                Clear
+                {pending && busy === "clear" ? "Clearing..." : "Clear"}
               </button>
             ) : (
               <>
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() =>
+                  onClick={() => {
+                    setBusy("delete");
                     start(async () => {
                       const fd = new FormData();
                       fd.set("id", editTx.id);
                       await deleteTransaction(fd);
                       onClose();
-                    })
-                  }
+                    });
+                  }}
                   className="rounded-full px-2.5 py-1 text-[11px] font-bold text-negative ring-1 ring-negative/30 transition hover:bg-negative/10 disabled:opacity-60"
                 >
-                  Delete
+                  {pending && busy === "delete" ? "Deleting..." : "Delete"}
                 </button>
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() =>
+                  onClick={() => {
+                    setBusy("toggle");
                     start(async () => {
                       const fd = new FormData();
                       fd.set("id", editTx.id);
                       fd.set("cleared", editTx.cleared ? "false" : "true");
                       await toggleCleared(fd);
                       onClose();
-                    })
-                  }
+                    });
+                  }}
                   className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold text-foreground ring-1 transition disabled:opacity-60 ${
                     editTx.cleared
                       ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
                       : "bg-positive/10 ring-positive/25 hover:bg-positive/20"
                   }`}
                 >
-                  {editTx.cleared ? "Unclear" : "Clear"}
+                  {pending && busy === "toggle"
+                    ? editTx.cleared
+                      ? "Unclearing..."
+                      : "Clearing..."
+                    : editTx.cleared
+                    ? "Unclear"
+                    : "Clear"}
                 </button>
               </>
             )}
@@ -753,7 +765,7 @@ export function TransactionModal({
               disabled={pending}
               className={"rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
-              {pending
+              {pending && busy === "save"
                 ? "Saving..."
                 : isRefund
                 ? isEdit

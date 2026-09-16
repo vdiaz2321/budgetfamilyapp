@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
@@ -15,6 +15,7 @@ import {
 } from "./flight-actions";
 import { Field, Section, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
+import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelFlight, TravelTrip, Traveller } from "./types";
 
 type LegDraft = {
@@ -43,7 +44,7 @@ export function FlightModal({
   trips,
   defaultTripId,
   currency,
-  kindSwitch,
+  embed,
   onClose,
 }: {
   flight: TravelFlight | null;
@@ -53,15 +54,16 @@ export function FlightModal({
   cards: TravelCard[];
   travellers: Traveller[];
   currency: string;
-  /** The Stay | Flight switch, shown only when adding. */
-  kindSwitch?: React.ReactNode;
+  /** Shown as a section of the Add Travel Log popup — see embedded-section. */
+  embed?: Embed;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [trip, setTrip] = useTripChoice(flight ? flight.tripId : defaultTripId);
+  const [ownTrip, setTrip] = useTripChoice(flight ? flight.tripId : defaultTripId);
+  const trip = embed ? embed.trip : ownTrip;
   const [airline, setAirline] = useState(flight?.airline ?? "");
   const [bookingCode, setBookingCode] = useState(flight?.bookingCode ?? "");
   const [reservedOn, setReservedOn] = useState(flight?.reservedOn ?? "");
@@ -179,10 +181,7 @@ export function FlightModal({
     return names.filter((n) => !taken.has(n.name.toLowerCase()));
   }
 
-  function submit() {
-    start(async () => {
-      setError(null);
-      const result = await saveTravelFlight({
+  const payload = () => ({
         id: flight?.id ?? null,
         ...trip,
         airline,
@@ -201,7 +200,26 @@ export function FlightModal({
         passengers: passengers.map((p) => ({
           travellerId: p.travellerId, name: p.name, fare: p.fare, fareEur: p.fareEur, pointsUsed: p.pointsUsed, points: p.points,
         })),
-      });
+  });
+
+  useEffect(() => {
+    if (!embed) return;
+    embed.register({
+      isEmpty: () =>
+        ![airline, bookingCode, reservedOn, cardLabel, pocketCost, remarks].some((v) => v.trim()) &&
+        legs.every((l) => ![l.flightOn, l.flightNumber, l.fromPlace, l.toPlace, l.departsAt, l.arrivesAt].some((v) => v.trim())) &&
+        passengers.every((p) => !p.name && !p.fare.trim() && !p.fareEur.trim() && !p.points.trim()),
+      save: async () => {
+        const result = await saveTravelFlight(payload());
+        return { error: result?.error ?? null };
+      },
+    });
+  });
+
+  function submit() {
+    start(async () => {
+      setError(null);
+      const result = await saveTravelFlight(payload());
       if (result?.error) setError(result.error);
       else {
         router.refresh();
@@ -221,17 +239,15 @@ export function FlightModal({
     });
   }
 
-  return (
-    <ModalShell title={flight ? "Edit flight" : "Add flight"} onClose={onClose} className="sm:max-w-3xl">
+  const body = (
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          submit();
+          if (!embed) submit();
         }}
-        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
+        className={`grid grid-cols-1 gap-3 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
       >
-        {kindSwitch}
-        <TripPicker trips={trips} value={trip} onChange={setTrip} />
+        {embed ? null : <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!flight && !defaultTripId} />}
         {flight?.cancelledAt ? (
           <p className="rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
             Cancelled booking — kept on record, left out of every total.
@@ -510,10 +526,11 @@ export function FlightModal({
         </div>
         </Section>
 
-        {error ? (
+        {error && !embed ? (
           <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p>
         ) : null}
 
+        {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · Flight cost{" "}
@@ -557,12 +574,17 @@ export function FlightModal({
             </button>
           </div>
         </div>
+        )}
         {draw !== 0 ? (
           <p className="text-[11px] text-muted">
             Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
           </p>
         ) : null}
       </form>
+  );
+  return embed ? body : (
+    <ModalShell title={flight ? "Edit flight" : "Add flight"} onClose={onClose} className="sm:max-w-3xl">
+      {body}
     </ModalShell>
   );
 }

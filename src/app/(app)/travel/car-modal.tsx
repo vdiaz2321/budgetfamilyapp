@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter } from "@/components/currency-converter";
@@ -8,6 +8,7 @@ import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/l
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import { Field, Section, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
+import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
 
 const rateDisplay = (micros: number) => String(Number((micros / 1_000_000).toFixed(4)));
@@ -22,7 +23,7 @@ export function CarModal({
   trips,
   defaultTripId,
   currency,
-  kindSwitch,
+  embed,
   onClose,
 }: {
   car: TravelCar | null;
@@ -30,15 +31,16 @@ export function CarModal({
   defaultTripId?: string | null;
   cards: TravelCard[];
   currency: string;
-  /** The Stay | Flight | Rental | Misc switch, shown only when adding. */
-  kindSwitch?: React.ReactNode;
+  /** Shown as a section of the Add Travel Log popup — see embedded-section. */
+  embed?: Embed;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [trip, setTrip] = useTripChoice(car ? car.tripId : defaultTripId);
+  const [ownTrip, setTrip] = useTripChoice(car ? car.tripId : defaultTripId);
+  const trip = embed ? embed.trip : ownTrip;
   const [company, setCompany] = useState(car?.company ?? "");
   const [bookingCode, setBookingCode] = useState(car?.bookingCode ?? "");
   const [reservedOn, setReservedOn] = useState(car?.reservedOn ?? "");
@@ -86,6 +88,27 @@ export function CarModal({
     if (next && !holder.trim() && next.holder) setHolder(next.holder);
   }
 
+  const payload = () => ({
+    id: car?.id ?? null,
+    ...trip,
+    kind: "rental" as const,
+    company, bookingCode, reservedOn,
+    pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace,
+    accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValue, remarks,
+  });
+
+  useEffect(() => {
+    if (!embed) return;
+    embed.register({
+      isEmpty: () =>
+        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, cardLabel, cost, costEur, pocketCost, points, remarks].some((v) => v.trim()),
+      save: async () => {
+        const result = await saveTravelCar(payload());
+        return { error: result?.error ?? null };
+      },
+    });
+  });
+
   function finish(result: { error: string | null }) {
     if (result?.error) setError(result.error);
     else {
@@ -94,29 +117,19 @@ export function CarModal({
     }
   }
 
-  return (
-    <ModalShell title={car ? "Edit rental" : "Add rental"} onClose={onClose} className="sm:max-w-3xl">
+  const body = (
       <form
         onSubmit={(e) => {
           e.preventDefault();
+          if (embed) return;
           start(async () => {
             setError(null);
-            finish(
-              await saveTravelCar({
-                id: car?.id ?? null,
-                ...trip,
-                kind: "rental",
-                company, bookingCode, reservedOn,
-                pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace,
-                accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValue, remarks,
-              }),
-            );
+            finish(await saveTravelCar(payload()));
           });
         }}
-        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
+        className={`grid grid-cols-1 gap-3 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
       >
-        {kindSwitch}
-        <TripPicker trips={trips} value={trip} onChange={setTrip} />
+        {embed ? null : <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!car && !defaultTripId} />}
         {car?.cancelledAt ? (
           <p className="rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
             Cancelled booking — kept on record, left out of every total.
@@ -256,8 +269,9 @@ export function CarModal({
           </div>
         </Section>
 
-        {error ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
+        {error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
 
+        {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             Pocket cost <span className="font-bold tabular-nums text-foreground">{formatMoney(pocketCents, currency)}</span>
@@ -300,12 +314,17 @@ export function CarModal({
             </button>
           </div>
         </div>
+        )}
         {draw !== 0 ? (
           <p className="text-[11px] text-muted">
             Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
           </p>
         ) : null}
       </form>
+  );
+  return embed ? body : (
+    <ModalShell title={car ? "Edit rental" : "Add rental"} onClose={onClose} className="sm:max-w-3xl">
+      {body}
     </ModalShell>
   );
 }

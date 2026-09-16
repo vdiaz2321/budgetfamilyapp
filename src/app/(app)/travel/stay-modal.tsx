@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
+import type { Embed } from "./embedded-section";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 
 const NO_CARD = "";
@@ -22,9 +23,9 @@ export function StayModal({
   brands,
   currency,
   defaultAccountId,
-  kindSwitch,
   trips,
   defaultTripId,
+  embed,
   onClose,
 }: {
   stay: TravelStay | null;
@@ -38,14 +39,34 @@ export function StayModal({
   // Opened from a card's own panel on Accounts, the card is already known —
   // it starts selected, with the same fill-in a manual pick would do.
   defaultAccountId?: string;
-  /** The Stay | Flight switch, shown only when adding from the Travel Log. */
-  kindSwitch?: React.ReactNode;
+  /** Shown as a section of the Add Travel Log popup — see embedded-section. */
+  embed?: Embed;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [trip, setTrip] = useTripChoice(stay ? stay.tripId : defaultTripId);
+  const [ownTrip, setTrip] = useTripChoice(stay ? stay.tripId : defaultTripId);
+  const trip = embed ? embed.trip : ownTrip;
+  const formRef = useRef<HTMLFormElement>(null);
+  // The popup's save button reads the form as it stands and posts it.
+  useEffect(() => {
+    if (!embed) return;
+    embed.register({
+      isEmpty: () => {
+        if (!formRef.current) return true;
+        const fd = new FormData(formRef.current);
+        return ["propertyName", "city", "reservedOn", "checkIn", "pointsCost", "hotelCost", "pocketCost", "hotelCredit", "remarks"].every(
+          (k) => !String(fd.get(k) ?? "").trim(),
+        );
+      },
+      save: async () => {
+        if (!formRef.current) return { error: null };
+        const result = await saveTravelStay(new FormData(formRef.current));
+        return { error: result?.error ?? null };
+      },
+    });
+  });
   const [accountId, setAccountId] = useState(stay?.accountId ?? defaultAccountId ?? NO_CARD);
   const preset = defaultAccountId ? cards.find((c) => c.id === defaultAccountId) ?? null : null;
   const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
@@ -154,15 +175,16 @@ export function StayModal({
     Math.round((Number(hotelCost.replace(/[$,\s]/g, "")) || 0) * 100) -
     Math.round((Number(pocketCost.replace(/[$,\s]/g, "")) || 0) * 100);
 
-  return (
-    <ModalShell title={stay ? "Edit stay" : "Add stay"} onClose={onClose}>
+  const body = (
       <form
+        ref={formRef}
         // onSubmit, not `action` — React resets a form with an `action` prop
         // once the action returns, so a rejected save wiped every uncontrolled
         // field (hotel name, city, nights, pax, card name, remarks) and left
         // the error pointing at a form you had to retype.
         onSubmit={(e) => {
           e.preventDefault();
+          if (embed) return;
           const formData = new FormData(e.currentTarget);
           start(async () => {
             setError(null);
@@ -176,10 +198,16 @@ export function StayModal({
             }
           });
         }}
-        className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
+        className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
       >
-        {kindSwitch ? <div className="sm:col-span-2">{kindSwitch}</div> : null}
-        {trips ? <TripPicker trips={trips} value={trip} onChange={setTrip} hiddenInputs className="sm:col-span-2" /> : null}
+        {embed ? (
+          <>
+            <input type="hidden" name="tripId" value={trip.newTripName.trim() ? "" : trip.tripId} />
+            <input type="hidden" name="newTripName" value={trip.newTripName} />
+          </>
+        ) : trips ? (
+          <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!stay && !defaultTripId} hiddenInputs className="sm:col-span-2" />
+        ) : null}
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
         {stay?.cancelledAt ? (
           <p className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
@@ -500,12 +528,13 @@ export function StayModal({
         {/* Above the buttons, not below them. Rendered after the footer row
             it sat ~4px under the fold on a 375x812 phone, so a blocked save
             looked like a dead button. */}
-        {error ? (
+        {error && !embed ? (
           <p className="sm:col-span-2 rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">
             {error}
           </p>
         ) : null}
 
+        {embed ? null : (
         <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             Saved on this stay{" "}
@@ -569,6 +598,7 @@ export function StayModal({
             </button>
           </div>
         </div>
+        )}
         {draw && (draw.points !== 0 || draw.credit !== 0) ? (
           <p className="sm:col-span-2 text-[11px] text-muted">
             Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
@@ -582,6 +612,10 @@ export function StayModal({
           </p>
         ) : null}
       </form>
+  );
+  return embed ? body : (
+    <ModalShell title={stay ? "Edit stay" : "Add stay"} onClose={onClose}>
+      {body}
     </ModalShell>
   );
 }

@@ -2,6 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
+import { deleteTravelStay } from "./actions";
+import { deleteTravelCar } from "./car-actions";
+import { deleteTravelFlight } from "./flight-actions";
 
 export async function renameTrip(id: string, name: string) {
   const { supabase, household } = await getSessionContext();
@@ -20,11 +23,36 @@ export async function renameTrip(id: string, name: string) {
   return { error: null };
 }
 
-// Deletes the trip only. Its flights, stays and cars stay in their logs, just
-// no longer grouped (the foreign keys are ON DELETE SET NULL).
+// Deletes the trip and everything in it: its stays, flights and rentals go
+// through their own deletes (so points they took come back to the card), and
+// its spending rows go with the trip (ON DELETE CASCADE).
 export async function deleteTrip(id: string) {
   const { supabase, household } = await getSessionContext();
-  const { error } = await supabase.from("travel_trips").delete().eq("id", id).eq("household_id", household.id);
+  const householdId = household.id;
+  const [stays, flights, cars] = await Promise.all([
+    supabase.from("travel_stays").select("id").eq("trip_id", id).eq("household_id", householdId),
+    supabase.from("travel_flights").select("id").eq("trip_id", id).eq("household_id", householdId),
+    supabase.from("travel_cars").select("id").eq("trip_id", id).eq("household_id", householdId),
+  ]);
+  const lookupError = stays.error ?? flights.error ?? cars.error;
+  if (lookupError) return { error: `Couldn't load that trip's bookings — ${lookupError.message}` };
+
+  for (const s of stays.data ?? []) {
+    const fd = new FormData();
+    fd.set("id", s.id);
+    const result = await deleteTravelStay(fd);
+    if (result?.error) return { error: result.error };
+  }
+  for (const f of flights.data ?? []) {
+    const result = await deleteTravelFlight(f.id);
+    if (result?.error) return { error: result.error };
+  }
+  for (const c of cars.data ?? []) {
+    const result = await deleteTravelCar(c.id);
+    if (result?.error) return { error: result.error };
+  }
+
+  const { error } = await supabase.from("travel_trips").delete().eq("id", id).eq("household_id", householdId);
   if (error) return { error: `Couldn't delete that trip — ${error.message}` };
   revalidatePath("/travel");
   return { error: null };

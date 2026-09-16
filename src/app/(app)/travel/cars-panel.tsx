@@ -1,13 +1,8 @@
 "use client";
 
 import { formatMoney } from "@/lib/money";
+import { sheetDateRange } from "./trip-summary";
 import type { TravelCar } from "./types";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function sheetDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${Number(d)}-${MONTHS[Number(m) - 1]}-${y.slice(2)}`;
-}
 
 /** Car rentals and family-car drives, newest first — one line each. */
 export function CarsList({
@@ -50,8 +45,7 @@ export function CarsList({
                 </span>
                 <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
                   <span className="tabular-nums">
-                    {sheetDate(c.pickupOn)}
-                    {c.returnOn && c.returnOn !== c.pickupOn ? ` – ${sheetDate(c.returnOn)}` : ""}
+                    {sheetDateRange(c.pickupOn, c.returnOn)}
                   </span>
                   {rental && places ? <span>{places}</span> : null}
                 </span>
@@ -61,11 +55,14 @@ export function CarsList({
                   <Figure label="Pts used" value={c.pointsCost.toLocaleString()} style={{ color: "var(--viz-savings)" }} />
                 ) : null}
                 <Figure label={rental ? "Rental cost" : "Fuel & tolls"} value={formatMoney(c.costCents, currency)} />
-                <Figure
-                  label="Pocket cost"
-                  value={formatMoney(c.pocketCostCents, currency)}
-                  className={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                />
+                {/* Only when points paid part of it — otherwise it repeats the cost. */}
+                {c.pocketCostCents !== c.costCents ? (
+                  <Figure
+                    label="Pocket cost"
+                    value={formatMoney(c.pocketCostCents, currency)}
+                    className={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                  />
+                ) : null}
               </span>
             </button>
           </li>
