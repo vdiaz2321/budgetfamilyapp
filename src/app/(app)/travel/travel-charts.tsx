@@ -36,7 +36,7 @@ export function CostBars({
   currency: string;
   // The year the Reservations list is filtered to, washed here so the filter
   // and the chart are visibly the same subject.
-  selected?: string;
+  selected?: string[];
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...years.flatMap((y) => [y.hotel, y.pocket]));
@@ -80,7 +80,7 @@ export function CostBars({
                 onMouseEnter={() => setHover(i)}
                 onMouseLeave={() => setHover((h) => (h === i ? null : h))}
                 className="relative flex h-full flex-1 flex-col justify-end rounded-t-md"
-                style={y.year === selected ? { backgroundColor: "var(--viz-sel)" } : undefined}
+                style={selected?.includes(y.year) ? { backgroundColor: "var(--viz-sel)" } : undefined}
               >
                 <div className="flex h-full items-end justify-center gap-1">
                   <div
@@ -126,7 +126,7 @@ export function CostBars({
               <span
                 key={y.year}
                 className={`flex-1 text-center text-[10px] tabular-nums ${
-                  y.year === selected ? "font-bold text-foreground" : "text-muted"
+                  selected?.includes(y.year) ? "font-bold text-foreground" : "text-muted"
                 }`}
               >
                 {y.year}
@@ -147,7 +147,7 @@ export function SavedLine({
 }: {
   years: YearPoint[];
   currency: string;
-  selected?: string;
+  selected?: string[];
 }) {
   const W = 320;
   const H = 120;
@@ -191,7 +191,7 @@ export function SavedLine({
         ) : null}
         {saved.map((v, i) => (
           <g key={years[i].year}>
-            {years[i].year === selected ? (
+            {selected?.includes(years[i].year) ? (
               <circle cx={x(i)} cy={y(v)} r={7} fill="var(--positive)" opacity={0.25} />
             ) : null}
             <circle cx={x(i)} cy={y(v)} r={3.5} fill="var(--positive)" />
@@ -210,7 +210,7 @@ export function SavedLine({
               y={H - 4}
               textAnchor={i === 0 ? "start" : i === saved.length - 1 ? "end" : "middle"}
               className="text-[10px] tabular-nums"
-              style={{ fill: years[i].year === selected ? "var(--foreground)" : "var(--muted)" }}
+              style={{ fill: selected?.includes(years[i].year) ? "var(--foreground)" : "var(--muted)" }}
             >
               {years[i].year}
             </text>

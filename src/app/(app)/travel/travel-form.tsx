@@ -1,7 +1,45 @@
-// Field pieces shared by the Travel Log's flight and car forms.
+// Field pieces shared by the Travel Log's flight, stay and car forms.
+
+/**
+ * Booked, or still a planned price. A planned booking counts in the trip as
+ * planned and takes nothing from a card until it is switched to booked.
+ */
+export function PlannedSwitch({
+  value,
+  onChange,
+  bookedLabel = "Booked",
+  plannedLabel = "Planned",
+}: {
+  value: boolean;
+  onChange: (planned: boolean) => void;
+  bookedLabel?: string;
+  plannedLabel?: string;
+}) {
+  return (
+    <div role="radiogroup" aria-label="Booking status" className="inline-flex h-7 items-stretch rounded-lg bg-background p-0.5 ring-1 ring-line">
+      {[
+        { planned: false, label: bookedLabel },
+        { planned: true, label: plannedLabel },
+      ].map((o) => (
+        <button
+          key={o.label}
+          type="button"
+          role="radio"
+          aria-checked={value === o.planned}
+          onClick={() => onChange(o.planned)}
+          className={`rounded-md px-3 text-xs font-semibold transition ${
+            value === o.planned ? "bg-sky-600 text-white" : "text-muted hover:bg-sky-100 hover:text-foreground dark:hover:bg-sky-900/40"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export const inputClass =
-  "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500";
 
 export function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (

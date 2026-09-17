@@ -98,7 +98,7 @@ export function BrandPicker({
   return (
     <div ref={box} className="relative">
       <input type="hidden" name="brand" value={value} />
-      <div className="flex items-center gap-1 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-brand">
+      <div className="flex items-center gap-1 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
         <input
           value={open ? query : value}
           placeholder={value || "Type to search"}

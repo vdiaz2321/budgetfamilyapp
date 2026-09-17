@@ -20,7 +20,16 @@ let cachedRates: { rates: Record<string, number>; fetchedAt: number } | null = n
  *  figure beside the dollars (the Travel Log keeps euros). */
 export type ConvertedFrom = { currency: string; amountCents: number };
 
-export function CurrencyConverter({ onUse }: { onUse: (usdCents: number, from: ConvertedFrom) => void }) {
+export function CurrencyConverter({
+  onUse,
+  blue = false,
+}: {
+  onUse: (usdCents: number, from: ConvertedFrom) => void;
+  /** Blue instead of the indigo brand colour — the Travel forms use no purple. */
+  blue?: boolean;
+}) {
+  const link = blue ? "text-sky-700 hover:text-sky-800 dark:text-sky-400" : "text-brand hover:text-brand-strong";
+  const focusRing = blue ? "focus:ring-sky-500" : "focus:ring-brand";
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [from, setFrom] = useState<string>("EUR");
@@ -61,7 +70,7 @@ export function CurrencyConverter({ onUse }: { onUse: (usdCents: number, from: C
       <button
         type="button"
         onClick={openConverter}
-        className="inline-flex w-fit items-center gap-1 rounded-md py-1.5 text-sm font-semibold text-brand hover:text-brand-strong hover:underline sm:py-0"
+        className={`inline-flex w-fit items-center gap-1 rounded-md py-1.5 text-sm font-semibold ${link} hover:underline sm:py-0`}
       >
         ↗ Convert currency to USD
       </button>
@@ -98,12 +107,12 @@ export function CurrencyConverter({ onUse }: { onUse: (usdCents: number, from: C
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
-          className="w-24 rounded-lg bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className={`w-24 rounded-lg bg-surface px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 ${focusRing}`}
         />
         <select
           value={from}
           onChange={(e) => setFrom(e.target.value)}
-          className="rounded-lg bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className={`rounded-lg bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 ${focusRing}`}
         >
           {FX_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>

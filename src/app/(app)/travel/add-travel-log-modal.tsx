@@ -48,8 +48,8 @@ export function AddTravelLogModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [trip, setTrip] = useTripChoice(defaultTripId);
-  // Stay starts open — it's the usual first booking; the rest open on a tap.
-  const [open, setOpen] = useState<Record<Kind, boolean>>({ stay: true, misc: false, flight: false, car: false });
+  // Every section starts collapsed; each opens on a tap.
+  const [open, setOpen] = useState<Record<Kind, boolean>>({ stay: false, misc: false, flight: false, car: false });
   // Sections already saved by an earlier press, when another one failed. They
   // are not saved twice on the retry.
   const [saved, setSaved] = useState<Kind[]>([]);
@@ -140,7 +140,6 @@ export function AddTravelLogModal({
                   key={trip.tripId || "new"}
                   trips={trips}
                   expenses={expenses}
-                  cards={cards}
                   currency={currency}
                   defaultTripId={trip.tripId || null}
                   embed={embed}
@@ -184,7 +183,7 @@ export function AddTravelLogModal({
             type="button"
             onClick={save}
             disabled={pending}
-            className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+            className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
           >
             {pending ? "Saving…" : "Add Travel Log"}
           </button>

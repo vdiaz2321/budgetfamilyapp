@@ -39,6 +39,11 @@ export type TravelStay = {
   // Paid with the card's free-night certificate. Sets that card's Booked date;
   // takes no points. freeNightPoints is the certificate's cap for this stay.
   freeNightUsed: boolean;
+  // Not booked yet: the prices are an estimate. Counts in the trip as planned
+  // and draws nothing from a card until it is switched to booked.
+  isEstimate: boolean;
+  // The estimate, kept after it is booked so planned sits beside actual.
+  plannedCostCents: number | null;
   freeNightPoints: number | null;
   // True only for stays created in the app. Imported stays never took points
   // off a card, so editing them must not move a balance.
@@ -149,6 +154,11 @@ export type TravelFlight = {
   // False for flights brought in from the Google Sheet: editing one fixes the
   // record and never moves a card's points.
   movesCardPoints: boolean;
+  // Not bought yet: the fares are today's quoted prices. Counts in the totals
+  // as planned, and draws no points from a card until it is marked bought.
+  isEstimate: boolean;
+  // The estimate, kept after it is bought so planned sits beside actual.
+  plannedCostCents: number | null;
   pocketCostCents: number;
   remarks: string | null;
   cancelledAt: string | null;
@@ -186,6 +196,9 @@ export type TravelCar = {
   costCents: number;
   costEurCents: number | null;
   movesCardPoints: boolean;
+  // Not booked yet — see TravelStay.isEstimate.
+  isEstimate: boolean;
+  plannedCostCents: number | null;
   pocketCostCents: number;
   remarks: string | null;
   cancelledAt: string | null;

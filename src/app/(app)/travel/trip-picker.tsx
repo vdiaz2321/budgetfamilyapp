@@ -44,44 +44,46 @@ export function TripPicker({
     .filter((t) => !t.startOn || t.startOn.slice(0, 4) >= thisYear || t.id === value.tripId)
     .sort((a, b) => (b.startOn ?? "9999").localeCompare(a.startOn ?? "9999"));
 
+  const pick = (next: string) => {
+    if (next === NEW) {
+      setCreating(true);
+      onChange({ tripId: "", newTripName: value.newTripName });
+    } else {
+      setCreating(false);
+      onChange({ tripId: next, newTripName: "" });
+    }
+  };
+  const options = (
+    <>
+      <option value={NEW}>+ New trip…</option>
+      <option value="">No trip</option>
+      {shown.map((t) => (
+        <option key={t.id} value={t.id}>{t.name}</option>
+      ))}
+    </>
+  );
+  const nameInput = (className: string) => (
+    <input
+      value={value.newTripName}
+      onChange={(e) => onChange({ tripId: "", newTripName: e.target.value })}
+      // Enter would submit the whole booking form mid-name.
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.preventDefault();
+      }}
+      autoFocus
+      placeholder="Greece - May 2027"
+      className={className}
+    />
+  );
+
   return (
     <div className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${className ?? ""}`}>
       <Field label="Trip">
-        <select
-          value={creating ? NEW : value.tripId}
-          onChange={(e) => {
-            if (e.target.value === NEW) {
-              setCreating(true);
-              onChange({ tripId: "", newTripName: value.newTripName });
-            } else {
-              setCreating(false);
-              onChange({ tripId: e.target.value, newTripName: "" });
-            }
-          }}
-          className={inputClass}
-        >
-          <option value={NEW}>+ New trip…</option>
-          <option value="">No trip</option>
-          {shown.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
+        <select value={creating ? NEW : value.tripId} onChange={(e) => pick(e.target.value)} className={inputClass}>
+          {options}
         </select>
       </Field>
-      {creating ? (
-        <Field label="New trip name">
-          <input
-            value={value.newTripName}
-            onChange={(e) => onChange({ tripId: "", newTripName: e.target.value })}
-            // Enter would submit the whole booking form mid-name.
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.preventDefault();
-            }}
-            autoFocus
-            placeholder="Greece - May 2027"
-            className={inputClass}
-          />
-        </Field>
-      ) : null}
+      {creating ? <Field label="New trip name">{nameInput(inputClass)}</Field> : null}
       {hiddenInputs ? (
         <>
           <input type="hidden" name="tripId" value={creating ? "" : value.tripId} />

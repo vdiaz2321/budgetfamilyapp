@@ -28,8 +28,8 @@ export function CarsList({
               onClick={() => onEdit(c)}
               className={`flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6 ${c.cancelledAt ? "opacity-60" : ""}`}
             >
-              <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
-                <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0 sm:flex-row sm:items-center sm:gap-x-3">
+                <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:shrink-0">
                   <span className="truncate text-sm font-semibold">
                     {rental ? c.company ?? "Car rental" : places || "Drive"}
                   </span>
@@ -37,13 +37,18 @@ export function CarsList({
                     {rental ? "Rental" : "Our car"}
                     {c.bookingCode ? <span className="text-slate-700 dark:text-slate-200"> · {c.bookingCode}</span> : null}
                   </span>
+                  {c.isEstimate ? (
+                    <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+                      Planned
+                    </span>
+                  ) : null}
                   {c.cancelledAt ? (
                     <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
                       Cancelled
                     </span>
                   ) : null}
                 </span>
-                <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
                   <span className="tabular-nums">
                     {sheetDateRange(c.pickupOn, c.returnOn)}
                   </span>

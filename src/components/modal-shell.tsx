@@ -54,7 +54,8 @@ export function ModalShell({
   headerExtra,
   headerActions,
 }: {
-  title: string;
+  // Usually text; a control (a picker) can stand in for it.
+  title: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
   className?: string;

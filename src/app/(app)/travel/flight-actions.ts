@@ -33,6 +33,8 @@ export type FlightPayload = {
   pointsValue: string;
   pocketCost: string;
   remarks: string;
+  /** Not bought yet — the fares are an estimate. */
+  isEstimate: boolean;
   legs: Array<{
     flightOn: string;
     flightNumber: string;
@@ -110,6 +112,9 @@ export async function saveTravelFlight(payload: FlightPayload) {
   // The booking's points are its points tickets added up.
   const pointsCost = passengers.reduce((sum, p) => sum + (p.pointsUsed ? p.pointsCost : 0), 0);
   const pointsUsed = pointsCost > 0;
+  const isEstimate = Boolean(payload.isEstimate);
+  // What the card gives up: nothing until the tickets are actually bought.
+  const drawPoints = isEstimate || !pointsUsed ? 0 : pointsCost;
   const flightCost = passengers.reduce((sum, p) => sum + p.fareCents, 0);
   const pointsFares = passengers.reduce((sum, p) => sum + (p.pointsUsed ? p.fareCents : 0), 0);
   // Left blank, what came out of pocket is the cash tickets' fares. Typed, it
@@ -145,6 +150,10 @@ export async function saveTravelFlight(payload: FlightPayload) {
       ? passengers.reduce((sum, p) => sum + (p.fareEurCents ?? 0), 0)
       : null,
     pocket_cost_cents: pocketCost,
+    is_estimate: isEstimate,
+    // While an estimate, its cost is the plan; once bought the last plan stays
+    // put so the trip can compare it with what was really paid.
+    ...(isEstimate ? { planned_cost_cents: pocketCost } : {}),
     remarks: clean(payload.remarks),
     updated_at: new Date().toISOString(),
   };
@@ -155,7 +164,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
     const prev = unwrap(
       await supabase
         .from("travel_flights")
-        .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, moves_card_points")
+        .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, moves_card_points, is_estimate")
         .eq("id", flightId)
         .eq("household_id", householdId)
         .maybeSingle(),
@@ -166,7 +175,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
     // A cancelled booking has already handed its points back.
     const before: RewardDraw = {
       accountId: prev.account_id,
-      points: prev.cancelled_at || !prev.points_used ? 0 : prev.points_cost ?? 0,
+      points: prev.cancelled_at || prev.is_estimate || !prev.points_used ? 0 : prev.points_cost ?? 0,
       credit: 0,
     };
     // A flight imported from the sheet was paid long ago; editing it fixes the
@@ -176,7 +185,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
           supabase,
           householdId,
           before,
-          { accountId, points: prev.cancelled_at ? 0 : pointsUsed ? pointsCost : 0, credit: 0 },
+          { accountId, points: prev.cancelled_at ? 0 : drawPoints, credit: 0 },
           meta,
           prev.reward_activity_id,
           "flight_booking",
@@ -195,7 +204,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
       supabase,
       householdId,
       { accountId, points: 0, credit: 0 },
-      { accountId, points: pointsUsed ? pointsCost : 0, credit: 0 },
+      { accountId, points: drawPoints, credit: 0 },
       meta,
       null,
       "flight_booking",
@@ -255,7 +264,7 @@ async function loadFlightDraw(id: string) {
   const flight = unwrap(
     await supabase
       .from("travel_flights")
-      .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, airline, booking_code, reserved_on, first_flight_on, moves_card_points")
+      .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, airline, booking_code, reserved_on, first_flight_on, moves_card_points, is_estimate")
       .eq("id", id)
       .eq("household_id", household.id)
       .maybeSingle(),
@@ -269,7 +278,7 @@ export async function deleteTravelFlight(id: string) {
   const { supabase, householdId, flight } = await loadFlightDraw(id);
   if (!flight) return { error: "That flight was not found." };
 
-  if (flight.moves_card_points && !flight.cancelled_at && flight.points_used && flight.points_cost) {
+  if (flight.moves_card_points && !flight.cancelled_at && !flight.is_estimate && flight.points_used && flight.points_cost) {
     const sync = await syncRewardLedger(
       supabase,
       householdId,
@@ -296,7 +305,8 @@ export async function setTravelFlightCancelled(id: string, cancelled: boolean) {
   if (Boolean(flight.cancelled_at) === cancelled) return { error: null };
 
   let activityId = flight.reward_activity_id;
-  if (flight.moves_card_points && flight.points_used && flight.points_cost) {
+  // An estimate never drew its points, so cancelling or restoring moves none.
+  if (flight.moves_card_points && !flight.is_estimate && flight.points_used && flight.points_cost) {
     const none = { accountId: flight.account_id, points: 0, credit: 0 };
     const full = { accountId: flight.account_id, points: flight.points_cost, credit: 0 };
     const sync = await syncRewardLedger(

@@ -7,6 +7,7 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
+import { PlannedSwitch } from "./travel-form";
 import type { Embed } from "./embedded-section";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 
@@ -26,9 +27,19 @@ export function StayModal({
   trips,
   defaultTripId,
   embed,
+  roomOf,
+  onAddRoom,
+  onBack,
   onClose,
 }: {
   stay: TravelStay | null;
+  /** A new stay started as another room of this one: same hotel, city, dates,
+   *  trip and brand; cost, points, card and pax left for the new room. */
+  roomOf?: TravelStay | null;
+  /** Offers "+ Add another room" on a saved stay. */
+  onAddRoom?: (stay: TravelStay) => void;
+  /** Returns to the stay this form was opened from, instead of closing. */
+  onBack?: () => void;
   /** Omitted where the form opens outside the Travel Log (a card's panel):
    *  no picker is shown and saving leaves the stay's trip as it was. */
   trips?: TravelTrip[];
@@ -46,7 +57,7 @@ export function StayModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [ownTrip, setTrip] = useTripChoice(stay ? stay.tripId : defaultTripId);
+  const [ownTrip, setTrip] = useTripChoice(stay ? stay.tripId : roomOf ? roomOf.tripId : defaultTripId);
   const trip = embed ? embed.trip : ownTrip;
   const formRef = useRef<HTMLFormElement>(null);
   // The popup's save button reads the form as it stands and posts it.
@@ -70,7 +81,9 @@ export function StayModal({
   const [accountId, setAccountId] = useState(stay?.accountId ?? defaultAccountId ?? NO_CARD);
   const preset = defaultAccountId ? cards.find((c) => c.id === defaultAccountId) ?? null : null;
   const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
-  const [brand, setBrand] = useState(stay?.brand ?? "");
+  // What a second room shares with the first; everything else starts empty.
+  const base = stay ?? roomOf ?? null;
+  const [brand, setBrand] = useState(base?.brand ?? "");
   const [points, setPoints] = useState(stay?.pointsCost ? String(stay.pointsCost) : "");
   // Whether the points figure is a redemption or a what-if. A new stay starts
   // unticked — nothing leaves a card until "Pts used" is ticked on purpose.
@@ -97,12 +110,13 @@ export function StayModal({
   // The two dates are held so the form can say, while you type, that the
   // check-in lands before the booking — almost always last year's year typed
   // by mistake. The server refuses it too; this just catches it sooner.
-  const [reservedOn, setReservedOn] = useState(stay?.reservedOn ?? "");
-  const [checkIn, setCheckIn] = useState(stay?.checkIn ?? "");
+  const [reservedOn, setReservedOn] = useState(base?.reservedOn ?? "");
+  const [checkIn, setCheckIn] = useState(base?.checkIn ?? "");
   const datesOutOfOrder = Boolean(reservedOn && checkIn && checkIn < reservedOn);
   // Live totals so the saving is visible while typing, not only after saving.
   const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
   const [pocketCost, setPocketCost] = useState(money(stay?.pocketCostCents));
+  const [isEstimate, setIsEstimate] = useState(stay?.isEstimate ?? false);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
 
@@ -161,13 +175,14 @@ export function StayModal({
   // Points the card has actually lent this stay — none of them, on a stay
   // whose points figure is a what-if, so the preview matches what saving does.
   // An imported stay never took points off a card, so saving it moves none.
-  const alreadyDrawn = stay && !stay.cancelledAt && stay.accountId === accountId
+  // A planned stay has drawn nothing and draws nothing.
+  const alreadyDrawn = stay && !stay.cancelledAt && !stay.isEstimate && stay.accountId === accountId
     ? { points: stay.pointsUsed ? stay.pointsCost : 0, credit: stay.hotelCreditCents }
     : { points: 0, credit: 0 };
   const draw = card && (!stay || stay.movesCardPoints)
     ? {
-        points: (pointsUsed ? pointsTyped : 0) - alreadyDrawn.points,
-        credit: creditTyped - alreadyDrawn.credit,
+        points: (pointsUsed && !isEstimate ? pointsTyped : 0) - alreadyDrawn.points,
+        credit: (isEstimate ? 0 : creditTyped) - alreadyDrawn.credit,
       }
     : null;
 
@@ -206,7 +221,7 @@ export function StayModal({
             <input type="hidden" name="newTripName" value={trip.newTripName} />
           </>
         ) : trips ? (
-          <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!stay && !defaultTripId} hiddenInputs className="sm:col-span-2" />
+          <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!stay && !roomOf && !defaultTripId} hiddenInputs className="sm:col-span-2" />
         ) : null}
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
         {stay?.cancelledAt ? (
@@ -218,12 +233,12 @@ export function StayModal({
         <Field label="Hotel / Apartment Name">
           <input
             name="propertyName"
-            defaultValue={stay?.propertyName ?? ""}
+            defaultValue={base?.propertyName ?? ""}
             className={inputClass}
           />
         </Field>
         <Field label="City, State/Country">
-          <input name="city" defaultValue={stay?.city ?? ""} className={inputClass} />
+          <input name="city" defaultValue={base?.city ?? ""} className={inputClass} />
         </Field>
 
         {/* The two dates and the two counts on one row — none of the four
@@ -253,7 +268,7 @@ export function StayModal({
             ) : null}
           </Field>
           <Field label="Nights">
-            <input type="number" name="nights" min="1" step="1" defaultValue={stay?.nights ?? 1} className={inputClass} />
+            <input type="number" name="nights" min="1" step="1" defaultValue={base?.nights ?? 1} className={inputClass} />
           </Field>
           <Field label="Total pax">
             <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={inputClass} />
@@ -319,6 +334,12 @@ export function StayModal({
               className={inputClass}
             />
           </Field>
+        </div>
+
+        {/* Booked, or still a planned price — just above the prices it describes. */}
+        <div className="sm:col-span-2">
+          <PlannedSwitch value={isEstimate} onChange={setIsEstimate} />
+          {isEstimate ? <input type="hidden" name="isEstimate" value="on" /> : null}
         </div>
 
         {/* The six figures are all short — the free-night cap, points, a
@@ -463,7 +484,7 @@ export function StayModal({
                 setFreeNightUsed(e.target.checked);
                 if (e.target.checked) setPointsUsed(false);
               }}
-              className="h-4 w-4 accent-[var(--brand)]"
+              className="h-4 w-4 accent-sky-700"
             />
             <span>
               Free night
@@ -484,7 +505,7 @@ export function StayModal({
                 setPointsUsed(e.target.checked);
                 if (e.target.checked) setFreeNightUsed(false);
               }}
-              className="h-4 w-4 accent-[var(--brand)]"
+              className="h-4 w-4 accent-sky-700"
             />
             <span>
               Pts
@@ -497,7 +518,7 @@ export function StayModal({
               type="checkbox"
               name="breakfastIncluded"
               defaultChecked={stay?.breakfastIncluded ?? false}
-              className="h-4 w-4 accent-[var(--brand)]"
+              className="h-4 w-4 accent-sky-700"
             />
             {/* Two short lines rather than one long one, so the note beside it
                 keeps the width. */}
@@ -541,6 +562,19 @@ export function StayModal({
             <span className="font-bold tabular-nums text-positive">{formatMoney(saved, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            {/* A family of five books two rooms: the second starts as a copy of
+                this one's hotel, dates and trip, saved as its own stay so it
+                can go on a different card, points or a free night. */}
+            {stay && onAddRoom ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => onAddRoom(stay)}
+                className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+              >
+                + Add another room
+              </button>
+            ) : null}
             {/* A booking that falls through is cancelled, not deleted: it keeps
                 its place in the archive and drops out of every total. */}
             {stay ? (
@@ -555,7 +589,13 @@ export function StayModal({
                     onClose();
                   }
                 })}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                // Red while it would cancel, so it is not clicked by mistake;
+                // restoring a cancelled booking is harmless and stays neutral.
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                  stay.cancelledAt
+                    ? "ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    : "text-negative ring-negative/60 hover:bg-negative/10"
+                }`}
               >
                 {stay.cancelledAt ? "Restore booking" : "Cancel booking"}
               </button>
@@ -579,6 +619,16 @@ export function StayModal({
                 Delete
               </button>
             ) : null}
+            {onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                disabled={pending}
+                className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 disabled:opacity-60 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+              >
+                ← Back
+              </button>
+            ) : null}
             {/* Dismisses the form. Distinct from "Cancel booking" above, which
                 cancels the reservation itself. */}
             <button
@@ -592,7 +642,7 @@ export function StayModal({
             <button
               type="submit"
               disabled={pending}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
             >
               {pending ? "Saving…" : stay ? "Save stay" : "Add stay"}
             </button>
@@ -614,14 +664,14 @@ export function StayModal({
       </form>
   );
   return embed ? body : (
-    <ModalShell title={stay ? "Edit stay" : "Add stay"} onClose={onClose}>
+    <ModalShell title={stay ? "Edit stay" : roomOf ? `Add another room · ${roomOf.propertyName}` : "Add stay"} onClose={onClose}>
       {body}
     </ModalShell>
   );
 }
 
 const inputClass =
-  "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500";
 
 function Field({
   label,

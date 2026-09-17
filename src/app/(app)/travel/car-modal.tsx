@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
-import { Field, Section, inputClass } from "./travel-form";
+import { Field, PlannedSwitch, Section, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
@@ -68,6 +68,7 @@ export function CarModal({
     return car.pocketCostCents !== expected ? centsToDisplay(car.pocketCostCents) : "";
   });
   const [remarks, setRemarks] = useState(car?.remarks ?? "");
+  const [isEstimate, setIsEstimate] = useState(car?.isEstimate ?? false);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const costCents = Math.max(0, displayToCents(cost));
@@ -79,8 +80,8 @@ export function CarModal({
     ? Math.round((Date.parse(returnOn) - Date.parse(pickupOn)) / 86_400_000)
     : null;
   const moves = !car || car.movesCardPoints;
-  const alreadyDrawn = car && !car.cancelledAt && car.pointsUsed && car.accountId === accountId ? car.pointsCost : 0;
-  const draw = card && moves ? (onPoints ? pointsTyped : 0) - alreadyDrawn : 0;
+  const alreadyDrawn = car && !car.cancelledAt && !car.isEstimate && car.pointsUsed && car.accountId === accountId ? car.pointsCost : 0;
+  const draw = card && moves ? (onPoints && !isEstimate ? pointsTyped : 0) - alreadyDrawn : 0;
 
   function pickCard(nextId: string) {
     setAccountId(nextId);
@@ -94,7 +95,7 @@ export function CarModal({
     kind: "rental" as const,
     company, bookingCode, reservedOn,
     pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace,
-    accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValue, remarks,
+    accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValue, remarks, isEstimate,
   });
 
   useEffect(() => {
@@ -184,6 +185,7 @@ export function CarModal({
           title="Payment"
           action={
             <CurrencyConverter
+              blue
               onUse={(cents, from) => {
                 setCost(centsToDisplay(cents));
                 if (from.currency === "EUR") setCostEur(centsToDisplay(from.amountCents));
@@ -191,6 +193,10 @@ export function CarModal({
             />
           }
         >
+          {/* Booked, or still a planned price. */}
+          <div className="mb-3">
+            <PlannedSwitch value={isEstimate} onChange={setIsEstimate} />
+          </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
               <select value={accountId} onChange={(e) => pickCard(e.target.value)} className={inputClass}>
@@ -255,7 +261,7 @@ export function CarModal({
                 type="checkbox"
                 checked={pointsUsed}
                 onChange={(e) => setPointsUsed(e.target.checked)}
-                className="h-4 w-4 accent-[var(--brand)]"
+                className="h-4 w-4 accent-sky-700"
               />
               <span>
                 Paid with
@@ -282,7 +288,13 @@ export function CarModal({
                 type="button"
                 disabled={pending}
                 onClick={() => start(async () => finish(await setTravelCarCancelled(car.id, !car.cancelledAt)))}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                // Red while it would cancel, so it is not clicked by mistake;
+                // restoring a cancelled booking is harmless and stays neutral.
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                  car.cancelledAt
+                    ? "ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    : "text-negative ring-negative/60 hover:bg-negative/10"
+                }`}
               >
                 {car.cancelledAt ? "Restore booking" : "Cancel booking"}
               </button>
@@ -308,7 +320,7 @@ export function CarModal({
             <button
               type="submit"
               disabled={pending}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
             >
               {pending ? "Saving…" : car ? "Save rental" : "Add rental"}
             </button>

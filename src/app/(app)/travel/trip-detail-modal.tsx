@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
+import { bookingPlanActual, sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES } from "./types";
 
 const DASH = "—";
@@ -25,6 +25,8 @@ const SECTION_BUTTON =
  */
 export function TripDetailModal({
   summary: t,
+  allTrips,
+  onSwitchTrip,
   currency,
   onEditBooking,
   onAddBooking,
@@ -32,6 +34,9 @@ export function TripDetailModal({
   onClose,
 }: {
   summary: TripSummary;
+  /** Every trip, for the title's dropdown — pick one to jump to it. */
+  allTrips: TripSummary[];
+  onSwitchTrip: (tripId: string) => void;
   currency: string;
   onEditBooking: (booking: Booking) => void;
   onAddBooking: () => void;
@@ -47,6 +52,17 @@ export function TripDetailModal({
   const [startOn, setStartOn] = useState(t.trip.startOn ?? "");
   const [endOn, setEndOn] = useState(t.trip.endOn ?? "");
   const [notes, setNotes] = useState(t.trip.notes ?? "");
+
+  // Cancelled bookings stay listed but are left out of the totals.
+  const bookingTotals = t.bookings
+    .filter((b) => !b.cancelled)
+    .reduce(
+      (sum, b) => {
+        const { planned, actual } = bookingPlanActual(b);
+        return { rows: sum.rows + 1, planned: sum.planned + (planned ?? 0), actual: sum.actual + (actual ?? 0) };
+      },
+      { rows: 0, planned: 0, actual: 0 },
+    );
 
   // The spending table rounds to whole units and keeps dollars and euros on
   // one line — "$507 / €428" — instead of stacking ".00" figures.
@@ -72,7 +88,21 @@ export function TripDetailModal({
 
   return (
     <ModalShell
-      title={t.trip.name}
+      title={
+        // The title is the trip picker: another trip opens in place.
+        <select
+          aria-label="Trip"
+          value={t.trip.id}
+          onChange={(e) => onSwitchTrip(e.target.value)}
+          className="max-w-full cursor-pointer truncate rounded-md bg-transparent py-0.5 pr-1 text-lg font-bold [field-sizing:content] hover:bg-sky-100 focus:outline-none dark:hover:bg-sky-900/40"
+        >
+          {allTrips.map((x) => (
+            <option key={x.trip.id} value={x.trip.id}>
+              {x.trip.name}
+            </option>
+          ))}
+        </select>
+      }
       onClose={onClose}
       className="sm:max-w-4xl"
       mobileAlign="top"
@@ -157,45 +187,91 @@ export function TripDetailModal({
             </button>
           </div>
           {t.bookings.length ? (
-            <ul className="divide-y divide-line/60 rounded-lg ring-1 ring-line">
-              {t.bookings.map((b) => (
-                <li key={`${b.kind}-${b.id}`}>
-                  <button
-                    type="button"
-                    onClick={() => onEditBooking(b)}
-                    className={`flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2 text-left transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${b.cancelled ? "opacity-60" : ""}`}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {KIND_LABEL[b.kind]}
-                      </span>
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate text-[13px] font-semibold">
-                          {b.title}
-                          {b.cancelled ? <span className="ml-1.5 text-[10px] font-semibold text-muted">Cancelled</span> : null}
-                        </span>
-                        <span className="text-[11px] text-muted">
-                          <span className="tabular-nums">
-                            {sheetDateRange(b.start, b.end)}
-                          </span>{" "}
-                          · {b.detail}
-                        </span>
-                      </span>
-                    </span>
-                    <span className="flex items-baseline gap-3 pl-16 sm:pl-0">
-                      {b.points > 0 ? (
-                        <span className="text-xs font-semibold tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                          {b.points.toLocaleString()} pts
-                        </span>
-                      ) : null}
-                      <span className={`text-sm font-bold tabular-nums ${b.pocket > 0 ? "text-negative" : "text-muted"}`}>
-                        {formatMoney(b.pocket, currency)}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            // Planned against actual, like Spending below. A flight not bought
+            // yet sits under Planned; once bought it moves to Actual and keeps
+            // its estimate beside it.
+            <div className="overflow-x-auto rounded-lg ring-1 ring-line">
+              {/* Same fixed column widths as Spending below, so the two tables'
+                  Planned / Actual / Difference columns line up. */}
+              <table className="w-full min-w-[34rem] table-fixed text-sm">
+                <colgroup>
+                  <col className="w-[46%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                </colgroup>
+                <thead>
+                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+                    <th className="px-3 py-1.5 text-center font-semibold">Booking</th>
+                    <th className="px-3 py-1.5 text-center font-semibold">Planned</th>
+                    <th className="px-3 py-1.5 text-center font-semibold">Actual</th>
+                    <th className="px-3 py-1.5 text-center font-semibold">Difference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {t.bookings.map((b) => {
+                    const { planned, actual } = bookingPlanActual(b);
+                    const diff = planned != null && actual != null ? planned - actual : null;
+                    return (
+                      <tr
+                        key={`${b.kind}-${b.id}`}
+                        onClick={() => onEditBooking(b)}
+                        className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${b.cancelled ? "opacity-60" : ""}`}
+                      >
+                        <td className="px-3 py-2 text-left">
+                          <button type="button" onClick={(e) => { e.stopPropagation(); onEditBooking(b); }} className="flex min-w-0 items-center gap-2 text-left">
+                            <span className="w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {KIND_LABEL[b.kind]}
+                            </span>
+                            <span className="flex min-w-0 flex-col">
+                              <span className="text-[13px] font-semibold">
+                                {b.title}
+                                {b.cancelled ? <span className="ml-1.5 text-[10px] font-semibold text-muted">Cancelled</span> : null}
+                              </span>
+                              <span className="text-[11px] text-muted">
+                                <span className="tabular-nums">{sheetDateRange(b.start, b.end)}</span> · {b.detail}
+                              </span>
+                            </span>
+                          </button>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
+                          {planned != null ? formatMoney(planned, currency) : DASH}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-center font-semibold tabular-nums">
+                          {actual != null ? (
+                            <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoney(actual, currency)}</span>
+                          ) : (
+                            <span className="font-normal text-muted">{DASH}</span>
+                          )}
+                          {b.points > 0 ? (
+                            <span className="block text-[11px] font-semibold" style={{ color: "var(--viz-savings)" }}>
+                              {b.points.toLocaleString()} pts
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
+                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoney(Math.abs(diff), currency)}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {bookingTotals.rows > 1 ? (
+                  <tfoot>
+                    <tr className="border-t-2 border-line font-bold">
+                      <td className="px-3 py-1.5 text-left">Total</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
+                        {bookingTotals.planned ? formatMoney(bookingTotals.planned, currency) : DASH}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
+                        {bookingTotals.actual ? formatMoney(bookingTotals.actual, currency) : DASH}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                ) : null}
+              </table>
+            </div>
           ) : (
             <p className="rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-line">No flights, stays or rentals in this trip yet.</p>
           )}
@@ -215,7 +291,13 @@ export function TripDetailModal({
           </div>
           {t.expenses.length ? (
             <div className="overflow-x-auto rounded-lg ring-1 ring-line">
-              <table className="w-full min-w-[26rem] text-sm">
+              <table className="w-full min-w-[34rem] table-fixed text-sm">
+                <colgroup>
+                  <col className="w-[46%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
                     <th className="px-3 py-1.5 text-center font-semibold">Category</th>
@@ -228,7 +310,9 @@ export function TripDetailModal({
                   {EXPENSE_CATEGORIES.map(({ key, label }) => {
                     const e = t.expenses.find((x) => x.category === key);
                     if (!e) return null;
-                    const diff = e.plannedCents != null && e.actualCents != null ? e.plannedCents - e.actualCents : null;
+                    // Blank counts as zero, same as the spending form, so the
+                    // Total row's difference is its planned minus its actual.
+                    const diff = e.plannedCents != null || e.actualCents != null ? (e.plannedCents ?? 0) - (e.actualCents ?? 0) : null;
                     return (
                       <tr key={key} className="border-b border-line/60 last:border-0">
                         <td className="px-3 py-1.5 text-left font-semibold">{label}</td>
@@ -258,7 +342,14 @@ export function TripDetailModal({
                       {money(t.actualMisc)}
                       {eurTotal("actualEurCents") != null ? <span className="font-normal text-muted"> / {euros(eurTotal("actualEurCents"))}</span> : null}
                     </td>
-                    <td />
+                    {(() => {
+                      const diff = t.plannedMisc - t.actualMisc;
+                      return (
+                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff >= 0 ? "text-positive" : "text-negative"}`}>
+                          {`${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                        </td>
+                      );
+                    })()}
                   </tr>
                 </tfoot>
               </table>
@@ -291,7 +382,7 @@ export function TripDetailModal({
                 <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={`${inputClass} resize-y`} />
               </Field>
               <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3">
-                <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                <button type="submit" disabled={pending} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                   {pending ? "Saving…" : "Save trip"}
                 </button>
                 <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground">

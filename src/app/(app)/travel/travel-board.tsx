@@ -1,5 +1,7 @@
 "use client";
 
+import { YearPicker, inYears, useSessionYears, yearsLabel } from "./year-picker";
+import { SearchBox } from "./search-box";
 import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { ModalShell } from "@/components/modal-shell";
@@ -141,9 +143,10 @@ export function TravelBoard({
   // the stays because it answers the same question they do.
   rewards: CreditCardBoardData;
 }) {
-  const [year, setYear] = useState<string>(() => {
+  // Years ticked in the log's picker; none ticked means every year.
+  const [year, setYear] = useSessionYears("travel-reservations-log-years", () => {
     const current = today.slice(0, 4);
-    return stays.some((s) => stayYear(s) === current) ? current : ALL;
+    return stays.some((s) => stayYear(s) === current) ? [current] : [];
   });
   const [brand, setBrand] = useState<string>(ALL);
   const [query, setQuery] = useState("");
@@ -159,8 +162,8 @@ export function TravelBoard({
   // the same question two ways, so reading them against different years was
   // never what was wanted. Independent of the Reservations filter above them.
   // Both tallies open on this year.
-  const [tallyYear, setTallyYear] = useState<string>(() => today.slice(0, 4));
-  const [cardYear, setCardYear] = useState<string>(() => today.slice(0, 4));
+  const [tallyYear, setTallyYear] = useSessionYears("travel-brand-tally-years", () => [today.slice(0, 4)]);
+  const [cardYear, setCardYear] = useSessionYears("travel-card-tally-years", () => [today.slice(0, 4)]);
   const [openCards, setOpenCards] = useState(true);
   // The log starts collapsed on a fresh login — it's the longest section on
   // the page — but sessionStorage carries whatever you last set for as long as
@@ -185,6 +188,8 @@ export function TravelBoard({
   const [expandedYears, setExpandedYears] = useState(false);
   const [expandedUpcoming, setExpandedUpcoming] = useState<"hotels" | "flights" | "cars" | null>(null);
   const [editing, setEditing] = useState<TravelStay | null>(null);
+  // "+ Add another room" on a stay: a new stay prefilled from that one.
+  const [roomOf, setRoomOf] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
   // A trip row's "edit spending" opens the Misc form on its own, not the
   // whole Add Travel Log popup.
@@ -205,6 +210,7 @@ export function TravelBoard({
     setSpendingOnly(false);
     setAddTripId(null);
     setEditing(null);
+    setRoomOf(null);
     setEditingFlight(null);
     setEditingCar(null);
   };
@@ -232,7 +238,7 @@ export function TravelBoard({
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const rows = stays.filter((s) => {
-      if (year !== ALL && stayYear(s) !== year) return false;
+      if (!inYears(year, stayYear(s))) return false;
       if (brand !== ALL && s.brand !== brand) return false;
       if (bfastOnly && !s.breakfastIncluded) return false;
       if (ptsOnly && !s.pointsUsed) return false;
@@ -280,6 +286,18 @@ export function TravelBoard({
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [live]);
+
+  // The rollup table's own year picker — every year until you narrow it, since
+  // the table exists to compare years.
+  const [rollupYears, setRollupYears] = useSessionYears("travel-year-rollup-years", () => []);
+  const rollupRows = byYear.filter(([y]) => inYears(rollupYears, y));
+  const rollupTotals = rollupRows.reduce(
+    (t, [, row]) => ({ spent: t.spent + row.pocket, saved: t.saved + row.hotel - row.pocket }),
+    { spent: 0, saved: 0 },
+  );
+  const rollupPicker = (
+    <YearPicker years={years} value={rollupYears} onChange={setRollupYears} label="Total Cost Saved by Year years" />
+  );
 
   const yearPoints: YearPoint[] = useMemo(
     () => byYear.map(([year, row]) => ({ year, hotel: row.hotel, pocket: row.pocket, stays: row.stays })),
@@ -342,7 +360,7 @@ export function TravelBoard({
   // The charts always plot every year — narrowing them to one would leave a
   // single column — so they say so, and mark the filtered year instead.
   const chartScope =
-    year === ALL ? "All years" : `All years · ${year} highlighted`;
+    year.length === 0 ? "All years" : `All years · ${yearsLabel(year)} highlighted`;
 
   // Only stays that carry a CC Info label and still point at no card — those
   // are the ones the Link cards modal can actually fix. A stay with no label
@@ -357,7 +375,7 @@ export function TravelBoard({
   // Stays per brand for the period the panel is set to — the sheet's brand
   // tally, and what a by-brand chart will group on.
   const tallyStays = useMemo(
-    () => (tallyYear === ALL ? live : live.filter((s) => stayYear(s) === tallyYear)),
+    () => live.filter((s) => inYears(tallyYear, stayYear(s))),
     [live, tallyYear],
   );
   const tallyTotals = useMemo(() => {
@@ -371,7 +389,7 @@ export function TravelBoard({
   // The card tally has its own year, so brand and card can be read for
   // different years side by side.
   const cardStays = useMemo(
-    () => (cardYear === ALL ? live : live.filter((s) => stayYear(s) === cardYear)),
+    () => live.filter((s) => inYears(cardYear, stayYear(s))),
     [live, cardYear],
   );
   const cardTotals = useMemo(() => {
@@ -382,18 +400,8 @@ export function TravelBoard({
     }
     return { spent, saved };
   }, [cardStays]);
-  const tallyPeriod = (value: string, onChange: (v: string) => void, label: string) => (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-    >
-      <option value={ALL}>All years</option>
-      {years.map((y) => (
-        <option key={y} value={y}>{y}</option>
-      ))}
-    </select>
+  const tallyPeriod = (value: string[], onChange: (v: string[]) => void, label: string) => (
+    <YearPicker years={years} value={value} onChange={onChange} label={label} />
   );
 
   // What each real card has actually done for you — only answerable once the
@@ -425,15 +433,6 @@ export function TravelBoard({
     return Array.from(map.entries()).sort((a, b) => b[1].stays - a[1].stays || a[0].localeCompare(b[0]));
   }, [tallyStays]);
 
-  const allTotals = useMemo(() => {
-    let spent = 0, saved = 0;
-    for (const s of live) {
-      spent += s.pocketCostCents;
-      saved += savedCents(s);
-    }
-    return { spent, saved };
-  }, [live]);
-
   // What the Reservations list currently adds up to, so a year filter answers
   // "what did that year actually cost me" without scrolling 80 rows.
   const shownTotals = useMemo(() => {
@@ -455,32 +454,17 @@ export function TravelBoard({
   // The year picker sits in the log's header, beside Open full width — the
   // same place the Travel Log keeps its own.
   const yearSelect = (
-    <select
-      aria-label="Hotel Reservations Log year"
-      value={year}
-      onChange={(e) => setYear(e.target.value)}
-      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-    >
-      <option value={ALL}>All years</option>
-      {years.map((y) => (
-        <option key={y} value={y}>{y}</option>
-      ))}
-    </select>
+    <YearPicker years={years} value={year} onChange={setYear} label="Hotel Reservations Log year" />
   );
 
   const reservations = (
     <>
-              {/* Filters on the left, and the figures the header doesn't carry
-                  on the right — spent and saved live in the header, so they are
-                  not repeated here. */}
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
+              {/* Filters, then the figures the header doesn't carry right after
+                  them — spent and saved live in the header, so they are not
+                  repeated here. */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
                 <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search hotel, city, card…"
-                    className="w-44 rounded-md bg-background px-2 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                  />
+                  <SearchBox value={query} onChange={setQuery} placeholder="Search hotel, city…" label="Search hotels" className="w-36" />
                   {/* Breakfast is the one perk worth pulling a list on, so it
                       filters from here instead of only being readable per row. */}
                   <button
@@ -515,7 +499,7 @@ export function TravelBoard({
                     <select
                       value={brand}
                       onChange={(e) => setBrand(e.target.value)}
-                      className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                      className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
                     >
                       <option value={ALL}>All brands</option>
                       {brands.map((b) => <option key={b} value={b}>{b}</option>)}
@@ -523,7 +507,7 @@ export function TravelBoard({
                   ) : null}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   {/* Mobile has cards, not column headers, so it needs its own
                       way to reorder them. */}
                   <select
@@ -532,7 +516,7 @@ export function TravelBoard({
                       const [key, dir] = e.target.value.split(":");
                       setSort({ key: key as SortKey, dir: dir as "asc" | "desc" });
                     }}
-                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:hidden"
+                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:hidden"
                   >
                     <option value="checkIn:desc">Newest check-in</option>
                     <option value="checkIn:asc">Oldest check-in</option>
@@ -544,7 +528,7 @@ export function TravelBoard({
                   {/* The night count opens the run of totals: it says what the
                       money figures beside it are counting. */}
                   <span className="text-[11px] text-muted tabular-nums">
-                    Total in {year === ALL ? "all years" : year}: {shownTotals.nights} Night
+                    Total in {year.length === 0 ? "all years" : yearsLabel(year)}: {shownTotals.nights} Night
                     {shownTotals.nights === 1 ? "" : "s"}
                     {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
                   </span>
@@ -607,6 +591,11 @@ export function TravelBoard({
                           {s.cancelledAt ? (
                             <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
                               Cancelled
+                            </span>
+                          ) : null}
+                          {s.isEstimate ? (
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                              Planned
                             </span>
                           ) : null}
                         </td>
@@ -688,6 +677,11 @@ export function TravelBoard({
                           {s.cancelledAt ? (
                             <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
                               Cancelled
+                            </span>
+                          ) : null}
+                          {s.isEstimate ? (
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                              Planned
                             </span>
                           ) : null}
                         </span>
@@ -925,15 +919,15 @@ export function TravelBoard({
           </tr>
         </thead>
         <tbody>
-          {byYear.map(([y, row]) => (
+          {rollupRows.map(([y, row]) => (
             <tr
               key={y}
-              className={`border-b border-line/60 last:border-0 ${year === y ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
+              className={`border-b border-line/60 last:border-0 ${year.includes(y) ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
             >
               <td
                 className="sticky left-0 z-10 px-2 py-2 text-center font-semibold tabular-nums"
                 style={{
-                  backgroundColor: year === y ? "var(--viz-sel)" : "var(--surface)",
+                  backgroundColor: year.includes(y) ? "var(--viz-sel)" : "var(--surface)",
                 }}
               >
                 {y}
@@ -968,7 +962,7 @@ export function TravelBoard({
             <button
               type="button"
               onClick={() => setAdding(true)}
-              className="rounded-lg bg-brand px-4 py-2 text-base font-bold text-white transition hover:bg-brand-strong sm:text-lg"
+              className="rounded-lg bg-sky-700 px-4 py-2 text-base font-bold text-white transition hover:bg-sky-800 sm:text-lg"
             >
               Add Travel Log
             </button>
@@ -1001,7 +995,7 @@ export function TravelBoard({
           <button
             type="button"
             onClick={() => setAdding(true)}
-            className="mt-4 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong"
+            className="mt-4 rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800"
           >
             Add your first stay
           </button>
@@ -1123,7 +1117,7 @@ export function TravelBoard({
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
                 <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
-                <CostBars years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+                <CostBars years={yearPoints} currency={currency} selected={year} />
               </div>
               {/* Stretched to the bar chart's height (it carries a legend this
                   one doesn't); the line sits at the bottom so both year rows line up. */}
@@ -1131,7 +1125,7 @@ export function TravelBoard({
                 <h2 className="text-center text-sm font-bold">Total saved per year</h2>
                 <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
                 <div className="flex flex-1 flex-col justify-end">
-                  <SavedLine years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+                  <SavedLine years={yearPoints} currency={currency} selected={year} />
                 </div>
               </div>
           </section>
@@ -1146,13 +1140,18 @@ export function TravelBoard({
             meta={
               <HeaderTotals
                 countLabel="Total years"
-                count={byYear.length}
-                spent={allTotals.spent}
-                saved={allTotals.saved}
+                count={rollupRows.length}
+                spent={rollupTotals.spent}
+                saved={rollupTotals.saved}
                 currency={currency}
               />
             }
-            control={<OpenFullWidthButton onClick={() => setExpandedYears(true)} />}
+            control={
+              <span className="flex items-center gap-2">
+                {rollupPicker}
+                <OpenFullWidthButton onClick={() => setExpandedYears(true)} />
+              </span>
+            }
             open={openYears}
             onToggle={() => setOpenYears((v) => !v)}
           >
@@ -1314,13 +1313,16 @@ export function TravelBoard({
           onClose={() => setExpandedYears(false)}
           className="sm:max-w-5xl"
           headerExtra={
-            <HeaderTotals
-              countLabel="Total years"
-              count={byYear.length}
-              spent={allTotals.spent}
-              saved={allTotals.saved}
-              currency={currency}
-            />
+            <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <HeaderTotals
+                countLabel="Total years"
+                count={rollupRows.length}
+                spent={rollupTotals.spent}
+                saved={rollupTotals.saved}
+                currency={currency}
+              />
+              {rollupPicker}
+            </span>
           }
         >
           {yearTable}
@@ -1333,7 +1335,11 @@ export function TravelBoard({
 
       {openTrip ? (
         <TripDetailModal
+          // Remounted per trip so notes and edit state start fresh on a switch.
+          key={openTrip.trip.id}
           summary={openTrip}
+          allTrips={tripSummaries}
+          onSwitchTrip={setOpenTripId}
           currency={currency}
           onEditBooking={(b) =>
             b.kind === "flight" ? setEditingFlight(b.flight) : b.kind === "stay" ? setEditing(b.stay) : setEditingCar(b.car)
@@ -1357,7 +1363,6 @@ export function TravelBoard({
           key={addTripId ?? "new"}
           trips={trips}
           expenses={expenses}
-          cards={cards}
           currency={currency}
           defaultTripId={addTripId}
           onClose={closeForms}
@@ -1376,7 +1381,34 @@ export function TravelBoard({
         />
       ) : null}
       {editing ? (
-        <StayModal stay={editing} cards={cards} brands={brandList} currency={currency} trips={trips} onClose={closeForms} />
+        <StayModal
+          stay={editing}
+          cards={cards}
+          brands={brandList}
+          currency={currency}
+          trips={trips}
+          onAddRoom={(s) => {
+            closeForms();
+            setRoomOf(s);
+          }}
+          onClose={closeForms}
+        />
+      ) : null}
+      {roomOf ? (
+        <StayModal
+          key={`room-${roomOf.id}`}
+          stay={null}
+          roomOf={roomOf}
+          cards={cards}
+          brands={brandList}
+          currency={currency}
+          trips={trips}
+          onBack={() => {
+            setRoomOf(null);
+            setEditing(roomOf);
+          }}
+          onClose={closeForms}
+        />
       ) : null}
       {editingFlight ? (
         <FlightModal flight={editingFlight} cards={cards} travellers={travellers} trips={trips} currency={currency} onClose={closeForms} />

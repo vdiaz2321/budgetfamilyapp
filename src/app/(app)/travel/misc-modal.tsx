@@ -9,7 +9,7 @@ import { saveTripExpenses } from "./expense-actions";
 import { Field, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
-import { EXPENSE_CATEGORIES, type ExpenseCategory, type TravelCard, type TravelTrip, type TripExpense } from "./types";
+import { EXPENSE_CATEGORIES, type ExpenseCategory, type TravelTrip, type TripExpense } from "./types";
 
 type Row = {
   category: ExpenseCategory;
@@ -17,6 +17,8 @@ type Row = {
   plannedEur: string;
   actual: string;
   actualEur: string;
+  // No longer picked in this form; carried through so a card saved earlier
+  // isn't wiped on the next save.
   accountId: string;
 };
 type Slot = "planned" | "actual";
@@ -45,7 +47,6 @@ function rowsFor(tripId: string, expenses: TripExpense[]): Row[] {
 export function MiscModal({
   trips,
   expenses,
-  cards,
   defaultTripId,
   currency,
   embed,
@@ -54,7 +55,6 @@ export function MiscModal({
   currency: string;
   trips: TravelTrip[];
   expenses: TripExpense[];
-  cards: TravelCard[];
   defaultTripId?: string | null;
   /** Shown as a section of the Add Travel Log popup — see embedded-section.
    *  Remount it (key) when the popup's trip changes, to load that trip's figures. */
@@ -116,10 +116,16 @@ export function MiscModal({
 
   const sum = (key: keyof Row) => rows.reduce((total, r) => total + (r[key] ? Math.max(0, displayToCents(r[key])) : 0), 0);
   const totals = { planned: sum("planned"), plannedEur: sum("plannedEur"), actual: sum("actual"), actualEur: sum("actualEur") };
-  // What counts toward the trip: each category's actual, or its plan until then.
-  const counted = rows.reduce(
-    (total, r) => total + (r.actual.trim() ? displayToCents(r.actual) : r.planned.trim() ? displayToCents(r.planned) : 0),
-    0,
+  // Planned less actual, in dollars, with a blank counted as zero — plain
+  // arithmetic, so the Total row's difference is exactly its planned minus its
+  // actual. Positive is under plan, negative over. Empty rows show a dash.
+  const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : 0);
+  const difference = (r: Row) => (r.planned.trim() || r.actual.trim() ? cents(r.planned) - cents(r.actual) : null);
+  const totalDiff = totals.planned || totals.actual ? totals.planned - totals.actual : null;
+  const diffCell = (d: number | null) => (
+    <span className={`tabular-nums ${d == null ? "text-muted" : d >= 0 ? "text-positive" : "text-negative"}`}>
+      {d == null ? "—" : `${d >= 0 ? "" : "−"}${formatMoney(Math.abs(d), currency)}`}
+    </span>
   );
 
   // On a wide screen the column headings sit once above the rows; on a phone
@@ -132,11 +138,11 @@ export function MiscModal({
         onChange={(e) => update(r.category, { [key]: e.target.value })}
         onFocus={() => (focused.current = { category: r.category, slot: key.startsWith("planned") ? "planned" : "actual" })}
         inputMode="decimal"
-        className={inputClass}
+        className={`${inputClass} sm:text-center`}
       />
     </label>
   );
-  const headings = [`Planned (${currencySymbol(currency)})`, "Planned (€)", `Actual (${currencySymbol(currency)})`, "Actual (€)", "Card"];
+  const headings = [`Planned (${currencySymbol(currency)})`, "Planned (€)", `Actual (${currencySymbol(currency)})`, "Actual (€)", "Difference"];
 
   const body = (
       <form
@@ -171,11 +177,11 @@ export function MiscModal({
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-bold uppercase tracking-wide">Spending for the whole trip</h3>
             <div className="has-[.rounded-xl]:basis-full">
-              <CurrencyConverter onUse={applyConverted} />
+              <CurrencyConverter onUse={applyConverted} blue />
             </div>
           </div>
 
-          <div className="hidden grid-cols-[8.5rem_1fr_1fr_1fr_1fr_10rem] gap-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted sm:grid">
+          <div className="hidden grid-cols-[8.5rem_1fr_1fr_1fr_1fr_1fr] gap-2 pb-1 text-center text-[10px] font-semibold uppercase tracking-wide text-muted sm:grid">
             <span>Category</span>
             {headings.map((h) => (
               <span key={h}>{h}</span>
@@ -187,45 +193,39 @@ export function MiscModal({
               return (
                 <li
                   key={r.category}
-                  className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[8.5rem_1fr_1fr_1fr_1fr_10rem] sm:items-center sm:rounded-none sm:bg-transparent sm:p-0 sm:ring-0"
+                  className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[8.5rem_1fr_1fr_1fr_1fr_1fr] sm:items-center sm:rounded-none sm:bg-transparent sm:p-0 sm:ring-0"
                 >
                   <span className="col-span-2 text-sm font-semibold sm:col-span-1">{label}</span>
                   {money(r, "planned", `Planned (${currencySymbol(currency)})`)}
                   {money(r, "plannedEur", "Planned (€)")}
                   {money(r, "actual", `Actual (${currencySymbol(currency)})`)}
                   {money(r, "actualEur", "Actual (€)")}
-                  <label className="col-span-2 block min-w-0 sm:col-span-1">
-                    <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">Card</span>
-                    <select value={r.accountId} onChange={(e) => update(r.category, { accountId: e.target.value })} className={inputClass}>
-                      <option value="">—</option>
-                      {cards.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <span className="col-span-2 flex items-baseline justify-between text-sm font-semibold sm:col-span-1 sm:block sm:text-center">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">Difference</span>
+                    {diffCell(difference(r))}
+                  </span>
                 </li>
               );
             })}
           </ul>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[8.5rem_1fr_1fr_1fr_1fr_10rem]">
-            <span className="col-span-2 sm:col-span-1">Total</span>
+          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[8.5rem_1fr_1fr_1fr_1fr_1fr] sm:text-center">
+            <span className="col-span-2 sm:col-span-1 sm:text-left">Total</span>
             <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Planned </span>{formatMoney(totals.planned, currency)}</span>
             <span>€{centsToDisplay(totals.plannedEur)}</span>
             <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Actual </span>{formatMoney(totals.actual, currency)}</span>
             <span>€{centsToDisplay(totals.actualEur)}</span>
+            <span className="col-span-2 sm:col-span-1">
+              <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference </span>
+              {diffCell(totalDiff)}
+            </span>
           </div>
         </section>
 
         {error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
 
         {embed ? null : (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
-          <p className="text-xs text-muted">
-            Counts toward the trip{" "}
-            <span className="font-bold tabular-nums text-foreground">{formatMoney(counted, currency)}</span>
-            <span className="ml-1">(actual, or planned where there is no actual yet)</span>
-          </p>
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-line pt-3">
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -238,7 +238,7 @@ export function MiscModal({
             <button
               type="submit"
               disabled={pending}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
             >
               {pending ? "Saving…" : "Save spending"}
             </button>

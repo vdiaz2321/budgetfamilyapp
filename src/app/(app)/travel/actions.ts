@@ -101,8 +101,13 @@ export async function saveTravelStay(formData: FormData) {
   const freeNightUsed = formData.get("freeNightUsed") === "on";
   const freeNightPoints = int(formData, "freeNightPoints") || null;
   const pointsUsed = formData.get("pointsUsed") === "on" && pointsCost > 0 && !freeNightUsed;
-  const pointsDrawn = pointsUsed ? pointsCost : 0;
+  // Not booked yet: nothing — points, night credit or certificate — leaves a
+  // card until it is switched to booked.
+  const isEstimate = formData.get("isEstimate") === "on";
+  const pointsDrawn = pointsUsed && !isEstimate ? pointsCost : 0;
   const hotelCredit = Math.max(0, displayToCents(String(formData.get("hotelCredit") ?? "0")));
+  const creditDrawn = isEstimate ? 0 : hotelCredit;
+  const certificateUsed = freeNightUsed && !isEstimate;
   const pocketCost = Math.max(0, displayToCents(String(formData.get("pocketCost") ?? "0")));
 
   // How the out-of-pocket half was settled is not a choice any more: it is
@@ -151,6 +156,9 @@ export async function saveTravelStay(formData: FormData) {
     points_cost: pointsCost,
     points_used: pointsUsed,
     pocket_paid_with: pocketPaidWith,
+    is_estimate: isEstimate,
+    // While planned, its cost is the plan; once booked the last plan stays put.
+    ...(isEstimate ? { planned_cost_cents: pocketCost } : {}),
     remarks: text(formData, "remarks"),
     breakfast_included: formData.get("breakfastIncluded") === "on",
     free_night_used: freeNightUsed,
@@ -165,7 +173,7 @@ export async function saveTravelStay(formData: FormData) {
     const prev = unwrap(
       await supabase
         .from("travel_stays")
-        .select("account_id, check_in, points_cost, points_used, hotel_credit_cents, cancelled_at, reward_activity_id, moves_card_points, free_night_used")
+        .select("account_id, check_in, points_cost, points_used, hotel_credit_cents, cancelled_at, reward_activity_id, moves_card_points, free_night_used, is_estimate")
         .eq("id", id)
         .eq("household_id", householdId)
         .maybeSingle(),
@@ -175,7 +183,7 @@ export async function saveTravelStay(formData: FormData) {
 
     // A cancelled stay has already handed everything back, so it starts from
     // zero and editing it draws again.
-    const before: RewardDraw = prev.cancelled_at
+    const before: RewardDraw = prev.cancelled_at || prev.is_estimate
       ? { accountId: prev.account_id, points: 0, credit: 0 }
       : {
           accountId: prev.account_id,
@@ -191,7 +199,7 @@ export async function saveTravelStay(formData: FormData) {
         supabase,
         householdId,
         before,
-        { accountId, points: pointsDrawn, credit: hotelCredit },
+        { accountId, points: pointsDrawn, credit: creditDrawn },
         { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
         prev.reward_activity_id,
       );
@@ -212,8 +220,8 @@ export async function saveTravelStay(formData: FormData) {
     const stampError = await syncFreeNightStamp(
       supabase,
       householdId,
-      prev.free_night_used && !prev.cancelled_at ? { accountId: prev.account_id, checkIn: prev.check_in } : null,
-      freeNightUsed && !prev.cancelled_at ? { accountId, checkIn } : null,
+      prev.free_night_used && !prev.cancelled_at && !prev.is_estimate ? { accountId: prev.account_id, checkIn: prev.check_in } : null,
+      certificateUsed && !prev.cancelled_at ? { accountId, checkIn } : null,
     );
     if (stampError) return { error: stampError };
     revalidate();
@@ -226,7 +234,7 @@ export async function saveTravelStay(formData: FormData) {
     supabase,
     householdId,
     { accountId, points: 0, credit: 0 },
-    { accountId, points: pointsDrawn, credit: hotelCredit },
+    { accountId, points: pointsDrawn, credit: creditDrawn },
     { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
   );
   if (sync.error) return { error: sync.error };
@@ -238,7 +246,7 @@ export async function saveTravelStay(formData: FormData) {
     console.error("[saveTravelStay:insert]", error);
     return { error: `Couldn't save that stay — ${error.message}` };
   }
-  if (freeNightUsed) {
+  if (certificateUsed) {
     const stampError = await syncFreeNightStamp(supabase, householdId, null, { accountId, checkIn });
     if (stampError) return { error: stampError };
   }
@@ -257,7 +265,7 @@ export async function deleteTravelStay(formData: FormData) {
   const stay = unwrap(
     await supabase
       .from("travel_stays")
-      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on, reward_activity_id, moves_card_points, free_night_used")
+      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on, reward_activity_id, moves_card_points, free_night_used, is_estimate")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -265,7 +273,8 @@ export async function deleteTravelStay(formData: FormData) {
   );
   if (!stay) return { error: "That stay was not found." };
 
-  if (!stay.cancelled_at && stay.free_night_used) {
+  // A planned stay drew nothing, so deleting it hands nothing back.
+  if (!stay.cancelled_at && !stay.is_estimate && stay.free_night_used) {
     const stampError = await syncFreeNightStamp(
       supabase,
       householdId,
@@ -274,7 +283,7 @@ export async function deleteTravelStay(formData: FormData) {
     );
     if (stampError) return { error: stampError };
   }
-  if (!stay.cancelled_at && stay.moves_card_points) {
+  if (!stay.cancelled_at && !stay.is_estimate && stay.moves_card_points) {
     const sync = await syncRewardLedger(
       supabase,
       householdId,
@@ -357,7 +366,7 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
   const stay = unwrap(
     await supabase
       .from("travel_stays")
-      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on, reward_activity_id, moves_card_points, free_night_used")
+      .select("account_id, points_cost, points_used, hotel_credit_cents, cancelled_at, property_name, check_in, reserved_on, reward_activity_id, moves_card_points, free_night_used, is_estimate")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
@@ -374,7 +383,8 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
   const full = { accountId: stay.account_id, ...drawn };
 
   let activityId = stay.reward_activity_id;
-  if (stay.moves_card_points) {
+  // A planned stay draws nothing, so cancelling or restoring moves nothing.
+  if (stay.moves_card_points && !stay.is_estimate) {
     const sync = await syncRewardLedger(
       supabase,
       householdId,
@@ -390,7 +400,7 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
     if (sync.error) return { error: sync.error };
     activityId = sync.activityId;
   }
-  if (stay.free_night_used) {
+  if (stay.free_night_used && !stay.is_estimate) {
     const stamp = { accountId: stay.account_id, checkIn: stay.check_in };
     const stampError = await syncFreeNightStamp(
       supabase,

@@ -49,6 +49,23 @@ export function flightRoute(f: TravelFlight): string {
   return stops.join(" → ");
 }
 
+/**
+ * A booking as planned against actual, the way trip spending reads. A flight
+ * not bought yet is all plan; a bought one keeps the estimate it replaced, if
+ * it ever was one. Stays and rentals work the same way.
+ */
+export function bookingPlanActual(b: Booking): { planned: number | null; actual: number | null } {
+  if (b.kind === "flight") {
+    return b.flight.isEstimate
+      ? { planned: b.pocket, actual: null }
+      : { planned: b.flight.plannedCostCents, actual: b.pocket };
+  }
+  const booking = b.kind === "stay" ? b.stay : b.car;
+  return booking.isEstimate
+    ? { planned: b.pocket, actual: null }
+    : { planned: booking.plannedCostCents, actual: b.pocket };
+}
+
 function flightBooking(f: TravelFlight): Booking {
   const start = f.legs[0]?.flightOn ?? f.firstFlightOn;
   return {
@@ -180,7 +197,10 @@ export function summarizeTrips(
         miscTotal,
         plannedMisc: tripExpenses.reduce((s, e) => s + (e.plannedCents ?? 0), 0),
         actualMisc: tripExpenses.reduce((s, e) => s + (e.actualCents ?? 0), 0),
-        hasEstimates: tripExpenses.some((e) => e.plannedCents != null && e.actualCents == null),
+        // A spending plan with no actual yet, or a flight not bought yet.
+        hasEstimates:
+          tripExpenses.some((e) => e.plannedCents != null && e.actualCents == null) ||
+          live.some((b) => (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate),
         total: flightsPaid + hotelsPaid + rentalsPaid + miscTotal,
         saved: Math.max(0, cashValue - (flightsPaid + hotelsPaid + rentalsPaid)),
         points: live.reduce((sum, b) => sum + b.points, 0),

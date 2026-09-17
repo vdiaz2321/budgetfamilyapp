@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { OpenFullWidthButton } from "./open-full-width-button";
+import { SearchBox } from "./search-box";
+import { YearPicker, inYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { sheetDateRange, type TripSummary } from "./trip-summary";
 import type { ExpenseCategory } from "./types";
 
-const ALL = "__all__";
-const YEAR_KEY = "travel-trip-log-year";
 
 // The trip's name without the "· May 2027" the importer adds — the Dates
 // column already says when.
@@ -17,6 +17,19 @@ function placeName(name: string): string {
   return name.split(" · ")[0];
 }
 const DASH = "—";
+
+// What the trip search matches: the trip's name plus what was booked on it —
+// hotels and their cities, airlines, flight numbers, airports and booking codes, and rental
+// companies with their pickup and return places.
+function searchText(t: TripSummary): string {
+  const words = t.bookings.flatMap((b) => {
+    if (b.kind === "stay") return [b.stay.propertyName, b.stay.city, b.stay.brand];
+    if (b.kind === "flight")
+      return [b.flight.airline, b.flight.bookingCode, ...b.flight.legs.flatMap((l) => [l.flightNumber, l.fromPlace, l.toPlace])];
+    return [b.car.company, b.car.bookingCode, b.car.pickupPlace, b.car.returnPlace];
+  });
+  return [t.trip.name, ...words].filter(Boolean).join(" ").toLowerCase();
+}
 
 // The whole-trip columns: flights and hotels, the day-to-day spending, then
 // the rental last.
@@ -63,30 +76,13 @@ export function TripLogPanel({
         .reverse(),
     [summaries],
   );
-  // This year on a fresh login; a year picked afterwards is remembered for the
-  // session (sessionStorage is wiped on login — see session-init.tsx).
-  const [year, setYear] = useState(() => String(new Date().getFullYear()));
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => {
-    try {
-      const saved = window.sessionStorage.getItem(YEAR_KEY);
-      // Client-only hydration; the first render uses this year to match the server.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved) setYear(saved);
-    } catch {
-      // sessionStorage unavailable — stays on this year.
-    }
-    setHydrated(true);
-  }, []);
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      window.sessionStorage.setItem(YEAR_KEY, year);
-    } catch {
-      // sessionStorage unavailable — the pick just won't persist.
-    }
-  }, [year, hydrated]);
-  const shown = year === ALL ? summaries : summaries.filter((t) => t.start?.startsWith(year));
+  // This year on a fresh login; a pick afterwards is remembered for the session.
+  const [year, setYear] = useSessionYears("travel-trip-log-years", () => [String(new Date().getFullYear())]);
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shown = summaries.filter(
+    (t) => inYears(year, t.start?.slice(0, 4)) && (!q || searchText(t).includes(q)),
+  );
 
   const sum = (read: (t: TripSummary) => number) => shown.reduce((total, t) => total + read(t), 0);
   const totalSpent = sum((t) => t.total);
@@ -177,17 +173,7 @@ export function TripLogPanel({
   );
 
   const yearSelect = (
-    <select
-      aria-label="Travel Log year"
-      value={year}
-      onChange={(e) => setYear(e.target.value)}
-      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-    >
-      <option value={ALL}>All years</option>
-      {years.map((y) => (
-        <option key={y} value={y}>{y}</option>
-      ))}
-    </select>
+    <YearPicker years={years} value={year} onChange={setYear} label="Travel Log year" />
   );
 
   return (
@@ -221,6 +207,7 @@ export function TripLogPanel({
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
           <span className="text-sm font-bold tabular-nums text-negative">{formatMoney(totalSpent, currency)}</span>
         </span>
+        <SearchBox value={query} onChange={setQuery} placeholder="Search trip, hotel, flight…" label="Search trips" className="w-44" />
         <span className="ml-auto flex items-center gap-2">
           {yearSelect}
           <OpenFullWidthButton onClick={() => setExpanded(true)} />

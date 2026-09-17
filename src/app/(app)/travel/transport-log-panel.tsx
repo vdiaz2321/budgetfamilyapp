@@ -1,10 +1,31 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CarsList } from "./cars-panel";
 import { FlightsList } from "./flights-panel";
+import { SearchBox } from "./search-box";
+import { YearPicker, inYears, useSessionYears } from "./year-picker";
 import type { TravelCar, TravelFlight } from "./types";
+
+// What the search matches on a flight: airline, booking code, flight numbers,
+// airports and who flew.
+function flightText(f: TravelFlight): string {
+  return [
+    f.airline,
+    f.bookingCode,
+    ...f.legs.flatMap((l) => [l.flightNumber, l.fromPlace, l.toPlace]),
+    ...f.passengers.map((p) => p.name),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function carText(c: TravelCar): string {
+  return [c.company, c.bookingCode, c.pickupPlace, c.returnPlace].filter(Boolean).join(" ").toLowerCase();
+}
 
 /**
  * Flights and rentals in one card: how you got there and got around. Each
@@ -25,19 +46,37 @@ export function TransportLogPanel({
 }) {
   const [state, setState] = useSessionCollapse("travel-transport-log", () => ({ open: false }));
   const open = !!state.open;
+  const years = useMemo(
+    () =>
+      Array.from(new Set([...flights.map((f) => f.firstFlightOn.slice(0, 4)), ...cars.map((c) => c.pickupOn.slice(0, 4))]))
+        .sort()
+        .reverse(),
+    [flights, cars],
+  );
+  // This year when it has anything booked, otherwise every year (none ticked).
+  const [year, setYear] = useSessionYears("travel-transport-log-years", () => {
+    const current = String(new Date().getFullYear());
+    return years.includes(current) ? [current] : [];
+  });
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shownFlights = flights.filter(
+    (f) => inYears(year, f.firstFlightOn.slice(0, 4)) && (!q || flightText(f).includes(q)),
+  );
+  const shownCars = cars.filter((c) => inYears(year, c.pickupOn.slice(0, 4)) && (!q || carText(c).includes(q)));
   const total =
-    flights.filter((f) => !f.cancelledAt).reduce((sum, f) => sum + f.pocketCostCents, 0) +
-    cars.filter((c) => !c.cancelledAt).reduce((sum, c) => sum + c.pocketCostCents, 0);
+    shownFlights.filter((f) => !f.cancelledAt).reduce((sum, f) => sum + f.pocketCostCents, 0) +
+    shownCars.filter((c) => !c.cancelledAt).reduce((sum, c) => sum + c.pocketCostCents, 0);
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <button
-        type="button"
-        onClick={() => setState({ open: !open })}
-        aria-expanded={open}
-        className={`flex w-full flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${open ? "border-b border-line" : ""}`}
-      >
-        <span className="flex items-center gap-2">
+      <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6 ${open ? "border-b border-line" : ""}`}>
+        <button
+          type="button"
+          onClick={() => setState({ open: !open })}
+          aria-expanded={open}
+          className="flex items-center gap-2 text-left"
+        >
           <svg
             aria-hidden
             viewBox="0 0 20 20"
@@ -51,25 +90,30 @@ export function TransportLogPanel({
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
           <span className="text-sm font-bold">Flights &amp; Rentals Log</span>
-        </span>
-        <Figure label="Total flights" value={String(flights.length)} />
-        <Figure label="Total rentals" value={String(cars.length)} />
+        </button>
+        <Figure label="Total flights" value={String(shownFlights.length)} />
+        <Figure label="Total rentals" value={String(shownCars.length)} />
         <Figure label="Total spent" value={formatMoney(total, currency)} className="text-negative" />
-      </button>
+        <SearchBox value={query} onChange={setQuery} placeholder="Search airline, airport…" label="Search flights and rentals" className="w-44" />
+        <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" className="ml-auto" />
+      </div>
 
       {open ? (
         <>
-          {flights.length > 0 ? (
+          {shownFlights.length > 0 ? (
             <>
               <GroupHeading title="Flights" />
-              <FlightsList flights={flights} currency={currency} onEdit={onEditFlight} />
+              <FlightsList flights={shownFlights} currency={currency} onEdit={onEditFlight} />
             </>
           ) : null}
-          {cars.length > 0 ? (
+          {shownCars.length > 0 ? (
             <>
-              <GroupHeading title="Rentals" divided={flights.length > 0} />
-              <CarsList cars={cars} currency={currency} onEdit={onEditCar} />
+              <GroupHeading title="Rentals" divided={shownFlights.length > 0} />
+              <CarsList cars={shownCars} currency={currency} onEdit={onEditCar} />
             </>
+          ) : null}
+          {shownFlights.length === 0 && shownCars.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-muted sm:px-6">No flights or rentals match.</p>
           ) : null}
         </>
       ) : null}

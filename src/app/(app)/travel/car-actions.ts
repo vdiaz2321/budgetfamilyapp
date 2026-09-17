@@ -41,6 +41,8 @@ export type CarPayload = {
   points: string;
   pointsValue: string;
   remarks: string;
+  /** Not booked yet — the cost is an estimate. */
+  isEstimate: boolean;
 };
 
 function dollarsToMicros(raw: string): number | null {
@@ -81,6 +83,9 @@ export async function saveTravelCar(payload: CarPayload) {
   // The family car isn't paid for with points.
   const points = rental ? Math.max(0, Math.trunc(Number(payload.points.replace(/,/g, "")) || 0)) : 0;
   const pointsUsed = rental && payload.pointsUsed && points > 0;
+  const isEstimate = Boolean(payload.isEstimate);
+  // Nothing leaves a card until a planned rental is booked.
+  const drawPoints = pointsUsed && !isEstimate ? points : 0;
   // Left blank, what left the wallet is the cost — or nothing on points.
   const pocketCost = payload.pocketCost.trim()
     ? Math.max(0, displayToCents(payload.pocketCost))
@@ -113,6 +118,8 @@ export async function saveTravelCar(payload: CarPayload) {
     cost_cents: cost,
     cost_eur_cents: payload.costEur.trim() ? Math.max(0, displayToCents(payload.costEur)) : null,
     pocket_cost_cents: pocketCost,
+    is_estimate: isEstimate,
+    ...(isEstimate ? { planned_cost_cents: pocketCost } : {}),
     remarks: clean(payload.remarks),
     updated_at: new Date().toISOString(),
   };
@@ -122,7 +129,7 @@ export async function saveTravelCar(payload: CarPayload) {
     const prev = unwrap(
       await supabase
         .from("travel_cars")
-        .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, moves_card_points")
+        .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, moves_card_points, is_estimate")
         .eq("id", payload.id)
         .eq("household_id", householdId)
         .maybeSingle(),
@@ -133,8 +140,8 @@ export async function saveTravelCar(payload: CarPayload) {
       ? await syncRewardLedger(
           supabase,
           householdId,
-          { accountId: prev.account_id, points: prev.cancelled_at || !prev.points_used ? 0 : prev.points_cost ?? 0, credit: 0 },
-          { accountId, points: prev.cancelled_at || !pointsUsed ? 0 : points, credit: 0 },
+          { accountId: prev.account_id, points: prev.cancelled_at || prev.is_estimate || !prev.points_used ? 0 : prev.points_cost ?? 0, credit: 0 },
+          { accountId, points: prev.cancelled_at ? 0 : drawPoints, credit: 0 },
           meta,
           prev.reward_activity_id,
           "car_booking",
@@ -152,7 +159,7 @@ export async function saveTravelCar(payload: CarPayload) {
       supabase,
       householdId,
       { accountId, points: 0, credit: 0 },
-      { accountId, points: pointsUsed ? points : 0, credit: 0 },
+      { accountId, points: drawPoints, credit: 0 },
       meta,
       null,
       "car_booking",
@@ -171,7 +178,7 @@ async function loadCar(id: string) {
   const car = unwrap(
     await supabase
       .from("travel_cars")
-      .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, company, booking_code, reserved_on, pickup_on, moves_card_points")
+      .select("account_id, points_cost, points_used, cancelled_at, reward_activity_id, company, booking_code, reserved_on, pickup_on, moves_card_points, is_estimate")
       .eq("id", id)
       .eq("household_id", household.id)
       .maybeSingle(),
@@ -183,7 +190,7 @@ async function loadCar(id: string) {
 export async function deleteTravelCar(id: string) {
   const { supabase, householdId, car } = await loadCar(id);
   if (!car) return { error: "That car was not found." };
-  if (car.moves_card_points && !car.cancelled_at && car.points_used && car.points_cost) {
+  if (car.moves_card_points && !car.cancelled_at && !car.is_estimate && car.points_used && car.points_cost) {
     const sync = await syncRewardLedger(
       supabase,
       householdId,
@@ -207,7 +214,7 @@ export async function setTravelCarCancelled(id: string, cancelled: boolean) {
   if (Boolean(car.cancelled_at) === cancelled) return { error: null };
 
   let activityId = car.reward_activity_id;
-  if (car.moves_card_points && car.points_used && car.points_cost) {
+  if (car.moves_card_points && !car.is_estimate && car.points_used && car.points_cost) {
     const none = { accountId: car.account_id, points: 0, credit: 0 };
     const full = { accountId: car.account_id, points: car.points_cost, credit: 0 };
     const sync = await syncRewardLedger(
