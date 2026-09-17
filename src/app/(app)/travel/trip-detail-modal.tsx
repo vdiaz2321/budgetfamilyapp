@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { centsToDisplay, formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
 import { sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
@@ -11,6 +11,12 @@ import { EXPENSE_CATEGORIES } from "./types";
 
 const DASH = "—";
 const KIND_LABEL = { flight: "Flight", stay: "Stay", car: "Rental" } as const;
+// A section's action, sat right beside its heading. Bordered and on the page
+// background so it reads as a button, not a faint outline. Hover is a light
+// blue wash — grey read as disabled, black as too heavy, and Victor rejects
+// the purple brand colour anywhere new.
+const SECTION_BUTTON =
+  "rounded-md border border-black/25 bg-background px-2.5 py-1 text-[11px] font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40";
 
 /**
  * One trip, whole: its bookings in date order, its spending planned against
@@ -36,13 +42,21 @@ export function TripDetailModal({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
+  const [editingNotes, setEditingNotes] = useState(false);
   const [name, setName] = useState(t.trip.name);
   const [startOn, setStartOn] = useState(t.trip.startOn ?? "");
   const [endOn, setEndOn] = useState(t.trip.endOn ?? "");
   const [notes, setNotes] = useState(t.trip.notes ?? "");
 
-  const money = (cents: number | null | undefined) => (cents ? formatMoney(cents, currency) : DASH);
-  const euros = (cents: number | null | undefined) => (cents != null ? `€${centsToDisplay(cents)}` : "");
+  // The spending table rounds to whole units and keeps dollars and euros on
+  // one line — "$507 / €428" — instead of stacking ".00" figures.
+  const money = (cents: number | null | undefined) => (cents ? formatMoneyWhole(cents, currency) : DASH);
+  const euros = (cents: number | null | undefined) => (cents != null ? formatMoneyWhole(cents, "€") : "");
+  // The euro side of a Total cell — only when some row has a euro figure.
+  const eurTotal = (field: "plannedEurCents" | "actualEurCents") => {
+    const values = t.expenses.map((e) => e[field]).filter((v): v is number => v != null);
+    return values.length ? values.reduce((sum, v) => sum + v, 0) : null;
+  };
 
   function run(action: () => Promise<{ error: string | null }>, after: () => void) {
     start(async () => {
@@ -64,7 +78,7 @@ export function TripDetailModal({
       mobileAlign="top"
     >
       <div className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
-        <p className="flex flex-wrap items-baseline gap-x-3 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
           {t.start ? (
             <span className="tabular-nums">
               {sheetDateRange(t.start, t.end)}
@@ -74,8 +88,49 @@ export function TripDetailModal({
           )}
           {t.nights != null ? <span>{t.nights} night{t.nights === 1 ? "" : "s"}</span> : null}
           {t.pax ? <span>{t.pax} pax</span> : null}
-          {t.trip.notes ? <span className="text-foreground">{t.trip.notes}</span> : null}
-        </p>
+          {!editingNotes ? (
+            <button type="button" onClick={() => { setNotes(t.trip.notes ?? ""); setEditingNotes(true); }} className={`${SECTION_BUTTON} text-foreground`}>
+              {t.trip.notes ? "Edit notes" : "+ Add notes"}
+            </button>
+          ) : null}
+        </div>
+
+        {/* ---- Notes: edited in place, right where they are read; the Edit
+             notes button sits on the dates line above. */}
+        {editingNotes || t.trip.notes ? (
+        <section>
+          {editingNotes ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                run(
+                  () => updateTrip(t.trip.id, { name: t.trip.name, startOn: t.trip.startOn ?? "", endOn: t.trip.endOn ?? "", notes }),
+                  () => setEditingNotes(false),
+                );
+              }}
+              className="space-y-2"
+            >
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={5}
+                autoFocus
+                className={`${inputClass} resize-y`}
+              />
+              <div className="flex flex-wrap gap-2">
+                <button type="submit" disabled={pending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60" style={{ backgroundColor: "var(--viz-income)" }}>
+                  {pending ? "Saving…" : "Save notes"}
+                </button>
+                <button type="button" onClick={() => setEditingNotes(false)} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground">
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="whitespace-pre-line text-xs">{t.trip.notes}</p>
+          )}
+        </section>
+        ) : null}
 
         {/* What the trip came to. */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -91,12 +146,12 @@ export function TripDetailModal({
 
         {/* ---- Bookings */}
         <section>
-          <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="mb-1 flex items-center gap-3">
             <h3 className="text-xs font-bold uppercase tracking-wide">Bookings</h3>
             <button
               type="button"
               onClick={onAddBooking}
-              className="rounded-md px-2.5 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              className={SECTION_BUTTON}
             >
               + Add to this trip
             </button>
@@ -148,12 +203,12 @@ export function TripDetailModal({
 
         {/* ---- Spending, planned against actual */}
         <section>
-          <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="mb-1 flex items-center gap-3">
             <h3 className="text-xs font-bold uppercase tracking-wide">Spending</h3>
             <button
               type="button"
               onClick={onEditSpending}
-              className="rounded-md px-2.5 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              className={SECTION_BUTTON}
             >
               {t.expenses.length ? "Edit spending" : "+ Add spending"}
             </button>
@@ -179,14 +234,14 @@ export function TripDetailModal({
                         <td className="px-3 py-1.5 text-left font-semibold">{label}</td>
                         <td className="px-3 py-1.5 text-center tabular-nums">
                           {money(e.plannedCents)}
-                          {e.plannedEurCents != null ? <span className="block text-[10px] text-muted">{euros(e.plannedEurCents)}</span> : null}
+                          {e.plannedEurCents != null ? <span className="text-muted"> / {euros(e.plannedEurCents)}</span> : null}
                         </td>
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums">
                           {money(e.actualCents)}
-                          {e.actualEurCents != null ? <span className="block text-[10px] font-normal text-muted">{euros(e.actualEurCents)}</span> : null}
+                          {e.actualEurCents != null ? <span className="font-normal text-muted"> / {euros(e.actualEurCents)}</span> : null}
                         </td>
                         <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
-                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoney(Math.abs(diff), currency)}`}
+                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
                         </td>
                       </tr>
                     );
@@ -195,8 +250,14 @@ export function TripDetailModal({
                 <tfoot>
                   <tr className="border-t-2 border-line font-bold">
                     <td className="px-3 py-1.5 text-left">Total</td>
-                    <td className="px-3 py-1.5 text-center tabular-nums">{money(t.plannedMisc)}</td>
-                    <td className="px-3 py-1.5 text-center tabular-nums">{money(t.actualMisc)}</td>
+                    <td className="px-3 py-1.5 text-center tabular-nums">
+                      {money(t.plannedMisc)}
+                      {eurTotal("plannedEurCents") != null ? <span className="font-normal text-muted"> / {euros(eurTotal("plannedEurCents"))}</span> : null}
+                    </td>
+                    <td className="px-3 py-1.5 text-center tabular-nums">
+                      {money(t.actualMisc)}
+                      {eurTotal("actualEurCents") != null ? <span className="font-normal text-muted"> / {euros(eurTotal("actualEurCents"))}</span> : null}
+                    </td>
                     <td />
                   </tr>
                 </tfoot>
@@ -227,7 +288,7 @@ export function TripDetailModal({
                 <input type="date" value={endOn} onChange={(e) => setEndOn(e.target.value)} className={inputClass} />
               </Field>
               <Field label="Notes" className="col-span-2 sm:col-span-3">
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={`${inputClass} resize-y`} />
               </Field>
               <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3">
                 <button type="submit" disabled={pending} className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
@@ -257,10 +318,10 @@ export function TripDetailModal({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setMode("edit")}
+                onClick={() => { setNotes(t.trip.notes ?? ""); setMode("edit"); }}
                 className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
               >
-                Edit name & dates
+                Edit trip
               </button>
               <button
                 type="button"
@@ -280,7 +341,7 @@ export function TripDetailModal({
 
 function Stat({ label, value, className, note }: { label: string; value: string; className?: string; note?: string }) {
   return (
-    <div className="rounded-lg bg-background/60 px-3 py-2 ring-1 ring-line">
+    <div className="rounded-lg bg-background/60 px-3 py-2 text-center ring-1 ring-line">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
       <p className={`text-base font-bold tabular-nums ${className ?? ""}`}>{value}</p>
       {note ? <p className="text-[10px] font-semibold text-muted">{note}</p> : null}

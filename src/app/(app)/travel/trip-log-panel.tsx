@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { OpenFullWidthButton } from "./open-full-width-button";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -222,16 +223,7 @@ export function TripLogPanel({
         </span>
         <span className="ml-auto flex items-center gap-2">
           {yearSelect}
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="hidden items-center gap-1.5 rounded-md border border-black/25 bg-background px-2 py-1 text-[11px] font-semibold transition hover:bg-black/5 sm:inline-flex dark:border-white/30 dark:hover:bg-white/10"
-          >
-            Open full width
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-            </svg>
-          </button>
+          <OpenFullWidthButton onClick={() => setExpanded(true)} />
         </span>
       </div>
 

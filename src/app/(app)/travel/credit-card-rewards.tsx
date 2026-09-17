@@ -34,6 +34,7 @@ import {
   upsertCardDetails,
 } from "../accounts/actions";
 import { ModalShell } from "@/components/modal-shell";
+import { OpenFullWidthButton } from "./open-full-width-button";
 import { StayModal } from "./stay-modal";
 import type { TravelBrand, TravelCard } from "./types";
 
@@ -1058,6 +1059,75 @@ function RewardsActivityLedger({
   // popup closes it with the row instead of leaving a form for a gone entry.
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingEntry = editingId ? entries.find((e) => e.id === editingId) ?? null : null;
+  // The same list, in a wide popup where the detail column isn't cut short.
+  const [expanded, setExpanded] = useState(false);
+
+  const yearSelect = (
+    <select
+      aria-label="Year"
+      value={year}
+      onChange={(e) => setYear(e.target.value)}
+      className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+    >
+      {years.map((y) => (
+        <option key={y} value={y}>{y}</option>
+      ))}
+      <option value="all">All years</option>
+    </select>
+  );
+  const entryCount = (
+    <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">
+      {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"}
+    </span>
+  );
+  const list = visibleEntries.length === 0 ? (
+    <p className="px-4 py-4 text-sm text-muted">
+      {entries.length === 0
+        ? "No rewards activity yet. Open a card and choose “Rewards Activity Log” to create the first entry."
+        : `No rewards activity in ${year}.`}
+    </p>
+  ) : (
+    <ul className="divide-y divide-line bg-background/70">
+      {visibleEntries.map((entry) => {
+        const amount = (
+          <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
+            {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
+          </span>
+        );
+        const detail = `${labels[entry.type]}${entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}${entry.note ? ` · ${entry.note}` : ""}`;
+        return (
+        <li key={entry.id} className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] sm:gap-2 dark:hover:bg-white/[0.04]">
+          {/* Every row opens the edit popup. It used to jump to the card
+              and open its "Log points" form, which read as a new entry
+              instead of the one you clicked. Delete keeps its own hit
+              area — a <button> can't nest inside another one. */}
+          <button
+            type="button"
+            onClick={() => setEditingId(entry.id)}
+            className="min-w-0 flex-1 cursor-pointer text-left sm:contents"
+          >
+            {/* Phone: card and amount on one line, date and detail under
+                it — four cells in a row left no room for the card name. */}
+            <span className="block min-w-0 sm:hidden">
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
+                {amount}
+              </span>
+              <span className="mt-0.5 block truncate text-muted">
+                <span className="tabular-nums">{entry.occurredOn}</span> · {detail}
+              </span>
+            </span>
+            <span className="hidden text-muted tabular-nums sm:block">{entry.occurredOn}</span>
+            <span className="hidden min-w-0 truncate font-semibold sm:block">{entry.cardName}</span>
+            <span className="hidden min-w-0 truncate text-muted sm:block">{detail}</span>
+            <span className="hidden sm:block">{amount}</span>
+          </button>
+          <RewardActivityRowActions entry={entry} compact />
+        </li>
+        );
+      })}
+    </ul>
+  );
 
   return (
     <section>
@@ -1079,70 +1149,18 @@ function RewardsActivityLedger({
           </span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
-          <select
-            aria-label="Year"
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-            className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-            <option value="all">All years</option>
-          </select>
-          <span className="rounded bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand">
-            {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"}
-          </span>
+          {yearSelect}
+          {entryCount}
+          <OpenFullWidthButton onClick={() => setExpanded(true)} />
         </div>
       </div>
-      {!open ? null : visibleEntries.length === 0 ? (
-        <p className="px-4 py-4 text-sm text-muted">
-          {entries.length === 0
-            ? "No rewards activity yet. Open a card and choose “Rewards Activity Log” to create the first entry."
-            : `No rewards activity in ${year}.`}
-        </p>
-      ) : (
-        <ul className="divide-y divide-line bg-background/70">
-          {visibleEntries.map((entry) => {
-            const amount = (
-              <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
-                {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoney(entry.hotelCreditDeltaCents, currency) : "Booked"}
-              </span>
-            );
-            const detail = `${labels[entry.type]}${entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}${entry.note ? ` · ${entry.note}` : ""}`;
-            return (
-            <li key={entry.id} className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] sm:gap-2 dark:hover:bg-white/[0.04]">
-              {/* Every row opens the edit popup. It used to jump to the card
-                  and open its "Log points" form, which read as a new entry
-                  instead of the one you clicked. Delete keeps its own hit
-                  area — a <button> can't nest inside another one. */}
-              <button
-                type="button"
-                onClick={() => setEditingId(entry.id)}
-                className="min-w-0 flex-1 cursor-pointer text-left sm:contents"
-              >
-                {/* Phone: card and amount on one line, date and detail under
-                    it — four cells in a row left no room for the card name. */}
-                <span className="block min-w-0 sm:hidden">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
-                    {amount}
-                  </span>
-                  <span className="mt-0.5 block truncate text-muted">
-                    <span className="tabular-nums">{entry.occurredOn}</span> · {detail}
-                  </span>
-                </span>
-                <span className="hidden text-muted tabular-nums sm:block">{entry.occurredOn}</span>
-                <span className="hidden min-w-0 truncate font-semibold sm:block">{entry.cardName}</span>
-                <span className="hidden min-w-0 truncate text-muted sm:block">{detail}</span>
-                <span className="hidden sm:block">{amount}</span>
-              </button>
-              <RewardActivityRowActions entry={entry} compact />
-            </li>
-            );
-          })}
-        </ul>
-      )}
+      {open ? list : null}
+      {expanded ? (
+        <ModalShell title="Rewards Points Transactions Log" onClose={() => setExpanded(false)} className="sm:max-w-5xl" headerExtra={entryCount}>
+          <div className="flex justify-end border-b border-line px-4 py-2 sm:px-6">{yearSelect}</div>
+          {list}
+        </ModalShell>
+      ) : null}
       {editingEntry ? (
         <EditRewardActivityModal
           // Keyed so opening a different row starts from that row's values.

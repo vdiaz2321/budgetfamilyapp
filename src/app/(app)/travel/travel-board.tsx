@@ -12,6 +12,7 @@ import { FlightModal } from "./flight-modal";
 import { CarModal } from "./car-modal";
 import { TransportLogPanel } from "./transport-log-panel";
 import { TripLogPanel } from "./trip-log-panel";
+import { OpenFullWidthButton } from "./open-full-width-button";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
 import { sheetDateRange, summarizeTrips } from "./trip-summary";
@@ -157,7 +158,9 @@ export function TravelBoard({
   // One period for the two side-by-side tallies (brand and card): they answer
   // the same question two ways, so reading them against different years was
   // never what was wanted. Independent of the Reservations filter above them.
-  const [tallyYear, setTallyYear] = useState<string>(ALL);
+  // Both tallies open on this year.
+  const [tallyYear, setTallyYear] = useState<string>(() => today.slice(0, 4));
+  const [cardYear, setCardYear] = useState<string>(() => today.slice(0, 4));
   const [openCards, setOpenCards] = useState(true);
   // The log starts collapsed on a fresh login — it's the longest section on
   // the page — but sessionStorage carries whatever you last set for as long as
@@ -179,6 +182,8 @@ export function TravelBoard({
   // The reservations log opened in a popup, where the sheet's full column set
   // has room. Desktop only — see the button in the panel header.
   const [expanded, setExpanded] = useState(false);
+  const [expandedYears, setExpandedYears] = useState(false);
+  const [expandedUpcoming, setExpandedUpcoming] = useState<"hotels" | "flights" | "cars" | null>(null);
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
   // A trip row's "edit spending" opens the Misc form on its own, not the
@@ -311,6 +316,7 @@ export function TravelBoard({
         .sort((a, b) => a.pickupOn.localeCompare(b.pickupOn)),
     [carList, today],
   );
+  const upcomingGroups = [upcoming, upcomingFlights, upcomingCars].filter((g) => g.length > 0).length;
 
   // The sheet's CC Info column, grouped: one row per distinct label, with the
   // card those stays already point at when they all agree.
@@ -362,14 +368,25 @@ export function TravelBoard({
     }
     return { spent, saved };
   }, [tallyStays]);
-  // One control, in the Brand header, for both tallies: they sit side by side
-  // and are read together, so a second copy on the card panel was the same
-  // switch twice.
-  const tallyPeriod = (
+  // The card tally has its own year, so brand and card can be read for
+  // different years side by side.
+  const cardStays = useMemo(
+    () => (cardYear === ALL ? live : live.filter((s) => stayYear(s) === cardYear)),
+    [live, cardYear],
+  );
+  const cardTotals = useMemo(() => {
+    let spent = 0, saved = 0;
+    for (const s of cardStays) {
+      spent += s.pocketCostCents;
+      saved += savedCents(s);
+    }
+    return { spent, saved };
+  }, [cardStays]);
+  const tallyPeriod = (value: string, onChange: (v: string) => void, label: string) => (
     <select
-      aria-label="Tally period"
-      value={tallyYear}
-      onChange={(e) => setTallyYear(e.target.value)}
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
       className="cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
     >
       <option value={ALL}>All years</option>
@@ -383,7 +400,7 @@ export function TravelBoard({
   // labels are linked, which is what the Link cards button is for.
   const cardTally = useMemo(() => {
     const map = new Map<string, { stays: number; spent: number; saved: number; points: number }>();
-    for (const s of tallyStays) {
+    for (const s of cardStays) {
       const key = (s.accountId ? cardName.get(s.accountId) : null) ?? "Not linked";
       const row = map.get(key) ?? { stays: 0, spent: 0, saved: 0, points: 0 };
       row.stays += 1;
@@ -393,7 +410,7 @@ export function TravelBoard({
       map.set(key, row);
     }
     return Array.from(map.entries()).sort((a, b) => b[1].stays - a[1].stays || a[0].localeCompare(b[0]));
-  }, [tallyStays, cardName]);
+  }, [cardStays, cardName]);
   const brandTally = useMemo(() => {
     const map = new Map<string, { stays: number; spent: number; saved: number; points: number }>();
     for (const s of tallyStays) {
@@ -730,6 +747,213 @@ export function TravelBoard({
     </>
   );
 
+  // The upcoming-booking lists, shared by each card and its full-width popup.
+  const hotelRows = (
+  <ul className="divide-y divide-line">
+    {upcoming.map((s) => (
+      <li key={s.id}>
+        <button
+          type="button"
+          onClick={() => setEditing(s)}
+          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+        >
+          {/* Two lines, not one. Sharing a line with the trip
+              details left the name a `truncate` box ~30px wide
+              next to a shrink-0 detail run — "Hotel Babylon
+              Royal" rendered as "Hot…". The name owns its line
+              and the details sit under it, the way the mobile
+              card already reads. */}
+          <span className="flex min-w-0 flex-1 flex-col gap-y-0.5">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="text-sm font-semibold">{s.propertyName}</span>
+              {/* Same chip as the card panel's "Owner:" / "Bank:". */}
+              {s.brand ? (
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  Booked Thru: <span className="text-slate-700 dark:text-slate-200">{s.brand}</span>
+                </span>
+              ) : null}
+            </span>
+            <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+              <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
+              <span className="tabular-nums">{s.nights}n</span>
+              {s.city ? <span>{s.city}</span> : null}
+              {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
+            </span>
+            <Remarks text={s.remarks} />
+          </span>
+          {/* At 375px these wrap under the name; at sm+ they hold
+              the right-hand end of the single line. */}
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
+            <Figure
+              label="Days away"
+              value={String(daysUntil(today, s.checkIn))}
+              tone=""
+              style={{ color: "var(--viz-savings)" }}
+            />
+            <Figure
+              label="Hotel cost"
+              value={s.hotelCostCents > 0 ? formatMoney(s.hotelCostCents, currency) : DASH}
+              tone=""
+            />
+            <Figure
+              label="Pocket cost"
+              value={
+                s.pocketCostCents > 0
+                  ? formatMoney(s.pocketCostCents, currency)
+                  : coveredBy(s)
+              }
+              tone={s.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+            />
+          </span>
+        </button>
+      </li>
+    ))}
+  </ul>
+  );
+  const flightRows = (
+  <ul className="divide-y divide-line">
+    {upcomingFlights.map(({ flight: f, next }) => {
+      const stops: string[] = [];
+      for (const leg of f.legs) {
+        if (leg.fromPlace && stops[stops.length - 1] !== leg.fromPlace) stops.push(leg.fromPlace);
+        if (leg.toPlace) stops.push(leg.toPlace);
+      }
+      return (
+        <li key={f.id}>
+          <button
+            type="button"
+            onClick={() => setEditingFlight(f)}
+            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+          >
+            <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  {f.airline}
+                  {f.bookingCode ? <span className="text-slate-700 dark:text-slate-200"> · {f.bookingCode}</span> : null}
+                </span>
+              </span>
+              {/* The next flight: its date, number, time and route. */}
+              <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+                <span className="tabular-nums">{sheetDate(next.flightOn)}</span>
+                {next.flightNumber ? <span>{next.flightNumber}</span> : null}
+                {next.departsAt ? <span className="tabular-nums">{next.departsAt}</span> : null}
+                {next.fromPlace && next.toPlace ? <span>{next.fromPlace} → {next.toPlace}</span> : null}
+                <span className="tabular-nums">{f.passengers.length} pax</span>
+              </span>
+              <Remarks text={f.remarks} />
+            </span>
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
+              <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} />
+              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoney(f.flightCostCents, currency) : DASH} tone="" />
+              {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
+              {f.pocketCostCents !== f.flightCostCents ? (
+                <Figure
+                  label="Pocket cost"
+                  value={f.pocketCostCents > 0 ? formatMoney(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
+                  tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                />
+              ) : null}
+            </span>
+          </button>
+        </li>
+      );
+    })}
+  </ul>
+  );
+  const carRows = (
+  <ul className="divide-y divide-line">
+    {upcomingCars.map((c) => (
+      <li key={c.id}>
+        <button
+          type="button"
+          onClick={() => setEditingCar(c)}
+          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+        >
+          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
+              {c.bookingCode ? (
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  Booking: <span className="text-slate-700 dark:text-slate-200">{c.bookingCode}</span>
+                </span>
+              ) : null}
+            </span>
+            <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+              <span className="tabular-nums">
+                {sheetDateRange(c.pickupOn, c.returnOn)}
+              </span>
+              {c.pickupPlace ? <span>{c.pickupPlace}</span> : null}
+            </span>
+            <Remarks text={c.remarks} />
+          </span>
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
+            {/* Already picked up: nothing left to count down. */}
+            <Figure
+              label="Days away"
+              value={c.pickupOn >= today ? String(daysUntil(today, c.pickupOn)) : "Out now"}
+              tone=""
+              style={{ color: "var(--viz-savings)" }}
+            />
+            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoney(c.costCents, currency) : DASH} tone="" />
+            {c.pocketCostCents !== c.costCents ? (
+              <Figure
+                label="Pocket cost"
+                value={c.pocketCostCents > 0 ? formatMoney(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
+                tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+              />
+            ) : null}
+          </span>
+        </button>
+      </li>
+    ))}
+  </ul>
+  );
+
+  // The year rollup's table, shared by the inline panel and its full-width popup.
+  const yearTable = (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+            <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Year</th>
+            <th className="px-2 py-2 text-center font-semibold">Total stays</th>
+            <th className="px-2 py-2 text-center font-semibold">Total pts used</th>
+            <th className="px-2 py-2 text-center font-semibold">Total hotel cost</th>
+            <th className="px-2 py-2 text-center font-semibold">Total pocket cost</th>
+            <th className="px-2 py-2 text-center font-semibold">Total saved</th>
+          </tr>
+        </thead>
+        <tbody>
+          {byYear.map(([y, row]) => (
+            <tr
+              key={y}
+              className={`border-b border-line/60 last:border-0 ${year === y ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
+            >
+              <td
+                className="sticky left-0 z-10 px-2 py-2 text-center font-semibold tabular-nums"
+                style={{
+                  backgroundColor: year === y ? "var(--viz-sel)" : "var(--surface)",
+                }}
+              >
+                {y}
+              </td>
+              <td className="px-2 py-2 text-center tabular-nums text-muted">{row.stays}</td>
+              <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                {row.points > 0 ? row.points.toLocaleString() : DASH}
+              </td>
+              <td className="px-2 py-2 text-center tabular-nums">{formatMoney(row.hotel, currency)}</td>
+              <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoney(row.pocket, currency)}</td>
+              <td className="px-2 py-2 text-center font-bold tabular-nums text-positive">
+                {formatMoney(row.hotel - row.pocket, currency)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <div className="space-y-3">
       <header className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
@@ -797,195 +1021,50 @@ export function TravelBoard({
 
           {/* ---- What's still ahead. Sits above the archive because a booking
                you haven't taken yet is the thing you come here to check. */}
-          {upcoming.length + upcomingFlights.length + upcomingCars.length > 0 ? (
-            <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              {/* One card, one group per kind of booking — each group names
-                  what it holds instead of a single "Coming up". */}
+          {upcomingGroups > 0 ? (
+            <div className="grid items-start gap-3 lg:grid-cols-2">
+              {/* One card per kind of booking, side by side on a wide screen —
+                  each names what it holds instead of a single "Coming up". A
+                  group that is alone takes the full row. */}
               {upcoming.length > 0 ? (
+              <section className={`overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${upcomingGroups === 1 ? "lg:col-span-2" : ""}`}>
                 <UpcomingHeader
                   title="Hotel Reservations"
                   count={upcoming.length}
                   open={isUpcomingOpen("hotels")}
                   onToggle={() => toggleUpcoming("hotels")}
+                  onExpand={() => setExpandedUpcoming("hotels")}
                 />
+              {isUpcomingOpen("hotels") ? hotelRows : null}
+              </section>
               ) : null}
-              <ul className="divide-y divide-line">
-                {(isUpcomingOpen("hotels") ? upcoming : []).map((s) => (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => setEditing(s)}
-                      className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
-                    >
-                      {/* Two lines, not one. Sharing a line with the trip
-                          details left the name a `truncate` box ~30px wide
-                          next to a shrink-0 detail run — "Hotel Babylon
-                          Royal" rendered as "Hot…". The name owns its line
-                          and the details sit under it, the way the mobile
-                          card already reads. */}
-                      <span className="flex min-w-0 flex-1 flex-col gap-y-0.5">
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate text-sm font-semibold">{s.propertyName}</span>
-                          {/* Same chip as the card panel's "Owner:" / "Bank:". */}
-                          {s.brand ? (
-                            <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                              Booked Thru: <span className="text-slate-700 dark:text-slate-200">{s.brand}</span>
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
-                          <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
-                          <span className="tabular-nums">{s.nights}n</span>
-                          {s.city ? <span>{s.city}</span> : null}
-                          {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
-                        </span>
-                      </span>
-                      {/* At 375px these wrap under the name; at sm+ they hold
-                          the right-hand end of the single line. */}
-                      <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
-                        <Figure
-                          label="Days away"
-                          value={String(daysUntil(today, s.checkIn))}
-                          tone=""
-                          style={{ color: "var(--viz-savings)" }}
-                        />
-                        <Figure
-                          label="Hotel cost"
-                          value={s.hotelCostCents > 0 ? formatMoney(s.hotelCostCents, currency) : DASH}
-                          tone=""
-                        />
-                        <Figure
-                          label="Pocket cost"
-                          value={
-                            s.pocketCostCents > 0
-                              ? formatMoney(s.pocketCostCents, currency)
-                              : coveredBy(s)
-                          }
-                          tone={s.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                        />
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
 
               {upcomingFlights.length > 0 ? (
-                <>
+                <section className={`overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${upcomingGroups === 1 ? "lg:col-span-2" : ""}`}>
                   <UpcomingHeader
                     title="Flight Reservations"
                     count={upcomingFlights.length}
-                    divided={upcoming.length > 0}
                     open={isUpcomingOpen("flights")}
                     onToggle={() => toggleUpcoming("flights")}
+                  onExpand={() => setExpandedUpcoming("flights")}
                   />
-                  <ul className="divide-y divide-line">
-                    {(isUpcomingOpen("flights") ? upcomingFlights : []).map(({ flight: f, next }) => {
-                      const stops: string[] = [];
-                      for (const leg of f.legs) {
-                        if (leg.fromPlace && stops[stops.length - 1] !== leg.fromPlace) stops.push(leg.fromPlace);
-                        if (leg.toPlace) stops.push(leg.toPlace);
-                      }
-                      return (
-                        <li key={f.id}>
-                          <button
-                            type="button"
-                            onClick={() => setEditingFlight(f)}
-                            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
-                          >
-                            <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
-                              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
-                                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                                  {f.airline}
-                                  {f.bookingCode ? <span className="text-slate-700 dark:text-slate-200"> · {f.bookingCode}</span> : null}
-                                </span>
-                              </span>
-                              {/* The next flight: its date, number, time and route. */}
-                              <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
-                                <span className="tabular-nums">{sheetDate(next.flightOn)}</span>
-                                {next.flightNumber ? <span>{next.flightNumber}</span> : null}
-                                {next.departsAt ? <span className="tabular-nums">{next.departsAt}</span> : null}
-                                {next.fromPlace && next.toPlace ? <span>{next.fromPlace} → {next.toPlace}</span> : null}
-                                <span className="tabular-nums">{f.passengers.length} pax</span>
-                              </span>
-                            </span>
-                            <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
-                              <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} />
-                              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoney(f.flightCostCents, currency) : DASH} tone="" />
-                              {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
-                              {f.pocketCostCents !== f.flightCostCents ? (
-                                <Figure
-                                  label="Pocket cost"
-                                  value={f.pocketCostCents > 0 ? formatMoney(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
-                                  tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                                />
-                              ) : null}
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </>
+                  {isUpcomingOpen("flights") ? flightRows : null}
+                </section>
               ) : null}
 
               {upcomingCars.length > 0 ? (
-                <>
+                <section className={`overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${upcomingGroups === 1 ? "lg:col-span-2" : ""}`}>
                   <UpcomingHeader
                     title="Rental Reservations"
                     count={upcomingCars.length}
-                    divided={upcoming.length + upcomingFlights.length > 0}
                     open={isUpcomingOpen("cars")}
                     onToggle={() => toggleUpcoming("cars")}
+                  onExpand={() => setExpandedUpcoming("cars")}
                   />
-                  <ul className="divide-y divide-line">
-                    {(isUpcomingOpen("cars") ? upcomingCars : []).map((c) => (
-                      <li key={c.id}>
-                        <button
-                          type="button"
-                          onClick={() => setEditingCar(c)}
-                          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
-                        >
-                          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
-                              {c.bookingCode ? (
-                                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                                  Booking: <span className="text-slate-700 dark:text-slate-200">{c.bookingCode}</span>
-                                </span>
-                              ) : null}
-                            </span>
-                            <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
-                              <span className="tabular-nums">
-                                {sheetDateRange(c.pickupOn, c.returnOn)}
-                              </span>
-                              {c.pickupPlace ? <span>{c.pickupPlace}</span> : null}
-                            </span>
-                          </span>
-                          <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
-                            {/* Already picked up: nothing left to count down. */}
-                            <Figure
-                              label="Days away"
-                              value={c.pickupOn >= today ? String(daysUntil(today, c.pickupOn)) : "Out now"}
-                              tone=""
-                              style={{ color: "var(--viz-savings)" }}
-                            />
-                            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoney(c.costCents, currency) : DASH} tone="" />
-                            {c.pocketCostCents !== c.costCents ? (
-                              <Figure
-                                label="Pocket cost"
-                                value={c.pocketCostCents > 0 ? formatMoney(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
-                                tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                              />
-                            ) : null}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
+                  {isUpcomingOpen("cars") ? carRows : null}
+                </section>
               ) : null}
-            </section>
+            </div>
           ) : null}
 
           {trips.length > 0 ? (
@@ -1017,19 +1096,7 @@ export function TravelBoard({
               {yearSelect}
               {/* Desktop only: on a phone the list below is already a card per
                   stay, so there are no hidden columns for a popup to reveal. */}
-              <button
-                type="button"
-                onClick={() => setExpanded(true)}
-                className="hidden items-center gap-1.5 rounded-md border border-black/25 bg-background px-2 py-1 text-[11px] font-semibold transition hover:bg-black/5 sm:inline-flex dark:border-white/30 dark:hover:bg-white/10"
-              >
-                Open full width
-                <svg
-                  width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
-                >
-                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                </svg>
-              </button>
+              <OpenFullWidthButton onClick={() => setExpanded(true)} />
               </span>
             }
             open={openList}
@@ -1049,29 +1116,31 @@ export function TravelBoard({
           ) : null}
 
 
-          {/* ---- The points ledger behind the bookings above. */}
-          <RewardsPointsLog />
-
           {/* ---- The two charts side by side. They are drawn narrow by
                design, so half a row suits them; the summary tables below are
                not, which is why they no longer share this grid. */}
-          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+          <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
                 <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
                 <CostBars years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
               </div>
-              <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
+              {/* Stretched to the bar chart's height (it carries a legend this
+                  one doesn't); the line sits at the bottom so both year rows line up. */}
+              <div className="flex flex-col rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="text-center text-sm font-bold">Total saved per year</h2>
                 <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
-                <SavedLine years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+                <div className="flex flex-1 flex-col justify-end">
+                  <SavedLine years={yearPoints} currency={currency} selected={year === ALL ? undefined : year} />
+                </div>
               </div>
           </section>
 
-          {/* ---- Year-over-year rollup: the sheet's summary block. Full
-               width, not half: six columns in a half-row put Total saved —
-               the figure the whole table exists for — off the right edge
-               behind a sideways scroll. */}
+          {/* ---- The year rollup beside the points ledger. Half a row at xl
+               (~650px) fits the rollup's six columns; below xl they stack, and
+               either one opens full width. */}
+          <div className="grid items-start gap-3 xl:grid-cols-2">
+          <RewardsPointsLog />
           <Panel
             title="Total Cost Saved by Year"
             meta={
@@ -1083,56 +1152,19 @@ export function TravelBoard({
                 currency={currency}
               />
             }
+            control={<OpenFullWidthButton onClick={() => setExpandedYears(true)} />}
             open={openYears}
             onToggle={() => setOpenYears((v) => !v)}
           >
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Year</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total stays</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total pts used</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total hotel cost</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total pocket cost</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total saved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {byYear.map(([y, row]) => (
-                    <tr
-                      key={y}
-                      className={`border-b border-line/60 last:border-0 ${year === y ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
-                    >
-                      <td
-                        className="sticky left-0 z-10 px-2 py-2 text-center font-semibold tabular-nums"
-                        style={{
-                          backgroundColor: year === y ? "var(--viz-sel)" : "var(--surface)",
-                        }}
-                      >
-                        {y}
-                      </td>
-                      <td className="px-2 py-2 text-center tabular-nums text-muted">{row.stays}</td>
-                      <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                        {row.points > 0 ? row.points.toLocaleString() : DASH}
-                      </td>
-                      <td className="px-2 py-2 text-center tabular-nums">{formatMoney(row.hotel, currency)}</td>
-                      <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoney(row.pocket, currency)}</td>
-                      <td className="px-2 py-2 text-center font-bold tabular-nums text-positive">
-                        {formatMoney(row.hotel - row.pocket, currency)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {yearTable}
           </Panel>
+          </div>
 
           {/* ---- The two "who did we stay with" tallies: the same money cut
-               by hotel brand and by the card that paid. Stacked full width
-               rather than side by side — five money columns need ~560px, and
-               half a row gave them 383, hiding Total saved behind a
-               horizontal scroll on desktop as well as on a phone. */}
+               by hotel brand and by the card that paid. Side by side only from
+               xl up — five money columns need ~560px, and below that half a
+               row hid Total saved behind a horizontal scroll. */}
+          <div className="grid items-start gap-3 xl:grid-cols-2">
           {/* ---- Stays by brand: the sheet's right-hand tally. */}
           <Panel
             title="Total Stays by Brand"
@@ -1145,7 +1177,7 @@ export function TravelBoard({
                 currency={currency}
               />
             }
-            control={tallyPeriod}
+            control={tallyPeriod(tallyYear, setTallyYear, "Brand tally year")}
             open={openBrands}
             onToggle={() => setOpenBrands((v) => !v)}
           >
@@ -1191,11 +1223,12 @@ export function TravelBoard({
               <HeaderTotals
                 countLabel="Total cards"
                 count={cardTally.length}
-                spent={tallyTotals.spent}
-                saved={tallyTotals.saved}
+                spent={cardTotals.spent}
+                saved={cardTotals.saved}
                 currency={currency}
               />
             }
+            control={tallyPeriod(cardYear, setCardYear, "Card tally year")}
             open={openCards}
             onToggle={() => setOpenCards((v) => !v)}
           >
@@ -1235,6 +1268,7 @@ export function TravelBoard({
               </table>
             </div>
           </Panel>
+          </div>
 
         </CreditCardRewardsProvider>
       )}
@@ -1259,6 +1293,37 @@ export function TravelBoard({
         >
           <div className="flex justify-end border-b border-line px-4 py-2 sm:px-6">{yearSelect}</div>
           {reservations}
+        </ModalShell>
+      ) : null}
+
+      {expandedUpcoming ? (
+        <ModalShell
+          title={
+            expandedUpcoming === "hotels" ? "Hotel Reservations" : expandedUpcoming === "flights" ? "Flight Reservations" : "Rental Reservations"
+          }
+          onClose={() => setExpandedUpcoming(null)}
+          className="sm:max-w-5xl"
+        >
+          {expandedUpcoming === "hotels" ? hotelRows : expandedUpcoming === "flights" ? flightRows : carRows}
+        </ModalShell>
+      ) : null}
+
+      {expandedYears ? (
+        <ModalShell
+          title="Total Cost Saved by Year"
+          onClose={() => setExpandedYears(false)}
+          className="sm:max-w-5xl"
+          headerExtra={
+            <HeaderTotals
+              countLabel="Total years"
+              count={byYear.length}
+              spent={allTotals.spent}
+              saved={allTotals.saved}
+              currency={currency}
+            />
+          }
+        >
+          {yearTable}
         </ModalShell>
       ) : null}
 
@@ -1323,46 +1388,57 @@ export function TravelBoard({
   );
 }
 
+// A booking's remarks, under its details — only when there are any.
+function Remarks({ text }: { text: string | null }) {
+  if (!text?.trim()) return null;
+  return <span className="line-clamp-2 text-[11px] italic text-muted">{text}</span>;
+}
+
 // The heading over one group in the upcoming card: what the group holds, and
 // how many of them are still ahead. The whole line folds its group away.
 function UpcomingHeader({
   title,
   count,
-  divided,
   open,
   onToggle,
+  onExpand,
 }: {
   title: string;
   count: number;
-  divided?: boolean;
   open: boolean;
   onToggle: () => void;
+  onExpand: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={open}
-      className={`flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-line px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${open ? "border-b" : ""} ${divided ? "border-t" : ""}`}
-    >
-      <svg
-        aria-hidden
-        viewBox="0 0 20 20"
-        className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+    <div className={`flex items-center border-line ${open ? "border-b" : ""}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
       >
-        <path d="M5 7.5 10 12.5 15 7.5" />
-      </svg>
-      <h2 className="text-sm font-bold">{title}</h2>
-      <span className="flex items-baseline gap-1.5">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Future bookings:</span>
-        <span className="text-sm font-bold tabular-nums">{count}</span>
-      </span>
-    </button>
+        <svg
+          aria-hidden
+          viewBox="0 0 20 20"
+          className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 7.5 10 12.5 15 7.5" />
+        </svg>
+        <h2 className="text-sm font-bold">{title}</h2>
+        <span className="flex items-baseline gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Future bookings:</span>
+          <span className="text-sm font-bold tabular-nums">{count}</span>
+        </span>
+      </button>
+      <div className="shrink-0 pr-4 sm:pr-6">
+        <OpenFullWidthButton onClick={onExpand} />
+      </div>
+    </div>
   );
 }
 
