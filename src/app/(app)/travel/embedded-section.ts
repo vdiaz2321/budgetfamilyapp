@@ -1,4 +1,5 @@
 import type { TripChoice } from "./trip-picker";
+import type { TravelStay } from "./types";
 
 /**
  * A booking form shown as one section of the Add Travel Log popup instead of
@@ -9,6 +10,8 @@ export type SectionHandle = {
   /** Nothing typed yet — the save skips it. */
   isEmpty: () => boolean;
   save: () => Promise<{ error: string | null }>;
+  /** Stay only: what a second room copies from this one, as typed so far. */
+  copyForRoom?: () => TravelStay;
 };
 
 export type Embed = {

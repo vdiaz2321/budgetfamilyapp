@@ -36,6 +36,10 @@ export function TripPicker({
   startNew?: boolean;
 }) {
   const [creating, setCreating] = useState(!!startNew);
+  // No "No trip" choice for new bookings — everything belongs to a trip. It
+  // only shows on an old booking that was saved without one, so the box
+  // doesn't claim a trip it isn't in.
+  const [savedWithoutTrip] = useState(!startNew && !value.tripId);
   // Newest trip first, and only this year's and upcoming ones — older trips
   // are history, not somewhere a new booking goes. The trip already chosen
   // (editing an old booking) always stays in the list.
@@ -55,8 +59,8 @@ export function TripPicker({
   };
   const options = (
     <>
-      <option value={NEW}>+ New trip…</option>
-      <option value="">No trip</option>
+      <option value={NEW}>+ Start a new trip…</option>
+      {savedWithoutTrip ? <option value="">No trip</option> : null}
       {shown.map((t) => (
         <option key={t.id} value={t.id}>{t.name}</option>
       ))}
@@ -78,12 +82,14 @@ export function TripPicker({
 
   return (
     <div className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${className ?? ""}`}>
-      <Field label="Trip">
+      {/* The name comes first: a new trip is the usual case, and the
+          dropdown on the right is only for adding to one already saved. */}
+      {creating ? <Field label="New trip name">{nameInput(inputClass)}</Field> : null}
+      <Field label="Add to trip" className="sm:col-start-2">
         <select value={creating ? NEW : value.tripId} onChange={(e) => pick(e.target.value)} className={inputClass}>
           {options}
         </select>
       </Field>
-      {creating ? <Field label="New trip name">{nameInput(inputClass)}</Field> : null}
       {hiddenInputs ? (
         <>
           <input type="hidden" name="tripId" value={creating ? "" : value.tripId} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
@@ -8,7 +8,7 @@ import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./acti
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { PlannedSwitch } from "./travel-form";
-import type { Embed } from "./embedded-section";
+import type { Embed, SectionHandle } from "./embedded-section";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 
 const NO_CARD = "";
@@ -28,7 +28,7 @@ export function StayModal({
   defaultTripId,
   embed,
   roomOf,
-  onAddRoom,
+  allowRooms,
   onBack,
   onClose,
 }: {
@@ -36,8 +36,9 @@ export function StayModal({
   /** A new stay started as another room of this one: same hotel, city, dates,
    *  trip and brand; cost, points, card and pax left for the new room. */
   roomOf?: TravelStay | null;
-  /** Offers "+ Add another room" on a saved stay. */
-  onAddRoom?: (stay: TravelStay) => void;
+  /** Offers "+ Add another room" on a saved stay: each room opens as its own
+   *  section under this one and saves with it. */
+  allowRooms?: boolean;
   /** Returns to the stay this form was opened from, instead of closing. */
   onBack?: () => void;
   /** Omitted where the form opens outside the Travel Log (a card's panel):
@@ -76,8 +77,32 @@ export function StayModal({
         const result = await saveTravelStay(new FormData(formRef.current));
         return { error: result?.error ?? null };
       },
+      copyForRoom: () => currentAsRoom(),
     });
   });
+  function currentAsRoom(): TravelStay {
+        const fd = formRef.current ? new FormData(formRef.current) : new FormData();
+        const text = (k: string) => String(fd.get(k) ?? "").trim();
+        return {
+          id: "", tripId: null, accountId: null, cardLabel: null, holder: null,
+          propertyName: text("propertyName"),
+          city: text("city") || null,
+          brand: brand || null,
+          bookingChannel: null,
+          reservedOn: reservedOn || null,
+          checkIn,
+          nights: Number(text("nights")) || 1,
+          pax: null, pointsCost: 0, pointsUsed: false, pointsValueMicros: null,
+          hotelCreditCents: 0, hotelCostCents: 0, pocketCostCents: 0, pocketPaidWith: "card",
+          remarks: null, breakfastIncluded: false, cancelledAt: null, rewardActivityId: null,
+          freeNightUsed: false, isEstimate, plannedCostCents: null, freeNightPoints: null,
+          movesCardPoints: true,
+        };
+  }
+  // Extra rooms added under a saved stay, each its own embedded stay form.
+  const formId = useId();
+  const [rooms, setRooms] = useState<{ id: number; roomOf: TravelStay }[]>([]);
+  const roomHandles = useRef<Record<number, SectionHandle | null>>({});
   const [accountId, setAccountId] = useState(stay?.accountId ?? defaultAccountId ?? NO_CARD);
   const preset = defaultAccountId ? cards.find((c) => c.id === defaultAccountId) ?? null : null;
   const [holder, setHolder] = useState(stay?.holder ?? (stay ? "" : preset?.holder ?? ""));
@@ -116,7 +141,7 @@ export function StayModal({
   // Live totals so the saving is visible while typing, not only after saving.
   const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
   const [pocketCost, setPocketCost] = useState(money(stay?.pocketCostCents));
-  const [isEstimate, setIsEstimate] = useState(stay?.isEstimate ?? false);
+  const [isEstimate, setIsEstimate] = useState(stay?.isEstimate ?? roomOf?.isEstimate ?? Boolean(embed));
 
   const card = cards.find((c) => c.id === accountId) ?? null;
 
@@ -191,8 +216,10 @@ export function StayModal({
     Math.round((Number(pocketCost.replace(/[$,\s]/g, "")) || 0) * 100);
 
   const body = (
+    <div className={embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}>
       <form
         ref={formRef}
+        id={formId}
         // onSubmit, not `action` — React resets a form with an `action` prop
         // once the action returns, so a rejected save wiped every uncontrolled
         // field (hotel name, city, nights, pax, card name, remarks) and left
@@ -204,16 +231,28 @@ export function StayModal({
           start(async () => {
             setError(null);
             const result = await saveTravelStay(formData);
-            if (result?.error) setError(result.error);
-            else {
-              // revalidatePath alone leaves the client router cache in place,
-              // so the new row wouldn't appear until a manual reload.
-              router.refresh();
-              onClose();
+            if (result?.error) {
+              setError(result.error);
+              return;
             }
+            // Then each added room. A saved room leaves the list, so a retry
+            // after a failed one doesn't save it twice.
+            const failed: string[] = [];
+            for (const [i, r] of rooms.entries()) {
+              const handle = roomHandles.current[r.id];
+              if (!handle || handle.isEmpty()) continue;
+              const roomResult = await handle.save();
+              if (roomResult.error) failed.push(`Room ${i + 2}: ${roomResult.error}`);
+              else setRooms((rs) => rs.filter((x) => x.id !== r.id));
+            }
+            // revalidatePath alone leaves the client router cache in place,
+            // so the new row wouldn't appear until a manual reload.
+            router.refresh();
+            if (failed.length) setError(failed.join(" · "));
+            else onClose();
           });
         }}
-        className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         {embed ? (
           <>
@@ -555,8 +594,52 @@ export function StayModal({
           </p>
         ) : null}
 
+        {draw && (draw.points !== 0 || draw.credit !== 0) ? (
+          <p className="sm:col-span-2 text-[11px] text-muted">
+            Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
+            {[
+              draw.points ? `${Math.abs(draw.points).toLocaleString()} pts` : null,
+              draw.credit ? `${formatMoney(Math.abs(draw.credit), currency)} night credit` : null,
+            ]
+              .filter(Boolean)
+              .join(" and ")}{" "}
+            {draw.points < 0 || draw.credit < 0 ? "to" : "from"} {card?.name} on Accounts.
+          </p>
+        ) : null}
+      </form>
+      {rooms.map((r, i) => (
+        <div key={r.id} className="mt-4 border-t border-line pt-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-bold">Room {i + 2}</span>
+            <button
+              type="button"
+              onClick={() => {
+                delete roomHandles.current[r.id];
+                setRooms((rs) => rs.filter((x) => x.id !== r.id));
+              }}
+              className="rounded-md px-2 py-1 text-xs font-semibold text-negative transition hover:bg-negative/10"
+            >
+              Remove room
+            </button>
+          </div>
+          <StayModal
+            stay={null}
+            roomOf={r.roomOf}
+            cards={cards}
+            brands={brands}
+            currency={currency}
+            embed={{
+              trip,
+              register: (handle) => {
+                roomHandles.current[r.id] = handle;
+              },
+            }}
+            onClose={onClose}
+          />
+        </div>
+      ))}
         {embed ? null : (
-        <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             Saved on this stay{" "}
             <span className="font-bold tabular-nums text-positive">{formatMoney(saved, currency)}</span>
@@ -565,11 +648,13 @@ export function StayModal({
             {/* A family of five books two rooms: the second starts as a copy of
                 this one's hotel, dates and trip, saved as its own stay so it
                 can go on a different card, points or a free night. */}
-            {stay && onAddRoom ? (
+            {stay && allowRooms ? (
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => onAddRoom(stay)}
+                onClick={() =>
+                  setRooms((rs) => [...rs, { id: (rs.at(-1)?.id ?? 0) + 1, roomOf: currentAsRoom() }])
+                }
                 className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
               >
                 + Add another room
@@ -641,6 +726,7 @@ export function StayModal({
             </button>
             <button
               type="submit"
+              form={formId}
               disabled={pending}
               className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
             >
@@ -649,19 +735,7 @@ export function StayModal({
           </div>
         </div>
         )}
-        {draw && (draw.points !== 0 || draw.credit !== 0) ? (
-          <p className="sm:col-span-2 text-[11px] text-muted">
-            Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
-            {[
-              draw.points ? `${Math.abs(draw.points).toLocaleString()} pts` : null,
-              draw.credit ? `${formatMoney(Math.abs(draw.credit), currency)} night credit` : null,
-            ]
-              .filter(Boolean)
-              .join(" and ")}{" "}
-            {draw.points < 0 || draw.credit < 0 ? "to" : "from"} {card?.name} on Accounts.
-          </p>
-        ) : null}
-      </form>
+    </div>
   );
   return embed ? body : (
     <ModalShell title={stay ? "Edit stay" : roomOf ? `Add another room · ${roomOf.propertyName}` : "Add stay"} onClose={onClose}>

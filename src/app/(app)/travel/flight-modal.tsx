@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
@@ -15,8 +15,9 @@ import {
 } from "./flight-actions";
 import { Field, PlannedSwitch, Section, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
+import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
-import type { Embed } from "./embedded-section";
+import type { Embed, SectionHandle } from "./embedded-section";
 import type { TravelCard, TravelFlight, TravelTrip, Traveller } from "./types";
 
 type LegDraft = {
@@ -30,6 +31,14 @@ type LegDraft = {
 };
 type PassengerDraft = { key: number; travellerId: string | null; name: string; fare: string; fareEur: string; pointsUsed: boolean; points: string };
 
+type FlightCopy = {
+  airline: string;
+  reservedOn: string;
+  isEstimate: boolean;
+  homePlace: string;
+  passengers: { travellerId: string | null; name: string }[];
+};
+
 let nextKey = 1;
 const emptyLeg = (from = "", to = ""): LegDraft => ({
   key: nextKey++, flightOn: "", flightNumber: "", fromPlace: from, toPlace: to, departsAt: "", arrivesAt: "",
@@ -42,10 +51,12 @@ export function FlightModal({
   flight,
   cards,
   travellers,
+  airlines = [],
   trips,
   defaultTripId,
   currency,
   embed,
+  copyOf,
   onClose,
 }: {
   flight: TravelFlight | null;
@@ -54,9 +65,14 @@ export function FlightModal({
   defaultTripId?: string | null;
   cards: TravelCard[];
   travellers: Traveller[];
+  /** Every airline already on a saved flight, offered as you type. */
+  airlines?: string[];
   currency: string;
   /** Shown as a section of the Add Travel Log popup — see embedded-section. */
   embed?: Embed;
+  /** A second one-way booking started from this one: same airline, booking
+   *  date, status and passengers (fares left blank), flying back home. */
+  copyOf?: FlightCopy;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -65,11 +81,11 @@ export function FlightModal({
 
   const [ownTrip, setTrip] = useTripChoice(flight ? flight.tripId : defaultTripId);
   const trip = embed ? embed.trip : ownTrip;
-  const [airline, setAirline] = useState(flight?.airline ?? "");
+  const [airline, setAirline] = useState(flight?.airline ?? copyOf?.airline ?? "");
   // Not editable here any more; kept so saving leaves an existing code alone.
   const [bookingCode] = useState(flight?.bookingCode ?? "");
-  const [reservedOn, setReservedOn] = useState(flight?.reservedOn ?? "");
-  const [isEstimate, setIsEstimate] = useState(flight?.isEstimate ?? false);
+  const [reservedOn, setReservedOn] = useState(flight?.reservedOn ?? copyOf?.reservedOn ?? "");
+  const [isEstimate, setIsEstimate] = useState(flight?.isEstimate ?? copyOf?.isEstimate ?? Boolean(embed));
   const [legs, setLegs] = useState<LegDraft[]>(() =>
     flight?.legs.length
       ? flight.legs.map((l) => ({
@@ -81,7 +97,7 @@ export function FlightModal({
           departsAt: l.departsAt?.slice(0, 5) ?? "",
           arrivesAt: l.arrivesAt?.slice(0, 5) ?? "",
         }))
-      : [emptyLeg()],
+      : [emptyLeg("", copyOf?.homePlace ?? "")],
   );
   const [passengers, setPassengers] = useState<PassengerDraft[]>(() =>
     flight?.passengers.length
@@ -94,7 +110,9 @@ export function FlightModal({
           pointsUsed: p.pointsUsed,
           points: p.pointsCost ? String(p.pointsCost) : "",
         }))
-      : [emptyPassenger()],
+      : copyOf?.passengers.length
+        ? copyOf.passengers.map((p) => ({ ...emptyPassenger(), travellerId: p.travellerId, name: p.name }))
+        : [emptyPassenger()],
   );
   const [accountId, setAccountId] = useState(flight?.accountId ?? "");
   const [cardLabel, setCardLabel] = useState(flight?.cardLabel ?? "");
@@ -163,7 +181,12 @@ export function FlightModal({
   const updatePassenger = (key: number, patch: Partial<PassengerDraft>) =>
     setPassengers((all) => all.map((p) => (p.key === key ? { ...p, ...patch } : p)));
 
+  // What's in the Total box while typing. It can be blank for a moment so the
+  // "1" can be cleared and replaced; blank never shrinks the list.
+  const [countDraft, setCountDraft] = useState<string | null>(null);
   function setPassengerCount(raw: string) {
+    setCountDraft(raw);
+    if (!raw.trim()) return;
     const count = Math.min(12, Math.max(1, Math.trunc(Number(raw)) || 1));
     setPassengers((all) =>
       count > all.length
@@ -217,29 +240,68 @@ export function FlightModal({
         })),
   });
 
+  const ownEmpty = () =>
+    ![airline, bookingCode, reservedOn, cardLabel, pocketCost, remarks].some((v) => v.trim()) &&
+    legs.every((l) => ![l.flightOn, l.flightNumber, l.fromPlace, l.toPlace, l.departsAt, l.arrivesAt].some((v) => v.trim())) &&
+    passengers.every((p) => !p.name && !p.fare.trim() && !p.fareEur.trim() && !p.points.trim());
+
+  // Separate one-way bookings added under this one ("Booking 2", ...), each
+  // its own embedded flight form, saved right after this one.
+  const formId = useId();
+  const [extras, setExtras] = useState<{ id: number; copy: FlightCopy }[]>([]);
+  const extraHandles = useRef<Record<number, SectionHandle | null>>({});
+  // A new booking already saved by an earlier press, when a later one
+  // failed. It is not saved a second time on the retry.
+  const ownSaved = useRef(false);
+
+  async function saveAll(): Promise<string | null> {
+    if (!ownSaved.current && !(embed && ownEmpty())) {
+      const result = await saveTravelFlight(payload());
+      if (result?.error) return result.error;
+      if (!flight) ownSaved.current = true;
+    }
+    const failed: string[] = [];
+    for (const [i, x] of extras.entries()) {
+      const handle = extraHandles.current[x.id];
+      if (!handle || handle.isEmpty()) continue;
+      const result = await handle.save();
+      if (result.error) failed.push(`Flight #${i + 2}: ${result.error}`);
+      else setExtras((all) => all.filter((e) => e.id !== x.id));
+    }
+    return failed.length ? failed.join(" · ") : null;
+  }
+
+  function addBooking() {
+    setExtras((all) => [
+      ...all,
+      {
+        id: (all.at(-1)?.id ?? 0) + 1,
+        copy: {
+          airline,
+          reservedOn,
+          isEstimate,
+          homePlace: legs[0]?.fromPlace ?? "",
+          passengers: passengers.filter((p) => p.name).map((p) => ({ travellerId: p.travellerId, name: p.name })),
+        },
+      },
+    ]);
+  }
+
   useEffect(() => {
     if (!embed) return;
     embed.register({
-      isEmpty: () =>
-        ![airline, bookingCode, reservedOn, cardLabel, pocketCost, remarks].some((v) => v.trim()) &&
-        legs.every((l) => ![l.flightOn, l.flightNumber, l.fromPlace, l.toPlace, l.departsAt, l.arrivesAt].some((v) => v.trim())) &&
-        passengers.every((p) => !p.name && !p.fare.trim() && !p.fareEur.trim() && !p.points.trim()),
-      save: async () => {
-        const result = await saveTravelFlight(payload());
-        return { error: result?.error ?? null };
-      },
+      isEmpty: () => ownEmpty() && extras.every((x) => extraHandles.current[x.id]?.isEmpty() ?? true),
+      save: async () => ({ error: await saveAll() }),
     });
   });
 
   function submit() {
     start(async () => {
       setError(null);
-      const result = await saveTravelFlight(payload());
-      if (result?.error) setError(result.error);
-      else {
-        router.refresh();
-        onClose();
-      }
+      const failure = await saveAll();
+      router.refresh();
+      if (failure) setError(failure);
+      else onClose();
     });
   }
 
@@ -255,12 +317,14 @@ export function FlightModal({
   }
 
   const body = (
+    <div className={embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}>
       <form
+        id={formId}
         onSubmit={(e) => {
           e.preventDefault();
           if (!embed) submit();
         }}
-        className={`grid grid-cols-1 gap-3 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
+        className="grid grid-cols-1 gap-3"
       >
         {flight?.cancelledAt ? (
           <p className="rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
@@ -281,7 +345,7 @@ export function FlightModal({
             />
           )}
           <Field label="Airline">
-            <input value={airline} onChange={(e) => setAirline(e.target.value)} className={inputClass} />
+            <AirlinePicker airlines={airlines} value={airline} onChange={setAirline} />
           </Field>
           <Field label="Booking made">
             <input type="date" value={reservedOn} onChange={(e) => setReservedOn(e.target.value)} className={inputClass} />
@@ -351,17 +415,20 @@ export function FlightModal({
             {datesOutOfOrder ? (
               <p className="text-[11px] font-medium text-negative">A flight is dated before the booking — check the year.</p>
             ) : null}
-            {/* The return starts where the last flight landed. */}
-            <button
-              type="button"
-              onClick={() => {
-                const last = legs[legs.length - 1];
-                setLegs((all) => [...all, emptyLeg(last?.toPlace ?? "", last?.fromPlace ?? "")]);
-              }}
-              className="rounded-md px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-            >
-              + {legs.length === 1 ? "Add return flight" : "Add another flight"}
-            </button>
+            {/* The return starts where the last flight landed. An added
+                booking (Booking 2, …) is a one-way ticket: no return. */}
+            {copyOf ? null : (
+              <button
+                type="button"
+                onClick={() => {
+                  const last = legs[legs.length - 1];
+                  setLegs((all) => [...all, emptyLeg(last?.toPlace ?? "", last?.fromPlace ?? "")]);
+                }}
+                className="rounded-md px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                + {legs.length === 1 ? "Add return flight" : "Add another flight"}
+              </button>
+            )}
           </div>
         </Section>
 
@@ -380,8 +447,10 @@ export function FlightModal({
                 min="1"
                 max="12"
                 step="1"
-                value={passengers.length}
+                value={countDraft ?? passengers.length}
                 onChange={(e) => setPassengerCount(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onBlur={() => setCountDraft(null)}
                 // Compact, to sit level with the Bought / Planned switch and the
                 // points picker beside it.
                 className="h-7 w-14 rounded-md bg-background px-2 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
@@ -572,8 +641,59 @@ export function FlightModal({
           <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p>
         ) : null}
 
+        {draw !== 0 ? (
+          <p className="text-[11px] text-muted">
+            Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
+          </p>
+        ) : null}
+      </form>
+      {extras.map((x, i) => (
+        <div key={x.id} className="mt-4 border-t border-line pt-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-bold">Flight #{i + 2}</span>
+            <button
+              type="button"
+              onClick={() => {
+                delete extraHandles.current[x.id];
+                setExtras((all) => all.filter((e) => e.id !== x.id));
+              }}
+              className="rounded-md px-2 py-1 text-xs font-semibold text-negative transition hover:bg-negative/10"
+            >
+              Remove flight
+            </button>
+          </div>
+          <FlightModal
+            flight={null}
+            copyOf={x.copy}
+            cards={cards}
+            travellers={travellers}
+            airlines={airlines}
+            trips={trips}
+            currency={currency}
+            embed={{
+              trip,
+              register: (handle) => {
+                extraHandles.current[x.id] = handle;
+              },
+            }}
+            onClose={onClose}
+          />
+        </div>
+      ))}
+      {/* Two one-way tickets bought separately, each its own booking with
+          its own fares, without a second popup. An added booking does not
+          offer it again; the button under the first one keeps adding. */}
+      {copyOf ? null : (
+        <button
+          type="button"
+          onClick={addBooking}
+          className="mt-3 rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+        >
+          + Add another flight booking
+        </button>
+      )}
         {embed ? null : (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · {isEstimate ? "Planned flight cost" : "Flight cost"}{" "}
             <span className="font-bold tabular-nums text-foreground">{formatMoney(fareCents, currency)}</span>
@@ -615,6 +735,7 @@ export function FlightModal({
             </button>
             <button
               type="submit"
+              form={formId}
               disabled={pending}
               className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
             >
@@ -623,12 +744,7 @@ export function FlightModal({
           </div>
         </div>
         )}
-        {draw !== 0 ? (
-          <p className="text-[11px] text-muted">
-            Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
-          </p>
-        ) : null}
-      </form>
+    </div>
   );
   return embed ? body : (
     <ModalShell title={flight ? "Edit flight" : "Add flight"} onClose={onClose} className="sm:max-w-5xl">

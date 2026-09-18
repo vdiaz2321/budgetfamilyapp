@@ -188,8 +188,6 @@ export function TravelBoard({
   const [expandedYears, setExpandedYears] = useState(false);
   const [expandedUpcoming, setExpandedUpcoming] = useState<"hotels" | "flights" | "cars" | null>(null);
   const [editing, setEditing] = useState<TravelStay | null>(null);
-  // "+ Add another room" on a stay: a new stay prefilled from that one.
-  const [roomOf, setRoomOf] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
   // A trip row's "edit spending" opens the Misc form on its own, not the
   // whole Add Travel Log popup.
@@ -204,13 +202,22 @@ export function TravelBoard({
     () => summarizeTrips(trips, stays, flights, carList, expenses),
     [trips, stays, flights, carList, expenses],
   );
+  // Airlines already on a saved flight, one spelling each, for the flight
+  // form's suggestions.
+  const airlines = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const f of flights) {
+      const name = f.airline?.trim();
+      if (name && !byKey.has(name.toLowerCase())) byKey.set(name.toLowerCase(), name);
+    }
+    return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+  }, [flights]);
   const openTrip = tripSummaries.find((t) => t.trip.id === openTripId) ?? null;
   const closeForms = () => {
     setAdding(false);
     setSpendingOnly(false);
     setAddTripId(null);
     setEditing(null);
-    setRoomOf(null);
     setEditingFlight(null);
     setEditingCar(null);
   };
@@ -1374,6 +1381,7 @@ export function TravelBoard({
           cards={cards}
           brands={brandList}
           travellers={travellers}
+          airlines={airlines}
           expenses={expenses}
           currency={currency}
           defaultTripId={addTripId}
@@ -1387,31 +1395,12 @@ export function TravelBoard({
           brands={brandList}
           currency={currency}
           trips={trips}
-          onAddRoom={(s) => {
-            closeForms();
-            setRoomOf(s);
-          }}
-          onClose={closeForms}
-        />
-      ) : null}
-      {roomOf ? (
-        <StayModal
-          key={`room-${roomOf.id}`}
-          stay={null}
-          roomOf={roomOf}
-          cards={cards}
-          brands={brandList}
-          currency={currency}
-          trips={trips}
-          onBack={() => {
-            setRoomOf(null);
-            setEditing(roomOf);
-          }}
+          allowRooms
           onClose={closeForms}
         />
       ) : null}
       {editingFlight ? (
-        <FlightModal flight={editingFlight} cards={cards} travellers={travellers} trips={trips} currency={currency} onClose={closeForms} />
+        <FlightModal flight={editingFlight} cards={cards} travellers={travellers} airlines={airlines} trips={trips} currency={currency} onClose={closeForms} />
       ) : null}
       {editingCar ? (
         <CarModal car={editingCar} cards={cards} trips={trips} currency={currency} onClose={closeForms} />

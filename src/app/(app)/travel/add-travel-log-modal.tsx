@@ -8,8 +8,8 @@ import type { SectionHandle } from "./embedded-section";
 import { FlightModal } from "./flight-modal";
 import { MiscModal } from "./misc-modal";
 import { StayModal } from "./stay-modal";
-import { TripPicker, useTripChoice } from "./trip-picker";
-import type { TravelBrand, TravelCard, TravelTrip, Traveller, TripExpense } from "./types";
+import { useTripChoice } from "./trip-picker";
+import type { TravelBrand, TravelCard, TravelStay, TravelTrip, Traveller, TripExpense } from "./types";
 
 type Kind = "stay" | "misc" | "flight" | "car";
 
@@ -30,6 +30,7 @@ export function AddTravelLogModal({
   cards,
   brands,
   travellers,
+  airlines,
   expenses,
   currency,
   defaultTripId,
@@ -39,6 +40,7 @@ export function AddTravelLogModal({
   cards: TravelCard[];
   brands: TravelBrand[];
   travellers: Traveller[];
+  airlines: string[];
   expenses: TripExpense[];
   currency: string;
   /** Opened from a trip's own row: every section goes into that trip. */
@@ -50,10 +52,14 @@ export function AddTravelLogModal({
   const [trip, setTrip] = useTripChoice(defaultTripId);
   // Every section starts collapsed; each opens on a tap.
   const [open, setOpen] = useState<Record<Kind, boolean>>({ stay: false, misc: false, flight: false, car: false });
-  // Sections already saved by an earlier press, when another one failed. They
-  // are not saved twice on the retry.
-  const [saved, setSaved] = useState<Kind[]>([]);
-  const [errors, setErrors] = useState<Partial<Record<Kind, string>>>({});
+  // A family of five books two rooms: each extra room is its own stay form,
+  // started as a copy of the first room's hotel, city, dates and brand.
+  const [rooms, setRooms] = useState<{ id: number; roomOf: TravelStay | null }[]>([{ id: 0, roomOf: null }]);
+  const roomHandles = useRef<Record<number, SectionHandle | null>>({});
+  // Units ("stay:0", "stay:1", "misc", …) already saved by an earlier press,
+  // when another one failed. They are not saved twice on the retry.
+  const [saved, setSaved] = useState<string[]>([]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const handles = {
     stay: useRef<SectionHandle | null>(null),
@@ -66,21 +72,26 @@ export function AddTravelLogModal({
     start(async () => {
       setErrors({});
       setNotice(null);
-      const toSave = SECTIONS.map((s) => s.kind).filter(
-        (k) => open[k] && !saved.includes(k) && handles[k].current && !handles[k].current.isEmpty(),
+      const toSave = units().filter(
+        (u) => open[u.kind] && !saved.includes(u.id) && u.handle && !u.handle.isEmpty(),
       );
+      // A new trip needs its name before anything can be filed under it.
+      if (!defaultTripId && !trip.newTripName.trim()) {
+        setNotice("Give the trip a name first.");
+        return;
+      }
       if (toSave.length === 0) {
         setNotice("Nothing to add yet — fill in at least one section.");
         return;
       }
       // One at a time, in order: a new trip is created by the first section
       // and the rest find it by its name.
-      const done: Kind[] = [];
-      const failed: Partial<Record<Kind, string>> = {};
-      for (const k of toSave) {
-        const result = await handles[k].current!.save();
-        if (result.error) failed[k] = result.error;
-        else done.push(k);
+      const done: string[] = [];
+      const failed: Record<string, string> = {};
+      for (const u of toSave) {
+        const result = await u.handle!.save();
+        if (result.error) failed[u.id] = result.error;
+        else done.push(u.id);
       }
       router.refresh();
       if (Object.keys(failed).length === 0) {
@@ -92,16 +103,52 @@ export function AddTravelLogModal({
     });
   }
 
-  const label = (k: Kind) => SECTIONS.find((s) => s.kind === k)!.label;
+  // Everything the save button can post, in order: each room, then the rest.
+  function units() {
+    return [
+      ...rooms.map((r) => ({ id: `stay:${r.id}`, kind: "stay" as Kind, handle: roomHandles.current[r.id] ?? null })),
+      ...SECTIONS.filter((s) => s.kind !== "stay").map((s) => ({ id: s.kind as string, kind: s.kind, handle: handles[s.kind].current })),
+    ];
+  }
+  const roomLabel = (i: number) => (i === 0 ? "Stay" : `Room ${i + 1}`);
+  const label = (id: string) => {
+    const i = rooms.findIndex((r) => `stay:${r.id}` === id);
+    return i >= 0 ? roomLabel(i) : SECTIONS.find((s) => s.kind === id)!.label;
+  };
+
+  function addRoom() {
+    const copy = roomHandles.current[rooms[0].id]?.copyForRoom?.() ?? null;
+    setRooms((rs) => [...rs, { id: Math.max(...rs.map((r) => r.id)) + 1, roomOf: copy }]);
+  }
 
   return (
-    <ModalShell title="Add Travel Log" onClose={onClose} className="sm:max-w-4xl">
-      <div className="px-5 pt-4">
-        <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!defaultTripId} />
-      </div>
+    <ModalShell
+      // From a trip's own row everything goes into that trip; from the page's
+      // Add button it is always a new trip, named right in the header. Adding
+      // to a saved trip is done from that trip's row, so no picker here.
+      title={defaultTripId ? `Add to ${trips.find((t) => t.id === defaultTripId)?.name ?? "trip"}` : "Add Travel Log:"}
+      headerActions={
+        defaultTripId ? null : (
+          <input
+            value={trip.newTripName}
+            onChange={(e) => setTrip({ tripId: "", newTripName: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.preventDefault();
+            }}
+            autoFocus
+            aria-label="Trip name"
+            placeholder="Greece - May 2027"
+            className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:w-72"
+          />
+        )
+      }
+      onClose={onClose}
+      className="sm:max-w-4xl"
+    >
 
       {SECTIONS.map(({ kind, label: name }) => {
-        const isSaved = saved.includes(kind);
+        const isSaved =
+          kind === "stay" ? rooms.every((r) => saved.includes(`stay:${r.id}`)) : saved.includes(kind);
         const isOpen = open[kind] && !isSaved;
         const embed = {
           trip,
@@ -133,7 +180,58 @@ export function AddTravelLogModal({
                 doesn't throw away what was typed in it. Only open ones save. */}
             <div className={isOpen ? "border-t border-line px-5 pb-4 pt-3" : "hidden"}>
               {kind === "stay" ? (
-                <StayModal stay={null} cards={cards} brands={brands} currency={currency} embed={embed} onClose={onClose} />
+                <div className="space-y-4">
+                  {rooms.map((r, i) => {
+                    const roomSaved = saved.includes(`stay:${r.id}`);
+                    return (
+                      <div key={r.id} className={i > 0 ? "border-t border-line pt-3" : ""}>
+                        {i > 0 ? (
+                          <div className="mb-2 flex items-center justify-between">
+                            <span className="text-sm font-bold">
+                              {roomLabel(i)}
+                              {roomSaved ? <span className="ml-2 text-xs font-semibold text-positive">Saved</span> : null}
+                            </span>
+                            {roomSaved ? null : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  delete roomHandles.current[r.id];
+                                  setRooms((rs) => rs.filter((x) => x.id !== r.id));
+                                }}
+                                className="rounded-md px-2 py-1 text-xs font-semibold text-negative transition hover:bg-negative/10"
+                              >
+                                Remove room
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+                        <div className={roomSaved ? "hidden" : ""}>
+                          <StayModal
+                            stay={null}
+                            roomOf={r.roomOf}
+                            cards={cards}
+                            brands={brands}
+                            currency={currency}
+                            embed={{
+                              trip,
+                              register: (handle: SectionHandle) => {
+                                roomHandles.current[r.id] = handle;
+                              },
+                            }}
+                            onClose={onClose}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={addRoom}
+                    className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+                  >
+                    + Add another room
+                  </button>
+                </div>
               ) : kind === "misc" ? (
                 <MiscModal
                   // A different trip loads that trip's own figures.
@@ -146,7 +244,7 @@ export function AddTravelLogModal({
                   onClose={onClose}
                 />
               ) : kind === "flight" ? (
-                <FlightModal flight={null} cards={cards} travellers={travellers} trips={trips} currency={currency} embed={embed} onClose={onClose} />
+                <FlightModal flight={null} cards={cards} travellers={travellers} airlines={airlines} trips={trips} currency={currency} embed={embed} onClose={onClose} />
               ) : (
                 <CarModal car={null} cards={cards} trips={trips} currency={currency} embed={embed} onClose={onClose} />
               )}
@@ -160,7 +258,7 @@ export function AddTravelLogModal({
         {Object.keys(errors).length > 0 || notice ? (
           <div className="mb-2 space-y-1 rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">
             {notice ? <p>{notice}</p> : null}
-            {(Object.keys(errors) as Kind[]).map((k) => (
+            {Object.keys(errors).map((k) => (
               <p key={k}>
                 <span className="font-bold">{label(k)}:</span> {errors[k]}
               </p>

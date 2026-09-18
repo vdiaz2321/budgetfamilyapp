@@ -68,7 +68,7 @@ export function CarModal({
     return car.pocketCostCents !== expected ? centsToDisplay(car.pocketCostCents) : "";
   });
   const [remarks, setRemarks] = useState(car?.remarks ?? "");
-  const [isEstimate, setIsEstimate] = useState(car?.isEstimate ?? false);
+  const [isEstimate, setIsEstimate] = useState(car?.isEstimate ?? Boolean(embed));
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const costCents = Math.max(0, displayToCents(cost));

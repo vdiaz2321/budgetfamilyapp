@@ -240,7 +240,7 @@ export function BudgetBoard({
     // Show items from start of month (not just today) so overdue unpaid items
     // stay visible until Pay/Edit is clicked, not just until the date passes.
     const end = isCurrentMonth
-      ? (() => { const e = new Date(start); e.setDate(e.getDate() + 7); return e; })()
+      ? (() => { const e = new Date(start); e.setDate(e.getDate() + 5); return e; })()
       : new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() + 1, 0);
     const inWindow = (value: Date) => value >= startOfMonth && value <= end;
     // Every kind that can carry a due day (bills, expenses, debt) contributes

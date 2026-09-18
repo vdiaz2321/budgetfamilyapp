@@ -18,8 +18,8 @@ export function PlannedSwitch({
   return (
     <div role="radiogroup" aria-label="Booking status" className="inline-flex h-7 items-stretch rounded-lg bg-background p-0.5 ring-1 ring-line">
       {[
-        { planned: false, label: bookedLabel },
         { planned: true, label: plannedLabel },
+        { planned: false, label: bookedLabel },
       ].map((o) => (
         <button
           key={o.label}
