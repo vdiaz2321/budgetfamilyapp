@@ -20,6 +20,7 @@ import {
 } from "./actions";
 import type { AccountOption, BucketOption, RowData, SubOption, TxData, TxPrefill } from "./types";
 import { DEBT_KINDS } from "./types";
+import { EXPENSE_CATEGORIES } from "@/app/(app)/travel/types";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
@@ -210,15 +211,19 @@ export function ItemPanel({
   // while it's in flight, and the panel closes once it lands.
   const [saving, setSaving] = useState(false);
   const onSaving = () => {
-    setSaving(true);
-    onSaveStart();
-    // Close on the next macrotask, not now: the panel holds the form, and
-    // unmounting it inside the click handler would kill the submit before the
-    // browser dispatches it. One tick later the action is already in flight
-    // and finishes on its own — which is the point, because in dev that round
-    // trip re-renders the whole budget page and takes several seconds. The
-    // board carries the "Saving…" pill from here on.
-    setTimeout(onClose, 0);
+    // Everything happens on the next macrotask, not now. The browser submits
+    // the form only AFTER the click handlers finish, and React commits state
+    // set in a real click before that — so `setSaving(true)` here disabled the
+    // Save button first, and a disabled button submits nothing (the panel
+    // closed, the pill said "Saving…" forever, and no write ran). Unmounting
+    // the panel now would kill the submit the same way. One tick later the
+    // action is already in flight and finishes on its own; the board carries
+    // the "Saving…" pill from here on.
+    setTimeout(() => {
+      setSaving(true);
+      onSaveStart();
+      onClose();
+    }, 0);
   };
   // Every editor form runs its write through here, so neither a failure nor a
   // slow revalidation can strand the button on "Saving…".
@@ -378,6 +383,8 @@ export function ItemPanel({
               dueDay={row.dueDay}
               paymentAccountId={row.paymentAccountId}
               paymentAccountOptions={paymentAccountOptions}
+              travelCategory={row.travelCategory}
+              showTravel={kind === "expenses" || kind === "bills"}
               hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)}
               autoPlanned={row.autoPlanned}
               showDetails={showItemDetails}
@@ -757,6 +764,8 @@ function PlannedForm({
   dueDay,
   paymentAccountId,
   paymentAccountOptions,
+  travelCategory,
+  showTravel,
   hasDue,
   autoPlanned,
   showDetails,
@@ -774,6 +783,9 @@ function PlannedForm({
   dueDay?: number | null;
   paymentAccountId: string | null;
   paymentAccountOptions: AccountOption[];
+  // The Travel Log spending row this item's trip-tagged purchases count in.
+  travelCategory?: string | null;
+  showTravel?: boolean;
   hasDue?: boolean;
   autoPlanned?: boolean;
   showDetails: boolean;
@@ -864,6 +876,25 @@ function PlannedForm({
             {plannedInput}
           </Section>
         )}
+        {showTravel ? (
+          <Section title="Travel Log">
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted">Counts as trip spending under</span>
+              <select
+                key={travelCategory ?? "none"}
+                name="travelCategory"
+                defaultValue={travelCategory ?? ""}
+                className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Not trip spending</option>
+                {EXPENSE_CATEGORIES.map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[10px] text-muted">A purchase on this item tagged to a trip shows on that trip&apos;s Spending as Actual.</span>
+            </label>
+          </Section>
+        ) : null}
       </form>
 
       {showDetails ? (

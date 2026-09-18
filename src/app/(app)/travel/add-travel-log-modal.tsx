@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CarModal } from "./car-modal";
@@ -15,7 +15,7 @@ type Kind = "stay" | "misc" | "flight" | "car";
 
 const SECTIONS: { kind: Kind; label: string }[] = [
   { kind: "stay", label: "Stay" },
-  { kind: "misc", label: "Misc" },
+  { kind: "misc", label: "Spending" },
   { kind: "flight", label: "Flight" },
   { kind: "car", label: "Rental" },
 ];
@@ -61,6 +61,43 @@ export function AddTravelLogModal({
   const [saved, setSaved] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  // What is typed in the trip box. It matches a saved trip by name (the way
+  // the server would anyway), so adding to one is the same as naming it.
+  const [tripName, setTripName] = useState("");
+  // The list of saved trips under the box, drawn by the app: the browser's
+  // own datalist popup floats away from the box in the desktop app.
+  const [listOpen, setListOpen] = useState(false);
+  const nameBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!listOpen) return;
+    function onDown(e: MouseEvent) {
+      if (!nameBox.current?.contains(e.target as Node)) setListOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [listOpen]);
+  const normalise = (name: string) => name.trim().replace(/\s+[-–—·]\s+/g, " · ").replace(/\s+/g, " ").toLowerCase();
+  const matched = defaultTripId ? null : trips.find((t) => t.id === trip.tripId) ?? null;
+  // Trips offered as you type: this year's and upcoming, newest first.
+  const thisYear = String(new Date().getFullYear());
+  const suggestions = trips
+    .filter((t) => !t.startOn || t.startOn.slice(0, 4) >= thisYear)
+    .filter((t) => !tripName.trim() || t.name.toLowerCase().includes(tripName.trim().toLowerCase()))
+    .sort((a, b) => (b.startOn ?? "9999").localeCompare(a.startOn ?? "9999"));
+  function typeTripName(value: string) {
+    setTripName(value);
+    const hit = trips.find((t) => normalise(t.name) === normalise(value));
+    setTrip(hit ? { tripId: hit.id, newTripName: "" } : { tripId: "", newTripName: value });
+  }
+  // Closing with something typed asks first — one stray tap on the backdrop
+  // would otherwise throw away four sections of a phone's worth of typing.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  function requestClose() {
+    if (pending) return;
+    const typed = tripName.trim() || units().some((u) => u.handle && !u.handle.isEmpty());
+    if (typed && saved.length === 0) setConfirmDiscard(true);
+    else onClose();
+  }
   const handles = {
     stay: useRef<SectionHandle | null>(null),
     misc: useRef<SectionHandle | null>(null),
@@ -76,7 +113,7 @@ export function AddTravelLogModal({
         (u) => open[u.kind] && !saved.includes(u.id) && u.handle && !u.handle.isEmpty(),
       );
       // A new trip needs its name before anything can be filed under it.
-      if (!defaultTripId && !trip.newTripName.trim()) {
+      if (!defaultTripId && !trip.tripId && !trip.newTripName.trim()) {
         setNotice("Give the trip a name first.");
         return;
       }
@@ -129,20 +166,64 @@ export function AddTravelLogModal({
       title={defaultTripId ? `Add to ${trips.find((t) => t.id === defaultTripId)?.name ?? "trip"}` : "Add Travel Log:"}
       headerActions={
         defaultTripId ? null : (
-          <input
-            value={trip.newTripName}
-            onChange={(e) => setTrip({ tripId: "", newTripName: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.preventDefault();
-            }}
-            autoFocus
-            aria-label="Trip name"
-            placeholder="Greece - May 2027"
-            className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:w-72"
-          />
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+            <div ref={nameBox} className="relative w-full sm:w-72">
+              {/* The placeholder shows the naming pattern every trip follows. */}
+              <input
+                value={tripName}
+                onChange={(e) => {
+                  typeTripName(e.target.value);
+                  setListOpen(true);
+                }}
+                onFocus={() => setListOpen(true)}
+                onClick={() => setListOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    setListOpen(false);
+                  } else if (e.key === "Escape" && listOpen) {
+                    e.stopPropagation();
+                    setListOpen(false);
+                  }
+                }}
+                autoFocus
+                autoComplete="off"
+                aria-label="Trip name"
+                placeholder="Greece - May 2027"
+                className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+              {listOpen && suggestions.length > 0 ? (
+                <ul className="absolute left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-md bg-surface py-1 shadow-lg ring-1 ring-line">
+                  {suggestions.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          typeTripName(t.name);
+                          setListOpen(false);
+                        }}
+                        className={`w-full px-2 py-1.5 text-left text-sm transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                          t.id === trip.tripId ? "font-semibold" : ""
+                        }`}
+                      >
+                        {t.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            {/* Says which it is, so a name that happens to match doesn't file
+                into a saved trip without saying so. */}
+            {tripName.trim() ? (
+              <span className={`text-xs font-semibold ${matched ? "text-positive" : "text-muted"}`}>
+                {matched ? `Adding to ${matched.name}` : "New trip"}
+              </span>
+            ) : null}
+          </div>
         )
       }
-      onClose={onClose}
+      onClose={requestClose}
       className="sm:max-w-4xl"
     >
 
@@ -211,6 +292,7 @@ export function AddTravelLogModal({
                             roomOf={r.roomOf}
                             cards={cards}
                             brands={brands}
+                            trips={trips}
                             currency={currency}
                             embed={{
                               trip,
@@ -268,10 +350,31 @@ export function AddTravelLogModal({
             ) : null}
           </div>
         ) : null}
+        {confirmDiscard ? (
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-black/5 px-3 py-2 text-sm dark:bg-white/10">
+            <span className="font-medium">Throw away what you typed?</span>
+            <span className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDiscard(false)}
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md bg-negative px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+              >
+                Discard
+              </button>
+            </span>
+          </div>
+        ) : null}
         <div className="flex items-center justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={pending}
             className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/5"
           >

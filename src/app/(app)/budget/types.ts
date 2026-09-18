@@ -64,6 +64,8 @@ export type RowData = {
   // Optional account used when the item is manually marked Paid from the
   // upcoming-due card. This is deliberately separate from a Savings link.
   paymentAccountId: string | null;
+  // The Travel Log spending row this item's trip-tagged purchases count in.
+  travelCategory: string | null;
   plannedCents: number;
   spentCents: number;
   // What this item actually cost last month. Drives the "Prev Mo Spent"
@@ -186,6 +188,10 @@ export type TxData = {
   accountId: string | null;
   // The property this row is attributed to (accounts.kind = 'property').
   propertyId: string | null;
+  // The trip this purchase is tagged to (travel_trips.id).
+  tripId: string | null;
+  // The booking it pays for, as "stay:<id>" / "flight:<id>" / "car:<id>".
+  bookingRef: string | null;
   toAccountId: string | null;
   fromBucketId: string | null;
   toBucketId: string | null;

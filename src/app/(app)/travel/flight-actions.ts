@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
-import { resolveTripId } from "./trip-resolve";
+import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger, type RewardDraw } from "./reward-ledger";
 
 function revalidate() {
@@ -130,6 +130,13 @@ export async function saveTravelFlight(payload: FlightPayload) {
 
   const trip = await resolveTripId(supabase, householdId, payload.tripId, payload.newTripName);
   if (trip.error) return { error: trip.error };
+  // A trip this save just created goes away again if the save fails.
+  const fail = async (error: string) => {
+    await discardNewTrip(supabase, householdId, trip);
+    return { error };
+  };
+  const dateError = await tripDateError(supabase, householdId, trip, legs.map((l) => l.flightOn), "A flight date");
+  if (dateError) return fail(dateError);
 
   const row = {
     household_id: householdId,
@@ -170,7 +177,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
         .maybeSingle(),
       "travel_flights",
     );
-    if (!prev) return { error: "That flight was not found." };
+    if (!prev) return fail("That flight was not found.");
 
     // A cancelled booking has already handed its points back.
     const before: RewardDraw = {
@@ -191,14 +198,14 @@ export async function saveTravelFlight(payload: FlightPayload) {
           "flight_booking",
         )
       : { error: null, activityId: prev.reward_activity_id };
-    if (sync.error) return { error: sync.error };
+    if (sync.error) return fail(sync.error);
 
     const { error } = await supabase
       .from("travel_flights")
       .update({ ...row, reward_activity_id: sync.activityId })
       .eq("id", flightId)
       .eq("household_id", householdId);
-    if (error) return { error: `Couldn't save that flight — ${error.message}` };
+    if (error) return fail(`Couldn't save that flight — ${error.message}`);
   } else {
     const sync = await syncRewardLedger(
       supabase,
@@ -209,14 +216,14 @@ export async function saveTravelFlight(payload: FlightPayload) {
       null,
       "flight_booking",
     );
-    if (sync.error) return { error: sync.error };
+    if (sync.error) return fail(sync.error);
 
     const { data, error } = await supabase
       .from("travel_flights")
       .insert({ ...row, reward_activity_id: sync.activityId })
       .select("id")
       .single();
-    if (error) return { error: `Couldn't save that flight — ${error.message}` };
+    if (error) return fail(`Couldn't save that flight — ${error.message}`);
     flightId = data.id;
   }
 
@@ -224,7 +231,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
   // own worth preserving, and it keeps a removed row from lingering.
   for (const table of ["travel_flight_legs", "travel_flight_passengers"] as const) {
     const { error } = await supabase.from(table).delete().eq("flight_id", flightId).eq("household_id", householdId);
-    if (error) return { error: `Couldn't save that flight — ${error.message}` };
+    if (error) return fail(`Couldn't save that flight — ${error.message}`);
   }
   const { error: legsError } = await supabase.from("travel_flight_legs").insert(
     legs.map((leg, i) => ({
@@ -239,7 +246,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
       arrives_at: leg.arrivesAt,
     })),
   );
-  if (legsError) return { error: `Couldn't save the flights — ${legsError.message}` };
+  if (legsError) return fail(`Couldn't save the flights — ${legsError.message}`);
   const { error: paxError } = await supabase.from("travel_flight_passengers").insert(
     passengers.map((p, i) => ({
       household_id: householdId,
@@ -253,7 +260,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
       points_cost: p.pointsCost,
     })),
   );
-  if (paxError) return { error: `Couldn't save the passengers — ${paxError.message}` };
+  if (paxError) return fail(`Couldn't save the passengers — ${paxError.message}`);
 
   revalidate();
   return { error: null };

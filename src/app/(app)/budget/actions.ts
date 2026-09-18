@@ -12,6 +12,20 @@ import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 import { unwrap } from "@/lib/supabase-result";
 
+// travel_trip_expenses.category keys — the rows on a trip's Spending table.
+import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef } from "@/app/(app)/travel/booking-payments";
+
+const TRAVEL_CATEGORY_KEYS = new Set(["restaurants", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash", "other"]);
+
+// "Points used" typed beside a booking payment. Blank means "leave the
+// booking's own figure"; a number (0 included) is written onto the booking.
+function bookingPointsOf(formData: FormData): number | null {
+  const raw = String(formData.get("bookingPoints") ?? "").replace(/,/g, "").trim();
+  if (!raw) return null;
+  const n = Math.trunc(Number(raw));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 // The bucket a Savings subcategory contributes to, if any linked — null when
 // not a savings item or not linked, so callers can skip the bucket math.
 async function getLinkedBucketId(
@@ -666,7 +680,13 @@ export async function updateSubcategory(formData: FormData) {
   const rawDue = String(formData.get("dueDay") ?? "").trim();
   const dueDay = rawDue === "" ? null : Math.min(31, Math.max(1, parseInt(rawDue, 10)));
 
-  const update: { name: string; due_day: number | null; payment_account_id?: string | null } = { name, due_day: dueDay };
+  const update: { name: string; due_day: number | null; payment_account_id?: string | null; travel_category?: string | null } = { name, due_day: dueDay };
+  // Which Travel Log spending row this item's trip-tagged purchases count in.
+  // Only the full item form carries it; the inline rename leaves it alone.
+  if (formData.has("travelCategory")) {
+    const raw = String(formData.get("travelCategory") ?? "").trim();
+    update.travel_category = TRAVEL_CATEGORY_KEYS.has(raw) ? raw : null;
+  }
   // The small inline rename form does not carry this input. Only change the
   // payment link when the full item form submitted one.
   if (formData.has("paymentAccountId")) {
@@ -688,11 +708,14 @@ export async function updateSubcategory(formData: FormData) {
     }
   }
 
-  await supabase
-    .from("subcategories")
-    .update(update)
-    .eq("id", id)
-    .eq("household_id", householdId);
+  unwrap(
+    await supabase
+      .from("subcategories")
+      .update(update)
+      .eq("id", id)
+      .eq("household_id", householdId),
+    "saving the budget item",
+  );
 
   // If this subcategory is bound to any active subscriptions, shift each
   // subscription's next_renewal_date to the new day-of-month. Without this
@@ -714,11 +737,14 @@ export async function updateSubcategory(formData: FormData) {
       const day = Math.min(dueDay, lastDay);
       const iso = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       if (iso === sub.next_renewal_date) continue;
-      await supabase
-        .from("subscriptions")
-        .update({ next_renewal_date: iso, updated_at: new Date().toISOString() })
-        .eq("id", sub.id)
-        .eq("household_id", householdId);
+      unwrap(
+        await supabase
+          .from("subscriptions")
+          .update({ next_renewal_date: iso, updated_at: new Date().toISOString() })
+          .eq("id", sub.id)
+          .eq("household_id", householdId),
+        "moving the subscription's due date",
+      );
     }
   }
 
@@ -936,6 +962,95 @@ export async function upsertDebtAndPlan(formData: FormData) {
  * household" answer nulls it out, so a slow or failing lookup can't silently
  * drop the tag off a row the user did tag.
  */
+// The trip a purchase is tagged to, checked to be this household's. Its
+// spending then shows on the Travel Log as Actual for the item's travel row.
+async function resolveTripTag(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  raw: string,
+): Promise<string | null> {
+  if (!raw) return null;
+  const { data, error } = await supabase
+    .from("travel_trips")
+    .select("id")
+    .eq("id", raw)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not verify the trip: ${error.message}`);
+  return data?.id ?? null;
+}
+
+// The trips the transaction modal offers: this year's and upcoming, newest
+// first, with their dates so the one covering the transaction's date can be
+// picked on its own. Fetched on open, like payees, not shipped with every page.
+export async function listTripsForTagging(): Promise<{ id: string; name: string; startOn: string | null; endOn: string | null }[]> {
+  const { supabase, householdId } = await requireHousehold();
+  const thisYear = `${new Date().getFullYear()}-01-01`;
+  const { data, error } = await supabase
+    .from("travel_trips")
+    .select("id, name, start_on, end_on")
+    .eq("household_id", householdId)
+    .or(`start_on.is.null,start_on.gte.${thisYear}`)
+    .order("start_on", { ascending: false, nullsFirst: true });
+  if (error) throw new Error(`Could not load the trips: ${error.message}`);
+  return (data ?? []).map((t) => ({ id: t.id, name: t.name, startOn: t.start_on ?? null, endOn: t.end_on ?? null }));
+}
+
+// A payment linked to a booking sets that booking's pocket cost and marks it
+// Booked; the balance of the card follows through the reward ledger.
+async function syncBookings(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  // Points typed on the form go onto the LAST ref (the booking being paid).
+  pointsTyped: number | null,
+  ...refs: Array<BookingRef | null>
+) {
+  const seen = new Set<string>();
+  const target = refs[refs.length - 1];
+  // Compared by id, not identity: on an edit the "before" and "after" refs
+  // are usually the same booking read twice.
+  const targetKey = target ? `${target.kind}:${target.id}` : null;
+  for (const ref of refs) {
+    const key = `${ref?.kind}:${ref?.id}`;
+    if (!ref || seen.has(key)) continue;
+    seen.add(key);
+    const problem = await syncBookingPayment(supabase, householdId, ref, key === targetKey ? pointsTyped : null);
+    if (problem) console.error("[syncBookingPayment]", problem);
+  }
+  revalidatePath("/travel");
+}
+
+// The bookings of one trip, for the transaction form's "Pays for" pick:
+// live (not cancelled) stays, flights and rentals, oldest first.
+export async function listTripBookings(
+  tripId: string,
+): Promise<{ ref: string; label: string; pocketCents: number; isEstimate: boolean; pointsCost: number; pointsUsed: boolean; hasCard: boolean }[]> {
+  const { supabase, householdId } = await requireHousehold();
+  if (!tripId) return [];
+  const [stays, flights, cars] = await Promise.all([
+    supabase.from("travel_stays").select("id, property_name, check_in, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).eq("trip_id", tripId),
+    supabase.from("travel_flights").select("id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).eq("trip_id", tripId),
+    supabase.from("travel_cars").select("id, company, pickup_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).eq("trip_id", tripId),
+  ]);
+  const problem = stays.error ?? flights.error ?? cars.error;
+  if (problem) throw new Error(`Could not load the trip's bookings: ${problem.message}`);
+  const day = (iso: string) => {
+    const [y, m, d] = iso.split("-");
+    return `${Number(d)}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y.slice(2)}`;
+  };
+  const pts = (b: { points_cost: number | null; points_used: boolean | null; account_id: string | null }) => ({
+    pointsCost: Number(b.points_cost ?? 0),
+    pointsUsed: Boolean(b.points_used),
+    hasCard: Boolean(b.account_id),
+  });
+  const rows = [
+    ...(stays.data ?? []).filter((s) => !s.cancelled_at).map((s) => ({ ref: `stay:${s.id}`, on: s.check_in, label: `Stay · ${s.property_name} · ${day(s.check_in)}`, pocketCents: Number(s.pocket_cost_cents ?? 0), isEstimate: Boolean(s.is_estimate), ...pts(s) })),
+    ...(flights.data ?? []).filter((f) => !f.cancelled_at).map((f) => ({ ref: `flight:${f.id}`, on: f.first_flight_on, label: `Flight · ${f.airline} · ${day(f.first_flight_on)}`, pocketCents: Number(f.pocket_cost_cents ?? 0), isEstimate: Boolean(f.is_estimate), ...pts(f) })),
+    ...(cars.data ?? []).filter((c) => !c.cancelled_at).map((c) => ({ ref: `car:${c.id}`, on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, pocketCents: Number(c.pocket_cost_cents ?? 0), isEstimate: Boolean(c.is_estimate), ...pts(c) })),
+  ];
+  return rows.sort((a, b) => a.on.localeCompare(b.on)).map(({ on: _on, ...r }) => r);
+}
+
 async function resolvePropertyId(
   supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
   householdId: string,
@@ -963,6 +1078,8 @@ export async function addTransaction(formData: FormData) {
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const propertyIdRaw = String(formData.get("propertyId") ?? "").trim();
+  const tripIdRaw = String(formData.get("tripId") ?? "").trim();
+  const bookingRefRaw = String(formData.get("bookingRef") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   const isRefund = formData.get("isRefund") === "on";
   const cleared = formData.get("cleared") === "on";
@@ -1068,6 +1185,8 @@ export async function addTransaction(formData: FormData) {
     directBucketId = b?.id ?? null;
   }
 
+  const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
+  const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
   await supabase.from("transactions").insert({
     household_id: householdId,
     occurred_on: occurredOn,
@@ -1078,11 +1197,14 @@ export async function addTransaction(formData: FormData) {
     account_id: accountId,
     bucket_id: directBucketId,
     property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
+    trip_id: tripId,
+    ...bookingColumns(booking),
     memo,
     is_withdrawal: isWithdrawal,
     cleared,
     source: "manual",
   });
+  if (booking) await syncBookings(supabase, householdId, bookingPointsOf(formData), booking);
 
   // A contribution adds to the linked bucket; a withdrawal (e.g. using the
   // Real Estate bucket for a down payment) subtracts from it instead. All
@@ -1146,6 +1268,8 @@ export async function updateTransaction(formData: FormData) {
   const accountIdRaw = String(formData.get("accountId") ?? "").trim();
   const bucketIdRaw = String(formData.get("bucketId") ?? "").trim();
   const propertyIdRaw = String(formData.get("propertyId") ?? "").trim();
+  const tripIdRaw = String(formData.get("tripId") ?? "").trim();
+  const bookingRefRaw = String(formData.get("bookingRef") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   const isRefund = formData.get("isRefund") === "on";
   if (!id || !subcategoryId || !occurredOn || enteredCents <= 0) return;
@@ -1239,6 +1363,21 @@ export async function updateTransaction(formData: FormData) {
     directBucketId = b?.id ?? null;
   }
 
+  // The booking this payment was on before, so an unlinked or moved payment
+  // is taken back off it.
+  const prevBooking = bookingRefOf(
+    unwrap(
+      await supabase
+        .from("transactions")
+        .select("travel_stay_id, travel_flight_id, travel_car_id")
+        .eq("id", id)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "transactions",
+    ) ?? {},
+  );
+  const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
+  const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
   await supabase
     .from("transactions")
     .update({
@@ -1250,11 +1389,14 @@ export async function updateTransaction(formData: FormData) {
       account_id: accountId,
       bucket_id: directBucketId,
       property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
+      trip_id: tripId,
+      ...bookingColumns(booking),
       memo,
       is_withdrawal: isWithdrawal,
     })
     .eq("id", id)
     .eq("household_id", householdId);
+  if (prevBooking || booking) await syncBookings(supabase, householdId, booking ? bookingPointsOf(formData) : null, prevBooking, booking);
 
   // Undo the old transaction's bucket effect (it may have hit a different
   // bucket, or none at all), then apply the new one's. All linked-id lookups
@@ -1416,6 +1558,20 @@ export async function updateTransactionAmount(formData: FormData) {
   }
   if (touchedSnapshot) await captureSnapshots(supabase, householdId, { force: true });
 
+  // A changed amount changes what the linked booking has been paid.
+  const linked = bookingRefOf(
+    unwrap(
+      await supabase
+        .from("transactions")
+        .select("travel_stay_id, travel_flight_id, travel_car_id")
+        .eq("id", id)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "transactions",
+    ) ?? {},
+  );
+  if (linked) await syncBookings(supabase, householdId, null, linked);
+
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
@@ -1535,12 +1691,13 @@ export async function deleteTransaction(formData: FormData) {
   const tx = unwrap(
     await supabase
       .from("transactions")
-      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type")
+      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle(),
     "transactions",
   );
+  const deletedBooking = tx ? bookingRefOf(tx) : null;
 
   if (tx?.movement_type === "account_transfer") {
     const { error } = await supabase.rpc("mutate_account_transfer", {
@@ -1629,6 +1786,9 @@ export async function deleteTransaction(formData: FormData) {
       await captureSnapshots(supabase, householdId, { force: true });
     }
   }
+
+  // The booking this payment was on now adds up without it.
+  if (deletedBooking) await syncBookings(supabase, householdId, null, deletedBooking);
 
   revalidatePath("/budget");
   revalidatePath("/transactions");

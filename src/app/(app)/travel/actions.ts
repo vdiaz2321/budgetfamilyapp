@@ -5,8 +5,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
-import { syncRewardLedger, type RewardDraw } from "./reward-ledger";
-import { resolveTripId } from "./trip-resolve";
+import { syncFreeNightStamp, syncRewardLedger, type RewardDraw } from "./reward-ledger";
+import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -46,41 +46,6 @@ function dollarsToMicros(raw: string): number | null {
   return Math.round(value * 1_000_000);
 }
 
-
-type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
-
-// A free-night certificate is a status on the card, not points: using one
-// sets the card's Booked date to the stay's check-in. Moving the certificate
-// off a stay (unticked, another card, a new date, cancelled, deleted) clears
-// the old stamp — but only when the card still shows THIS stay's date, so a
-// date typed on the card by hand is never wiped.
-async function syncFreeNightStamp(
-  supabase: SupabaseClient,
-  householdId: string,
-  before: { accountId: string | null; checkIn: string } | null,
-  after: { accountId: string | null; checkIn: string } | null,
-) {
-  const same = before && after && before.accountId === after.accountId && before.checkIn === after.checkIn;
-  if (same) return null;
-  if (before?.accountId) {
-    const { error } = await supabase
-      .from("credit_card_details")
-      .update({ benefit_used_on: null, updated_at: new Date().toISOString() })
-      .eq("account_id", before.accountId)
-      .eq("household_id", householdId)
-      .eq("benefit_used_on", before.checkIn);
-    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
-  }
-  if (after?.accountId) {
-    const { error } = await supabase
-      .from("credit_card_details")
-      .update({ benefit_used_on: after.checkIn, updated_at: new Date().toISOString() })
-      .eq("account_id", after.accountId)
-      .eq("household_id", householdId);
-    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
-  }
-  return null;
-}
 
 export async function saveTravelStay(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
@@ -135,6 +100,13 @@ export async function saveTravelStay(formData: FormData) {
     ? await resolveTripId(supabase, householdId, text(formData, "tripId"), text(formData, "newTripName"))
     : { tripId: null, error: null };
   if (trip.error) return { error: trip.error };
+  // A trip this save just created goes away again if the save fails.
+  const fail = async (error: string) => {
+    await discardNewTrip(supabase, householdId, trip);
+    return { error };
+  };
+  const dateError = await tripDateError(supabase, householdId, trip, [checkIn], `The check-in (${checkIn})`);
+  if (dateError) return fail(dateError);
 
   const row = {
     household_id: householdId,
@@ -179,7 +151,7 @@ export async function saveTravelStay(formData: FormData) {
         .maybeSingle(),
       "travel_stays",
     );
-    if (!prev) return { error: "That stay was not found." };
+    if (!prev) return fail("That stay was not found.");
 
     // A cancelled stay has already handed everything back, so it starts from
     // zero and editing it draws again.
@@ -203,7 +175,7 @@ export async function saveTravelStay(formData: FormData) {
         { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
         prev.reward_activity_id,
       );
-      if (sync.error) return { error: sync.error };
+      if (sync.error) return fail(sync.error);
       activityId = sync.activityId;
     }
 
@@ -214,7 +186,7 @@ export async function saveTravelStay(formData: FormData) {
       .eq("household_id", householdId);
     if (error) {
       console.error("[saveTravelStay:update]", error);
-      return { error: `Couldn't save that stay — ${error.message}` };
+      return fail(`Couldn't save that stay — ${error.message}`);
     }
     // A cancelled stay holds no certificate until it is restored.
     const stampError = await syncFreeNightStamp(
@@ -223,7 +195,7 @@ export async function saveTravelStay(formData: FormData) {
       prev.free_night_used && !prev.cancelled_at && !prev.is_estimate ? { accountId: prev.account_id, checkIn: prev.check_in } : null,
       certificateUsed && !prev.cancelled_at ? { accountId, checkIn } : null,
     );
-    if (stampError) return { error: stampError };
+    if (stampError) return fail(stampError);
     revalidate();
     return { error: null };
   }
@@ -237,18 +209,18 @@ export async function saveTravelStay(formData: FormData) {
     { accountId, points: pointsDrawn, credit: creditDrawn },
     { occurredOn: reservedOn || checkIn, bookedOn: checkIn, note: propertyName },
   );
-  if (sync.error) return { error: sync.error };
+  if (sync.error) return fail(sync.error);
 
   const { error } = await supabase
     .from("travel_stays")
     .insert({ ...row, reward_activity_id: sync.activityId ?? null, moves_card_points: true });
   if (error) {
     console.error("[saveTravelStay:insert]", error);
-    return { error: `Couldn't save that stay — ${error.message}` };
+    return fail(`Couldn't save that stay — ${error.message}`);
   }
   if (certificateUsed) {
     const stampError = await syncFreeNightStamp(supabase, householdId, null, { accountId, checkIn });
-    if (stampError) return { error: stampError };
+    if (stampError) return fail(stampError);
   }
   revalidate();
   return { error: null };

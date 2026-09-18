@@ -13,7 +13,7 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { Field, PlannedSwitch, Section, inputClass } from "./travel-form";
+import { Field, PlannedPointsNote, PlannedSwitch, Section, inputClass, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -86,6 +86,9 @@ export function FlightModal({
   const [bookingCode] = useState(flight?.bookingCode ?? "");
   const [reservedOn, setReservedOn] = useState(flight?.reservedOn ?? copyOf?.reservedOn ?? "");
   const [isEstimate, setIsEstimate] = useState(flight?.isEstimate ?? copyOf?.isEstimate ?? Boolean(embed));
+  // Typing the booking date says the tickets are bought: the switch follows
+  // unless it was set by hand.
+  const [statusTouched, setStatusTouched] = useState(Boolean(flight));
   const [legs, setLegs] = useState<LegDraft[]>(() =>
     flight?.legs.length
       ? flight.legs.map((l) => ({
@@ -152,6 +155,7 @@ export function FlightModal({
   const impliedMicros = pointsTyped > 0 && pointsFareCents > 0 ? Math.round((pointsFareCents / pointsTyped) * 10_000) : null;
   const pocketCents = pocketCost.trim() ? displayToCents(pocketCost) : fareCents - pointsFareCents;
   const datesOutOfOrder = Boolean(reservedOn && legs[0]?.flightOn && legs.some((l) => l.flightOn && l.flightOn < reservedOn));
+  const tripNote = outsideTripNote(trips, trip.tripId, legs.map((l) => l.flightOn));
 
   // What saving moves on the card, same preview the stay form gives. An
   // estimate has drawn nothing and draws nothing.
@@ -241,7 +245,7 @@ export function FlightModal({
   });
 
   const ownEmpty = () =>
-    ![airline, bookingCode, reservedOn, cardLabel, pocketCost, remarks].some((v) => v.trim()) &&
+    ![airline, bookingCode, reservedOn, accountId, cardLabel, holder, pocketCost, remarks].some((v) => v.trim()) &&
     legs.every((l) => ![l.flightOn, l.flightNumber, l.fromPlace, l.toPlace, l.departsAt, l.arrivesAt].some((v) => v.trim())) &&
     passengers.every((p) => !p.name && !p.fare.trim() && !p.fareEur.trim() && !p.points.trim());
 
@@ -335,12 +339,12 @@ export function FlightModal({
         {/* Trip, airline and booking date on one line. The booking code is
             no longer typed here; one saved earlier is kept as it was. */}
         <div className="grid grid-cols-2 items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_11rem]">
-          {embed ? null : (
+          {embed || flight ? null : (
             <TripPicker
               trips={trips}
               value={trip}
               onChange={setTrip}
-              startNew={!flight && !defaultTripId}
+              startNew={!defaultTripId}
               className="col-span-2 sm:col-span-1 sm:grid-cols-1!"
             />
           )}
@@ -348,7 +352,15 @@ export function FlightModal({
             <AirlinePicker airlines={airlines} value={airline} onChange={setAirline} />
           </Field>
           <Field label="Booking made">
-            <input type="date" value={reservedOn} onChange={(e) => setReservedOn(e.target.value)} className={inputClass} />
+            <input
+              type="date"
+              value={reservedOn}
+              onChange={(e) => {
+                setReservedOn(e.target.value);
+                if (e.target.value && !statusTouched) setIsEstimate(false);
+              }}
+              className={inputClass}
+            />
           </Field>
         </div>
 
@@ -414,6 +426,8 @@ export function FlightModal({
             ))}
             {datesOutOfOrder ? (
               <p className="text-[11px] font-medium text-negative">A flight is dated before the booking — check the year.</p>
+            ) : tripNote ? (
+              <p className="text-[11px] font-medium text-negative">{tripNote}</p>
             ) : null}
             {/* The return starts where the last flight landed. An added
                 booking (Booking 2, …) is a one-way ticket: no return. */}
@@ -459,7 +473,15 @@ export function FlightModal({
             {/* Bought, or still a planned fare — right beside the fares it
                 describes. A planned fare counts in the trip as planned and
                 takes no points from a card until it is switched to Bought. */}
-            <PlannedSwitch value={isEstimate} onChange={setIsEstimate} bookedLabel="Bought" plannedLabel="Planned fare" />
+            <PlannedSwitch
+              value={isEstimate}
+              onChange={(v) => {
+                setIsEstimate(v);
+                setStatusTouched(true);
+              }}
+              bookedLabel="Bought"
+              plannedLabel="Planned fare"
+            />
             {/* Which seats were paid with points, picked in one place; each
                 ticked passenger gets a Points box on their row. */}
             <CheckPicker
@@ -505,7 +527,8 @@ export function FlightModal({
             {passengers.map((p, i) => (
               <li
                 key={p.key}
-                className="grid grid-cols-[1.75rem_minmax(0,1fr)_5.25rem_5.25rem] items-end gap-2 sm:grid-cols-[1.75rem_minmax(0,12rem)_6.5rem_6.5rem_6.5rem]"
+                // 4.5rem fares at 375px leave the name box room for "Pick a name".
+                className="grid grid-cols-[1.75rem_minmax(0,1fr)_4.5rem_4.5rem] items-end gap-2 sm:grid-cols-[1.75rem_minmax(0,12rem)_6.5rem_6.5rem_6.5rem]"
               >
                 {/* Remove sits first, so the ✕ lines up down the left edge. */}
                 <button
@@ -641,6 +664,7 @@ export function FlightModal({
           <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p>
         ) : null}
 
+        <PlannedPointsNote show={isEstimate && pointsUsed} />
         {draw !== 0 ? (
           <p className="text-[11px] text-muted">
             Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
@@ -747,7 +771,12 @@ export function FlightModal({
     </div>
   );
   return embed ? body : (
-    <ModalShell title={flight ? "Edit flight" : "Add flight"} onClose={onClose} className="sm:max-w-5xl">
+    <ModalShell
+      title={flight ? "Edit flight" : "Add flight"}
+      onClose={onClose}
+      className="sm:max-w-5xl"
+      headerActions={flight ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
+    >
       {body}
     </ModalShell>
   );

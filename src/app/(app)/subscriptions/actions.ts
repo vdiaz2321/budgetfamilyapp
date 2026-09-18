@@ -245,10 +245,33 @@ export async function updateSubscriptionAmount(formData: FormData) {
   const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
   if (amountCents < 0) return;
   const month = String(formData.get("month") ?? "").trim(); // YYYY-MM-01
-  // A month this subscription doesn't bill in has no sticker price to edit —
-  // the number typed there budgets that month alone, so it goes to
-  // subscription_plans and leaves the subscription's own amount untouched.
-  if (formData.get("perMonth") === "1" && /^\d{4}-\d{2}-01$/.test(month)) {
+  const validMonth = /^\d{4}-\d{2}-01$/.test(month);
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  // Does this month already carry its own figure? Then the Plan cell is
+  // showing that figure, and editing it must edit it — not the price.
+  const hasOverride = validMonth
+    ? Boolean(
+        unwrap(
+          await supabase
+            .from("subscription_plans")
+            .select("id")
+            .eq("household_id", householdId)
+            .eq("subscription_id", id)
+            .eq("month", month)
+            .maybeSingle(),
+          "subscription month plan",
+        ),
+      )
+    : false;
+  // Three cases budget one month alone (subscription_plans) and leave the
+  // subscription's own amount untouched: a month it doesn't bill in (no
+  // sticker price there), a past month (its plan is history — changing the
+  // price from August would rewrite every month since), and a month that
+  // already has its own figure.
+  const perMonth =
+    validMonth && (formData.get("perMonth") === "1" || month < currentMonth || hasOverride);
+  if (perMonth) {
     if (amountCents === 0) {
       await supabase
         .from("subscription_plans")
@@ -273,11 +296,58 @@ export async function updateSubscriptionAmount(formData: FormData) {
     revalidate();
     return;
   }
-  await supabase
-    .from("subscriptions")
-    .update({ amount_cents: amountCents, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("household_id", householdId);
+  // A real price change. The Budget page derives every month's plan from
+  // amount_cents, so before changing it, freeze the old price into each
+  // earlier month the sub billed in that has no figure of its own — the
+  // months already paid at the old price keep the plan they had.
+  const sub = unwrap(
+    await supabase
+      .from("subscriptions")
+      .select("amount_cents, billing_cycle, next_renewal_date, is_active, subcategory_id, created_at")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "subscription",
+  );
+  if (!sub) return;
+  if (sub.amount_cents !== amountCents && validMonth && sub.subcategory_id && sub.is_active && sub.next_renewal_date) {
+    const existing = unwrap(
+      await supabase
+        .from("subscription_plans")
+        .select("month")
+        .eq("household_id", householdId)
+        .eq("subscription_id", id)
+        .lt("month", month),
+      "subscription month plans",
+    );
+    const covered = new Set((existing ?? []).map((row) => String(row.month)));
+    // From the month the sub was added, up to (not including) the edited one.
+    const start = new Date(`${String(sub.created_at).slice(0, 7)}-01T00:00:00Z`);
+    const snapshots: { household_id: string; subscription_id: string; month: string; planned_cents: number }[] = [];
+    for (const d = start; d.toISOString().slice(0, 10) < month; d.setUTCMonth(d.getUTCMonth() + 1)) {
+      const key = d.toISOString().slice(0, 7);
+      const first = `${key}-01`;
+      if (covered.has(first)) continue;
+      // Same billing rule as subscriptionChargesIn on the Budget page.
+      const charges =
+        sub.billing_cycle === "monthly" ||
+        (sub.billing_cycle === "annual" && sub.next_renewal_date.slice(5, 7) === key.slice(5)) ||
+        sub.next_renewal_date.slice(0, 7) === key;
+      if (!charges) continue;
+      snapshots.push({ household_id: householdId, subscription_id: id, month: first, planned_cents: sub.amount_cents });
+    }
+    if (snapshots.length > 0) {
+      unwrap(await supabase.from("subscription_plans").insert(snapshots), "saving past subscription plans");
+    }
+  }
+  unwrap(
+    await supabase
+      .from("subscriptions")
+      .update({ amount_cents: amountCents, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("household_id", householdId),
+    "saving subscription amount",
+  );
   revalidate();
 }
 

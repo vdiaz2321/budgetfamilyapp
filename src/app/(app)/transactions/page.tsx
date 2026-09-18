@@ -19,6 +19,10 @@ type TransactionQueryRow = {
   account_id: string | null;
   bucket_id: string | null;
   property_id: string | null;
+  trip_id: string | null;
+  travel_stay_id: string | null;
+  travel_flight_id: string | null;
+  travel_car_id: string | null;
   paid_to_account_id: string | null;
   paid_to_bucket_id: string | null;
   movement_type: "account_transfer" | "card_payment" | "investment_transfer" | null;
@@ -66,7 +70,7 @@ export default async function TransactionsPage({
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -238,6 +242,8 @@ export default async function TransactionsPage({
               : "Uncategorized",
       accountId: t.account_id ?? null,
       propertyId: t.property_id ?? null,
+      tripId: t.trip_id ?? null,
+      bookingRef: t.travel_stay_id ? `stay:${t.travel_stay_id}` : t.travel_flight_id ? `flight:${t.travel_flight_id}` : t.travel_car_id ? `car:${t.travel_car_id}` : null,
       toAccountId: t.paid_to_account_id ?? null,
       fromBucketId: t.bucket_id ?? null,
       toBucketId: t.paid_to_bucket_id ?? null,

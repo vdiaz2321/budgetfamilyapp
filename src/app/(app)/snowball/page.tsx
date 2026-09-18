@@ -150,6 +150,8 @@ export default async function SnowballPage() {
       subName: t.subcategory_id ? nameBySub.get(t.subcategory_id) ?? "Debt" : "Debt",
       accountId: t.account_id ?? null,
       propertyId: null,
+      tripId: null,
+      bookingRef: null,
       toAccountId: null,
       fromBucketId: null,
       toBucketId: null,

@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
-import { Field, PlannedSwitch, Section, inputClass } from "./travel-form";
+import { Field, PlannedPointsNote, PlannedSwitch, Section, inputClass, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
@@ -69,6 +69,9 @@ export function CarModal({
   });
   const [remarks, setRemarks] = useState(car?.remarks ?? "");
   const [isEstimate, setIsEstimate] = useState(car?.isEstimate ?? Boolean(embed));
+  // Typing the booking date says it is booked: the switch follows unless set by hand.
+  const [statusTouched, setStatusTouched] = useState(Boolean(car));
+  const tripNote = outsideTripNote(trips, trip.tripId, [pickupOn, returnOn]);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const costCents = Math.max(0, displayToCents(cost));
@@ -102,7 +105,7 @@ export function CarModal({
     if (!embed) return;
     embed.register({
       isEmpty: () =>
-        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, cardLabel, cost, costEur, pocketCost, points, remarks].some((v) => v.trim()),
+        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, accountId, cardLabel, holder, cost, costEur, pocketCost, points, remarks].some((v) => v.trim()),
       save: async () => {
         const result = await saveTravelCar(payload());
         return { error: result?.error ?? null };
@@ -130,7 +133,7 @@ export function CarModal({
         }}
         className={`grid grid-cols-1 gap-3 ${embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}`}
       >
-        {embed ? null : <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!car && !defaultTripId} />}
+        {embed || car ? null : <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!defaultTripId} />}
         {car?.cancelledAt ? (
           <p className="rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
             Cancelled booking — kept on record, left out of every total.
@@ -145,7 +148,15 @@ export function CarModal({
             <input value={bookingCode} onChange={(e) => setBookingCode(e.target.value)} autoComplete="off" className={`${inputClass} uppercase`} />
           </Field>
           <Field label="Booking made">
-            <input type="date" value={reservedOn} onChange={(e) => setReservedOn(e.target.value)} className={inputClass} />
+            <input
+              type="date"
+              value={reservedOn}
+              onChange={(e) => {
+                setReservedOn(e.target.value);
+                if (e.target.value && !statusTouched) setIsEstimate(false);
+              }}
+              className={inputClass}
+            />
           </Field>
         </div>
 
@@ -178,6 +189,7 @@ export function CarModal({
                 {days} day{days === 1 ? "" : "s"}
               </p>
             ) : null}
+            {tripNote ? <p className="text-[11px] font-medium text-negative">{tripNote}</p> : null}
           </div>
         </Section>
 
@@ -195,7 +207,13 @@ export function CarModal({
         >
           {/* Booked, or still a planned price. */}
           <div className="mb-3">
-            <PlannedSwitch value={isEstimate} onChange={setIsEstimate} />
+            <PlannedSwitch
+              value={isEstimate}
+              onChange={(v) => {
+                setIsEstimate(v);
+                setStatusTouched(true);
+              }}
+            />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
@@ -275,6 +293,7 @@ export function CarModal({
           </div>
         </Section>
 
+        <PlannedPointsNote show={isEstimate && onPoints} />
         {error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
 
         {embed ? null : (
@@ -335,7 +354,12 @@ export function CarModal({
       </form>
   );
   return embed ? body : (
-    <ModalShell title={car ? "Edit rental" : "Add rental"} onClose={onClose} className="sm:max-w-3xl">
+    <ModalShell
+      title={car ? "Edit rental" : "Add rental"}
+      onClose={onClose}
+      className="sm:max-w-3xl"
+      headerActions={car ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
+    >
       {body}
     </ModalShell>
   );

@@ -7,7 +7,7 @@ import { formatMoney, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
 import { bookingPlanActual, sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
-import { EXPENSE_CATEGORIES } from "./types";
+import { EXPENSE_CATEGORIES, actualCents } from "./types";
 
 const DASH = "—";
 const KIND_LABEL = { flight: "Flight", stay: "Stay", car: "Rental" } as const;
@@ -312,7 +312,8 @@ export function TripDetailModal({
                     if (!e) return null;
                     // Blank counts as zero, same as the spending form, so the
                     // Total row's difference is its planned minus its actual.
-                    const diff = e.plannedCents != null || e.actualCents != null ? (e.plannedCents ?? 0) - (e.actualCents ?? 0) : null;
+                    const actual = actualCents(e);
+                    const diff = e.plannedCents != null || actual != null ? (e.plannedCents ?? 0) - (actual ?? 0) : null;
                     return (
                       <tr key={key} className="border-b border-line/60 last:border-0">
                         <td className="px-3 py-1.5 text-left font-semibold">{label}</td>
@@ -321,8 +322,10 @@ export function TripDetailModal({
                           {e.plannedEurCents != null ? <span className="text-muted"> / {euros(e.plannedEurCents)}</span> : null}
                         </td>
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums">
-                          {money(e.actualCents)}
+                          {money(actual)}
                           {e.actualEurCents != null ? <span className="font-normal text-muted"> / {euros(e.actualEurCents)}</span> : null}
+                          {/* From the Budget: how many tagged purchases make this figure. */}
+                          {e.txCount > 0 ? <span className="ml-1 text-[10px] font-normal text-muted">{e.txCount} tx</span> : null}
                         </td>
                         <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
                           {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}

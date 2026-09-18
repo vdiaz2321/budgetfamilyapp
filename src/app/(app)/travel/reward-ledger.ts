@@ -158,3 +158,35 @@ export async function syncRewardLedger(
   return { error: null, activityId };
 }
 
+// A free-night certificate is a status on the card, not points: using one
+// sets the card's Booked date to the stay's check-in. Moving the certificate
+// off a stay (unticked, another card, a new date, cancelled, deleted) clears
+// the old stamp — but only when the card still shows THIS stay's date, so a
+// date typed on the card by hand is never wiped.
+export async function syncFreeNightStamp(
+  supabase: SupabaseClient,
+  householdId: string,
+  before: { accountId: string | null; checkIn: string } | null,
+  after: { accountId: string | null; checkIn: string } | null,
+) {
+  const same = before && after && before.accountId === after.accountId && before.checkIn === after.checkIn;
+  if (same) return null;
+  if (before?.accountId) {
+    const { error } = await supabase
+      .from("credit_card_details")
+      .update({ benefit_used_on: null, updated_at: new Date().toISOString() })
+      .eq("account_id", before.accountId)
+      .eq("household_id", householdId)
+      .eq("benefit_used_on", before.checkIn);
+    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
+  }
+  if (after?.accountId) {
+    const { error } = await supabase
+      .from("credit_card_details")
+      .update({ benefit_used_on: after.checkIn, updated_at: new Date().toISOString() })
+      .eq("account_id", after.accountId)
+      .eq("household_id", householdId);
+    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
+  }
+  return null;
+}

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
-import { resolveTripId } from "./trip-resolve";
+import { discardNewTrip, resolveTripId } from "./trip-resolve";
 import { EXPENSE_CATEGORIES, type ExpenseCategory } from "./types";
 
 const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -44,13 +44,17 @@ export async function saveTripExpenses(payload: ExpensePayload) {
 
   const trip = await resolveTripId(supabase, householdId, payload.tripId, payload.newTripName);
   if (trip.error || !trip.tripId) return { error: trip.error ?? "That trip was not found." };
+  const fail = async (error: string) => {
+    await discardNewTrip(supabase, householdId, trip);
+    return { error };
+  };
 
   const { error: tripError } = await supabase
     .from("travel_trips")
     .update({ start_on: startOn, end_on: endOn })
     .eq("id", trip.tripId)
     .eq("household_id", householdId);
-  if (tripError) return { error: `Couldn't save the trip dates — ${tripError.message}` };
+  if (tripError) return fail(`Couldn't save the trip dates — ${tripError.message}`);
 
   const rows = payload.rows
     .filter((r) => KEYS.has(r.category))
@@ -70,7 +74,7 @@ export async function saveTripExpenses(payload: ExpensePayload) {
 
   if (filled.length) {
     const { error } = await supabase.from("travel_trip_expenses").upsert(filled, { onConflict: "trip_id,category" });
-    if (error) return { error: `Couldn't save that spending — ${error.message}` };
+    if (error) return fail(`Couldn't save that spending — ${error.message}`);
   }
   if (emptied.length) {
     const { error } = await supabase
@@ -79,7 +83,7 @@ export async function saveTripExpenses(payload: ExpensePayload) {
       .eq("trip_id", trip.tripId)
       .eq("household_id", householdId)
       .in("category", emptied);
-    if (error) return { error: `Couldn't clear the emptied categories — ${error.message}` };
+    if (error) return fail(`Couldn't clear the emptied categories — ${error.message}`);
   }
 
   revalidatePath("/travel");

@@ -20,6 +20,10 @@ type Row = {
   // No longer picked in this form; carried through so a card saved earlier
   // isn't wiped on the next save.
   accountId: string;
+  // Purchases tagged to the trip on the Budget: when there are any, the
+  // Actual ($) box shows their total and can't be typed over.
+  txActualCents: number | null;
+  txCount: number;
 };
 type Slot = "planned" | "actual";
 
@@ -35,6 +39,8 @@ function rowsFor(tripId: string, expenses: TripExpense[]): Row[] {
       actual: show(e?.actualCents),
       actualEur: show(e?.actualEurCents),
       accountId: e?.accountId ?? "",
+      txActualCents: e?.txActualCents ?? null,
+      txCount: e?.txCount ?? 0,
     };
   });
 }
@@ -114,13 +120,23 @@ export function MiscModal({
     });
   }
 
-  const sum = (key: keyof Row) => rows.reduce((total, r) => total + (r[key] ? Math.max(0, displayToCents(r[key])) : 0), 0);
-  const totals = { planned: sum("planned"), plannedEur: sum("plannedEur"), actual: sum("actual"), actualEur: sum("actualEur") };
+  const sum = (key: "planned" | "plannedEur" | "actual" | "actualEur") =>
+    rows.reduce((total, r) => total + (r[key] ? Math.max(0, displayToCents(r[key])) : 0), 0);
+  // A row's actual, in cents: the tagged purchases when there are any, else
+  // what is typed. The typed box is kept aside, not overwritten.
+  const rowActual = (r: Row) => (r.txCount > 0 ? Math.max(0, r.txActualCents ?? 0) : r.actual.trim() ? Math.max(0, displayToCents(r.actual)) : 0);
+  const hasActual = (r: Row) => r.txCount > 0 || Boolean(r.actual.trim());
+  const totals = {
+    planned: sum("planned"),
+    plannedEur: sum("plannedEur"),
+    actual: rows.reduce((total, r) => total + rowActual(r), 0),
+    actualEur: sum("actualEur"),
+  };
   // Planned less actual, in dollars, with a blank counted as zero — plain
   // arithmetic, so the Total row's difference is exactly its planned minus its
   // actual. Positive is under plan, negative over. Empty rows show a dash.
   const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : 0);
-  const difference = (r: Row) => (r.planned.trim() || r.actual.trim() ? cents(r.planned) - cents(r.actual) : null);
+  const difference = (r: Row) => (r.planned.trim() || hasActual(r) ? cents(r.planned) - rowActual(r) : null);
   const totalDiff = totals.planned || totals.actual ? totals.planned - totals.actual : null;
   const diffCell = (d: number | null) => (
     <span className={`tabular-nums ${d == null ? "text-muted" : d >= 0 ? "text-positive" : "text-negative"}`}>
@@ -133,6 +149,13 @@ export function MiscModal({
   const money = (r: Row, key: "planned" | "plannedEur" | "actual" | "actualEur", label: string) => (
     <label className="block min-w-0">
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">{label}</span>
+      {key === "actual" && r.txCount > 0 ? (
+        // Backed by tagged purchases: shown, not typed. The count says why.
+        <span className="relative block">
+          <input value={centsToDisplay(Math.max(0, r.txActualCents ?? 0))} readOnly tabIndex={-1} className={`${inputClass} opacity-70 sm:text-center`} />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-muted">{r.txCount} tx</span>
+        </span>
+      ) : (
       <input
         value={r[key]}
         onChange={(e) => update(r.category, { [key]: e.target.value })}
@@ -140,6 +163,7 @@ export function MiscModal({
         inputMode="decimal"
         className={`${inputClass} sm:text-center`}
       />
+      )}
     </label>
   );
   const headings = [`Planned (${currencySymbol(currency)})`, "Planned (€)", `Actual (${currencySymbol(currency)})`, "Actual (€)", "Difference"];

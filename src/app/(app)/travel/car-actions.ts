@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
-import { resolveTripId } from "./trip-resolve";
+import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger } from "./reward-ledger";
 import type { CarKind } from "./types";
 
@@ -95,6 +95,13 @@ export async function saveTravelCar(payload: CarPayload) {
 
   const trip = await resolveTripId(supabase, householdId, payload.tripId, payload.newTripName);
   if (trip.error) return { error: trip.error };
+  // A trip this save just created goes away again if the save fails.
+  const fail = async (error: string) => {
+    await discardNewTrip(supabase, householdId, trip);
+    return { error };
+  };
+  const dateError = await tripDateError(supabase, householdId, trip, [pickupOn, returnOn], "The pick-up or return date");
+  if (dateError) return fail(dateError);
 
   const row = {
     household_id: householdId,
@@ -135,7 +142,7 @@ export async function saveTravelCar(payload: CarPayload) {
         .maybeSingle(),
       "travel_cars",
     );
-    if (!prev) return { error: "That car was not found." };
+    if (!prev) return fail("That car was not found.");
     const sync = prev.moves_card_points
       ? await syncRewardLedger(
           supabase,
@@ -147,13 +154,13 @@ export async function saveTravelCar(payload: CarPayload) {
           "car_booking",
         )
       : { error: null, activityId: prev.reward_activity_id };
-    if (sync.error) return { error: sync.error };
+    if (sync.error) return fail(sync.error);
     const { error } = await supabase
       .from("travel_cars")
       .update({ ...row, reward_activity_id: sync.activityId })
       .eq("id", payload.id)
       .eq("household_id", householdId);
-    if (error) return { error: `Couldn't save that car — ${error.message}` };
+    if (error) return fail(`Couldn't save that car — ${error.message}`);
   } else {
     const sync = await syncRewardLedger(
       supabase,
@@ -164,9 +171,9 @@ export async function saveTravelCar(payload: CarPayload) {
       null,
       "car_booking",
     );
-    if (sync.error) return { error: sync.error };
+    if (sync.error) return fail(sync.error);
     const { error } = await supabase.from("travel_cars").insert({ ...row, reward_activity_id: sync.activityId });
-    if (error) return { error: `Couldn't save that car — ${error.message}` };
+    if (error) return fail(`Couldn't save that car — ${error.message}`);
   }
 
   revalidate();

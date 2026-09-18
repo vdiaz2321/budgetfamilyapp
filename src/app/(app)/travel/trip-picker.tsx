@@ -25,6 +25,7 @@ export function TripPicker({
   hiddenInputs,
   className,
   startNew,
+  inHeader,
 }: {
   trips: TravelTrip[];
   value: TripChoice;
@@ -34,6 +35,10 @@ export function TripPicker({
   // Opened from the page's Add button (not from a trip): start on "New trip"
   // so the name box is ready; an existing trip is still one pick away.
   startNew?: boolean;
+  // Editing a booking: the trip is a setting of the booking, not a field to
+  // fill in, so it sits beside the modal's title — no "Add to trip" label.
+  // The header is outside the form, so the form posts the choice itself.
+  inHeader?: boolean;
 }) {
   const [creating, setCreating] = useState(!!startNew);
   // No "No trip" choice for new bookings — everything belongs to a trip. It
@@ -79,6 +84,24 @@ export function TripPicker({
       className={className}
     />
   );
+
+  if (inHeader) {
+    return (
+      <div className={`flex min-w-0 flex-wrap items-center gap-2 ${className ?? ""}`}>
+        <select
+          aria-label="Trip"
+          value={creating ? NEW : value.tripId}
+          onChange={(e) => pick(e.target.value)}
+          className="min-w-0 max-w-full rounded-md bg-background px-2 py-1 text-sm font-medium ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+        >
+          {options}
+        </select>
+        {creating
+          ? nameInput("min-w-0 w-48 rounded-md bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500")
+          : null}
+      </div>
+    );
+  }
 
   return (
     <div className={`grid grid-cols-1 gap-2 sm:grid-cols-2 ${className ?? ""}`}>

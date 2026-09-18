@@ -237,10 +237,21 @@ export type TripExpense = {
   actualEurCents: number | null;
   accountId: string | null;
   note: string | null;
+  // Purchases tagged to this trip on the Budget, whose item maps to this
+  // row: their total and how many. When there are any, they ARE the actual
+  // and the typed figure is set aside — one source, never both.
+  txActualCents: number | null;
+  txCount: number;
 };
+
+// The row's actual: what the tagged transactions add up to, or, on a trip
+// without any (the imported history), the figure typed on the Travel Log.
+export function actualCents(e: TripExpense): number | null {
+  return e.txCount > 0 ? e.txActualCents ?? 0 : e.actualCents;
+}
 
 // What a category counts toward the trip: the real figure once there is one,
 // the estimate until then.
 export function expenseCents(e: TripExpense): number {
-  return e.actualCents ?? e.plannedCents ?? 0;
+  return actualCents(e) ?? e.plannedCents ?? 0;
 }

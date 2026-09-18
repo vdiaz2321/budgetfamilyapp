@@ -4,6 +4,7 @@
 
 import {
   EXPENSE_CATEGORIES,
+  actualCents,
   expenseCents,
   type ExpenseCategory,
   type TravelCar,
@@ -196,10 +197,10 @@ export function summarizeTrips(
         misc,
         miscTotal,
         plannedMisc: tripExpenses.reduce((s, e) => s + (e.plannedCents ?? 0), 0),
-        actualMisc: tripExpenses.reduce((s, e) => s + (e.actualCents ?? 0), 0),
+        actualMisc: tripExpenses.reduce((s, e) => s + (actualCents(e) ?? 0), 0),
         // A spending plan with no actual yet, or a flight not bought yet.
         hasEstimates:
-          tripExpenses.some((e) => e.plannedCents != null && e.actualCents == null) ||
+          tripExpenses.some((e) => e.plannedCents != null && actualCents(e) == null) ||
           live.some((b) => (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate),
         total: flightsPaid + hotelsPaid + rentalsPaid + miscTotal,
         saved: Math.max(0, cashValue - (flightsPaid + hotelsPaid + rentalsPaid)),

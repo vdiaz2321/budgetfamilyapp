@@ -1,5 +1,36 @@
 // Field pieces shared by the Travel Log's flight, stay and car forms.
 
+import type { TravelTrip } from "./types";
+
+/**
+ * A date typed outside the trip it is being filed under — nearly always the
+ * wrong year. The server refuses it too (tripDateError); this says so sooner.
+ */
+export function outsideTripNote(trips: TravelTrip[] | undefined, tripId: string, dates: string[]): string | null {
+  const trip = trips?.find((t) => t.id === tripId);
+  if (!trip || (!trip.startOn && !trip.endOn)) return null;
+  const typed = dates.filter(Boolean);
+  const outside = typed.some((d) => (trip.startOn && d < trip.startOn) || (trip.endOn && d > trip.endOn));
+  if (!outside) return null;
+  const short = (iso: string | null) =>
+    iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "…";
+  return `Outside ${trip.name} (${short(trip.startOn)} – ${short(trip.endOn)}) — won't save; check the year`;
+}
+
+/**
+ * Shown while a booking is still Planned and its points are ticked as used:
+ * nothing leaves the card until it is switched to Booked, and that is easy to
+ * miss when Planned is the starting state.
+ */
+export function PlannedPointsNote({ show, what = "points" }: { show: boolean; what?: string }) {
+  if (!show) return null;
+  return (
+    <p className="text-[11px] font-medium text-negative">
+      Still Planned — no {what} come off the card until this is switched to Booked.
+    </p>
+  );
+}
+
 /**
  * Booked, or still a planned price. A planned booking counts in the trip as
  * planned and takes nothing from a card until it is switched to booked.

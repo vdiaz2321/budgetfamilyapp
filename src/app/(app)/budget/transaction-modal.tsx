@@ -5,7 +5,7 @@ import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, moneyExpressionToCents } from "@/lib/money";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
+import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared, listTripsForTagging, listTripBookings } from "./actions";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
 
 // Button label (short), plus tab labels.
@@ -201,6 +201,43 @@ export function TransactionModal({
 
   const today = new Date().toISOString().slice(0, 10);
   const defaultDate = editTx?.date ?? initialDate ?? (today.startsWith(monthKey) ? today : firstOfMonth);
+  // ---- Trip tag. A purchase on a trip is tagged to it here, once, and
+  // shows on the Travel Log as that trip's Actual spending — no retyping.
+  // The list is fetched on open (like payees); the trip whose dates cover
+  // the transaction's date is picked on its own until one is chosen by hand.
+  const [trips, setTrips] = useState<{ id: string; name: string; startOn: string | null; endOn: string | null }[]>([]);
+  useEffect(() => {
+    void listTripsForTagging().then(setTrips).catch(() => setTrips([]));
+  }, []);
+  const [dateValue, setDateValue] = useState(defaultDate);
+  const [tripId, setTripId] = useState(editTx?.tripId ?? "");
+  const [tripTouched, setTripTouched] = useState(isEdit);
+  const tripForDate = trips.find((t) => t.startOn && t.endOn && dateValue >= t.startOn && dateValue <= t.endOn) ?? null;
+  const effectiveTripId = tripTouched ? tripId : tripForDate?.id ?? "";
+  // What the payment is for: one of the trip's bookings (its pocket cost
+  // follows this payment) or nothing in particular (day-to-day spending).
+  const [bookings, setBookings] = useState<{ ref: string; label: string; pocketCents: number; isEstimate: boolean; pointsCost: number; pointsUsed: boolean; hasCard: boolean }[]>([]);
+  // Points typed beside the payment. Blank leaves the booking's own figure.
+  const [bookingPoints, setBookingPoints] = useState("");
+  const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? "");
+  useEffect(() => {
+    let live = true;
+    // No trip, no bookings — resolved the same async way so the effect never
+    // sets state synchronously.
+    const load = effectiveTripId ? listTripBookings(effectiveTripId) : Promise.resolve([]);
+    void load
+      .then((rows) => {
+        if (live) setBookings(rows);
+      })
+      .catch(() => {
+        if (live) setBookings([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [effectiveTripId]);
+  const bookingOk = bookings.some((b) => b.ref === bookingRef);
+  const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
   // Both add and edit share the two-tab UI now, so "Income" narrows to income
   // subs and "Expense" opens to any spend kind (savings/bills/expenses/debt).
   // A locked initial kind (Budget's Debt/Savings row context) still filters
@@ -571,7 +608,10 @@ export function TransactionModal({
                 type="date"
                 required
                 defaultValue={defaultDate}
-                onChange={clearErrors}
+                onChange={(e) => {
+                  setDateValue(e.target.value);
+                  clearErrors();
+                }}
                 className={
                   "w-[9.5rem] rounded-xl bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm " +
                   (missingDate ? "ring-2 ring-negative" : "ring-1 ring-line")
@@ -638,6 +678,74 @@ export function TransactionModal({
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            ) : null}
+
+            {/* Trip tag — only for spending, and only once there is a trip
+                this year or ahead to tag it to. */}
+            {txType !== "income" && trips.length > 0 ? (
+              <div>
+                <select
+                  name="tripId"
+                  value={effectiveTripId}
+                  onChange={(e) => {
+                    setTripId(e.target.value);
+                    setTripTouched(true);
+                    // A booking belongs to one trip; changing trips unlinks it.
+                    setBookingRef("");
+                  }}
+                  className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                >
+                  <option value="">Not part of a trip</option>
+                  {trips.map((t) => (
+                    <option key={t.id} value={t.id}>Trip: {t.name}</option>
+                  ))}
+                </select>
+                {effectiveTripId && bookings.length > 0 ? (
+                  <select
+                    name="bookingRef"
+                    value={bookingOk ? bookingRef : ""}
+                    onChange={(e) => setBookingRef(e.target.value)}
+                    className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  >
+                    <option value="">Pays for: day-to-day spending</option>
+                    {bookings.map((b) => (
+                      <option key={b.ref} value={b.ref}>
+                        Pays for: {b.label}{b.isEstimate ? " (planned)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {/* Points on that booking, typed here so the Travel Log
+                    never has to be visited for them. Shows the booking's own
+                    figure as the hint; blank keeps it. */}
+                {paidBooking ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <label className="flex flex-1 items-center gap-2 rounded-xl bg-background px-2 py-2 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-brand sm:px-3">
+                      <span className="shrink-0 text-xs font-semibold text-muted">Points used</span>
+                      <input
+                        name="bookingPoints"
+                        type="number"
+                        min="0"
+                        step="1"
+                        inputMode="numeric"
+                        value={bookingPoints}
+                        onChange={(e) => setBookingPoints(e.target.value)}
+                        placeholder={paidBooking.pointsUsed && paidBooking.pointsCost ? paidBooking.pointsCost.toLocaleString() : "0"}
+                        className="min-w-0 flex-1 bg-transparent text-right tabular-nums focus:outline-none"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                {effectiveTripId ? (
+                  <span className="mt-1 block px-1 text-[11px] text-muted">
+                    {bookingOk
+                      ? paidBooking?.hasCard
+                        ? "Sets that booking's Pocket cost to its payments added up, marks it Booked, and takes the points off its card."
+                        : "Sets that booking's Pocket cost to its payments added up and marks it Booked. No card is linked on it, so points are recorded but not taken from any card."
+                      : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.`}
+                  </span>
+                ) : null}
+              </div>
             ) : null}
 
             {/* Note */}

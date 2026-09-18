@@ -55,7 +55,7 @@ export default async function BudgetPage({
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id, is_recurring")
+      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id, is_recurring, travel_category")
       .eq("household_id", household.id)
       .order("sort_order"),
     // This month's plans and last month's, in one trip. Last month's feed the
@@ -81,7 +81,7 @@ export default async function BudgetPage({
     supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id)
       .gte("occurred_on", prevFirstOfMonth)
@@ -130,8 +130,8 @@ export default async function BudgetPage({
       .select("month, bill_id, planned_cents")
       .eq("household_id", household.id)
       .in("month", [prevFirstOfMonth, month.firstOfMonth]),
-    // Per-month plan overrides for subscriptions. Only months a subscription
-    // does NOT charge in read these — see subscriptionPlannedFor below.
+    // Per-month plan overrides for subscriptions. One wins over the sticker
+    // price in any month it exists — see subscriptionPlannedFor below.
     supabase
       .from("subscription_plans")
       .select("month, subscription_id, planned_cents")
@@ -270,18 +270,19 @@ export default async function BudgetPage({
     // quarterly / weekly: next_renewal_date is the exact next occurrence
     return sub.next_renewal_date.slice(0, 7) === monthKey;
   };
-  // What one subscription plans in one month: its own amount in the months it
-  // charges, otherwise whatever was budgeted by hand for that month (a
-  // subscription_plans row) — which is how an off-cycle charge, or one from a
-  // cancelled sub, gets covered instead of sitting permanently overspent.
+  // What one subscription plans in one month: that month's own figure (a
+  // subscription_plans row) when there is one, otherwise its amount in the
+  // months it charges and $0 in the rest. The override covers an off-cycle
+  // charge, and it also holds a past month's old price — a price change
+  // freezes the previous price into earlier months (updateSubscriptionAmount)
+  // so lowering Disney in September doesn't rewrite August's plan.
   const subscriptionPlannedFor = (
     sub: { id: string; is_active: boolean | null; next_renewal_date: string | null; billing_cycle: string; subcategory_id: string | null; amount_cents: number },
     monthKey: string,
     firstOfMonth: string,
   ) =>
-    subscriptionChargesIn(sub, monthKey)
-      ? sub.amount_cents
-      : subscriptionPlanOverrides.get(`${sub.id}:${firstOfMonth}`) ?? 0;
+    subscriptionPlanOverrides.get(`${sub.id}:${firstOfMonth}`) ??
+    (subscriptionChargesIn(sub, monthKey) ? sub.amount_cents : 0);
   const autoPlannedBySub = new Map<string, number>();
   // Same rule, kept per subscription so the card can show a row's own Plan.
   const subMonthPlannedById = new Map<string, number>();
@@ -372,9 +373,7 @@ export default async function BudgetPage({
       if (kind !== "bills" && kind !== "expenses") return null;
       // The board's own precedence — irregular plans, then subscriptions,
       // then the month's budget_plans row — re-derived for last month, so
-      // this figure is the one that month's board shows. Subscription
-      // amounts aren't stored per month, so a sub whose price changed since
-      // is measured at today's price; everything else is exact.
+      // this figure is the one that month's board shows.
       const plannedCents =
         prevIrregularPlannedBySub.get(s.id) ??
         prevAutoPlannedBySub.get(s.id) ??
@@ -428,6 +427,7 @@ export default async function BudgetPage({
           name: s.name,
           dueDay: s.due_day,
           paymentAccountId: (s as { payment_account_id?: string | null }).payment_account_id ?? null,
+          travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
           plannedCents,
           spentCents,
           prevSpentCents: prevSpentBySub.get(s.id) ?? 0,
@@ -675,6 +675,8 @@ export default async function BudgetPage({
               : "Uncategorized",
       accountId: t.account_id ?? null,
       propertyId: t.property_id ?? null,
+      tripId: (t as { trip_id?: string | null }).trip_id ?? null,
+      bookingRef: (t as { travel_stay_id?: string | null }).travel_stay_id ? `stay:${(t as { travel_stay_id?: string | null }).travel_stay_id}` : (t as { travel_flight_id?: string | null }).travel_flight_id ? `flight:${(t as { travel_flight_id?: string | null }).travel_flight_id}` : (t as { travel_car_id?: string | null }).travel_car_id ? `car:${(t as { travel_car_id?: string | null }).travel_car_id}` : null,
       toAccountId: t.paid_to_account_id ?? null,
       fromBucketId: t.bucket_id ?? null,
       toBucketId: t.paid_to_bucket_id ?? null,

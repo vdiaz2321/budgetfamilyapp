@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Runs the budget database backup at 9:00 on the 1st of every month.
+     If the Mac is asleep or off then, it runs the next time it wakes.
+     Installed by the steps in docs/backups.md. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.budgetfamilyapp.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__HOME__/.local/bin/budget-backup.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Day</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__HOME__/BudgetBackups/backup.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/BudgetBackups/backup.log</string>
+</dict>
+</plist>

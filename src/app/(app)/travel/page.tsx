@@ -9,7 +9,7 @@ export const metadata = { title: "Travel Log · Capitall" };
 export default async function TravelPage() {
   const { supabase, household } = await getSessionContext();
 
-  const [stays, brands, rewards, flights, legs, passengers, travellers, cars, trips, expenses] = await Promise.all([
+  const [stays, brands, rewards, flights, legs, passengers, travellers, cars, trips, expenses, tripTx] = await Promise.all([
     supabase
       .from("travel_stays")
       .select(
@@ -65,6 +65,14 @@ export default async function TravelPage() {
       .from("travel_trip_expenses")
       .select("trip_id, category, planned_cents, planned_eur_cents, actual_cents, actual_eur_cents, account_id, note")
       .eq("household_id", household.id),
+    // Purchases tagged to a trip on the Budget. Each lands in the Spending
+    // row its budget item maps to (subcategories.travel_category); refunds
+    // are negative and come off it. Untagged or unmapped ones stay out.
+    supabase
+      .from("transactions")
+      .select("trip_id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, subcategories(travel_category)")
+      .eq("household_id", household.id)
+      .not("trip_id", "is", null),
   ]);
   throwIfAny({
     travel_stays: stays.error,
@@ -76,7 +84,53 @@ export default async function TravelPage() {
     travel_cars: cars.error,
     travel_trips: trips.error,
     travel_trip_expenses: expenses.error,
+    transactions: tripTx.error,
   });
+
+  // Tagged purchases summed per trip and Spending row.
+  const txByRow = new Map<string, { cents: number; count: number }>();
+  type TripTxRow = {
+    trip_id: string | null; amount_cents: number;
+    travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null;
+    subcategories: { travel_category: string | null } | { travel_category: string | null }[] | null;
+  };
+  for (const t of (tripTx.data ?? []) as unknown as TripTxRow[]) {
+    // Paying for a booking is the booking's pocket cost, not spending on top.
+    if (t.travel_stay_id || t.travel_flight_id || t.travel_car_id) continue;
+    const sub = Array.isArray(t.subcategories) ? t.subcategories[0] : t.subcategories;
+    const category = sub?.travel_category;
+    if (!t.trip_id || !category) continue;
+    const key = `${t.trip_id}:${category}`;
+    const cur = txByRow.get(key) ?? { cents: 0, count: 0 };
+    txByRow.set(key, { cents: cur.cents + Number(t.amount_cents), count: cur.count + 1 });
+  }
+  const expenseRows: TripExpense[] = (expenses.data ?? []).map((e): TripExpense => {
+    const tx = txByRow.get(`${e.trip_id}:${e.category}`);
+    return {
+      tripId: e.trip_id,
+      category: e.category as ExpenseCategory,
+      plannedCents: e.planned_cents == null ? null : Number(e.planned_cents),
+      plannedEurCents: e.planned_eur_cents == null ? null : Number(e.planned_eur_cents),
+      actualCents: e.actual_cents == null ? null : Number(e.actual_cents),
+      actualEurCents: e.actual_eur_cents == null ? null : Number(e.actual_eur_cents),
+      accountId: e.account_id ?? null,
+      note: e.note ?? null,
+      txActualCents: tx?.cents ?? null,
+      txCount: tx?.count ?? 0,
+    };
+  });
+  // A row that only exists because purchases were tagged to it — no plan
+  // typed yet — still shows on the trip.
+  const seen = new Set(expenseRows.map((e) => `${e.tripId}:${e.category}`));
+  for (const [key, tx] of txByRow) {
+    if (seen.has(key)) continue;
+    const [tripId, category] = key.split(":");
+    expenseRows.push({
+      tripId, category: category as ExpenseCategory,
+      plannedCents: null, plannedEurCents: null, actualCents: null, actualEurCents: null,
+      accountId: null, note: null, txActualCents: tx.cents, txCount: tx.count,
+    });
+  }
 
   // Closed cards stay selectable only if they already carry a stay — a booking
   // made on a card that has since been closed still belongs in the log.
@@ -211,16 +265,7 @@ export default async function TravelPage() {
         endOn: t.end_on ?? null,
         notes: t.notes ?? null,
       }))}
-      expenses={(expenses.data ?? []).map((e): TripExpense => ({
-        tripId: e.trip_id,
-        category: e.category as ExpenseCategory,
-        plannedCents: e.planned_cents == null ? null : Number(e.planned_cents),
-        plannedEurCents: e.planned_eur_cents == null ? null : Number(e.planned_eur_cents),
-        actualCents: e.actual_cents == null ? null : Number(e.actual_cents),
-        actualEurCents: e.actual_eur_cents == null ? null : Number(e.actual_eur_cents),
-        accountId: e.account_id ?? null,
-        note: e.note ?? null,
-      }))}
+      expenses={expenseRows}
       cars={carRows}
       flights={flightRows}
       travellers={(travellers.data ?? []) as Traveller[]}

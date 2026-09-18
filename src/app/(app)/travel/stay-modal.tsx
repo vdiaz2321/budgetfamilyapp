@@ -7,7 +7,7 @@ import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
-import { PlannedSwitch } from "./travel-form";
+import { PlannedPointsNote, PlannedSwitch, outsideTripNote } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 
@@ -68,9 +68,12 @@ export function StayModal({
       isEmpty: () => {
         if (!formRef.current) return true;
         const fd = new FormData(formRef.current);
-        return ["propertyName", "city", "reservedOn", "checkIn", "pointsCost", "hotelCost", "pocketCost", "hotelCredit", "remarks"].every(
-          (k) => !String(fd.get(k) ?? "").trim(),
-        );
+        // Anything picked or typed counts, so a card chosen without a hotel
+        // name gets "Enter the hotel name" rather than "nothing to add".
+        return [
+          "propertyName", "city", "reservedOn", "checkIn", "pax", "brand", "accountId", "cardLabel", "holder",
+          "freeNightPoints", "pointsCost", "pointsValue", "hotelCost", "pocketCost", "hotelCredit", "remarks",
+        ].every((k) => !String(fd.get(k) ?? "").trim());
       },
       save: async () => {
         if (!formRef.current) return { error: null };
@@ -142,6 +145,10 @@ export function StayModal({
   const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
   const [pocketCost, setPocketCost] = useState(money(stay?.pocketCostCents));
   const [isEstimate, setIsEstimate] = useState(stay?.isEstimate ?? roomOf?.isEstimate ?? Boolean(embed));
+  // A new stay starts Planned. Typing the date the reservation was made says
+  // it is booked, so the switch follows — unless it was set by hand.
+  const [statusTouched, setStatusTouched] = useState(Boolean(stay));
+  const tripNote = outsideTripNote(trips, trip.tripId, [checkIn]);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
 
@@ -254,7 +261,9 @@ export function StayModal({
         }}
         className="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
-        {embed ? (
+        {embed || stay ? (
+          // Embedded, the popup owns the trip; editing, the picker is in the
+          // modal header (outside this form) — either way the form posts it.
           <>
             <input type="hidden" name="tripId" value={trip.newTripName.trim() ? "" : trip.tripId} />
             <input type="hidden" name="newTripName" value={trip.newTripName} />
@@ -288,7 +297,10 @@ export function StayModal({
               type="date"
               name="reservedOn"
               value={reservedOn}
-              onChange={(e) => setReservedOn(e.target.value)}
+              onChange={(e) => {
+                setReservedOn(e.target.value);
+                if (e.target.value && !statusTouched) setIsEstimate(false);
+              }}
               className={inputClass}
             />
           </Field>
@@ -304,6 +316,8 @@ export function StayModal({
               <span className="mt-0.5 block text-[10px] font-medium text-negative">
                 Before the reservation date — check the year
               </span>
+            ) : tripNote ? (
+              <span className="mt-0.5 block text-[10px] font-medium text-negative">{tripNote}</span>
             ) : null}
           </Field>
           <Field label="Nights">
@@ -377,7 +391,13 @@ export function StayModal({
 
         {/* Booked, or still a planned price — just above the prices it describes. */}
         <div className="sm:col-span-2">
-          <PlannedSwitch value={isEstimate} onChange={setIsEstimate} />
+          <PlannedSwitch
+            value={isEstimate}
+            onChange={(v) => {
+              setIsEstimate(v);
+              setStatusTouched(true);
+            }}
+          />
           {isEstimate ? <input type="hidden" name="isEstimate" value="on" /> : null}
         </div>
 
@@ -572,6 +592,12 @@ export function StayModal({
           </Field>
         </div>
 
+        <div className="sm:col-span-2 empty:hidden">
+          <PlannedPointsNote
+            show={isEstimate && ((pointsUsed && pointsTyped > 0) || freeNightUsed)}
+            what={freeNightUsed && !(pointsUsed && pointsTyped > 0) ? "free night" : pointsUsed && freeNightUsed ? "points or free night" : "points"}
+          />
+        </div>
         {freeNightUsed && (card || (Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints))) ? (
           <p className="sm:col-span-2 -mt-1 text-[11px] font-medium text-muted">
             {card ? (
@@ -738,7 +764,11 @@ export function StayModal({
     </div>
   );
   return embed ? body : (
-    <ModalShell title={stay ? "Edit stay" : roomOf ? `Add another room · ${roomOf.propertyName}` : "Add stay"} onClose={onClose}>
+    <ModalShell
+      title={stay ? "Edit stay" : roomOf ? `Add another room · ${roomOf.propertyName}` : "Add stay"}
+      onClose={onClose}
+      headerActions={stay && trips ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
+    >
       {body}
     </ModalShell>
   );
