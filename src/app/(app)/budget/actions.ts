@@ -190,6 +190,7 @@ export async function addCategoryGroup(formData: FormData): Promise<{ error?: st
 
   revalidatePath("/budget");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   return {};
 }
 
@@ -215,6 +216,7 @@ export async function renameCategoryGroup(formData: FormData): Promise<{ error?:
 
   revalidatePath("/budget");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   return {};
 }
 
@@ -261,6 +263,7 @@ export async function moveCategoryGroup(formData: FormData) {
   );
   revalidatePath("/budget");
   revalidatePath("/annual");
+  revalidatePath("/insights");
 }
 
 export async function deleteCategoryGroup(formData: FormData): Promise<{ error?: string }> {
@@ -285,6 +288,7 @@ export async function deleteCategoryGroup(formData: FormData): Promise<{ error?:
 
   revalidatePath("/budget");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   return {};
 }
 
@@ -465,6 +469,13 @@ export async function upsertPlan(formData: FormData) {
   );
 
   revalidatePath("/budget");
+  revalidatePath("/annual");
+  revalidatePath("/insights");
+  // A debt item's plan is the Pay Card prefill on Accounts and Travel Log,
+  // and Debt/Loans projects from it.
+  revalidatePath("/snowball");
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
 }
 
 // Move `amountCents` of planned budget from one subcategory to another for a
@@ -632,6 +643,7 @@ export async function moveSubcategoryToGroup(formData: FormData): Promise<{ erro
 
   revalidatePath("/budget");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   return {};
 }
 
@@ -956,6 +968,11 @@ export async function upsertDebt(formData: FormData) {
 
   await captureSnapshots(supabase, householdId, { force: true });
   revalidatePath("/budget");
+  // Same debt row Debt/Loans, Accounts, Travel Log and Net Worth read.
+  revalidatePath("/snowball");
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
+  revalidatePath("/networth");
 }
 
 // Combined save for the Debt panel: planned amount + debt details + optional
@@ -1281,7 +1298,10 @@ export async function addTransaction(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/travel");
+  revalidatePath("/networth");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   revalidatePath("/invest");
   return bookingWarning ? { warning: bookingWarning } : undefined;
 }
@@ -1508,7 +1528,10 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/travel");
+  revalidatePath("/networth");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   revalidatePath("/invest");
   return bookingWarning ? { warning: bookingWarning } : undefined;
 }
@@ -1549,6 +1572,7 @@ export async function updateTransactionAmount(formData: FormData) {
     revalidatePath("/budget");
     revalidatePath("/transactions");
     revalidatePath("/accounts");
+    revalidatePath("/travel");
     revalidatePath("/networth");
     return;
   }
@@ -1609,7 +1633,10 @@ export async function updateTransactionAmount(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/travel");
+  revalidatePath("/networth");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   revalidatePath("/invest");
 }
 
@@ -1753,8 +1780,10 @@ export async function deleteTransaction(formData: FormData) {
     revalidatePath("/budget");
     revalidatePath("/transactions");
     revalidatePath("/accounts");
+    revalidatePath("/travel");
     revalidatePath("/networth");
     revalidatePath("/annual");
+    revalidatePath("/insights");
     revalidatePath("/invest");
     return;
   }
@@ -1768,9 +1797,10 @@ export async function deleteTransaction(formData: FormData) {
     revalidatePath("/budget");
     revalidatePath("/transactions");
     revalidatePath("/accounts");
+    revalidatePath("/travel");
     revalidatePath("/networth");
     revalidatePath("/annual");
-    revalidatePath("/invest");
+    revalidatePath("/insights");
     revalidatePath("/invest");
     revalidatePath("/snowball");
     return;
@@ -1827,7 +1857,10 @@ export async function deleteTransaction(formData: FormData) {
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
+  revalidatePath("/travel");
+  revalidatePath("/networth");
   revalidatePath("/annual");
+  revalidatePath("/insights");
   revalidatePath("/invest");
 }
 

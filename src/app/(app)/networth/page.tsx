@@ -448,6 +448,10 @@ export default async function NetworthPage() {
   // categorised month would otherwise report $142 of spending as if it were
   // the whole year.
   const monthsByYear = new Map<number, Set<string>>();
+  // Months of the FI window the register actually covers. The app's history
+  // starts in January 2026, so "the last 12 months" held only 8 — and eight
+  // months of spending read as a year understated it by a third.
+  const fiWindowMonths = new Set<string>();
 
   for (const row of flowRows ?? []) {
     const kind = row.category_id ? catKind.get(row.category_id) : null;
@@ -460,6 +464,8 @@ export default async function NetworthPage() {
       monthsByYear.set(yr, seen);
     }
 
+    if (kind && inFiWindow) fiWindowMonths.add(row.month);
+
     if (kind === "bills" || kind === "expenses") {
       if (inFiWindow) fiSpendCents += cents;
       bump(spentByYear, yr, cents);
@@ -470,6 +476,15 @@ export default async function NetworthPage() {
       if (inFiWindow) fiIncomeCents += cents;
       bump(earnedByYear, yr, cents);
     }
+  }
+
+  // Scale a partial window up to a yearly rate, so every "/ yr" figure fed
+  // from here means a year.
+  if (fiWindowMonths.size > 0 && fiWindowMonths.size < 12) {
+    const toYear = (cents: number) => Math.round((cents * 12) / fiWindowMonths.size);
+    fiSpendCents = toYear(fiSpendCents);
+    fiContributionCents = toYear(fiContributionCents);
+    fiIncomeCents = toYear(fiIncomeCents);
   }
 
   // The portfolio: what the household could actually draw on. Active, not a

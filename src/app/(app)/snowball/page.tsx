@@ -1,4 +1,4 @@
-import { currentMonthFirst } from "@/lib/snapshots";
+import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, monthsBetweenKeys, amortizingPayment, monthlyInterestCents } from "@/lib/snowball";
 import { TransactionsPanel } from "../budget/transactions-panel";
 import type { AccountOption, SubOption, TxData } from "../budget/types";
@@ -24,7 +24,10 @@ export default async function SnowballPage() {
   // Bring installment debts up to date on interest before anything is read.
   // No-op for 0% cards and for anything on the manual-statement method, and
   // idempotent within a month — see lib/debt-interest.ts.
-  await accrueDebtInterest(supabase, household.id);
+  const accrual = await accrueDebtInterest(supabase, household.id);
+  // Interest raised a balance: re-save this month's snapshot so Net Worth and
+  // Accounts show it too, not only this page.
+  if (accrual.interestChargedCents > 0) await captureSnapshots(supabase, household.id, { force: true });
 
   const [{ data: debts, error: debtsError }, { data: subs, error: subsError }, plans, { data: periodRows, error: periodRowsError }, { data: debtSnapshotRows, error: debtSnapshotRowsError }] =
     await Promise.all([
@@ -116,7 +119,7 @@ export default async function SnowballPage() {
     const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }] = await Promise.all([
       supabase
         .from("transactions")
-        .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, cleared, is_withdrawal")
+        .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, movement_type, cleared, is_withdrawal")
         .eq("household_id", household.id)
         .in("subcategory_id", debtSubIds)
         .order("occurred_on", { ascending: false })
@@ -131,6 +134,7 @@ export default async function SnowballPage() {
     ]);
     throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError });
     const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
+    const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
     const bankingKinds = new Set(["checking", "savings", "cash", "savings_bucket"]);
     accountOptions = (accounts ?? [])
       .filter((a) => !a.is_kids_account && (bankingKinds.has(a.kind) || a.kind === "credit_card"))
@@ -145,7 +149,10 @@ export default async function SnowballPage() {
       date: t.occurred_on,
       amountCents: t.amount_cents,
       memo: t.memo,
-      payee: t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
+      // A Pay Card payment on a debt card lands here too; its payee is the card.
+      payee: t.paid_to_account_id
+        ? accountNameById.get(t.paid_to_account_id) ?? null
+        : t.payee_id ? payeeById.get(t.payee_id) ?? null : null,
       subId: t.subcategory_id ?? null,
       subName: t.subcategory_id ? nameBySub.get(t.subcategory_id) ?? "Debt" : "Debt",
       accountId: t.account_id ?? null,
@@ -153,12 +160,14 @@ export default async function SnowballPage() {
       tripId: null,
       bookingRef: null,
       travelCategory: null,
-      toAccountId: null,
-      fromBucketId: null,
+      toAccountId: t.paid_to_account_id ?? null,
+      fromBucketId: t.bucket_id ?? null,
       toBucketId: null,
       kind: "debt",
-      movementType: null,
-      isCardPayment: false,
+      // Card payments can be deleted here but not edited: the shared editor
+      // only knows one side of the movement.
+      movementType: t.movement_type === "card_payment" ? "card_payment" : null,
+      isCardPayment: t.movement_type === "card_payment",
       isTransfer: false,
       isInvestmentTransfer: false,
       cleared: t.cleared ?? false,

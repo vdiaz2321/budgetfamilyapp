@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { displayToCents } from "@/lib/money";
 import { getSessionContext } from "@/lib/auth-context";
 import { unwrap } from "@/lib/supabase-result";
+import { captureSnapshots } from "@/lib/snapshots";
 
 // Uses the shared, request-cached session context rather than re-running the
 // getUser → profile → household chain by hand (see AGENTS.md). The chain was
@@ -56,9 +57,14 @@ export async function recordDebtInterest(formData: FormData) {
     return { error: "Couldn't update the debt balance." };
   }
 
+  // Every other debt-balance change recaptures this month's snapshot; without
+  // it Net Worth kept the pre-interest balance until something else moved.
+  await captureSnapshots(supabase, householdId, { force: true });
   revalidatePath("/snowball");
   revalidatePath("/budget");
   revalidatePath("/accounts");
+  // Travel Log's Pay Card popup shows the debt balance too.
+  revalidatePath("/travel");
   revalidatePath("/networth");
   return { error: null };
 }
@@ -124,5 +130,9 @@ export async function applyPayoffPlan(formData: FormData) {
 
   revalidatePath("/snowball");
   revalidatePath("/budget");
+  revalidatePath("/annual");
+  // The Pay Card popup prefills this month's plan on both card pages.
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
   return { error: null };
 }

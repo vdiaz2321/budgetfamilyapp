@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 import { deleteMyAccount } from "./actions";
 
 type Props = {
@@ -9,6 +10,7 @@ type Props = {
 
 export function DeleteAccountButton({ soloOwner }: Props) {
   const [open, setOpen] = useState(false);
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;

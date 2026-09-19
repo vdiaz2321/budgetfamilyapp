@@ -999,16 +999,21 @@ function SplitRows({
       {splits.map((sp) => {
         const opt = options.find((o) => o.id === sp.subId);
         return (
-          <div key={sp.subId} className="flex items-center gap-2 border-b border-line/60 px-3 py-2.5 last:border-b-0">
-            <button
-              type="button"
-              onClick={() => onRemove(sp.subId)}
-              className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-negative text-white text-xs font-bold leading-none"
-              aria-label="Remove"
-            >
-              −
-            </button>
-            <span className="flex-1 truncate text-sm font-medium">{opt?.name ?? sp.subId}</span>
+          /* items-start + an input-height (h-8) label box: when the input's
+             + − = strip opens below it, the name stays level with the input
+             instead of re-centering down into the strip. */
+          <div key={sp.subId} className="flex items-start gap-2 border-b border-line/60 px-3 py-2.5 last:border-b-0">
+            <div className="flex h-8 min-w-0 flex-1 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onRemove(sp.subId)}
+                className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-negative text-white text-xs font-bold leading-none"
+                aria-label="Remove"
+              >
+                −
+              </button>
+              <span className="flex-1 truncate text-sm font-medium">{opt?.name ?? sp.subId}</span>
+            </div>
             <div className={"shrink-0 rounded-lg " + (invalidSubIds.has(sp.subId) ? "ring-2 ring-negative" : "")}>
               <SplitAmountInput
                 amountCents={sp.amountCents}

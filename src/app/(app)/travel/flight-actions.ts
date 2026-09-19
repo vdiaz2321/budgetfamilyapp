@@ -202,7 +202,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
 
     const { error } = await supabase
       .from("travel_flights")
-      .update({ ...row, reward_activity_id: sync.activityId })
+      .update({ ...row, reward_activity_id: sync.activityId, payment_restore: null })
       .eq("id", flightId)
       .eq("household_id", householdId);
     if (error) return fail(`Couldn't save that flight — ${error.message}`);
@@ -331,7 +331,7 @@ export async function setTravelFlightCancelled(id: string, cancelled: boolean) {
 
   const { error } = await supabase
     .from("travel_flights")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId })
+    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId, payment_restore: null })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) return { error: `Couldn't update that booking — ${error.message}` };

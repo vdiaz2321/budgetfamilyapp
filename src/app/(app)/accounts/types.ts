@@ -56,6 +56,10 @@ export type CardDetails = {
   payoffBalanceCents: number;
   payoffMinimumCents: number;
   payoffPlannedCents: number;
+  /** This month's Budget plan for the card's debt item (Pay Card prefill). */
+  debtMonthPlannedCents: number;
+  /** Paid toward that debt item so far this month. */
+  debtMonthPaidCents: number;
   payoffApr: number;
   payoffDueDay: number | null;
   promoAprEndsOn: string | null;

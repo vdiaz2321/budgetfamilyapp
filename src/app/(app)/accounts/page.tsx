@@ -4,6 +4,7 @@ import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, typ
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
+import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import { throwIfAny } from "@/lib/supabase-result";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
@@ -39,6 +40,7 @@ export default async function AccountsPage() {
     debtSnapshotRows,
     cardPaymentRows,
     { data: eoyHistoryRow, error: eoyHistoryError },
+    debtMonth,
   ] = await Promise.all([
     supabase
       .from("accounts")
@@ -139,6 +141,8 @@ export default async function AccountsPage() {
       .eq("household_id", household.id)
       .eq("month", `${Number(currentMonth.slice(0, 4)) - 1}-12-01`)
       .maybeSingle(),
+    // This month's Budget plan per debt item — the Pay Card prefill.
+    loadDebtMonthPlans(supabase, household.id),
   ]);
   // cardDetails and rewardActivities are deliberately NOT in this list: both
   // have a fallback below for the case where the migration behind them hasn't
@@ -263,6 +267,8 @@ export default async function AccountsPage() {
       payoffBalanceCents: payoff?.current_balance_cents ?? 0,
       payoffMinimumCents: payoff?.min_payment_cents ?? 0,
       payoffPlannedCents: payoff?.target_payment_cents ?? 0,
+      debtMonthPlannedCents: payoff ? debtMonth.get(payoff.subcategory_id)?.plannedCents ?? 0 : 0,
+      debtMonthPaidCents: payoff ? debtMonth.get(payoff.subcategory_id)?.paidCents ?? 0 : 0,
       payoffApr: Number(payoff?.apr ?? 0),
       payoffDueDay: payoff?.due_day ?? null,
       promoAprEndsOn: payoff?.promo_apr_ends_on ?? null,
@@ -368,9 +374,12 @@ export default async function AccountsPage() {
       })),
   }));
 
-  // Non-CC accounts for the "From" dropdown in the Pay Card modal.
+  // Accounts a card can be paid from, for the Pay Card modal's "From" dropdown:
+  // your own bank accounts. Not investment accounts — their balance is kept by
+  // hand, so the payment never came off it and Invest counted it as money in —
+  // and not kids' accounts, which aren't household money (payCard refuses both).
   const nonCardAccounts = accounts
-    .filter((a) => a.kind !== "credit_card" && a.active)
+    .filter((a) => a.kind !== "credit_card" && a.kind !== "investment" && !a.isKidsAccount && a.active)
     .map((a) => ({
       id: a.id,
       name: a.name,

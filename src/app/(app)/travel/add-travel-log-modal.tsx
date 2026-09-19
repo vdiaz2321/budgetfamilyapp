@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CarModal } from "./car-modal";
@@ -64,26 +64,8 @@ export function AddTravelLogModal({
   // What is typed in the trip box. It matches a saved trip by name (the way
   // the server would anyway), so adding to one is the same as naming it.
   const [tripName, setTripName] = useState("");
-  // The list of saved trips under the box, drawn by the app: the browser's
-  // own datalist popup floats away from the box in the desktop app.
-  const [listOpen, setListOpen] = useState(false);
-  const nameBox = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!listOpen) return;
-    function onDown(e: MouseEvent) {
-      if (!nameBox.current?.contains(e.target as Node)) setListOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [listOpen]);
   const normalise = (name: string) => name.trim().replace(/\s+[-–—·]\s+/g, " · ").replace(/\s+/g, " ").toLowerCase();
   const matched = defaultTripId ? null : trips.find((t) => t.id === trip.tripId) ?? null;
-  // Trips offered as you type: this year's and upcoming, newest first.
-  const thisYear = String(new Date().getFullYear());
-  const suggestions = trips
-    .filter((t) => !t.startOn || t.startOn.slice(0, 4) >= thisYear)
-    .filter((t) => !tripName.trim() || t.name.toLowerCase().includes(tripName.trim().toLowerCase()))
-    .sort((a, b) => (b.startOn ?? "9999").localeCompare(a.startOn ?? "9999"));
   function typeTripName(value: string) {
     setTripName(value);
     const hit = trips.find((t) => normalise(t.name) === normalise(value));
@@ -161,57 +143,26 @@ export function AddTravelLogModal({
   return (
     <ModalShell
       // From a trip's own row everything goes into that trip; from the page's
-      // Add button it is always a new trip, named right in the header. Adding
-      // to a saved trip is done from that trip's row, so no picker here.
+      // Add button it is always a new trip, named right in the header — no
+      // list of saved trips here. Changing a saved trip is the page's "Edit
+      // trip" picker, which opens that trip's own popup.
       title={defaultTripId ? `Add to ${trips.find((t) => t.id === defaultTripId)?.name ?? "trip"}` : "Add Travel Log:"}
       headerActions={
         defaultTripId ? null : (
           <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
-            <div ref={nameBox} className="relative w-full sm:w-72">
+            <div className="w-full sm:w-72">
               {/* The placeholder shows the naming pattern every trip follows. */}
               <input
                 value={tripName}
-                onChange={(e) => {
-                  typeTripName(e.target.value);
-                  setListOpen(true);
-                }}
-                onFocus={() => setListOpen(true)}
-                onClick={() => setListOpen(true)}
+                onChange={(e) => typeTripName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    setListOpen(false);
-                  } else if (e.key === "Escape" && listOpen) {
-                    e.stopPropagation();
-                    setListOpen(false);
-                  }
+                  if (e.key === "Enter") e.preventDefault();
                 }}
-                autoFocus
                 autoComplete="off"
                 aria-label="Trip name"
                 placeholder="Greece - May 2027"
                 className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
-              {listOpen && suggestions.length > 0 ? (
-                <ul className="absolute left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-md bg-surface py-1 shadow-lg ring-1 ring-line">
-                  {suggestions.map((t) => (
-                    <li key={t.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          typeTripName(t.name);
-                          setListOpen(false);
-                        }}
-                        className={`w-full px-2 py-1.5 text-left text-sm transition hover:bg-black/5 dark:hover:bg-white/10 ${
-                          t.id === trip.tripId ? "font-semibold" : ""
-                        }`}
-                      >
-                        {t.name}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </div>
             {/* Says which it is, so a name that happens to match doesn't file
                 into a saved trip without saying so. */}

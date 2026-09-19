@@ -21,6 +21,7 @@ import {
 import type { AccountOption, BucketOption, RowData, SubOption, TxData, TxPrefill } from "./types";
 import { DEBT_KINDS } from "./types";
 import { EXPENSE_CATEGORIES } from "@/app/(app)/travel/types";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
   income: "bg-positive",
@@ -721,11 +722,14 @@ function TxRow({
   const acct = t.accountId ? accountNameById.get(t.accountId) : null;
   return (
     <li className="group flex items-center gap-1 rounded-md px-1 hover:bg-surface-raised/60">
+      {/* A Pay Card payment on a debt card shows here as the debt's payment,
+          but the Budget editor only knows one side of it — delete only. */}
       <button
         type="button"
-        onClick={() => onEdit(t)}
-        className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left text-xs"
-        aria-label="Edit transaction"
+        onClick={() => { if (!t.isCardPayment) onEdit(t); }}
+        disabled={t.isCardPayment}
+        className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left text-xs disabled:cursor-default"
+        aria-label={t.isCardPayment ? "Card payment" : "Edit transaction"}
       >
         <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
         <span className="min-w-0 flex-1 truncate">
@@ -932,6 +936,7 @@ function ItemDetailsPopover({
   subOptions: SubOption[];
   onClose: () => void;
 }) {
+  useScrollLock();
   const [reassignOpen, setReassignOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);

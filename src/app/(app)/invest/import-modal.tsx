@@ -15,6 +15,7 @@ import {
   type PositionMapping,
 } from "./import-utils";
 import type { InvestAccount } from "./invest-board";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 type Props = {
   accounts: InvestAccount[];
@@ -71,6 +72,7 @@ function validRowCount(kind: ImportKind, headers: string[], rows: string[][], ma
 }
 
 export function ImportInvestmentModal({ accounts, onClose, onImported }: Props) {
+  useScrollLock();
   const [kind, setKind] = useState<ImportKind>("positions");
   const [fileName, setFileName] = useState("");
   const [csvText, setCsvText] = useState("");

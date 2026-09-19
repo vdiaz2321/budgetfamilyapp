@@ -238,7 +238,9 @@ export default async function TransactionsPage({
         : movementType === "investment_transfer"
           ? "Investment transfer"
           : movementType === "card_payment"
-            ? "Card payment"
+            // On a card carried as a debt the payment is booked to the debt,
+            // so it reads like a debt payment entered on Budget.
+            ? (t.subcategory_id ? nameBySub.get(t.subcategory_id) : null) ?? "Card payment"
             : t.subcategory_id
               ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
               : "Uncategorized",

@@ -157,7 +157,7 @@ export async function saveTravelCar(payload: CarPayload) {
     if (sync.error) return fail(sync.error);
     const { error } = await supabase
       .from("travel_cars")
-      .update({ ...row, reward_activity_id: sync.activityId })
+      .update({ ...row, reward_activity_id: sync.activityId, payment_restore: null })
       .eq("id", payload.id)
       .eq("household_id", householdId);
     if (error) return fail(`Couldn't save that car — ${error.message}`);
@@ -238,7 +238,7 @@ export async function setTravelCarCancelled(id: string, cancelled: boolean) {
   }
   const { error } = await supabase
     .from("travel_cars")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId })
+    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId, payment_restore: null })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) return { error: `Couldn't update that booking — ${error.message}` };

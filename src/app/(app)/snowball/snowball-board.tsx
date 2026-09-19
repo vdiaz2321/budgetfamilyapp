@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { addMonths, monthsBetween, projectSnowball, type MonthlyEntry } from "@/lib/snowball";
 import { applyPayoffPlan, recordDebtInterest } from "./actions";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // Debt card tints. Cool tones only — these sit behind money values, which
@@ -602,6 +603,7 @@ function SimulationOutcome({ paymentDelta, oneTimeCents, interestSavings, timeSa
 }
 
 function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; startMonth: string; currency: string; onClose: () => void }) {
+  useScrollLock();
   const baselinePayment = Math.max(row.minCents, row.plannedCents);
   const [payment, setPayment] = useState(centsToDisplay(baselinePayment));
   const [oneTimeExtra, setOneTimeExtra] = useState("");

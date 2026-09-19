@@ -10,6 +10,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { IRS_LIMITS_URL, contributionDeadline, monthsUntilDeadline } from "@/lib/contribution-limits";
 import { CashReserves, type CashReservesData } from "./cash-reserves";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 export type SavingsTxData = {
   id: string;
@@ -485,6 +486,7 @@ export function SavingsPanel({
   const kidsCards = cards.filter((card) => card.isKids);
   const [scope, setScope] = useState<Scope>(familyCards.length > 0 ? "family" : "all");
   const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+  useScrollLock(withdrawalOpen);
   // Payee autocomplete for the withdrawal modal — the full household list is
   // ~28KB, so it's fetched when the modal opens rather than shipped with the
   // page. Same pattern as the budget board and the transactions table.

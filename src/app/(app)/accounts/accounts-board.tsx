@@ -39,6 +39,7 @@ import {
   type RewardActivity,
   type Section,
 } from "./types";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 // Re-exported so importers (page.tsx) keep one import site for the board and
 // the shapes it takes.
@@ -588,8 +589,13 @@ export function AccountsBoard({
 
   // Hide only debts linked to a debt_loan account (those show as their own account row).
   // Payoff-tracked credit-card debts still list here so the Debts section stays the single view of what's owed.
+  // A paid-off debt stays listed while any month on screen still shows a
+  // balance for it: testing today's $0 alone dropped the four debts cleared on
+  // Aug 1 from May–Jul too, so those columns summed to less than Net Worth's.
   const visibleBudgetDebts = budgetDebts.filter(
-    (d) => d.balanceCents !== 0 && !isDebtLoanLinked(d),
+    (d) =>
+      !isDebtLoanLinked(d) &&
+      (d.balanceCents !== 0 || displayMonths.some((m) => (d.balancesByMonth?.[m] ?? 0) !== 0)),
   );
   const debtSectionsToRender = SECTIONS.filter(
     (s) =>
@@ -1053,6 +1059,7 @@ function TransferModal({
   allBuckets: BucketData[];
   onClose: () => void;
 }) {
+  useScrollLock();
   const [pending, start] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -1643,10 +1650,21 @@ function AccountSection({
           )}
           {extraDebts.length > 0 ? (
             <ul className="divide-y divide-line">
-              {extraDebts.map((d) => (
+              {extraDebts.map((d) => {
+                // A paid-off debt is listed for the months it still had a
+                // balance. Show its row only at widths where one of those
+                // months is on screen (1 column narrow, 3 from 560px, 5 from
+                // 860px) — otherwise a phone shows a bare "$0.00" row.
+                const owedIn = (from: number, to: number) =>
+                  historyMonths.slice(from, to).some((m) => (d.balancesByMonth?.[m] ?? 0) !== 0);
+                const display =
+                  d.balanceCents !== 0 || owedIn(0, 1) ? "grid"
+                    : owedIn(1, 3) ? "hidden @[560px]:grid"
+                      : "hidden @[860px]:grid";
+                return (
                 <li
                   key={`debt:${d.subcategoryId}`}
-                  className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 px-4 py-1.5`}
+                  className={`${display} ${DEBT_ROW_GRID} items-center gap-1.5 px-4 py-1.5`}
                 >
                   <span className="w-full min-w-0 truncate text-sm text-foreground">{d.name}</span>
                   {/* Same as account rows: each column reads the snapshot for
@@ -1677,7 +1695,8 @@ function AccountSection({
                     );
                   })}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           ) : null}
 
@@ -2814,6 +2833,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
 }
 
 function AddAccountModal({ onClose }: { onClose: () => void }) {
+  useScrollLock();
   const [sectionKey, setSectionKey] = useState<string | null>(null);
   const choices = SECTIONS.filter((section) =>
     ["banking", "investments", "property", "credit", "loans", "kids"].includes(section.key),

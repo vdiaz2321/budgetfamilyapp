@@ -19,6 +19,7 @@ import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
 import { sheetDateRange, summarizeTrips } from "./trip-summary";
 import { AddTravelLogModal } from "./add-travel-log-modal";
+import { EditTripPicker } from "./edit-trip-picker";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
 import {
   effectivePointsValueMicros,
@@ -973,6 +974,7 @@ export function TravelBoard({
             >
               Add Travel Log
             </button>
+            <EditTripPicker trips={trips} onPick={setOpenTripId} />
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
                 it stays out of the way until a new unlinked stay appears. */}

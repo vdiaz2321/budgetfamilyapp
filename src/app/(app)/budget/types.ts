@@ -237,3 +237,13 @@ export type TripTagging = {
   trips: { id: string; name: string; startOn: string | null; endOn: string | null }[];
   bookingsByTrip: Record<string, TripBookingOption[]>;
 };
+
+/**
+ * A paid-off debt drops out of the Budget — but only in months it has nothing
+ * in. The balance is today's, so testing it alone hid a debt from every month,
+ * including the ones it was still being paid in: January's Debt read $580.00
+ * while Annual, Insights and Debt/Loans all counted $1,532.80.
+ */
+export function isHiddenPaidOffDebt(kind: string, r: { plannedCents: number; spentCents: number; debt?: { balanceCents: number } | null }): boolean {
+  return kind === "debt" && r.debt != null && r.debt.balanceCents <= 0 && r.plannedCents === 0 && r.spentCents === 0;
+}

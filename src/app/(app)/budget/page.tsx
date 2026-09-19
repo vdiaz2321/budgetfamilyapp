@@ -4,6 +4,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { resolveMonth } from "@/lib/month";
 import { BudgetBoard } from "./budget-board";
 import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, TxData } from "./types";
+import { isHiddenPaidOffDebt } from "./types";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import { throwIfAny } from "@/lib/supabase-result";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
@@ -472,9 +473,7 @@ export default async function BudgetPage({
     // Paid-off debts are hidden in the UI (BudgetGroup filters them from its
     // visible list and subtotal); exclude their planned/spent here too so the
     // hero card's Planned Budget agrees with the sum of visible group headers.
-    const countableRows = kind === "debt"
-      ? rows.filter((r) => (r.debt?.balanceCents ?? 0) > 0)
-      : rows;
+    const countableRows = rows.filter((r) => !isHiddenPaidOffDebt(kind, r));
     return {
       categoryId: cat.id,
       kind,
@@ -670,7 +669,9 @@ export default async function BudgetPage({
         : movementType === "investment_transfer"
           ? "Investment transfer"
           : movementType === "card_payment"
-            ? "Card payment"
+            // On a card carried as a debt the payment is booked to the debt,
+            // so it reads like a debt payment entered on Budget.
+            ? (t.subcategory_id ? nameBySub.get(t.subcategory_id) : null) ?? "Card payment"
             : t.subcategory_id
               ? nameBySub.get(t.subcategory_id) ?? "Uncategorized"
               : "Uncategorized",

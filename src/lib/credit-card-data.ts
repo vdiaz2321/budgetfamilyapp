@@ -12,6 +12,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountData, BucketData, CardDetails, NonCardAccount, RewardActivity } from "@/app/(app)/accounts/types";
 import { throwIfAny } from "@/lib/supabase-result";
+import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import type { TravelBrand } from "@/app/(app)/travel/types";
 
 export type CreditCardBoardData = {
@@ -32,7 +33,7 @@ export async function loadCreditCardBoardData(
   const now = new Date();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, balanceRows, monthRows] =
+  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, balanceRows, monthRows, debtMonth] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -77,6 +78,7 @@ export async function loadCreditCardBoardData(
         .select("account_id, spend_cents")
         .eq("household_id", householdId)
         .eq("month", firstOfMonth),
+      loadDebtMonthPlans(supabase, householdId),
     ]);
 
   throwIfAny({
@@ -147,6 +149,8 @@ export async function loadCreditCardBoardData(
       payoffBalanceCents: payoff?.current_balance_cents ?? 0,
       payoffMinimumCents: payoff?.min_payment_cents ?? 0,
       payoffPlannedCents: payoff?.target_payment_cents ?? 0,
+      debtMonthPlannedCents: payoff ? debtMonth.get(payoff.subcategory_id)?.plannedCents ?? 0 : 0,
+      debtMonthPaidCents: payoff ? debtMonth.get(payoff.subcategory_id)?.paidCents ?? 0 : 0,
       payoffApr: Number(payoff?.apr ?? 0),
       payoffDueDay: payoff?.due_day ?? null,
       promoAprEndsOn: payoff?.promo_apr_ends_on ?? null,
@@ -200,7 +204,8 @@ export async function loadCreditCardBoardData(
     }));
 
   const nonCardAccounts: NonCardAccount[] = rows
-    .filter((a) => a.kind !== "credit_card" && a.active)
+    // Bank accounts only — see the matching list on the Accounts page.
+    .filter((a) => a.kind !== "credit_card" && a.kind !== "investment" && !a.is_kids_account && a.active)
     .map((a) => ({
       id: a.id,
       name: a.name,

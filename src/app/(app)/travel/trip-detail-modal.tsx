@@ -69,7 +69,13 @@ export function TripDetailModal({
   const money = (cents: number | null | undefined) => (cents ? formatMoneyWhole(cents, currency) : DASH);
   const euros = (cents: number | null | undefined) => (cents != null ? formatMoneyWhole(cents, "€") : "");
   // The euro side of a Total cell — only when some row has a euro figure.
+  // Once purchases are tagged to a row its dollar Actual comes from them, so a
+  // euro figure typed before then no longer describes it — hide it rather than
+  // show "$1 / €230". Tagged purchases carry no euro amount, so the euro Actual
+  // total is left off too once any row is tagged: it would be a partial sum.
+  const actualEur = (e: (typeof t.expenses)[number]) => (e.txCount > 0 ? null : e.actualEurCents);
   const eurTotal = (field: "plannedEurCents" | "actualEurCents") => {
+    if (field === "actualEurCents" && t.expenses.some((e) => e.txCount > 0)) return null;
     const values = t.expenses.map((e) => e[field]).filter((v): v is number => v != null);
     return values.length ? values.reduce((sum, v) => sum + v, 0) : null;
   };
@@ -190,7 +196,66 @@ export function TripDetailModal({
             // Planned against actual, like Spending below. A flight not bought
             // yet sits under Planned; once bought it moves to Actual and keeps
             // its estimate beside it.
-            <div className="overflow-x-auto rounded-lg ring-1 ring-line">
+            <>
+            {/* Phones: one card per booking, its three figures side by side
+                under the name — the table's four columns don't fit. */}
+            <ul className="divide-y divide-line/60 rounded-lg ring-1 ring-line sm:hidden">
+              {t.bookings.map((b) => {
+                const { planned, actual } = bookingPlanActual(b);
+                const diff = planned != null && actual != null ? planned - actual : null;
+                return (
+                  <li key={`${b.kind}-${b.id}`} className={b.cancelled ? "opacity-60" : ""}>
+                    <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-black/[0.04] dark:active:bg-white/[0.06]">
+                      <span className="flex min-w-0 items-start gap-2">
+                        <span className="mt-0.5 w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          {KIND_LABEL[b.kind]}
+                        </span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="text-[13px] font-semibold">
+                            {b.title}
+                            {b.cancelled ? <span className="ml-1.5 text-[10px] font-semibold text-muted">Cancelled</span> : null}
+                          </span>
+                          <span className="text-[11px] text-muted">
+                            <span className="tabular-nums">{sheetDateRange(b.start, b.end)}</span> · {b.detail}
+                          </span>
+                        </span>
+                      </span>
+                      <MobileFigures
+                        planned={planned != null ? formatMoney(planned, currency) : DASH}
+                        actual={
+                          <>
+                            {actual != null ? (
+                              <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoney(actual, currency)}</span>
+                            ) : (
+                              <span className="font-normal text-muted">{DASH}</span>
+                            )}
+                            {b.points > 0 ? (
+                              <span className="block text-[11px] font-semibold" style={{ color: "var(--viz-savings)" }}>
+                                {b.points.toLocaleString()} pts
+                              </span>
+                            ) : null}
+                          </>
+                        }
+                        diff={diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoney(Math.abs(diff), currency)}`}
+                        diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
+                      />
+                    </button>
+                  </li>
+                );
+              })}
+              {bookingTotals.rows > 1 ? (
+                <li className="border-t-2 border-line px-3 py-2 font-bold">
+                  <span className="text-sm">Total</span>
+                  <MobileFigures
+                    planned={bookingTotals.planned ? formatMoney(bookingTotals.planned, currency) : DASH}
+                    actual={bookingTotals.actual ? formatMoney(bookingTotals.actual, currency) : DASH}
+                    diff={DASH}
+                    diffClass="text-muted"
+                  />
+                </li>
+              ) : null}
+            </ul>
+            <div className="hidden overflow-x-auto rounded-lg ring-1 ring-line sm:block">
               {/* Same fixed column widths as Spending below, so the two tables'
                   Planned / Actual / Difference columns line up. */}
               <table className="w-full min-w-[34rem] table-fixed text-sm">
@@ -272,6 +337,7 @@ export function TripDetailModal({
                 ) : null}
               </table>
             </div>
+            </>
           ) : (
             <p className="rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-line">No flights, stays or rentals in this trip yet.</p>
           )}
@@ -290,7 +356,61 @@ export function TripDetailModal({
             </button>
           </div>
           {t.expenses.length ? (
-            <div className="overflow-x-auto rounded-lg ring-1 ring-line">
+            <>
+            {/* Phones: one row per category, its three figures side by side
+                under the name — the table's four columns don't fit. */}
+            <ul className="divide-y divide-line/60 rounded-lg ring-1 ring-line sm:hidden">
+              {EXPENSE_CATEGORIES.map(({ key, label }) => {
+                const e = t.expenses.find((x) => x.category === key);
+                if (!e) return null;
+                const actual = actualCents(e);
+                const diff = e.plannedCents != null || actual != null ? (e.plannedCents ?? 0) - (actual ?? 0) : null;
+                return (
+                  <li key={key} className="px-3 py-2">
+                    <span className="text-sm font-semibold">
+                      {label}
+                      {e.txCount > 0 ? <span className="ml-1.5 text-[10px] font-normal text-muted">{e.txCount} tx</span> : null}
+                    </span>
+                    <MobileFigures
+                      planned={
+                        <>
+                          {money(e.plannedCents)}
+                          {e.plannedEurCents != null ? <span className="block text-[11px] text-muted">{euros(e.plannedEurCents)}</span> : null}
+                        </>
+                      }
+                      actual={
+                        <>
+                          {money(actual)}
+                          {actualEur(e) != null ? <span className="block text-[11px] font-normal text-muted">{euros(actualEur(e))}</span> : null}
+                        </>
+                      }
+                      diff={diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                      diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
+                    />
+                  </li>
+                );
+              })}
+              <li className="border-t-2 border-line px-3 py-2 font-bold">
+                <span className="text-sm">Total</span>
+                <MobileFigures
+                  planned={
+                    <>
+                      {money(t.plannedMisc)}
+                      {eurTotal("plannedEurCents") != null ? <span className="block text-[11px] font-normal text-muted">{euros(eurTotal("plannedEurCents"))}</span> : null}
+                    </>
+                  }
+                  actual={
+                    <>
+                      {money(t.actualMisc)}
+                      {eurTotal("actualEurCents") != null ? <span className="block text-[11px] font-normal text-muted">{euros(eurTotal("actualEurCents"))}</span> : null}
+                    </>
+                  }
+                  diff={`${t.plannedMisc - t.actualMisc >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(t.plannedMisc - t.actualMisc), currency)}`}
+                  diffClass={t.plannedMisc - t.actualMisc >= 0 ? "text-positive" : "text-negative"}
+                />
+              </li>
+            </ul>
+            <div className="hidden overflow-x-auto rounded-lg ring-1 ring-line sm:block">
               <table className="w-full min-w-[34rem] table-fixed text-sm">
                 <colgroup>
                   <col className="w-[46%]" />
@@ -323,7 +443,7 @@ export function TripDetailModal({
                         </td>
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums">
                           {money(actual)}
-                          {e.actualEurCents != null ? <span className="font-normal text-muted"> / {euros(e.actualEurCents)}</span> : null}
+                          {actualEur(e) != null ? <span className="font-normal text-muted"> / {euros(actualEur(e))}</span> : null}
                           {/* From the Budget: how many tagged purchases make this figure. */}
                           {e.txCount > 0 ? <span className="ml-1 text-[10px] font-normal text-muted">{e.txCount} tx</span> : null}
                         </td>
@@ -357,6 +477,7 @@ export function TripDetailModal({
                 </tfoot>
               </table>
             </div>
+            </>
           ) : (
             <p className="rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-line">No restaurants, groceries or other spending yet.</p>
           )}
@@ -440,5 +561,33 @@ function Stat({ label, value, className, note }: { label: string; value: string;
       <p className={`text-base font-bold tabular-nums ${className ?? ""}`}>{value}</p>
       {note ? <p className="text-[10px] font-semibold text-muted">{note}</p> : null}
     </div>
+  );
+}
+
+// A phone row's Planned / Actual / Difference, side by side under its name —
+// the stacked stand-in for the desktop table's three figure columns.
+function MobileFigures({
+  planned,
+  actual,
+  diff,
+  diffClass = "",
+}: {
+  planned: React.ReactNode;
+  actual: React.ReactNode;
+  diff: React.ReactNode;
+  diffClass?: string;
+}) {
+  const cell = (label: string, value: React.ReactNode, className = "") => (
+    <span className="flex flex-col items-center">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className={`text-sm tabular-nums ${className}`}>{value}</span>
+    </span>
+  );
+  return (
+    <span className="mt-1.5 grid grid-cols-3 gap-2">
+      {cell("Planned", planned)}
+      {cell("Actual", actual, "font-semibold")}
+      {cell("Difference", diff, diffClass)}
+    </span>
   );
 }

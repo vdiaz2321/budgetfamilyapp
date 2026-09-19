@@ -44,6 +44,12 @@ function revalidate() {
   // Net Worth mirrors account names/grouping in its grid.
   revalidatePath("/networth");
   revalidatePath("/snowball");
+  // Travel Log shows the same cards' owed amounts and has its own Pay Card.
+  revalidatePath("/travel");
+  // A Pay Card payment on a debt card is that debt's payment on Annual and
+  // Insights too.
+  revalidatePath("/annual");
+  revalidatePath("/insights");
   // The sidebar's account totals live in the shared (app) layout.
   revalidatePath("/", "layout");
 }
@@ -967,14 +973,58 @@ export async function payCard(formData: FormData) {
   if (!sourceAccountId) return { error: "Pick a source account." };
   if (amountCents <= 0) return { error: "Enter a payment amount." };
 
+  // Only a household bank account can pay a card. From an investment account
+  // the balance never moved (adjustAccountLedger leaves those to be updated by
+  // hand) and v_investment_contributions read the payment as a contribution;
+  // a kids' account isn't household money.
+  const source = unwrap(
+    await supabase
+      .from("accounts")
+      .select("kind, is_kids_account")
+      .eq("id", sourceAccountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
+  if (!source) return { error: "Pick a source account." };
+  if (source.kind === "investment" || source.kind === "credit_card" || source.is_kids_account) {
+    return { error: "Pay a card from a bank account, not an investment, card or kids' account." };
+  }
+
+  // If a debt is tracked against this card, this payment is also a payment on
+  // that debt.
+  //
+  // Read from `debts` — the single liability ledger — rather than from
+  // `credit_card_details.is_revolving_debt` / `debt_subcategory_id`. Those were
+  // a second encoding of the same fact and had already drifted: card 3191
+  // VentureJ carried a live $1,968 debt row while its details flags said it
+  // wasn't a payoff debt, so paying it here moved money out of the bank and
+  // left the debt untouched.
+  const linkedDebt = unwrap(
+    await supabase
+      .from("debts")
+      .select("subcategory_id, subcategories(category_id)")
+      .eq("household_id", householdId)
+      .eq("account_id", cardId)
+      .maybeSingle(),
+    "debts",
+  ) as { subcategory_id: string; subcategories: { category_id: string } | null } | null;
+
   // Insert one transaction: account_id = source (debit), paid_to_account_id =
-  // card (reduces owed). subcategory_id stays null — CC payments aren't
-  // budget-category spending; the original charges already were.
+  // card (reduces owed). On an ordinary card subcategory_id stays null — the
+  // original charges were already the budget spending. On a debt card the row
+  // carries the debt's budget item, so Budget, Debt/Loans and Insights count
+  // it exactly like a debt payment entered on Budget; without it the debt
+  // balance dropped while Budget's Actual for that debt never moved.
   const { error: txError } = await supabase.from("transactions").insert({
     household_id: householdId,
     account_id: sourceAccountId,
+    // Stored so deleting the payment refunds the same bucket it came out of.
+    bucket_id: bucketId,
     paid_to_account_id: cardId,
     movement_type: "card_payment",
+    subcategory_id: linkedDebt?.subcategory_id ?? null,
+    category_id: linkedDebt?.subcategories?.category_id ?? null,
     amount_cents: amountCents,
     occurred_on: dateStr,
     memo: notes,
@@ -989,26 +1039,11 @@ export async function payCard(formData: FormData) {
     await adjustAccountLedger(supabase, householdId, sourceAccountId, -amountCents);
   }
 
-  // If a debt is tracked against this card, decrement it too so Budget and Net
-  // Worth stay honest.
-  //
-  // Read from `debts` — the single liability ledger — rather than from
-  // `credit_card_details.is_revolving_debt` / `debt_subcategory_id`. Those were
-  // a second encoding of the same fact and had already drifted: card 3191
-  // VentureJ carried a live $1,968 debt row while its details flags said it
-  // wasn't a payoff debt, so paying it here moved money out of the bank and
-  // left the debt untouched.
-  const linkedDebt = unwrap(
-    await supabase
-      .from("debts")
-      .select("subcategory_id")
-      .eq("household_id", householdId)
-      .eq("account_id", cardId)
-      .maybeSingle(),
-    "debts",
-  );
+  // Lower the tracked debt so Budget and Net Worth stay honest. Deleting the
+  // payment (reverseMovementTransaction) puts it back.
   if (linkedDebt?.subcategory_id) {
     await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, -amountCents);
+    revalidatePath("/snowball");
   }
 
   await captureSnapshots(supabase, householdId, { force: true });

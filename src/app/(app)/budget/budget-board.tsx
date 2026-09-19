@@ -30,9 +30,11 @@ import type {
   TxData,
   TxPrefill,
 } from "./types";
+import { isHiddenPaidOffDebt } from "./types";
 import type { CreditCardOption } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import { usePrefetchTripTagging } from "./trip-tagging-cache";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 type Props = {
   month: MonthNav;
@@ -196,6 +198,8 @@ export function BudgetBoard({
   // works with or without a selected budget row.
   const [showAddModal, setShowAddModal] = useState(false);
   const [duePayment, setDuePayment] = useState<DueItem | null>(null);
+  // The add-transaction popup below; the rail's inline form doesn't lock.
+  useScrollLock(showAddModal || (!!quickAdd && !!selected) || !!duePayment);
   // The payee autocomplete list is ~28KB — a sixth of this page's payload —
   // for a control most visits never open, so it's fetched the first time a
   // surface that needs it appears rather than shipped with the page.
@@ -321,8 +325,7 @@ export function BudgetBoard({
   // Paid-off debts are hidden from the debt group's row list, so they must
   // also drop out of the summary hero totals — otherwise the "Debt Repayment"
   // card's Planned inflates by every stale/paid-off debt's plan row.
-  const isVisibleRow = (kind: string, r: RowData) =>
-    !(kind === "debt" && r.debt && r.debt.balanceCents <= 0);
+  const isVisibleRow = (kind: string, r: RowData) => !isHiddenPaidOffDebt(kind, r);
   const kindTotals = (kinds: string[]) => {
     const matching = groups.filter((g) => kinds.includes(g.kind));
     return {

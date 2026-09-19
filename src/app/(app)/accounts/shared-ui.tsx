@@ -8,6 +8,7 @@ import { useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { payCard } from "./actions";
 import type { AccountData, BucketData, NonCardAccount } from "./types";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 export function LabeledInput({
   label,
@@ -192,6 +193,7 @@ export function PayCardModal({
   allBuckets: BucketData[];
   onClose: () => void;
 }) {
+  useScrollLock();
   const [pending, start] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string>(nonCardAccounts[0]?.id ?? "");
@@ -205,6 +207,18 @@ export function PayCardModal({
       ? sourceBuckets.find((b) => cardWords.some((w) => b.name.toLowerCase().includes(w)))?.id ?? ""
       : "";
   const [bucketId, setBucketId] = useState(defaultBucket);
+  // A card carried as a debt owes nothing on the card register (v_card_balances
+  // zeroes it) — what it owes is the debt row, so show and prefill from that.
+  const details = card.cardDetails;
+  const debtBalanceCents = details?.isRevolvingDebt ? Math.max(0, details.payoffBalanceCents) : 0;
+  // Prefill this month's Budget plan for the debt; with no plan, the minimum.
+  const debtPlanCents = details?.debtMonthPlannedCents ?? 0;
+  const debtPaidCents = details?.debtMonthPaidCents ?? 0;
+  const debtPrefillCents = debtBalanceCents > 0
+    ? Math.min(debtBalanceCents, debtPlanCents || details?.payoffMinimumCents || debtBalanceCents)
+    : 0;
+  const owedCents = card.owedCents ?? 0;
+  const prefillCents = owedCents > 0 ? owedCents : debtPrefillCents;
 
   return (
     <div
@@ -226,21 +240,37 @@ export function PayCardModal({
             ✕
           </button>
         </div>
-        {(card.owedCents ?? 0) > 0 ? (
+        {owedCents > 0 ? (
           <p className="text-xs text-muted">
-            Currently owed: <span className="font-semibold text-negative">{formatMoney(card.owedCents ?? 0, currency)}</span>
+            Currently owed: <span className="font-semibold text-negative">{formatMoney(owedCents, currency)}</span>
           </p>
+        ) : debtBalanceCents > 0 ? (
+          <div className="space-y-0.5 text-xs text-muted">
+            <p>
+              Debt balance: <span className="font-semibold text-negative">{formatMoney(debtBalanceCents, currency)}</span>
+            </p>
+            {debtPlanCents > 0 ? (
+              <p>
+                Paid this month: <span className="font-semibold text-foreground">{formatMoney(debtPaidCents, currency)}</span> of {formatMoney(debtPlanCents, currency)} planned
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
+        {/* onSubmit, not action: React resets an action form once it returns,
+            so a rejected payment snapped the amount back to the full balance —
+            one more click would then have paid all of it. */}
         <form
-          action={(fd) =>
+          onSubmit={(e) => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
             start(async () => {
               setErrorMsg(null);
               const r = await payCard(fd);
               if (r?.error) setErrorMsg(r.error);
               else onClose();
-            })
-          }
+            });
+          }}
           className="space-y-2"
         >
           <input type="hidden" name="cardId" value={card.id} />
@@ -250,13 +280,17 @@ export function PayCardModal({
             type="number"
             step="0.01"
             min="0"
-            defaultValue={card.owedCents && card.owedCents > 0 ? centsToDisplay(card.owedCents) : ""}
+            defaultValue={prefillCents > 0 ? centsToDisplay(prefillCents) : ""}
             required
             autoFocus
           />
-          {card.owedCents && card.owedCents > 0 ? (
+          {owedCents > 0 ? (
             <p className="text-[10px] text-muted">
               The full balance is prefilled. Recording this payment will bring the card to {formatMoney(0, currency)} while keeping the imported charges.
+            </p>
+          ) : debtBalanceCents > 0 ? (
+            <p className="text-[10px] text-muted">
+              {`${debtPlanCents > 0 ? "This month\u2019s Budget plan" : "The minimum payment"} is prefilled. It lowers the debt and counts as this month\u2019s payment on Budget.`}
             </p>
           ) : null}
           <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />

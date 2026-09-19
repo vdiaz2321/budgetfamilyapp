@@ -1625,7 +1625,7 @@ function CreditCardPanel({
                   <rect x="2" y="6" width="20" height="12" rx="2" />
                   <circle cx="12" cy="12" r="2.5" />
                 </svg>
-                <span className="sm:hidden">Pay</span><span className="hidden sm:inline">{owed > 0 ? "Pay balance" : "Pay card"}</span>
+                Pay Card
               </button>
             ) : null}
             {!isArchived && !card.dateClosed ? (

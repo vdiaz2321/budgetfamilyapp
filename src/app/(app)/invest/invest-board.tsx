@@ -16,6 +16,7 @@ import { AllHoldingsTable } from "./holdings-rollup";
 import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { SavingsPanel, type SavingsPanelProps } from "./savings-panel";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 export type YearCell = {
   year: number;
@@ -2038,6 +2039,7 @@ function TransferModal({
   currency: string;
   onClose: () => void;
 }) {
+  useScrollLock();
   const [pending, start] = useTransition();
   const [sourceAccountId, setSourceAccountId] = useState("");
   const [sourceBucketId, setSourceBucketId] = useState("");

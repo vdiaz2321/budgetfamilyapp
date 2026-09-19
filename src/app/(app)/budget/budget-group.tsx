@@ -14,6 +14,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { ACTUAL_LABEL, actualColorClass, BudgetRow, remainingColorClass } from "./budget-row";
 import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
+import { isHiddenPaidOffDebt } from "./types";
 
 type Props = {
   group: GroupData;
@@ -106,7 +107,6 @@ export function BudgetGroup({
   const { dragOverId, startDrag, optimisticOrder } = usePointerReorder(group.categoryId, group.rows);
 
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
-  const isDebt = group.kind === "debt";
   const isIncome = group.kind === "income";
   const actualLabel = ACTUAL_LABEL[group.kind];
   const headerActualLabel = isIncome ? "Rec'd" : actualLabel;
@@ -122,7 +122,7 @@ export function BudgetGroup({
     ? optimisticOrder.map((id) => group.rows.find((r) => r.subId === id)).filter(Boolean) as RowData[]
     : group.rows;
   const visibleRows = orderedRows.filter((r) => {
-    if (isDebt && r.debt && r.debt.balanceCents <= 0) return false;
+    if (isHiddenPaidOffDebt(group.kind, r)) return false;
     return true;
   });
 
@@ -162,39 +162,32 @@ export function BudgetGroup({
           on the right. Replaces both the old header AND the old footer. */}
       {/* Mobile header — flex layout */}
       <div
-        className="flex cursor-pointer items-center gap-2 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 @md:hidden"
+        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 @md:hidden"
         onClick={onToggle}
       >
         <button
           type="button"
           onClick={(event) => { event.stopPropagation(); onToggle(); }}
-          className="flex items-center gap-2.5 text-left"
+          className="flex min-w-0 items-center gap-2 text-left"
           aria-expanded={open}
         >
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[group.kind]}`} />
-          <span className="font-semibold">{group.name}</span>
-          <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
+          <span className="min-w-0 truncate font-semibold">{group.name}</span>
+          <span className="shrink-0 rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand">
             {countLabel}
             <span className="hidden @md:inline"> {visibleRows.length === 1 ? "item" : "items"}</span>
           </span>
         </button>
-        <CategoryGroupMenu group={group} />
-        <div className="ml-auto flex items-center gap-2 text-[11px] tabular-nums">
-          <span className="whitespace-nowrap text-xs tabular-nums">
-            <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
-            <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
-              {formatMoney(visibleSpentTotal, currency)}
-            </span>
-          </span>
-
+        <CategoryGroupMenu group={group} className="shrink-0" />
+        <div className="ml-auto flex shrink-0 items-center text-[11px] tabular-nums">
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); if (!open) onToggle(); setAdding(true); }}
@@ -206,6 +199,15 @@ export function BudgetGroup({
             </svg>
           </button>
         </div>
+        {/* Second line, lined up under the name (chevron 15 + dot 10 + two
+            8px gaps). On one line the name, count, menu, "$11,644.42 /
+            $5,101.55" and "+" needed ~30px more than a 375px phone has. */}
+        <span className="w-full whitespace-nowrap pl-[41px] text-xs tabular-nums">
+          <span className="text-muted">{formatMoney(visiblePlannedTotal, currency)} / </span>
+          <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+            {formatMoney(visibleSpentTotal, currency)}
+          </span>
+        </span>
       </div>
 
       {/* Desktop header — 12-col grid aligned with rows below */}

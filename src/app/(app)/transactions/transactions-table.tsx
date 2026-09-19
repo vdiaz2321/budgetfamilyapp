@@ -12,6 +12,7 @@ import { TransferEditorModal } from "./transfer-editor-modal";
 import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { usePrefetchTripTagging } from "../budget/trip-tagging-cache";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
   income: "Income",
@@ -91,6 +92,7 @@ export function TransactionsTable({
     setModal(target);
   };
   const [transferEdit, setTransferEdit] = useState<TxData | null>(null);
+  useScrollLock(!!modal || !!transferEdit);
   const [importOpen, setImportOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -137,7 +139,7 @@ export function TransactionsTable({
   });
   const selectedTxs = () => transactions.filter((t) => selectedIds.has(t.id));
   const selectedNetCents = () => selectedTxs().reduce(
-    (sum, t) => sum + (t.movementType ? 0 : t.kind === "income" ? t.amountCents : -t.amountCents),
+    (sum, t) => sum + (t.movementType && !t.kind ? 0 : t.kind === "income" ? t.amountCents : -t.amountCents),
     0,
   );
   const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
@@ -258,7 +260,7 @@ export function TransactionsTable({
     .filter((t) => t.kind === "income")
     .reduce((sum, t) => sum + t.amountCents, 0);
   const outflowTotal = filtered
-    .filter((t) => t.kind !== "income" && !t.movementType)
+    .filter((t) => t.kind !== "income" && (!t.movementType || t.kind))
     .reduce((sum, t) => sum + t.amountCents, 0);
   // Received minus spent for the rows in view. Early in the month, before a
   // payday lands, that is legitimately negative — so it's labelled "Net", not

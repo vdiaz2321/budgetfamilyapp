@@ -247,7 +247,9 @@ export type TripExpense = {
 // The row's actual: what the tagged transactions add up to, or, on a trip
 // without any (the imported history), the figure typed on the Travel Log.
 export function actualCents(e: TripExpense): number | null {
-  return e.txCount > 0 ? e.txActualCents ?? 0 : e.actualCents;
+  // Floored at zero like the Misc form's read-only field: a trip row with only
+  // a refund tagged to it would otherwise count negative in the trip totals.
+  return e.txCount > 0 ? Math.max(0, e.txActualCents ?? 0) : e.actualCents;
 }
 
 // What a category counts toward the trip: the real figure once there is one,

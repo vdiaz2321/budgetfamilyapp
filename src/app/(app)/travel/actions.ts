@@ -181,7 +181,7 @@ export async function saveTravelStay(formData: FormData) {
 
     const { error } = await supabase
       .from("travel_stays")
-      .update({ ...row, reward_activity_id: activityId })
+      .update({ ...row, reward_activity_id: activityId, payment_restore: null })
       .eq("id", id)
       .eq("household_id", householdId);
     if (error) {
@@ -385,7 +385,7 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
 
   const { error } = await supabase
     .from("travel_stays")
-    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId })
+    .update({ cancelled_at: cancelled ? new Date().toISOString() : null, reward_activity_id: activityId, payment_restore: null })
     .eq("id", id)
     .eq("household_id", householdId);
   if (error) {
@@ -417,7 +417,7 @@ export async function linkTravelCardLabels(
 
     const { data, error } = await supabase
       .from("travel_stays")
-      .update({ account_id: accountId || null })
+      .update({ account_id: accountId || null, payment_restore: null })
       .eq("household_id", householdId)
       .eq("card_label", clean)
       .select("id");

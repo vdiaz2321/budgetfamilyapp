@@ -401,6 +401,7 @@ export async function commitImport(csvText: string): Promise<ImportResult> {
   revalidatePath("/transactions");
   revalidatePath("/budget");
   revalidatePath("/annual");
+  revalidatePath("/insights");
 
   return {
     imported: inserted,

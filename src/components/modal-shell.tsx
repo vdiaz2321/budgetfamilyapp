@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useScrollLock } from "@/lib/use-scroll-lock";
 
 // Every ModalShell currently on screen, oldest first. Escape closes only the
 // last one: with a confirmation opened over a form, one press should dismiss
@@ -70,6 +71,7 @@ export function ModalShell({
   // screen — awkward to reach and easily overlapped by floating UI.
   mobileAlign?: "bottom" | "top";
 }) {
+  useScrollLock();
   const alignsTop = mobileAlign === "top";
   useCloseOnEscape(onClose);
   return (

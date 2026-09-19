@@ -189,7 +189,10 @@ export default async function InsightsPage({
   const purchases: PurchaseRow[] = [];
 
   for (const t of txRows ?? []) {
-    if (t.paid_to_account_id) continue; // card payment (transfer)
+    // Card payments are transfers — the charges were the spending. The one
+    // exception is a payment on a card carried as a debt: it's booked to the
+    // debt's budget item and counts like any other debt payment.
+    if (t.paid_to_account_id && !t.subcategory_id) continue;
     if (t.is_withdrawal) continue; // savings withdrawal (transfer)
     if (t.account_id && kidsAccounts.has(t.account_id)) continue; // kids money
 
