@@ -32,6 +32,7 @@ import type {
 } from "./types";
 import type { CreditCardOption } from "../subscriptions/subscriptions-board";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
+import { usePrefetchTripTagging } from "./trip-tagging-cache";
 
 type Props = {
   month: MonthNav;
@@ -98,6 +99,8 @@ export function BudgetBoard({
   subscriptionMonthPlanned,
   subscriptionMonthSpent,
 }: Props) {
+  // Trips for the transaction modal's pickers, ready before it opens.
+  usePrefetchTripTagging();
   const router = useRouter();
   const [railTab, setRailTab] = useState<"summary" | "transactions">("summary");
   const [rowFilter, setRowFilter] = useState<"all" | "overspent">("all");

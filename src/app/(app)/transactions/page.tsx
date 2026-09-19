@@ -20,6 +20,7 @@ type TransactionQueryRow = {
   bucket_id: string | null;
   property_id: string | null;
   trip_id: string | null;
+  travel_category: string | null;
   travel_stay_id: string | null;
   travel_flight_id: string | null;
   travel_car_id: string | null;
@@ -70,7 +71,7 @@ export default async function TransactionsPage({
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -100,7 +101,7 @@ export default async function TransactionsPage({
     await Promise.all([
       supabase
         .from("subcategories")
-        .select("id, category_id, name, linked_bucket_id")
+        .select("id, category_id, name, linked_bucket_id, travel_category")
         .eq("household_id", household.id)
         .order("sort_order"),
       transactionRowsPromise,
@@ -177,6 +178,7 @@ export default async function TransactionsPage({
       kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
       linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
       remainingCents: planned - actual,
+      travelCategory: s.travel_category ?? null,
     };
   });
 
@@ -243,6 +245,7 @@ export default async function TransactionsPage({
       accountId: t.account_id ?? null,
       propertyId: t.property_id ?? null,
       tripId: t.trip_id ?? null,
+      travelCategory: t.travel_category ?? null,
       bookingRef: t.travel_stay_id ? `stay:${t.travel_stay_id}` : t.travel_flight_id ? `flight:${t.travel_flight_id}` : t.travel_car_id ? `car:${t.travel_car_id}` : null,
       toAccountId: t.paid_to_account_id ?? null,
       fromBucketId: t.bucket_id ?? null,

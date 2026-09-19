@@ -11,6 +11,7 @@ import { ImportCsvModal } from "./import-csv-modal";
 import { TransferEditorModal } from "./transfer-editor-modal";
 import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
+import { usePrefetchTripTagging } from "../budget/trip-tagging-cache";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
   income: "Income",
@@ -72,6 +73,8 @@ export function TransactionsTable({
   payeeLineItems = [],
   dateRange,
 }: Props) {
+  // Trips for the transaction modal's pickers, ready before it opens.
+  usePrefetchTripTagging();
   const router = useRouter();
   // null = closed, "new" = add form, otherwise an existing tx to edit.
   const [modal, setModal] = useState<"new" | TxData | null>(null);

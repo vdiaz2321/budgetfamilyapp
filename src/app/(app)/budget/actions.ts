@@ -14,6 +14,7 @@ import { unwrap } from "@/lib/supabase-result";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
 import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef } from "@/app/(app)/travel/booking-payments";
+import type { TripTagging } from "./types";
 
 const TRAVEL_CATEGORY_KEYS = new Set(["restaurants", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash", "other"]);
 
@@ -24,6 +25,21 @@ function bookingPointsOf(formData: FormData): number | null {
   if (!raw) return null;
   const n = Math.trunc(Number(raw));
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+// The Travel Log row picked on the form for a trip purchase on the catch-all
+// item (its own row is "Other"). Kept only when it applies — a trip, no
+// booking, that item — and only when it differs from the item's row, so
+// null always means "the item decides".
+function travelCategoryOf(
+  formData: FormData,
+  itemCategory: string | null | undefined,
+  tripId: string | null,
+  booking: BookingRef | null,
+): string | null {
+  if (!tripId || booking || itemCategory !== "other") return null;
+  const raw = String(formData.get("travelCategory") ?? "").trim();
+  return TRAVEL_CATEGORY_KEYS.has(raw) && raw !== "other" ? raw : null;
 }
 
 // The bucket a Savings subcategory contributes to, if any linked — null when
@@ -980,20 +996,54 @@ async function resolveTripTag(
   return data?.id ?? null;
 }
 
-// The trips the transaction modal offers: this year's and upcoming, newest
-// first, with their dates so the one covering the transaction's date can be
-// picked on its own. Fetched on open, like payees, not shipped with every page.
-export async function listTripsForTagging(): Promise<{ id: string; name: string; startOn: string | null; endOn: string | null }[]> {
+// Everything the transaction modal's trip pickers need, in ONE server call:
+// every trip (newest first, with dates so the one covering the transaction's
+// date is picked on its own) and each trip's live bookings for "Pays for".
+// ALL trips, not just this year's: a purchase tagged to last December's trip
+// must still find its trip when edited in January, or saving would untag it
+// and drop its booking link. The modal narrows what the dropdown lists. Loaded when the page opens and kept on the client
+// (trip-tagging-cache.ts), so the pickers are there the moment the modal is —
+// two calls made on open took over a second, since server actions run one at
+// a time.
+export async function listTripTagging(): Promise<TripTagging> {
   const { supabase, householdId } = await requireHousehold();
-  const thisYear = `${new Date().getFullYear()}-01-01`;
   const { data, error } = await supabase
     .from("travel_trips")
     .select("id, name, start_on, end_on")
     .eq("household_id", householdId)
-    .or(`start_on.is.null,start_on.gte.${thisYear}`)
     .order("start_on", { ascending: false, nullsFirst: true });
   if (error) throw new Error(`Could not load the trips: ${error.message}`);
-  return (data ?? []).map((t) => ({ id: t.id, name: t.name, startOn: t.start_on ?? null, endOn: t.end_on ?? null }));
+  const trips = (data ?? []).map((t) => ({ id: t.id, name: t.name, startOn: t.start_on ?? null, endOn: t.end_on ?? null }));
+  const tripIds = trips.map((t) => t.id);
+  if (tripIds.length === 0) return { trips, bookingsByTrip: {} };
+
+  const [stays, flights, cars] = await Promise.all([
+    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_cars").select("id, trip_id, company, pickup_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+  ]);
+  const problem = stays.error ?? flights.error ?? cars.error;
+  if (problem) throw new Error(`Could not load the trips' bookings: ${problem.message}`);
+  const day = (iso: string) => {
+    const [y, m, d] = iso.split("-");
+    return `${Number(d)}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y.slice(2)}`;
+  };
+  const base = (b: { trip_id: string | null; pocket_cost_cents: number | null; is_estimate: boolean | null; points_cost: number | null; points_used: boolean | null; account_id: string | null }) => ({
+    tripId: b.trip_id as string,
+    pocketCents: Number(b.pocket_cost_cents ?? 0),
+    isEstimate: Boolean(b.is_estimate),
+    pointsCost: Number(b.points_cost ?? 0),
+    pointsUsed: Boolean(b.points_used),
+    hasCard: Boolean(b.account_id),
+  });
+  const rows = [
+    ...(stays.data ?? []).map((s) => ({ ref: `stay:${s.id}`, on: s.check_in, label: `Stay · ${s.property_name} · ${day(s.check_in)}`, ...base(s) })),
+    ...(flights.data ?? []).map((f) => ({ ref: `flight:${f.id}`, on: f.first_flight_on, label: `Flight · ${f.airline} · ${day(f.first_flight_on)}`, ...base(f) })),
+    ...(cars.data ?? []).map((c) => ({ ref: `car:${c.id}`, on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, ...base(c) })),
+  ].sort((a, b) => a.on.localeCompare(b.on));
+  const bookingsByTrip: TripTagging["bookingsByTrip"] = {};
+  for (const { on: _on, tripId, ...r } of rows) (bookingsByTrip[tripId] ??= []).push(r);
+  return { trips, bookingsByTrip };
 }
 
 // A payment linked to a booking sets that booking's pocket cost and marks it
@@ -1004,8 +1054,9 @@ async function syncBookings(
   // Points typed on the form go onto the LAST ref (the booking being paid).
   pointsTyped: number | null,
   ...refs: Array<BookingRef | null>
-) {
+): Promise<string | null> {
   const seen = new Set<string>();
+  const problems: string[] = [];
   const target = refs[refs.length - 1];
   // Compared by id, not identity: on an edit the "before" and "after" refs
   // are usually the same booking read twice.
@@ -1015,40 +1066,15 @@ async function syncBookings(
     if (!ref || seen.has(key)) continue;
     seen.add(key);
     const problem = await syncBookingPayment(supabase, householdId, ref, key === targetKey ? pointsTyped : null);
-    if (problem) console.error("[syncBookingPayment]", problem);
+    if (problem) {
+      console.error("[syncBookingPayment]", problem);
+      problems.push(problem);
+    }
   }
   revalidatePath("/travel");
-}
-
-// The bookings of one trip, for the transaction form's "Pays for" pick:
-// live (not cancelled) stays, flights and rentals, oldest first.
-export async function listTripBookings(
-  tripId: string,
-): Promise<{ ref: string; label: string; pocketCents: number; isEstimate: boolean; pointsCost: number; pointsUsed: boolean; hasCard: boolean }[]> {
-  const { supabase, householdId } = await requireHousehold();
-  if (!tripId) return [];
-  const [stays, flights, cars] = await Promise.all([
-    supabase.from("travel_stays").select("id, property_name, check_in, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).eq("trip_id", tripId),
-    supabase.from("travel_flights").select("id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).eq("trip_id", tripId),
-    supabase.from("travel_cars").select("id, company, pickup_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).eq("trip_id", tripId),
-  ]);
-  const problem = stays.error ?? flights.error ?? cars.error;
-  if (problem) throw new Error(`Could not load the trip's bookings: ${problem.message}`);
-  const day = (iso: string) => {
-    const [y, m, d] = iso.split("-");
-    return `${Number(d)}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y.slice(2)}`;
-  };
-  const pts = (b: { points_cost: number | null; points_used: boolean | null; account_id: string | null }) => ({
-    pointsCost: Number(b.points_cost ?? 0),
-    pointsUsed: Boolean(b.points_used),
-    hasCard: Boolean(b.account_id),
-  });
-  const rows = [
-    ...(stays.data ?? []).filter((s) => !s.cancelled_at).map((s) => ({ ref: `stay:${s.id}`, on: s.check_in, label: `Stay · ${s.property_name} · ${day(s.check_in)}`, pocketCents: Number(s.pocket_cost_cents ?? 0), isEstimate: Boolean(s.is_estimate), ...pts(s) })),
-    ...(flights.data ?? []).filter((f) => !f.cancelled_at).map((f) => ({ ref: `flight:${f.id}`, on: f.first_flight_on, label: `Flight · ${f.airline} · ${day(f.first_flight_on)}`, pocketCents: Number(f.pocket_cost_cents ?? 0), isEstimate: Boolean(f.is_estimate), ...pts(f) })),
-    ...(cars.data ?? []).filter((c) => !c.cancelled_at).map((c) => ({ ref: `car:${c.id}`, on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, pocketCents: Number(c.pocket_cost_cents ?? 0), isEstimate: Boolean(c.is_estimate), ...pts(c) })),
-  ];
-  return rows.sort((a, b) => a.on.localeCompare(b.on)).map(({ on: _on, ...r }) => r);
+  // The payment itself is saved by now; this is only what the booking
+  // couldn't take, for the form to show.
+  return problems.length ? problems.join(" ") : null;
 }
 
 async function resolvePropertyId(
@@ -1097,7 +1123,7 @@ export async function addTransaction(formData: FormData) {
   const sub = unwrap(
     await supabase
       .from("subcategories")
-      .select("category_id, name, linked_bucket_id, linked_account_id, categories(kind)")
+      .select("category_id, name, linked_bucket_id, linked_account_id, travel_category, categories(kind)")
       .eq("id", subcategoryId)
       .eq("household_id", householdId)
       .maybeSingle<{
@@ -1105,6 +1131,7 @@ export async function addTransaction(formData: FormData) {
         name: string;
         linked_bucket_id: string | null;
         linked_account_id: string | null;
+        travel_category: string | null;
         categories: { kind: string } | null;
       }>(),
     "subcategories",
@@ -1187,7 +1214,7 @@ export async function addTransaction(formData: FormData) {
 
   const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
   const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
-  await supabase.from("transactions").insert({
+  unwrap(await supabase.from("transactions").insert({
     household_id: householdId,
     occurred_on: occurredOn,
     amount_cents: amountCents,
@@ -1199,12 +1226,13 @@ export async function addTransaction(formData: FormData) {
     property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
     trip_id: tripId,
     ...bookingColumns(booking),
+    travel_category: travelCategoryOf(formData, sub.travel_category, tripId, booking),
     memo,
     is_withdrawal: isWithdrawal,
     cleared,
     source: "manual",
-  });
-  if (booking) await syncBookings(supabase, householdId, bookingPointsOf(formData), booking);
+  }), "saving the transaction");
+  const bookingWarning = booking ? await syncBookings(supabase, householdId, bookingPointsOf(formData), booking) : null;
 
   // A contribution adds to the linked bucket; a withdrawal (e.g. using the
   // Real Estate bucket for a down payment) subtracts from it instead. All
@@ -1255,6 +1283,7 @@ export async function addTransaction(formData: FormData) {
   revalidatePath("/accounts");
   revalidatePath("/annual");
   revalidatePath("/invest");
+  return bookingWarning ? { warning: bookingWarning } : undefined;
 }
 
 export async function updateTransaction(formData: FormData) {
@@ -1310,13 +1339,14 @@ export async function updateTransaction(formData: FormData) {
   const sub = unwrap(
     await supabase
       .from("subcategories")
-      .select("category_id, linked_bucket_id, linked_account_id, categories(kind)")
+      .select("category_id, linked_bucket_id, linked_account_id, travel_category, categories(kind)")
       .eq("id", subcategoryId)
       .eq("household_id", householdId)
       .maybeSingle<{
         category_id: string;
         linked_bucket_id: string | null;
         linked_account_id: string | null;
+        travel_category: string | null;
         categories: { kind: string } | null;
       }>(),
     "subcategories",
@@ -1378,7 +1408,7 @@ export async function updateTransaction(formData: FormData) {
   );
   const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
   const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
-  await supabase
+  unwrap(await supabase
     .from("transactions")
     .update({
       occurred_on: occurredOn,
@@ -1391,12 +1421,15 @@ export async function updateTransaction(formData: FormData) {
       property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
       trip_id: tripId,
       ...bookingColumns(booking),
+      travel_category: travelCategoryOf(formData, sub.travel_category, tripId, booking),
       memo,
       is_withdrawal: isWithdrawal,
     })
     .eq("id", id)
-    .eq("household_id", householdId);
-  if (prevBooking || booking) await syncBookings(supabase, householdId, booking ? bookingPointsOf(formData) : null, prevBooking, booking);
+    .eq("household_id", householdId), "saving the transaction");
+  const bookingWarning = prevBooking || booking
+    ? await syncBookings(supabase, householdId, booking ? bookingPointsOf(formData) : null, prevBooking, booking)
+    : null;
 
   // Undo the old transaction's bucket effect (it may have hit a different
   // bucket, or none at all), then apply the new one's. All linked-id lookups
@@ -1477,6 +1510,7 @@ export async function updateTransaction(formData: FormData) {
   revalidatePath("/accounts");
   revalidatePath("/annual");
   revalidatePath("/invest");
+  return bookingWarning ? { warning: bookingWarning } : undefined;
 }
 
 // Lightweight inline edit used by the transaction register. It changes only

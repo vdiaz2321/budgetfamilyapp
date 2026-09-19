@@ -111,18 +111,20 @@ export async function syncBookingPayment(
     // rebuilds the total from them on its next save, so the typed figure
     // goes on the first passenger and the rest are cleared.
     if (ref.kind === "flight") {
-      const { data: pax } = await supabase
+      const { data: pax, error: paxError } = await supabase
         .from("travel_flight_passengers")
         .select("id, sort_order")
         .eq("flight_id", ref.id)
         .eq("household_id", householdId)
         .order("sort_order");
+      if (paxError) return `Couldn't read the flight's passengers — ${paxError.message}`;
       for (const [i, p] of (pax ?? []).entries()) {
-        await supabase
+        const { error: paxSave } = await supabase
           .from("travel_flight_passengers")
           .update({ points_used: i === 0 && pointsTyped > 0, points_cost: i === 0 ? pointsTyped : 0 })
           .eq("id", p.id)
           .eq("household_id", householdId);
+        if (paxSave) return `Couldn't set the flight's points — ${paxSave.message}`;
       }
     }
   }

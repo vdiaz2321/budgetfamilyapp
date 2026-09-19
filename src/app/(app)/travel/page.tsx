@@ -70,7 +70,7 @@ export default async function TravelPage() {
     // are negative and come off it. Untagged or unmapped ones stay out.
     supabase
       .from("transactions")
-      .select("trip_id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, subcategories(travel_category)")
+      .select("trip_id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, travel_category, subcategories(travel_category)")
       .eq("household_id", household.id)
       .not("trip_id", "is", null),
   ]);
@@ -92,13 +92,16 @@ export default async function TravelPage() {
   type TripTxRow = {
     trip_id: string | null; amount_cents: number;
     travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null;
+    travel_category: string | null;
     subcategories: { travel_category: string | null } | { travel_category: string | null }[] | null;
   };
   for (const t of (tripTx.data ?? []) as unknown as TripTxRow[]) {
     // Paying for a booking is the booking's pocket cost, not spending on top.
     if (t.travel_stay_id || t.travel_flight_id || t.travel_car_id) continue;
     const sub = Array.isArray(t.subcategories) ? t.subcategories[0] : t.subcategories;
-    const category = sub?.travel_category;
+    // A row picked on the purchase itself (Parking under Traveling/Trips)
+    // wins over the item's own row.
+    const category = t.travel_category ?? sub?.travel_category;
     if (!t.trip_id || !category) continue;
     const key = `${t.trip_id}:${category}`;
     const cur = txByRow.get(key) ?? { cents: 0, count: 0 };

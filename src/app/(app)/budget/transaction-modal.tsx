@@ -5,8 +5,10 @@ import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, moneyExpressionToCents } from "@/lib/money";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared, listTripsForTagging, listTripBookings } from "./actions";
+import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
+import { refreshTripTagging, useTripTagging } from "./trip-tagging-cache";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
+import { EXPENSE_CATEGORIES } from "../travel/types";
 
 // Button label (short), plus tab labels.
 const KIND_SHORT: Record<CategoryKind, string> = {
@@ -146,6 +148,10 @@ export function TransactionModal({
   const [errors, setErrors] = useState<string[]>([]);
   const [errorFields, setErrorFields] = useState<Set<string>>(new Set());
   const [errorSplitIds, setErrorSplitIds] = useState<Set<string>>(new Set());
+  // Saved, but the booking it pays for couldn't take all of it (usually the
+  // card is short on points). The payment stays; the modal stays open to say
+  // so, with Done in place of Save so it can't be added twice.
+  const [savedWarning, setSavedWarning] = useState<string | null>(null);
   function clearErrors() {
     setErrors([]);
     setErrorFields(new Set());
@@ -203,41 +209,71 @@ export function TransactionModal({
   const defaultDate = editTx?.date ?? initialDate ?? (today.startsWith(monthKey) ? today : firstOfMonth);
   // ---- Trip tag. A purchase on a trip is tagged to it here, once, and
   // shows on the Travel Log as that trip's Actual spending — no retyping.
-  // The list is fetched on open (like payees); the trip whose dates cover
-  // the transaction's date is picked on its own until one is chosen by hand.
-  const [trips, setTrips] = useState<{ id: string; name: string; startOn: string | null; endOn: string | null }[]>([]);
-  useEffect(() => {
-    void listTripsForTagging().then(setTrips).catch(() => setTrips([]));
-  }, []);
+  // The list is loaded when the page opens (trip-tagging-cache.ts); the trip
+  // whose dates cover the transaction's date is picked on its own until one
+  // is chosen by hand.
+  const { trips, bookingsByTrip } = useTripTagging();
   const [dateValue, setDateValue] = useState(defaultDate);
   const [tripId, setTripId] = useState(editTx?.tripId ?? "");
   const [tripTouched, setTripTouched] = useState(isEdit);
   const tripForDate = trips.find((t) => t.startOn && t.endOn && dateValue >= t.startOn && dateValue <= t.endOn) ?? null;
   const effectiveTripId = tripTouched ? tripId : tripForDate?.id ?? "";
+  // The dropdown lists trips still running this year or ahead — plus
+  // whichever trip is selected, however old, so an edit never loses it.
+  const thisYearStart = `${new Date().getFullYear()}-01-01`;
+  const tripChoices = trips.filter(
+    (t) => !t.startOn || (t.endOn ?? t.startOn) >= thisYearStart || t.id === effectiveTripId,
+  );
   // What the payment is for: one of the trip's bookings (its pocket cost
   // follows this payment) or nothing in particular (day-to-day spending).
-  const [bookings, setBookings] = useState<{ ref: string; label: string; pocketCents: number; isEstimate: boolean; pointsCost: number; pointsUsed: boolean; hasCard: boolean }[]>([]);
+  const bookings = (effectiveTripId && bookingsByTrip[effectiveTripId]) || [];
   // Points typed beside the payment. Blank leaves the booking's own figure.
   const [bookingPoints, setBookingPoints] = useState("");
   const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? "");
-  useEffect(() => {
-    let live = true;
-    // No trip, no bookings — resolved the same async way so the effect never
-    // sets state synchronously.
-    const load = effectiveTripId ? listTripBookings(effectiveTripId) : Promise.resolve([]);
-    void load
-      .then((rows) => {
-        if (live) setBookings(rows);
-      })
-      .catch(() => {
-        if (live) setBookings([]);
-      });
-    return () => {
-      live = false;
-    };
-  }, [effectiveTripId]);
   const bookingOk = bookings.some((b) => b.ref === bookingRef);
+  // Which Travel Log column a trip purchase on the catch-all item
+  // (Traveling/Trips, whose own column is Other) lands in. Every other item
+  // has one fixed column, set on its item form.
+  const [travelCategory, setTravelCategory] = useState(editTx?.travelCategory ?? "other");
   const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
+  // On a trip, an item with a travel twin — same Travel Log column, "Travel"
+  // in its name (Restaurants → Restaurant Travel) — switches to that twin, so
+  // the Annual Overview files the meal under travel. Taking the trip off
+  // switches it back. Adjusted during render (not in an effect) so the form
+  // never shows the wrong item for a frame.
+  const travelTwinOf = (subId: string) => {
+    const o = subOptions.find((x) => x.id === subId);
+    if (!o?.travelCategory || /travel/i.test(o.name)) return null;
+    return subOptions.find((x) => x.id !== o.id && x.travelCategory === o.travelCategory && /travel/i.test(x.name))?.id ?? null;
+  };
+  // twin id → the item it replaced, for switching back.
+  const [swappedFrom, setSwappedFrom] = useState<Record<string, string>>({});
+  if (effectiveTripId) {
+    const next = splits.map((sp) => {
+      const twin = travelTwinOf(sp.subId);
+      return twin && !splits.some((o) => o.subId === twin) ? { ...sp, subId: twin } : sp;
+    });
+    if (next.some((sp, i) => sp.subId !== splits[i].subId)) {
+      const record = { ...swappedFrom };
+      next.forEach((sp, i) => {
+        if (sp.subId !== splits[i].subId) record[sp.subId] = splits[i].subId;
+      });
+      setSplits(next);
+      setSwappedFrom(record);
+    }
+  } else if (Object.keys(swappedFrom).length > 0) {
+    setSplits(
+      splits.map((sp) => {
+        const original = swappedFrom[sp.subId];
+        return original && !splits.some((o) => o.subId === original) ? { ...sp, subId: original } : sp;
+      }),
+    );
+    setSwappedFrom({});
+  }
+  const swapNote = Object.entries(swappedFrom)
+    .filter(([twin]) => splits.some((sp) => sp.subId === twin))
+    .map(([twin, original]) => `${subOptions.find((o) => o.id === original)?.name} → ${subOptions.find((o) => o.id === twin)?.name}`)
+    .join(", ");
   // Both add and edit share the two-tab UI now, so "Income" narrows to income
   // subs and "Expense" opens to any spend kind (savings/bills/expenses/debt).
   // A locked initial kind (Budget's Debt/Savings row context) still filters
@@ -342,6 +378,8 @@ export function TransactionModal({
       // already landed, instead of letting the rejection vanish and leaving
       // the user staring at a modal that did half the work.
       let saved = 0;
+      const warnings: string[] = [];
+      const note = (r: { warning?: string } | void) => { if (r?.warning) warnings.push(r.warning); };
       try {
       if (isEdit) {
         // Splits-on-edit: replace the original transaction with N new ones
@@ -359,14 +397,15 @@ export function TransactionModal({
             });
             sfd.set("subcategoryId", sp.subId);
             sfd.set("amount", (sp.amountCents / 100).toFixed(2));
-            await addTransaction(sfd);
+            note(await addTransaction(sfd));
             saved++;
           }
         } else {
           fd.set("subcategoryId", splits[0].subId);
           fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
-          await updateTransaction(fd);
+          note(await updateTransaction(fd));
         }
+        if (warnings.length) return setSavedWarning(warnings.join(" "));
         onClose();
       } else {
         if (splits.length === 0) return;
@@ -375,9 +414,10 @@ export function TransactionModal({
           fd.forEach((v, k) => { if (k !== "subcategoryId" && k !== "amount") sfd.append(k, v); });
           sfd.set("subcategoryId", sp.subId);
           sfd.set("amount", (sp.amountCents / 100).toFixed(2));
-          await addTransaction(sfd);
+          note(await addTransaction(sfd));
           saved++;
         }
+        if (warnings.length) return setSavedWarning(warnings.join(" "));
         if (fd.get("createAnother") === "on") {
           formRef.current?.reset();
           setSplits([]);
@@ -397,6 +437,9 @@ export function TransactionModal({
         setErrorFields(new Set());
         setErrorSplitIds(new Set());
       }
+      // A payment can change a booking (its Pocket cost, Planned → Booked),
+      // so the next open shows it as it is now.
+      void refreshTripTagging();
     });
   }
 
@@ -488,6 +531,9 @@ export function TransactionModal({
             // browser's validation off routes every reason through the single
             // banner above the footer, which names the field.
             noValidate
+            // Saved with a warning: React has reset the fields by now, so
+            // they'd show blanks and the wrong trip. Only the message stays.
+            hidden={savedWarning != null}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
               const el = e.target as HTMLElement;
@@ -696,7 +742,7 @@ export function TransactionModal({
                   className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                 >
                   <option value="">Not part of a trip</option>
-                  {trips.map((t) => (
+                  {tripChoices.map((t) => (
                     <option key={t.id} value={t.id}>Trip: {t.name}</option>
                   ))}
                 </select>
@@ -736,13 +782,31 @@ export function TransactionModal({
                     </label>
                   </div>
                 ) : null}
+                {effectiveTripId && !bookingOk && splits.some((sp) => subOptions.find((o) => o.id === sp.subId)?.travelCategory === "other") ? (
+                  <select
+                    name="travelCategory"
+                    value={travelCategory}
+                    onChange={(e) => setTravelCategory(e.target.value)}
+                    className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  >
+                    {(["other", "parking", "transport", "cash"] as const).map((key) => (
+                      <option key={key} value={key}>
+                        {/* In a split only the catch-all item's part uses it — say which. */}
+                        {splits.length > 1
+                          ? `${subOptions.find((o) => o.travelCategory === "other" && splits.some((sp) => sp.subId === o.id))?.name ?? "Travel"} column: `
+                          : "Travel Log column: "}
+                        {EXPENSE_CATEGORIES.find((c) => c.key === key)?.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 {effectiveTripId ? (
                   <span className="mt-1 block px-1 text-[11px] text-muted">
                     {bookingOk
                       ? paidBooking?.hasCard
                         ? "Sets that booking's Pocket cost to its payments added up, marks it Booked, and takes the points off its card."
                         : "Sets that booking's Pocket cost to its payments added up and marks it Booked. No card is linked on it, so points are recorded but not taken from any card."
-                      : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.`}
+                      : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}`}
                   </span>
                 ) : null}
               </div>
@@ -774,7 +838,26 @@ export function TransactionModal({
             ))}
           </div>
         ) : null}
+        {savedWarning ? (
+          <div
+            role="alert"
+            className="border-t border-negative/30 bg-negative/10 px-3 py-2 text-xs font-semibold text-negative"
+          >
+            <p>Transaction saved. {savedWarning}</p>
+          </div>
+        ) : null}
 
+        {savedWarning ? (
+          <div className={"flex justify-end border-t border-line px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] " + HEADER_TINT[txType]}>
+            <button
+              type="button"
+              onClick={onClose}
+              className={"rounded-xl px-2.5 py-1 text-xs font-bold transition-colors sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
+            >
+              Done
+            </button>
+          </div>
+        ) : (
         <div className={"flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 border-t border-line px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]  " + HEADER_TINT[txType]}>
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
@@ -887,6 +970,7 @@ export function TransactionModal({
             </button>
           </div>
         </div>
+        )}
       </div>
     </>
   );

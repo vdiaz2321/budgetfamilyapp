@@ -152,6 +152,7 @@ export default async function SnowballPage() {
       propertyId: null,
       tripId: null,
       bookingRef: null,
+      travelCategory: null,
       toAccountId: null,
       fromBucketId: null,
       toBucketId: null,

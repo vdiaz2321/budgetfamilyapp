@@ -128,6 +128,10 @@ export type SubOption = {
   // row can show money "left" while its stored plan is fully spent and cannot
   // be trimmed at all.
   trimmableCents?: number;
+  // The Travel Log row this item's trip purchases count in
+  // (subcategories.travel_category). "other" marks the catch-all item, whose
+  // purchases can pick a more exact row on the transaction form.
+  travelCategory?: string | null;
 };
 
 // An account option for the add-transaction form.
@@ -192,6 +196,9 @@ export type TxData = {
   tripId: string | null;
   // The booking it pays for, as "stay:<id>" / "flight:<id>" / "car:<id>".
   bookingRef: string | null;
+  // The Travel Log row picked on the purchase itself, when it overrides the
+  // item's (only on the catch-all travel item).
+  travelCategory: string | null;
   toAccountId: string | null;
   fromBucketId: string | null;
   toBucketId: string | null;
@@ -213,4 +220,20 @@ export type TxPrefill = {
   cents: number;
   accountId: string | null;
   payee: string | null;
+};
+
+// The transaction modal's trip pickers: taggable trips and each one's live
+// bookings (for "Pays for"), keyed by trip id. See listTripTagging().
+export type TripBookingOption = {
+  ref: string;
+  label: string;
+  pocketCents: number;
+  isEstimate: boolean;
+  pointsCost: number;
+  pointsUsed: boolean;
+  hasCard: boolean;
+};
+export type TripTagging = {
+  trips: { id: string; name: string; startOn: string | null; endOn: string | null }[];
+  bookingsByTrip: Record<string, TripBookingOption[]>;
 };

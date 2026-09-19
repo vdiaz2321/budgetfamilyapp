@@ -81,7 +81,7 @@ export default async function BudgetPage({
     supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
       )
       .eq("household_id", household.id)
       .gte("occurred_on", prevFirstOfMonth)
@@ -579,6 +579,7 @@ export default async function BudgetPage({
     kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
     linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
     remainingCents: remainingBySub.get(s.id),
+    travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
     trimmableCents: Math.max(0, (plannedBySub.get(s.id) ?? 0) - (spentBySub.get(s.id) ?? 0)),
   }));
 
@@ -676,6 +677,7 @@ export default async function BudgetPage({
       accountId: t.account_id ?? null,
       propertyId: t.property_id ?? null,
       tripId: (t as { trip_id?: string | null }).trip_id ?? null,
+      travelCategory: (t as { travel_category?: string | null }).travel_category ?? null,
       bookingRef: (t as { travel_stay_id?: string | null }).travel_stay_id ? `stay:${(t as { travel_stay_id?: string | null }).travel_stay_id}` : (t as { travel_flight_id?: string | null }).travel_flight_id ? `flight:${(t as { travel_flight_id?: string | null }).travel_flight_id}` : (t as { travel_car_id?: string | null }).travel_car_id ? `car:${(t as { travel_car_id?: string | null }).travel_car_id}` : null,
       toAccountId: t.paid_to_account_id ?? null,
       fromBucketId: t.bucket_id ?? null,
