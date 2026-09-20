@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ModalShell } from "@/components/modal-shell";
 import { formatMoney } from "@/lib/money";
-import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { ExpandIcon } from "./travel-board";
 import { CarsList } from "./cars-panel";
 import { FlightsList } from "./flights-panel";
 import { SearchBox } from "./search-box";
@@ -44,8 +45,9 @@ export function TransportLogPanel({
   onEditFlight: (flight: TravelFlight) => void;
   onEditCar: (car: TravelCar) => void;
 }) {
-  const [state, setState] = useSessionCollapse("travel-transport-log", () => ({ open: false }));
-  const open = !!state.open;
+  // The list opens in a full-width popup rather than unfolding here: this card
+  // is a third of a row, and the flight rows need the whole width.
+  const [expanded, setExpanded] = useState(false);
   const years = useMemo(
     () =>
       Array.from(new Set([...flights.map((f) => f.firstFlightOn.slice(0, 4)), ...cars.map((c) => c.pickupOn.slice(0, 4))]))
@@ -70,36 +72,36 @@ export function TransportLogPanel({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6 ${open ? "border-b border-line" : ""}`}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
         <button
           type="button"
-          onClick={() => setState({ open: !open })}
-          aria-expanded={open}
+          onClick={() => setExpanded(true)}
           className="flex items-center gap-2 text-left"
         >
-          <svg
-            aria-hidden
-            viewBox="0 0 20 20"
-            className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M5 7.5 10 12.5 15 7.5" />
-          </svg>
+          <ExpandIcon />
           <span className="text-sm font-bold">Flights &amp; Rentals Log</span>
         </button>
-        <Figure label="Total flights" value={String(shownFlights.length)} />
-        <Figure label="Total rentals" value={String(shownCars.length)} />
+        {/* One figure and the year it covers; the counts and the search open
+            with the list. */}
         <Figure label="Total spent" value={formatMoney(total, currency)} className="text-negative" />
-        <SearchBox value={query} onChange={setQuery} placeholder="Search airline, airport…" label="Search flights and rentals" className="w-44" />
-        <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" className="ml-auto" />
+        <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
       </div>
 
-      {open ? (
-        <>
+      {expanded ? (
+        <ModalShell
+          title="Flights & Rentals Log"
+          onClose={() => setExpanded(false)}
+          className="sm:max-w-[96vw]"
+          headerExtra={
+            <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <Figure label="Total flights" value={String(shownFlights.length)} />
+              <Figure label="Total rentals" value={String(shownCars.length)} />
+              <Figure label="Total spent" value={formatMoney(total, currency)} className="text-negative" />
+              <SearchBox value={query} onChange={setQuery} placeholder="Search airline, airport…" label="Search flights and rentals" className="w-44" />
+              <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
+            </span>
+          }
+        >
           {shownFlights.length > 0 ? (
             <>
               <GroupHeading title="Flights" />
@@ -115,7 +117,7 @@ export function TransportLogPanel({
           {shownFlights.length === 0 && shownCars.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-muted sm:px-6">No flights or rentals match.</p>
           ) : null}
-        </>
+        </ModalShell>
       ) : null}
     </section>
   );

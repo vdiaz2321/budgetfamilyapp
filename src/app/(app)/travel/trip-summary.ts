@@ -211,3 +211,31 @@ export function summarizeTrips(
     // Newest first; a trip with no dates yet (just made) sits at the top.
     .sort((a, b) => (b.start ?? "9999").localeCompare(a.start ?? "9999"));
 }
+
+/**
+ * One trip's bookings added up per kind, planned against actual — the same
+ * rule `bookingPlanActual` uses, applied straight to the records so the Trip
+ * spending table can show Stays / Flights / Rental beside the typed
+ * categories. Cancelled bookings count for nothing.
+ */
+export function bookingTotalsFor(
+  tripId: string,
+  stays: TravelStay[],
+  flights: TravelFlight[],
+  cars: TravelCar[],
+): Record<"stay" | "flight" | "car", { planned: number; actual: number }> {
+  const add = (
+    rows: { tripId: string | null; cancelledAt: string | null; isEstimate: boolean; plannedCostCents: number | null; pocketCostCents: number }[],
+  ) =>
+    rows
+      .filter((r) => r.tripId === tripId && !r.cancelledAt)
+      .reduce(
+        (totals, r) => ({
+          // Not booked yet: the price on it IS the plan, and nothing is spent.
+          planned: totals.planned + (r.isEstimate ? r.pocketCostCents : r.plannedCostCents ?? 0),
+          actual: totals.actual + (r.isEstimate ? 0 : r.pocketCostCents),
+        }),
+        { planned: 0, actual: 0 },
+      );
+  return { stay: add(stays), flight: add(flights), car: add(cars) };
+}

@@ -376,9 +376,12 @@ function CreditCardSection({
   const hideHotelColumn = (showOnlyTravelRedeem || categoryFilter === "travel") && focusedCategory !== "hotel";
   // Each rewards group collapses on its own header, persisted for the session
   // like the other collapsibles on this page. Undefined means open.
+  // A fresh login starts them all shut — thirteen cards' worth of rows is not
+  // what the page should open on; whatever is expanded then lasts the session.
+  // The key is versioned so an older session's "open" doesn't carry over.
   const [groupOpen, setGroupOpen] = useSessionCollapse(
-    "travel-credit-groups-open",
-    () => ({ travel: true, hotel: true, other: true }),
+    "travel-credit-groups-open-v2",
+    () => ({ travel: false, hotel: false, other: false }),
   );
   const toggleGroup = (key: string) =>
     setGroupOpen((state) => ({ ...state, [key]: state[key] === false }));
@@ -821,7 +824,7 @@ function CreditCardSection({
                       type="button"
                       onClick={() => toggleGroup("travel")}
                       aria-expanded={travelOpen}
-                      className="flex flex-1 items-center gap-2 text-left sm:gap-2.5"
+                      className="flex items-center gap-2 text-left sm:gap-2.5"
                     >
                     <GroupChevron open={travelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
@@ -834,7 +837,10 @@ function CreditCardSection({
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
-                    <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                    {/* Right beside the card count, not flung to the far edge:
+                        on a wide screen the figure was a screen away from the
+                        name it belongs to. */}
+                    <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
                   </div>
@@ -848,7 +854,7 @@ function CreditCardSection({
                       type="button"
                       onClick={() => toggleGroup("hotel")}
                       aria-expanded={hotelOpen}
-                      className="flex flex-1 items-center gap-2 text-left sm:gap-2.5"
+                      className="flex items-center gap-2 text-left sm:gap-2.5"
                     >
                     <GroupChevron open={hotelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
@@ -862,7 +868,7 @@ function CreditCardSection({
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
-                    <span className={`ml-auto whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                    <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
                   </div>
@@ -1196,7 +1202,7 @@ function EditRewardActivityModal({
         <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] text-sm">
           <p>
             This entry was made by a hotel stay{entry.note ? ` (${entry.note})` : ""}. To change its points, open that stay
-            in the <span className="font-semibold">Hotel Reservations Log</span> and edit it there.
+            in the <span className="font-semibold">Hotel Log</span> and edit it there.
           </p>
           <button type="button" onClick={onDone} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800">
             OK

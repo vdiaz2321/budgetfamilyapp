@@ -18,6 +18,9 @@ export type SubscriptionRow = {
   // sub plans every month, an annual one only in its renewal month.
   monthPlannedCents?: number;
   monthSpentCents?: number;
+  /** Ids of the transactions that make up `monthSpentCents`, so the row can
+   *  show WHICH charge landed — not just that the total moved. */
+  monthTxIds?: string[];
   /**
    * Whether this subscription actually bills in the month being viewed. When
    * it does, its Plan cell edits `amount_cents`; when it doesn't, the cell
@@ -42,6 +45,9 @@ export type IrregularBillRow = {
   // that rolls into Bills and the Annual Overview.
   monthSpentCents?: number;
   monthAccountNames?: string[];
+  /** Ids of the transactions behind `monthSpentCents` — same purpose as the
+   *  subscription field above. */
+  monthTxIds?: string[];
   /** Planned for the month being viewed. Absent/0 = nothing budgeted then. */
   plannedCents?: number;
 };

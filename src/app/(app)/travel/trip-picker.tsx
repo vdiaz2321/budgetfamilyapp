@@ -26,12 +26,19 @@ export function TripPicker({
   className,
   startNew,
   inHeader,
+  oneLine,
+  trailing,
 }: {
   trips: TravelTrip[];
   value: TripChoice;
   onChange: (next: TripChoice) => void;
   hiddenInputs?: boolean;
   className?: string;
+  // Trip spending: the picker and the trip's dates read as one line — which
+  // trip, and the span it covers — instead of stacking into two rows.
+  oneLine?: boolean;
+  // Rendered at the right end of that line (the trip's date boxes).
+  trailing?: React.ReactNode;
   // Opened from the page's Add button (not from a trip): start on "New trip"
   // so the name box is ready; an existing trip is still one pick away.
   startNew?: boolean;
@@ -84,6 +91,22 @@ export function TripPicker({
       className={className}
     />
   );
+
+  if (oneLine) {
+    return (
+      <div className={`flex flex-wrap items-end gap-3 ${className ?? ""}`}>
+        <Field label="Add to trip" className="min-w-[11rem] flex-1">
+          <select value={creating ? NEW : value.tripId} onChange={(e) => pick(e.target.value)} className={inputClass}>
+            {options}
+          </select>
+        </Field>
+        {creating ? (
+          <Field label="New trip name" className="min-w-[11rem] flex-1">{nameInput(inputClass)}</Field>
+        ) : null}
+        {trailing ? <div className="flex flex-wrap items-end gap-3 sm:ml-auto">{trailing}</div> : null}
+      </div>
+    );
+  }
 
   if (inHeader) {
     return (

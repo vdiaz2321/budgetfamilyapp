@@ -9,6 +9,7 @@ import { reorderIrregularBills, reorderSubscriptions, setIrregularBillMonthPlan,
 import { CYCLE_LABEL, SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import { actualColorClass, remainingColorClass } from "./budget-row";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
+import type { TxData, TxPrefill } from "./types";
 import { planNavKeyDown } from "./plan-nav";
 import { MATCH_BTN_CLASS } from "./budget-row";
 
@@ -63,6 +64,10 @@ export function SubscriptionsSummaryCard({
   monthSpentCents,
   onOpenSpent,
   overspentOnly = false,
+  transactions = [],
+  accountNameById,
+  onEditTransaction,
+  onAddTransaction,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
@@ -80,6 +85,12 @@ export function SubscriptionsSummaryCard({
    *  subscription shares that one subcategory — so without this the overspent
    *  filter names the bucket but never the charge. */
   overspentOnly?: boolean;
+  /** This month's transactions, so a row's editor can show the actual charge.
+   *  Rows carry `monthTxIds` — the ids the server matched to them. */
+  transactions?: TxData[];
+  accountNameById?: Map<string, string>;
+  onEditTransaction?: (tx: TxData) => void;
+  onAddTransaction?: (prefill?: TxPrefill) => void;
 }) {
   const [editorTarget, setEditorTarget] = useState<string | "new" | null>(null);
   // "By due" sorts the list as a calendar — cycle first so the every-month
@@ -111,6 +122,14 @@ export function SubscriptionsSummaryCard({
     .reduce((sum, s) => sum + s.amountCents, 0);
   const annualizedTotal = Math.round(monthlyTotal * 12) + annualBilledTotal;
   const cardMap = new Map((creditCards ?? []).map((c) => [c.id, c.name]));
+  // The row the editor is open on, and the transactions the server matched to
+  // it this month. Looked up by id rather than filtered by payee again so the
+  // list can never disagree with the Spent figure in the row.
+  const editorRow = editorTarget && editorTarget !== "new"
+    ? rows.find((r) => r.id === editorTarget) ?? null
+    : null;
+  const editorTxIds = new Set(editorRow?.monthTxIds ?? []);
+  const editorTxs = transactions.filter((t) => editorTxIds.has(t.id));
 
   return (
     <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
@@ -308,9 +327,32 @@ export function SubscriptionsSummaryCard({
           mobileAlign="top"
           className="sm:max-w-2xl"
         >
-          <div className="px-5 py-4">
+          <div className="space-y-4 px-5 py-4">
+            {editorRow ? (
+              <MonthPayments
+                txs={editorTxs}
+                currency={currency}
+                plannedCents={editorRow.monthPlannedCents ?? 0}
+                accountNameById={accountNameById ?? new Map()}
+                onEdit={onEditTransaction ? (tx) => { setEditorTarget(null); onEditTransaction(tx); } : undefined}
+                onAdd={
+                  onAddTransaction
+                    ? () => {
+                        setEditorTarget(null);
+                        onAddTransaction({
+                          cents: remainingPrefill(editorRow.monthPlannedCents ?? 0, editorRow.monthSpentCents ?? 0, editorRow.amountCents),
+                          accountId: editorRow.accountId,
+                          payee: editorRow.name,
+                          subId: editorRow.subcategoryId,
+                          kind: "bills",
+                        });
+                      }
+                    : undefined
+                }
+              />
+            ) : null}
             <SubscriptionForm
-              row={editorTarget === "new" ? null : rows.find((r) => r.id === editorTarget) ?? null}
+              row={editorRow}
               creditCards={creditCards}
               onDone={() => setEditorTarget(null)}
             />
@@ -455,6 +497,12 @@ export function IrregularBillsSummaryCard({
   open,
   onToggle,
   onOpenSpent,
+  overspentOnly = false,
+  dormantBills = [],
+  transactions = [],
+  accountNameById,
+  onEditTransaction,
+  onAddTransaction,
 }: {
   currency: string;
   monthFirstOfMonth: string;
@@ -468,8 +516,23 @@ export function IrregularBillsSummaryCard({
   open: boolean;
   onToggle: () => void;
   onOpenSpent?: () => void;
+  /** Overspent view: list only the bills that spent more than they planned.
+   *  The shared "Irregular Bills" subcategory can sit under its own plan while
+   *  single bills spent against $0, so the Bills group alone never names them. */
+  overspentOnly?: boolean;
+  /** Bills the year filter is holding back, offered as one-click "plan it
+   *  again" chips at the foot of the list. */
+  dormantBills?: { id: string; name: string; typicalAmountCents: number }[];
+  /** Same as the Subscriptions card: this month's rows, so a bill can show
+   *  which charges its Spent figure is made of. */
+  transactions?: TxData[];
+  accountNameById?: Map<string, string>;
+  onEditTransaction?: (tx: TxData) => void;
+  onAddTransaction?: (prefill?: TxPrefill) => void;
 }) {
   const [rows, setRows] = useState(irregularBills);
+  // The bill whose payments popup is open, if any.
+  const [paymentsFor, setPaymentsFor] = useState<string | null>(null);
   const [, startReorder] = useTransition();
   useEffect(() => {
     const reset = window.setTimeout(() => setRows(irregularBills), 0);
@@ -484,6 +547,11 @@ export function IrregularBillsSummaryCard({
   // expected to hit, so a fresh month totals $0 until amounts are entered.
   const totalPlanned = plannedTotalCents;
   const totalSpent = irregularBills.reduce((sum, b) => sum + (b.monthSpentCents ?? 0), 0);
+  const isOver = (b: IrregularBillRow) => (b.monthSpentCents ?? 0) > (b.plannedCents ?? 0);
+  const visibleRows = overspentOnly ? rows.filter(isOver) : rows;
+  const paymentsBill = paymentsFor ? rows.find((b) => b.id === paymentsFor) ?? null : null;
+  const paymentsTxIds = new Set(paymentsBill?.monthTxIds ?? []);
+  const paymentsTxs = transactions.filter((t) => paymentsTxIds.has(t.id));
 
   return (
     <section className="relative -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-xl dark:ring-white/10">
@@ -496,6 +564,11 @@ export function IrregularBillsSummaryCard({
         >
           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT.bills}`} />
           <span className="font-semibold">Irregular Bills</span>
+          {overspentOnly ? (
+            <span className="shrink-0 whitespace-nowrap rounded-full bg-negative/15 px-2 py-0.5 text-[10px] font-semibold text-negative">
+              {visibleRows.length} over plan
+            </span>
+          ) : null}
           <Chevron open={open} />
         </button>
 
@@ -521,9 +594,13 @@ export function IrregularBillsSummaryCard({
 
       {open ? (
         <div className="border-t border-line">
-          {irregularBills.length === 0 ? (
+          {visibleRows.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-              <p className="text-sm text-muted">No irregular bills yet. Add items via the budget settings.</p>
+              <p className="text-sm text-muted">
+                {dormantBills.length > 0
+                  ? "Nothing on this year's list yet. Irregular bills are one-offs, so each year starts empty — pick one below to plan it again."
+                  : "No irregular bills yet. Add items via the budget settings."}
+              </p>
             </div>
           ) : (
             <div className="divide-y divide-line">
@@ -534,7 +611,7 @@ export function IrregularBillsSummaryCard({
                 <span className="pl-6 text-right">Spent</span>
                 <span className="pl-4">Card used</span>
               </div>
-              {rows.map((b) => {
+              {visibleRows.map((b) => {
                 const dragOver = dragOverId === b.id;
                 return (
                   <div
@@ -542,13 +619,25 @@ export function IrregularBillsSummaryCard({
                     data-reorder-id={b.id}
                     className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-2 text-sm sm:grid-cols-[auto_minmax(0,1.5fr)_6.5rem_6.5rem_minmax(0,1.2fr)] ${dragOver ? "bg-brand-soft/40" : ""}`}
                   >
-                    <span
-                      onMouseDown={(e) => { e.preventDefault(); startDrag(b.id); }}
-                      className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+                    {/* Dragging a FILTERED list would save an order built
+                        from the rows that happen to be over — handle off. */}
+                    {overspentOnly ? (
+                      <span className="w-3" aria-hidden />
+                    ) : (
+                      <span
+                        onMouseDown={(e) => { e.preventDefault(); startDrag(b.id); }}
+                        className="-ml-1 flex shrink-0 cursor-grab items-center rounded p-1 text-muted/40 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
+                      >
+                        {DragHandle}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setPaymentsFor(b.id)}
+                      className="min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left transition hover:bg-sky-100 dark:hover:bg-sky-900/30"
                     >
-                      {DragHandle}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                      {b.name}
+                    </button>
                     <div className="hidden justify-end sm:flex">
                       <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} currency={currency} />
                     </div>
@@ -567,12 +656,50 @@ export function IrregularBillsSummaryCard({
                   </div>
                 );
               })}
-              <p className="px-4 py-2 text-[11px] text-muted">
-                Spent amounts are pulled automatically from transactions. Set a Planned amount per item to budget ahead for occasional expenses — totals sync to the Bills category above.
+              <p className={`px-4 py-2 text-[11px] text-muted ${overspentOnly ? "hidden" : ""}`}>
+                Spent amounts are pulled automatically from transactions. Set a Planned amount per item to budget ahead for occasional expenses — totals sync to the Bills category above. Tap a bill&apos;s name to see the charges behind its Spent figure.
               </p>
             </div>
           )}
+
+          {!overspentOnly && dormantBills.length > 0 ? (
+            <DormantBills bills={dormantBills} month={monthFirstOfMonth} currency={currency} />
+          ) : null}
         </div>
+      ) : null}
+
+      {paymentsBill ? (
+        <ModalShell
+          title={paymentsBill.name}
+          onClose={() => setPaymentsFor(null)}
+          mobileAlign="top"
+          className="sm:max-w-lg"
+        >
+          <div className="px-5 py-4">
+            <MonthPayments
+              txs={paymentsTxs}
+              currency={currency}
+              plannedCents={paymentsBill.plannedCents ?? 0}
+              accountNameById={accountNameById ?? new Map()}
+              onEdit={onEditTransaction ? (tx) => { setPaymentsFor(null); onEditTransaction(tx); } : undefined}
+              onAdd={
+                onAddTransaction
+                  ? () => {
+                      const bill = paymentsBill;
+                      setPaymentsFor(null);
+                      onAddTransaction({
+                        cents: remainingPrefill(bill.plannedCents ?? 0, bill.monthSpentCents ?? 0, bill.typicalAmountCents),
+                        accountId: bill.accountId,
+                        payee: bill.name,
+                        subId: bill.subcategoryId,
+                        kind: "bills",
+                      });
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        </ModalShell>
       ) : null}
     </section>
   );
@@ -776,3 +903,159 @@ function Chevron({ open }: { open: boolean }) {
     </svg>
   );
 }
+
+/**
+ * What to prefill a new payment with: whatever is still unpaid this month,
+ * falling back to the row's usual amount once the plan is fully covered — a
+ * second charge on an already-paid row would otherwise open at $0.00.
+ */
+function remainingPrefill(plannedCents: number, spentCents: number, fallbackCents: number): number {
+  const remaining = plannedCents - spentCents;
+  return remaining > 0 ? remaining : fallbackCents;
+}
+
+/**
+ * This month's charges for one subscription or irregular bill: whether the
+ * money actually moved, and the transactions it moved as. Both cards derive
+ * their Spent figure by matching transactions to the row's name, so until now
+ * a row could say "$1.99 spent" without ever showing WHICH charge that was —
+ * the thing every other budget item shows in its detail panel.
+ */
+export function MonthPayments({
+  txs,
+  currency,
+  plannedCents,
+  accountNameById,
+  onEdit,
+  onAdd,
+}: {
+  txs: TxData[];
+  currency: string;
+  plannedCents: number;
+  accountNameById: Map<string, string>;
+  onEdit?: (tx: TxData) => void;
+  onAdd?: () => void;
+}) {
+  const spent = txs.reduce((sum, t) => sum + t.amountCents, 0);
+  // "Paid" only means something against a plan. A row with no plan this month
+  // (an annual sub in a quiet month) is neither paid nor unpaid — it just has
+  // whatever charges landed.
+  const status =
+    txs.length === 0
+      ? { label: "Not paid yet", className: "text-warning" }
+      : plannedCents > 0 && spent < plannedCents
+        ? { label: "Partly paid", className: "text-warning" }
+        : { label: "Paid", className: "text-positive" };
+  const dateLabel = (iso: string) => {
+    const [, m, d] = iso.split("-").map(Number);
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${MONTHS[m - 1]} ${d}`;
+  };
+
+  return (
+    <div className="rounded-xl bg-background/60 p-3 ring-1 ring-line">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+          This month
+        </h3>
+        <span className={`text-xs font-semibold ${status.className}`}>{status.label}</span>
+      </div>
+
+      {txs.length === 0 ? (
+        <p className="mt-2 text-xs text-muted">No charge logged for this month yet.</p>
+      ) : (
+        <ul className="mt-2 space-y-1">
+          {txs.map((t) => {
+            const acct = t.accountId ? accountNameById.get(t.accountId) : null;
+            const content = (
+              <>
+                <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
+                <span className="min-w-0 flex-1 truncate text-left">
+                  <span className="font-medium">{t.payee ?? "—"}</span>
+                  {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}
+                </span>
+                <span className="shrink-0 tabular-nums text-negative">
+                  {formatMoney(t.amountCents, currency)}
+                </span>
+              </>
+            );
+            return (
+              <li key={t.id}>
+                {onEdit && !t.isCardPayment ? (
+                  <button
+                    type="button"
+                    onClick={() => onEdit(t)}
+                    className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-xs transition hover:bg-surface-raised/60"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div className="flex w-full items-center gap-2 px-1 py-1.5 text-xs">{content}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {onAdd ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          className="mt-2 w-full rounded-lg border border-line px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/30"
+        >
+          + Log payment
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Bills from earlier years that this year's list is not carrying. Clicking one
+ * plans it for the viewed month at its usual amount, which is exactly what puts
+ * it back on the list — no second row with the same name, and the amount is
+ * editable inline the moment it appears.
+ */
+function DormantBills({
+  bills,
+  month,
+  currency,
+}: {
+  bills: { id: string; name: string; typicalAmountCents: number }[];
+  month: string;
+  currency: string;
+}) {
+  const [pending, startPlan] = useTransition();
+  const [planningId, setPlanningId] = useState<string | null>(null);
+
+  return (
+    <div className="border-t border-line px-4 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+        Not on {month.slice(0, 4)}&apos;s list
+      </p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {bills.map((bill) => (
+          <button
+            key={bill.id}
+            type="button"
+            disabled={pending && planningId === bill.id}
+            onClick={() => {
+              setPlanningId(bill.id);
+              const fd = new FormData();
+              fd.append("id", bill.id);
+              fd.append("month", month);
+              fd.append("planned", centsToDisplay(bill.typicalAmountCents));
+              startPlan(async () => { await setIrregularBillMonthPlan(fd); });
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs transition hover:border-sky-400 hover:bg-sky-100 disabled:opacity-50 dark:hover:bg-sky-900/30"
+          >
+            <span>{bill.name}</span>
+            <span className="tabular-nums text-muted">{formatMoney(bill.typicalAmountCents, currency)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+

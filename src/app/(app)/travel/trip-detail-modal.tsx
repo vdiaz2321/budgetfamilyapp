@@ -168,11 +168,16 @@ export function TripDetailModal({
         </section>
         ) : null}
 
-        {/* What the trip came to. */}
+        {/* What the trip came to, left to right as it adds up: the two parts,
+            then their total, then what the points and credits saved. */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat
+            label="Bookings"
+            value={formatMoney(t.flights + t.hotels + t.rentals, currency)}
+            note="flights · stays · rental"
+          />
+          <Stat label="Spending" value={formatMoney(t.miscTotal, currency)} note="day to day" />
           <Stat label="Total spent" value={formatMoney(t.total, currency)} className="text-negative" note={t.hasEstimates ? "incl. planned" : undefined} />
-          <Stat label="Bookings" value={formatMoney(t.flights + t.hotels + t.rentals, currency)} />
-          <Stat label="Spending" value={formatMoney(t.miscTotal, currency)} />
           <Stat
             label={t.points > 0 ? "Pts used · saved" : "Saved"}
             value={t.points > 0 ? `${t.points.toLocaleString()} · ${formatMoney(t.saved, currency)}` : formatMoney(t.saved, currency)}

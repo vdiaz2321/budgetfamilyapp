@@ -63,6 +63,8 @@ type Props = {
   transactions: TxData[];
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
+  /** Bills held back by the Irregular Bills year filter — see page.tsx. */
+  dormantIrregularBills: { id: string; name: string; typicalAmountCents: number }[];
   creditCards?: CreditCardOption[];
   /** Items that ended last month spending more than they were planned. */
   prevMonthOverspent: {
@@ -95,6 +97,7 @@ export function BudgetBoard({
   transactions,
   subscriptions,
   irregularBills,
+  dormantIrregularBills,
   creditCards,
   prevMonthOverspent,
   irregularMonthPlanned,
@@ -159,12 +162,36 @@ export function BudgetBoard({
       ? overspentOpenGroups[categoryId] ?? true
       : openGroups[categoryId] ?? false;
 
-  const isOverspentRow = (kind: CategoryKind, row: RowData) =>
-    (kind === "bills" || kind === "expenses") && row.spentCents > row.plannedCents;
-  const overspentCount = groups.reduce(
-    (count, group) => count + group.rows.filter((row) => isOverspentRow(group.kind, row)).length,
-    0,
+  // Subscriptions and Irregular Bills are one subcategory each holding many
+  // real items, and each has its own card. Judging overspend on the shared
+  // subcategory hides the individual charge that actually went over — Irregular
+  // Bills can sit under its $60 plan while Xbox, car wash and Rocket Money each
+  // spent against a $0 plan. So those two subcategories are left out of the
+  // row-level check and their cards report their own rows instead.
+  const cardSubIds = new Set(
+    [
+      ...subscriptions.map((s) => s.subcategoryId),
+      ...irregularBills.map((b) => b.subcategoryId),
+    ].filter((id): id is string => Boolean(id)),
   );
+  const isOverspentRow = (kind: CategoryKind, row: RowData) =>
+    (kind === "bills" || kind === "expenses") &&
+    !cardSubIds.has(row.subId) &&
+    row.spentCents > row.plannedCents;
+  // Subscriptions whose own charge beat their own plan this month.
+  const overspentSubscriptions = subscriptions.filter(
+    (s) => (s.monthSpentCents ?? 0) > (s.monthPlannedCents ?? 0),
+  );
+  const overspentIrregularBills = irregularBills.filter(
+    (b) => (b.monthSpentCents ?? 0) > (b.plannedCents ?? 0),
+  );
+  const overspentCount =
+    groups.reduce(
+      (count, group) => count + group.rows.filter((row) => isOverspentRow(group.kind, row)).length,
+      0,
+    ) +
+    overspentSubscriptions.length +
+    overspentIrregularBills.length;
   // A server revalidation does not remount this client board. Treat an empty
   // overspent result as the normal list immediately, including for updates
   // made outside the cover-overage flow.
@@ -177,10 +204,6 @@ export function BudgetBoard({
           rows: group.rows.filter((row) => isOverspentRow(group.kind, row)),
         }))
         .filter((group) => group.rows.length > 0);
-  // Subscriptions whose own charge beat their own plan this month.
-  const overspentSubscriptions = subscriptions.filter(
-    (s) => (s.monthSpentCents ?? 0) > (s.monthPlannedCents ?? 0),
-  );
   const showOverspent = () => {
     setOverspentOpenGroups({});
     setRowFilter("overspent");
@@ -199,7 +222,7 @@ export function BudgetBoard({
   const [showAddModal, setShowAddModal] = useState(false);
   const [duePayment, setDuePayment] = useState<DueItem | null>(null);
   // The add-transaction popup below; the rail's inline form doesn't lock.
-  useScrollLock(showAddModal || (!!quickAdd && !!selected) || !!duePayment);
+  useScrollLock(showAddModal || !!quickAdd || !!duePayment);
   // The payee autocomplete list is ~28KB — a sixth of this page's payload —
   // for a control most visits never open, so it's fetched the first time a
   // surface that needs it appears rather than shipped with the page.
@@ -596,10 +619,34 @@ export function BudgetBoard({
                 monthPlannedCents={subscriptionMonthPlanned}
                 monthSpentCents={subscriptionMonthSpent}
                 overspentOnly
+                transactions={transactions}
+                accountNameById={accountNameById}
+                onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
+                onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
               />
             ) : null}
 
-            {showingOverspent && displayedGroups.length === 0 ? (
+            {/* Same story one card down: the shared "Irregular Bills" plan can
+                be under budget while single bills spent against a $0 plan. */}
+            {showingOverspent && overspentIrregularBills.length > 0 ? (
+              <IrregularBillsSummaryCard
+                currency={currency}
+                monthFirstOfMonth={month.firstOfMonth}
+                plannedTotalCents={irregularMonthPlanned}
+                subscriptions={subscriptions}
+                irregularBills={irregularBills}
+                creditCards={creditCards}
+                open
+                onToggle={() => {}}
+                overspentOnly
+                transactions={transactions}
+                accountNameById={accountNameById}
+                onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
+                onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
+              />
+            ) : null}
+
+            {showingOverspent && displayedGroups.length === 0 && overspentSubscriptions.length === 0 && overspentIrregularBills.length === 0 ? (
               <div className="rounded-xl bg-surface px-4 py-8 text-center text-sm text-muted shadow-sm ring-1 ring-black/5 dark:ring-white/10">
                 Nothing is overspent this month.
               </div>
@@ -624,6 +671,10 @@ export function BudgetBoard({
                       setRailTab("transactions");
                     }
                   }}
+                  transactions={transactions}
+                  accountNameById={accountNameById}
+                  onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
+                  onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
                 />
 
                 <IrregularBillsSummaryCard
@@ -635,6 +686,7 @@ export function BudgetBoard({
                   creditCards={creditCards}
                   open={openGroups["irregularBills"] ?? false}
                   onToggle={() => toggleGroup("irregularBills")}
+                  dormantBills={dormantIrregularBills}
                   onOpenSpent={() => {
                     const subId = irregularBills.find((b) => b.subcategoryId)?.subcategoryId;
                     if (subId) {
@@ -643,6 +695,10 @@ export function BudgetBoard({
                       setRailTab("transactions");
                     }
                   }}
+                  transactions={transactions}
+                  accountNameById={accountNameById}
+                  onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
+                  onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
                 />
               </>
             ) : null}
@@ -824,7 +880,7 @@ export function BudgetBoard({
         </ModalShell>
       ) : null}
 
-      {(showAddModal || (quickAdd && selected) || duePayment) ? (
+      {(showAddModal || quickAdd || duePayment) ? (
         <div className="fixed inset-0 z-[70] flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
           <div className="w-full sm:max-w-[520px]">
             <TransactionModal
@@ -837,8 +893,8 @@ export function BudgetBoard({
               bucketsByAccount={bucketsByAccount}
               payeeOptions={payeeOptions}
               payeeLineItems={payeeLineItems}
-              initialKind={duePayment?.kind ?? (quickAdd && selected ? selected.kind : undefined)}
-              initialSubId={duePayment?.subId ?? (quickAdd && selected ? selected.subId : undefined)}
+              initialKind={duePayment?.kind ?? (quickAdd && selected ? selected.kind : quickAddPrefill?.kind)}
+              initialSubId={duePayment?.subId ?? (quickAdd && selected ? selected.subId : quickAddPrefill?.subId ?? undefined)}
               initialAccountId={duePayment?.accountId ?? quickAddPrefill?.accountId ?? undefined}
               initialAmountCents={duePayment?.amountCents ?? quickAddPrefill?.cents}
               initialPayee={duePayment?.name ?? quickAddPrefill?.payee ?? undefined}

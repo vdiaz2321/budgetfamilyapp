@@ -143,6 +143,7 @@ export function FlightModal({
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const fareCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p.fare)), 0);
+  const fareEurCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p.fareEur)), 0);
   const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Points on the booking are its points tickets added up; the fares of those
   // tickets are what the points bought, which is how they are valued.
@@ -592,6 +593,17 @@ export function FlightModal({
               </li>
             ))}
           </ul>
+
+          {/* Every seat added up. The fare columns are per passenger, so
+              without this the booking's own total was only visible further
+              down, in Flight cost. */}
+          <div className="mt-2 grid grid-cols-[1.75rem_minmax(0,1fr)_4.5rem_4.5rem] items-baseline gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[1.75rem_minmax(0,12rem)_6.5rem_6.5rem_6.5rem]">
+            <span aria-hidden />
+            <span>Total</span>
+            <span className="text-center">{formatMoney(fareCents, currency)}</span>
+            <span className="text-center">€{centsToDisplay(fareEurCents)}</span>
+            <span className="hidden text-center sm:block">{pointsTyped ? pointsTyped.toLocaleString() : ""}</span>
+          </div>
         </section>
 
         {/* ---- How it was paid: the card, and points if any. */}

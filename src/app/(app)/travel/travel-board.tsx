@@ -38,6 +38,14 @@ import {
 
 const ALL = "__all__";
 
+// The three "what's still ahead" buttons in the page header, each opening its
+// own full-width popup. A kind with nothing ahead of it shows no button.
+const UPCOMING_BUTTONS: { key: "hotels" | "flights" | "cars"; label: string }[] = [
+  { key: "hotels", label: "Hotel Reservations" },
+  { key: "flights", label: "Flight Reservations" },
+  { key: "cars", label: "Rental Reservations" },
+];
+
 // The sheet writes dates as 12-Sep-25 and says how a room was covered instead
 // of printing $0.00. These keep the table reading the way the spreadsheet did.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -173,16 +181,6 @@ export function TravelBoard({
   const openList = !!listState.open;
   const setOpenList = (fn: (v: boolean) => boolean) =>
     setListState((s) => ({ open: fn(!!s.open) }));
-  // Each upcoming group (hotels, flights, rentals) folds on its own. All start
-  // collapsed on a fresh login; sessionStorage keeps what you set after that.
-  const [upcomingOpen, setUpcomingOpen] = useSessionCollapse("travel-upcoming", () => ({
-    hotels: false,
-    flights: false,
-    cars: false,
-  }));
-  const toggleUpcoming = (key: "hotels" | "flights" | "cars") =>
-    setUpcomingOpen((s) => ({ ...s, [key]: !s[key] }));
-  const isUpcomingOpen = (key: "hotels" | "flights" | "cars") => !!upcomingOpen[key];
   // The reservations log opened in a popup, where the sheet's full column set
   // has room. Desktop only — see the button in the panel header.
   const [expanded, setExpanded] = useState(false);
@@ -342,7 +340,6 @@ export function TravelBoard({
         .sort((a, b) => a.pickupOn.localeCompare(b.pickupOn)),
     [carList, today],
   );
-  const upcomingGroups = [upcoming, upcomingFlights, upcomingCars].filter((g) => g.length > 0).length;
 
   // The sheet's CC Info column, grouped: one row per distinct label, with the
   // card those stays already point at when they all agree.
@@ -462,7 +459,7 @@ export function TravelBoard({
   // The year picker sits in the log's header, beside Open full width — the
   // same place the Travel Log keeps its own.
   const yearSelect = (
-    <YearPicker years={years} value={year} onChange={setYear} label="Hotel Reservations Log year" />
+    <YearPicker years={years} value={year} onChange={setYear} label="Hotel Log year" />
   );
 
   const reservations = (
@@ -472,7 +469,7 @@ export function TravelBoard({
                   repeated here. */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
                 <div className="flex flex-wrap items-center gap-2">
-                  <SearchBox value={query} onChange={setQuery} placeholder="Search hotel, city…" label="Search hotels" className="w-36" />
+                  <SearchBox value={query} onChange={setQuery} placeholder="Search hotel, city…" label="Search hotels" className="w-52" />
                   {/* Breakfast is the one perk worth pulling a list on, so it
                       filters from here instead of only being readable per row. */}
                   <button
@@ -515,7 +512,7 @@ export function TravelBoard({
                   ) : null}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   {/* Mobile has cards, not column headers, so it needs its own
                       way to reorder them. */}
                   <select
@@ -524,7 +521,7 @@ export function TravelBoard({
                       const [key, dir] = e.target.value.split(":");
                       setSort({ key: key as SortKey, dir: dir as "asc" | "desc" });
                     }}
-                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:hidden"
+                    className="self-center rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:hidden"
                   >
                     <option value="checkIn:desc">Newest check-in</option>
                     <option value="checkIn:asc">Oldest check-in</option>
@@ -534,12 +531,16 @@ export function TravelBoard({
                     <option value="propertyName:asc">Hotel name A–Z</option>
                   </select>
                   {/* The night count opens the run of totals: it says what the
-                      money figures beside it are counting. */}
-                  <span className="text-[11px] text-muted tabular-nums">
-                    Total in {year.length === 0 ? "all years" : yearsLabel(year)}: {shownTotals.nights} Night
-                    {shownTotals.nights === 1 ? "" : "s"}
-                    {shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""}
-                  </span>
+                      money figures beside it are counting. Built as a Figure so
+                      it shares their label/value shape and sits on their
+                      baseline instead of floating out of line. */}
+                  <Figure
+                    label={`Total in ${year.length === 0 ? "all years" : yearsLabel(year)}`}
+                    value={`${shownTotals.nights} Night${shownTotals.nights === 1 ? "" : "s"}${
+                      shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""
+                    }`}
+                    tone=""
+                  />
                   <Figure label="Total hotel cost" value={formatMoney(shownTotals.hotel, currency)} tone="" />
                   <Figure
                     label="Total pts used"
@@ -750,6 +751,11 @@ export function TravelBoard({
   );
 
   // The upcoming-booking lists, shared by each card and its full-width popup.
+  const upcomingCounts = {
+    hotels: upcoming.length,
+    flights: upcomingFlights.length,
+    cars: upcomingCars.length,
+  };
   const hotelRows = (
   <ul className="divide-y divide-line">
     {upcoming.map((s) => (
@@ -978,6 +984,28 @@ export function TravelBoard({
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
                 it stays out of the way until a new unlinked stay appears. */}
+            {/* What's still ahead. These used to be two collapsible cards
+                halfway down the page; they are what you come here to check, so
+                they sit in the header and open straight into the full-width
+                popup — no expanding a narrow column first. */}
+            {UPCOMING_BUTTONS.map(({ key, label }) =>
+              upcomingCounts[key] > 0 ? (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setExpandedUpcoming(key)}
+                  className="flex items-center gap-2 rounded-lg border border-black/25 bg-background px-3 py-2 text-sm font-bold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+                >
+                  {label}
+                  {/* The count reads as part of the button, not as a muted
+                      chip bolted onto it — a grey pill here was all weight and
+                      no colour. */}
+                  <span className="tabular-nums text-sky-700 dark:text-sky-400">
+                    {upcomingCounts[key]}
+                  </span>
+                </button>
+              ) : null,
+            )}
             {unlinked > 0 ? (
               <button
                 type="button"
@@ -1022,54 +1050,11 @@ export function TravelBoard({
                plain card list and the Pay Card flow. */}
           <CreditCardSections />
 
-          {/* ---- What's still ahead. Sits above the archive because a booking
-               you haven't taken yet is the thing you come here to check. */}
-          {upcomingGroups > 0 ? (
-            <div className="grid items-start gap-3 lg:grid-cols-2">
-              {/* One card per kind of booking, side by side on a wide screen —
-                  each names what it holds instead of a single "Coming up". A
-                  group that is alone takes the full row. */}
-              {upcoming.length > 0 ? (
-              <section className={`overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${upcomingGroups === 1 ? "lg:col-span-2" : ""}`}>
-                <UpcomingHeader
-                  title="Hotel Reservations"
-                  count={upcoming.length}
-                  open={isUpcomingOpen("hotels")}
-                  onToggle={() => toggleUpcoming("hotels")}
-                  onExpand={() => setExpandedUpcoming("hotels")}
-                />
-              {isUpcomingOpen("hotels") ? hotelRows : null}
-              </section>
-              ) : null}
-
-              {upcomingFlights.length > 0 ? (
-                <section className={`overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${upcomingGroups === 1 ? "lg:col-span-2" : ""}`}>
-                  <UpcomingHeader
-                    title="Flight Reservations"
-                    count={upcomingFlights.length}
-                    open={isUpcomingOpen("flights")}
-                    onToggle={() => toggleUpcoming("flights")}
-                  onExpand={() => setExpandedUpcoming("flights")}
-                  />
-                  {isUpcomingOpen("flights") ? flightRows : null}
-                </section>
-              ) : null}
-
-              {upcomingCars.length > 0 ? (
-                <section className={`overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10 ${upcomingGroups === 1 ? "lg:col-span-2" : ""}`}>
-                  <UpcomingHeader
-                    title="Rental Reservations"
-                    count={upcomingCars.length}
-                    open={isUpcomingOpen("cars")}
-                    onToggle={() => toggleUpcoming("cars")}
-                  onExpand={() => setExpandedUpcoming("cars")}
-                  />
-                  {isUpcomingOpen("cars") ? carRows : null}
-                </section>
-              ) : null}
-            </div>
-          ) : null}
-
+          {/* ---- The three logs side by side. Each is a table far wider than a
+               third of this column, so none of them unfolds here any more —
+               the header opens its own full-width popup. Side by side they are
+               a row of doorways, not three stacked lids. */}
+          <div className="grid items-start gap-3 xl:grid-cols-3">
           {trips.length > 0 ? (
             <TripLogPanel summaries={tripSummaries} currency={currency} onOpenTrip={setOpenTripId} />
           ) : null}
@@ -1084,26 +1069,15 @@ export function TravelBoard({
                The popup is where they actually fit; no column was dropped to
                make the inline view work. */}
           <Panel
-            title="Hotel Reservations Log"
-            meta={
-              <HeaderTotals
-                countLabel="Total hotels"
-                count={filtered.length}
-                spent={shownTotals.pocket}
-                saved={shownTotals.saved}
-                currency={currency}
-              />
-            }
-            control={
-              <span className="flex items-center gap-2">
-              {yearSelect}
-              {/* Desktop only: on a phone the list below is already a card per
-                  stay, so there are no hidden columns for a popup to reveal. */}
-              <OpenFullWidthButton onClick={() => setExpanded(true)} />
-              </span>
-            }
+            title="Hotel Log"
+            /* Collapsed it says one thing: what this log came to, for the year
+               picked beside it. The counts and the search belong to the table,
+               and the table only ever opens full width now. */
+            meta={<Figure label="Total spent" value={formatMoney(shownTotals.pocket, currency)} tone="text-negative" />}
+            control={yearSelect}
             open={openList}
             onToggle={() => setOpenList((v) => !v)}
+            onExpand={() => setExpanded(true)}
           >
             {reservations}
           </Panel>
@@ -1117,7 +1091,7 @@ export function TravelBoard({
               onEditCar={setEditingCar}
             />
           ) : null}
-
+          </div>
 
           {/* ---- The two charts side by side. They are drawn narrow by
                design, so half a row suits them; the summary tables below are
@@ -1286,20 +1260,23 @@ export function TravelBoard({
           still hide the last columns on a laptop. */}
       {expanded ? (
         <ModalShell
-          title="Hotel Reservations Log"
+          title="Hotel Log"
           onClose={() => setExpanded(false)}
           className="sm:max-w-[96vw]"
           headerExtra={
-            <HeaderTotals
-              countLabel="Total hotels"
+            <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <HeaderTotals
+                countLabel="Total hotels"
                 count={filtered.length}
-              spent={shownTotals.pocket}
-              saved={shownTotals.saved}
-              currency={currency}
-            />
+                spent={shownTotals.pocket}
+                saved={shownTotals.saved}
+                currency={currency}
+              />
+              {/* On the title's own line, not a strip of its own below it. */}
+              {yearSelect}
+            </span>
           }
         >
-          <div className="flex justify-end border-b border-line px-4 py-2 sm:px-6">{yearSelect}</div>
           {reservations}
         </ModalShell>
       ) : null}
@@ -1372,6 +1349,9 @@ export function TravelBoard({
           key={addTripId ?? "new"}
           trips={trips}
           expenses={expenses}
+          stays={stays}
+          flights={flights}
+          cars={carList}
           currency={currency}
           defaultTripId={addTripId}
           onClose={closeForms}
@@ -1385,6 +1365,9 @@ export function TravelBoard({
           travellers={travellers}
           airlines={airlines}
           expenses={expenses}
+          stays={stays}
+          flights={flights}
+          cars={carList}
           currency={currency}
           defaultTripId={addTripId}
           onClose={closeForms}
@@ -1419,52 +1402,6 @@ function Remarks({ text }: { text: string | null }) {
 
 // The heading over one group in the upcoming card: what the group holds, and
 // how many of them are still ahead. The whole line folds its group away.
-function UpcomingHeader({
-  title,
-  count,
-  open,
-  onToggle,
-  onExpand,
-}: {
-  title: string;
-  count: number;
-  open: boolean;
-  onToggle: () => void;
-  onExpand: () => void;
-}) {
-  return (
-    <div className={`flex items-center border-line ${open ? "border-b" : ""}`}>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
-      >
-        <svg
-          aria-hidden
-          viewBox="0 0 20 20"
-          className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M5 7.5 10 12.5 15 7.5" />
-        </svg>
-        <h2 className="text-sm font-bold">{title}</h2>
-        <span className="flex items-baseline gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Future bookings:</span>
-          <span className="text-sm font-bold tabular-nums">{count}</span>
-        </span>
-      </button>
-      <div className="shrink-0 pr-4 sm:pr-6">
-        <OpenFullWidthButton onClick={onExpand} />
-      </div>
-    </div>
-  );
-}
-
 // A card whose body folds away. The header stays put so a collapsed section
 // still says what it holds and how much of it there is.
 function Panel({
@@ -1473,6 +1410,7 @@ function Panel({
   control,
   open,
   onToggle,
+  onExpand,
   children,
 }: {
   title: string;
@@ -1483,40 +1421,60 @@ function Panel({
   control?: React.ReactNode;
   open: boolean;
   onToggle: () => void;
+  /** Given instead of an inline expand: the header opens the full-width popup
+   *  and the panel never unfolds in the page column. The table needs more
+   *  width than this column has, so unfolding it here only ever showed half. */
+  onExpand?: () => void;
   children: React.ReactNode;
 }) {
+  const inlineOpen = onExpand ? false : open;
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className={`flex items-center ${open ? "border-b border-line" : ""}`}>
+      <div className={`flex flex-wrap items-center ${inlineOpen ? "border-b border-line" : ""}`}>
       <button
         type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className={`flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${control ? "pr-2" : ""}`}
+        onClick={onExpand ?? onToggle}
+        aria-expanded={onExpand ? undefined : open}
+        className={`flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${onExpand ? "" : "flex-1"} ${control ? "pr-2" : ""}`}
       >
         <span className="flex items-center gap-2">
-          <svg
-            aria-hidden
-            viewBox="0 0 20 20"
-            className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M5 7.5 10 12.5 15 7.5" />
-          </svg>
+          {onExpand ? (
+            <ExpandIcon />
+          ) : (
+            <svg
+              aria-hidden
+              viewBox="0 0 20 20"
+              className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 7.5 10 12.5 15 7.5" />
+            </svg>
+          )}
           <span className="text-sm font-bold">{title}</span>
         </span>
         {meta ? (
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{meta}</span>
         ) : null}
       </button>
-      {control ? <div className="shrink-0 pr-4 sm:pr-6">{control}</div> : null}
+      {/* Flush against the metas, not flung to the far edge — see the header
+          buttons above. */}
+      {control ? <div className={`shrink-0 pl-4 pr-4 sm:pr-6 ${onExpand ? "" : "ml-auto"}`}>{control}</div> : null}
       </div>
-      {open ? children : null}
+      {inlineOpen ? children : null}
     </section>
+  );
+}
+
+/** The two diagonal arrows: this header opens a full-width popup. */
+export function ExpandIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    </svg>
   );
 }
 
@@ -1579,7 +1537,7 @@ function HeaderTotals({
   );
 }
 
-function Figure({
+export function Figure({
   label,
   value,
   tone,

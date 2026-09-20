@@ -101,8 +101,15 @@ export function ModalShell({
               {headerActions}
             </div>
           ) : null}
-          <div className="ml-auto flex min-w-0 items-center gap-3">
-            {headerExtra}
+          {/* Flush against the title, not flung to the far edge — on a wide
+              popup the totals and pickers ended up a screen away from the
+              heading they describe. Only Close keeps the right edge. */}
+          {headerExtra ? (
+            <div className="order-last flex min-w-0 basis-full items-center gap-3 sm:order-none sm:basis-auto">
+              {headerExtra}
+            </div>
+          ) : null}
+          <div className="ml-auto flex shrink-0 items-center">
             <button
               type="button"
               onClick={onClose}

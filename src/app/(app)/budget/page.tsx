@@ -22,6 +22,17 @@ export default async function BudgetPage({
   const month = resolveMonth(monthParam);
   const nextFirst = `${month.nextKey}-01`;
   const prevFirstOfMonth = `${month.prevKey}-01`;
+  // Irregular bills are one-offs, not subscriptions: a passport or an optician
+  // visit belongs to the year it happened in and should not follow you into the
+  // next one. The card lists a bill only while the VIEWED year has something to
+  // show for it, so these two bounds fence that year off. Nothing is deleted —
+  // step back to 2026 and 2026's bills are all still there.
+  const viewedYear = Number(month.key.slice(0, 4));
+  const yearStart = `${viewedYear}-01-01`;
+  const yearEnd = `${viewedYear + 1}-01-01`;
+  // In January the previous month falls in the year before, and the board still
+  // needs its rows for the "overspent in December" chip.
+  const yearReadStart = prevFirstOfMonth < yearStart ? prevFirstOfMonth : yearStart;
 
   const { supabase, household } = await getSessionContext();
   const snowballExtraCents = household.snowball_monthly_extra_cents ?? 0;
@@ -52,6 +63,7 @@ export default async function BudgetPage({
     categories,
     { data: rolloverRows, error: rolloverRowsError },
     actualsSinceAnchor,
+    yearTxRows,
     { data: cardOwedRows, error: cardOwedError },
   ] = await Promise.all([
     supabase
@@ -119,18 +131,23 @@ export default async function BudgetPage({
       .order("name"),
     supabase
       .from("irregular_bills")
-      .select("id, name, typical_amount_cents, subcategory_id, account_id, notes, sort_order")
+      .select("id, name, typical_amount_cents, subcategory_id, account_id, notes, sort_order, created_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     // Irregular bills are planned per month, not once and forever — a new
     // month starts at $0 until a plan is entered for that specific month.
     // Both months again: this one for the board, last one for the chip.
+    // The whole viewed year, not just two months: this month's and last
+    // month's rows drive the board, and the rest answer "was this bill used at
+    // all this year?" for the card's year filter. At most a dozen bills times
+    // twelve months, so the extra rows are free.
     supabase
       .from("irregular_bill_plans")
       .select("month, bill_id, planned_cents")
       .eq("household_id", household.id)
-      .in("month", [prevFirstOfMonth, month.firstOfMonth]),
+      .gte("month", yearReadStart)
+      .lt("month", yearEnd),
     // Per-month plan overrides for subscriptions. One wins over the sticker
     // price in any month it exists — see subscriptionPlannedFor below.
     supabase
@@ -159,6 +176,20 @@ export default async function BudgetPage({
         .lte("month", month.firstOfMonth)
         .order("month")
         .order("subcategory_id")
+        .range(from, to),
+    ),
+    // Three columns of the viewed year's transactions — just enough to answer
+    // "did this bill get charged at all this year?" for the irregular-bills
+    // year filter. Paged because a year of rows crosses PostgREST's 1000-row
+    // cap; the full-fat transaction read above stays at two months.
+    fetchAllRows<{ subcategory_id: string | null; payee_id: string | null }>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("subcategory_id, payee_id")
+        .eq("household_id", household.id)
+        .gte("occurred_on", yearStart)
+        .lt("occurred_on", yearEnd)
+        .order("occurred_on")
         .range(from, to),
     ),
     // Owed per card for the transaction modal's account picker.
@@ -234,7 +265,7 @@ export default async function BudgetPage({
       .split(/[^a-z0-9]+/i)
       .filter((t) => t.length >= 3)
       .map((t) => (t.endsWith("s") ? t.slice(0, -1) : t));
-  const irregularMonthDetailById = new Map<string, { spentCents: number; accountNames: string[] }>();
+  const irregularMonthDetailById = new Map<string, { spentCents: number; accountNames: string[]; txIds: string[] }>();
   for (const bill of irregularBills ?? []) {
     const tokens = billTokens(bill.name);
     const matchingTransactions = (txRows ?? []).filter((tx) => {
@@ -252,6 +283,7 @@ export default async function BudgetPage({
     irregularMonthDetailById.set(bill.id, {
       spentCents: matchingTransactions.reduce((sum, tx) => sum + tx.amount_cents, 0),
       accountNames,
+      txIds: matchingTransactions.map((tx) => tx.id as string),
     });
   }
   // Auto-planned totals: subcategory rows linked to subscriptions or irregular
@@ -311,6 +343,9 @@ export default async function BudgetPage({
   // prevTxRows is last month's transactions, already fetched for the budget
   // items' version of this prefill.
   const subPrevSpentById = new Map<string, number>();
+  // The rows behind this month's figure, so the card can list the actual
+  // charge instead of only its total.
+  const subMonthTxIdsById = new Map<string, string[]>();
   for (const sub of subscriptions ?? []) {
     const tokens = billTokens(sub.name);
     const isThisSub = (tx: { subcategory_id: string | null; payee_id: string | null }) => {
@@ -322,7 +357,9 @@ export default async function BudgetPage({
     };
     const total = (rows: { amount_cents: number }[]) =>
       rows.reduce((sum, tx) => sum + tx.amount_cents, 0);
-    subMonthSpentById.set(sub.id, total((txRows ?? []).filter(isThisSub)));
+    const thisMonthTxs = (txRows ?? []).filter(isThisSub);
+    subMonthSpentById.set(sub.id, total(thisMonthTxs));
+    subMonthTxIdsById.set(sub.id, thisMonthTxs.map((tx) => tx.id as string));
     subPrevSpentById.set(sub.id, total((prevTxRows ?? []).filter(isThisSub)));
   }
   // Planned per bill for THIS month only (absent row = $0), and the per
@@ -728,6 +765,7 @@ export default async function BudgetPage({
     // that month's override. The Plan cell needs to know which it is.
     chargesThisMonth: subscriptionChargesIn(s, month.key),
     monthSpentCents: subMonthSpentById.get(s.id) ?? 0,
+    monthTxIds: subMonthTxIdsById.get(s.id) ?? [],
     prevSpentCents: subPrevSpentById.get(s.id) ?? 0,
   }));
 
@@ -742,7 +780,47 @@ export default async function BudgetPage({
     sortOrder: (b as { sort_order?: number }).sort_order ?? 0,
     monthSpentCents: irregularMonthDetailById.get(b.id)?.spentCents ?? 0,
     monthAccountNames: irregularMonthDetailById.get(b.id)?.accountNames ?? [],
+    monthTxIds: irregularMonthDetailById.get(b.id)?.txIds ?? [],
   }));
+
+  // ---- The year filter. An irregular bill earns its place in the viewed
+  // year's list by having been planned for, charged, or created in it. A
+  // passport renewed in 2026 therefore drops off the list in January 2027 on
+  // its own, instead of sitting at $0.00 forever, and comes straight back the
+  // moment it is planned or paid again. Viewing 2026 still shows it.
+  const plannedThisYear = new Set(
+    (irregularPlanRows ?? [])
+      .filter((p) => p.month >= yearStart && p.month < yearEnd && (p.planned_cents as number) !== 0)
+      .map((p) => p.bill_id as string),
+  );
+  const chargedThisYear = new Set(
+    (irregularBills ?? [])
+      .filter((bill) => {
+        const tokens = billTokens(bill.name);
+        return yearTxRows.some((tx) => {
+          if (tx.subcategory_id !== bill.subcategory_id) return false;
+          const payee = (payeeById.get(tx.payee_id ?? "") ?? "").toLowerCase();
+          if (!payee) return false;
+          if (payee === bill.name.trim().toLowerCase()) return true;
+          return tokens.length > 0 && tokens.every((t) => payee.includes(t));
+        });
+      })
+      .map((bill) => bill.id as string),
+  );
+  const createdThisYear = new Set(
+    (irregularBills ?? [])
+      .filter((b) => ((b as { created_at?: string }).created_at ?? "").slice(0, 4) === String(viewedYear))
+      .map((b) => b.id as string),
+  );
+  const isOnThisYearsList = (id: string) =>
+    plannedThisYear.has(id) || chargedThisYear.has(id) || createdThisYear.has(id);
+  const irregularBillRowsForYear = irregularBillRows.filter((b) => isOnThisYearsList(b.id));
+  // The ones the year filter left out. Offered at the foot of the card so a
+  // bill that comes round again is planned back in with one click, instead of
+  // being re-typed in settings as a second row with the same name.
+  const dormantIrregularBills = irregularBillRows
+    .filter((b) => !isOnThisYearsList(b.id))
+    .map((b) => ({ id: b.id, name: b.name, typicalAmountCents: b.typicalAmountCents }));
 
   const creditCards = (accounts ?? [])
     .filter((a) => a.kind === "credit_card")
@@ -814,7 +892,8 @@ export default async function BudgetPage({
       snowballFocusSubId={snowballFocusSubId}
       transactions={transactions}
       subscriptions={subscriptionRows}
-      irregularBills={irregularBillRows}
+      irregularBills={irregularBillRowsForYear}
+      dormantIrregularBills={dormantIrregularBills}
       creditCards={creditCards}
       prevMonthOverspent={{
         monthKey: month.prevKey,

@@ -6,10 +6,11 @@ import { ModalShell } from "@/components/modal-shell";
 import { CarModal } from "./car-modal";
 import type { SectionHandle } from "./embedded-section";
 import { FlightModal } from "./flight-modal";
+import { saveTripExpenses } from "./expense-actions";
 import { MiscModal } from "./misc-modal";
 import { StayModal } from "./stay-modal";
 import { useTripChoice } from "./trip-picker";
-import type { TravelBrand, TravelCard, TravelStay, TravelTrip, Traveller, TripExpense } from "./types";
+import type { TravelBrand, TravelCar, TravelCard, TravelFlight, TravelStay, TravelTrip, Traveller, TripExpense } from "./types";
 
 type Kind = "stay" | "misc" | "flight" | "car";
 
@@ -32,6 +33,9 @@ export function AddTravelLogModal({
   travellers,
   airlines,
   expenses,
+  stays,
+  flights,
+  cars,
   currency,
   defaultTripId,
   onClose,
@@ -42,6 +46,11 @@ export function AddTravelLogModal({
   travellers: Traveller[];
   airlines: string[];
   expenses: TripExpense[];
+  /** Passed through to the Spending section, which shows what the trip's
+   *  bookings already come to beside the typed categories. */
+  stays: TravelStay[];
+  flights: TravelFlight[];
+  cars: TravelCar[];
   currency: string;
   /** Opened from a trip's own row: every section goes into that trip. */
   defaultTripId?: string | null;
@@ -64,19 +73,40 @@ export function AddTravelLogModal({
   // What is typed in the trip box. It matches a saved trip by name (the way
   // the server would anyway), so adding to one is the same as naming it.
   const [tripName, setTripName] = useState("");
+  // The trip's own dates, typed in the header: they describe the whole trip,
+  // not its spending, so they no longer sit inside the Spending section. They
+  // are saved even when no section is open — a trip whose dates are all you
+  // came to set is a real thing to save.
+  const startingTrip = defaultTripId ? trips.find((t) => t.id === defaultTripId) ?? null : null;
+  const [startOn, setStartOn] = useState(startingTrip?.startOn ?? "");
+  const [endOn, setEndOn] = useState(startingTrip?.endOn ?? "");
+  // Once the dates are typed they are the user's; matching a saved trip by
+  // name stops overwriting them.
+  const datesTyped = useRef(false);
   const normalise = (name: string) => name.trim().replace(/\s+[-–—·]\s+/g, " · ").replace(/\s+/g, " ").toLowerCase();
   const matched = defaultTripId ? null : trips.find((t) => t.id === trip.tripId) ?? null;
   function typeTripName(value: string) {
     setTripName(value);
     const hit = trips.find((t) => normalise(t.name) === normalise(value));
     setTrip(hit ? { tripId: hit.id, newTripName: "" } : { tripId: "", newTripName: value });
+    // Typing the name of a saved trip shows the dates it already has.
+    if (!datesTyped.current) {
+      setStartOn(hit?.startOn ?? "");
+      setEndOn(hit?.endOn ?? "");
+    }
   }
+  function typeDate(which: "start" | "end", value: string) {
+    datesTyped.current = true;
+    if (which === "start") setStartOn(value);
+    else setEndOn(value);
+  }
+  const hasDates = startOn.trim() !== "" || endOn.trim() !== "";
   // Closing with something typed asks first — one stray tap on the backdrop
   // would otherwise throw away four sections of a phone's worth of typing.
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   function requestClose() {
     if (pending) return;
-    const typed = tripName.trim() || units().some((u) => u.handle && !u.handle.isEmpty());
+    const typed = tripName.trim() || hasDates || units().some((u) => u.handle && !u.handle.isEmpty());
     if (typed && saved.length === 0) setConfirmDiscard(true);
     else onClose();
   }
@@ -99,7 +129,7 @@ export function AddTravelLogModal({
         setNotice("Give the trip a name first.");
         return;
       }
-      if (toSave.length === 0) {
+      if (toSave.length === 0 && !hasDates) {
         setNotice("Nothing to add yet — fill in at least one section.");
         return;
       }
@@ -111,6 +141,15 @@ export function AddTravelLogModal({
         const result = await u.handle!.save();
         if (result.error) failed[u.id] = result.error;
         else done.push(u.id);
+      }
+      // The header's dates, written straight onto the trip. Skipped when the
+      // Spending section just saved — it carries the same two values. Last in
+      // line so a new trip has already been created by then; on its own it
+      // creates the trip itself.
+      if (hasDates && !done.includes("misc")) {
+        const result = await saveTripExpenses({ ...trip, startOn, endOn, rows: [] });
+        if (result.error) failed.dates = result.error;
+        else done.push("dates");
       }
       router.refresh();
       if (Object.keys(failed).length === 0) {
@@ -131,6 +170,7 @@ export function AddTravelLogModal({
   }
   const roomLabel = (i: number) => (i === 0 ? "Stay" : `Room ${i + 1}`);
   const label = (id: string) => {
+    if (id === "dates") return "Trip dates";
     const i = rooms.findIndex((r) => `stay:${r.id}` === id);
     return i >= 0 ? roomLabel(i) : SECTIONS.find((s) => s.kind === id)!.label;
   };
@@ -148,31 +188,55 @@ export function AddTravelLogModal({
       // trip" picker, which opens that trip's own popup.
       title={defaultTripId ? `Add to ${trips.find((t) => t.id === defaultTripId)?.name ?? "trip"}` : "Add Travel Log:"}
       headerActions={
-        defaultTripId ? null : (
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
-            <div className="w-full sm:w-72">
-              {/* The placeholder shows the naming pattern every trip follows. */}
-              <input
-                value={tripName}
-                onChange={(e) => typeTripName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") e.preventDefault();
-                }}
-                autoComplete="off"
-                aria-label="Trip name"
-                placeholder="Greece - May 2027"
-                className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
-            </div>
-            {/* Says which it is, so a name that happens to match doesn't file
-                into a saved trip without saying so. */}
-            {tripName.trim() ? (
-              <span className={`text-xs font-semibold ${matched ? "text-positive" : "text-muted"}`}>
-                {matched ? `Adding to ${matched.name}` : "New trip"}
-              </span>
-            ) : null}
-          </div>
-        )
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
+          {defaultTripId ? null : (
+            <>
+              <div className="w-full sm:w-64">
+                {/* The placeholder shows the naming pattern every trip follows. */}
+                <input
+                  value={tripName}
+                  onChange={(e) => typeTripName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.preventDefault();
+                  }}
+                  autoComplete="off"
+                  aria-label="Trip name"
+                  placeholder="Greece - May 2027"
+                  className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+              {/* Says which it is, so a name that happens to match doesn't file
+                  into a saved trip without saying so. */}
+              {tripName.trim() ? (
+                <span className={`text-xs font-semibold ${matched ? "text-positive" : "text-muted"}`}>
+                  {matched ? `Adding to ${matched.name}` : "New trip"}
+                </span>
+              ) : null}
+            </>
+          )}
+          {/* The trip's own span, typed once here rather than buried in the
+              Spending section. Saved with the trip even if no section is open. */}
+          <label className="flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted">Starts</span>
+            <input
+              type="date"
+              value={startOn}
+              onChange={(e) => typeDate("start", e.target.value)}
+              aria-label="Trip starts"
+              className="h-8 min-w-0 rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+            />
+          </label>
+          <label className="flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted">Ends</span>
+            <input
+              type="date"
+              value={endOn}
+              onChange={(e) => typeDate("end", e.target.value)}
+              aria-label="Trip ends"
+              className="h-8 min-w-0 rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+            />
+          </label>
+        </div>
       }
       onClose={requestClose}
       className="sm:max-w-4xl"
@@ -272,8 +336,12 @@ export function AddTravelLogModal({
                   trips={trips}
                   expenses={expenses}
                   currency={currency}
+                  stays={stays}
+                  flights={flights}
+                  cars={cars}
                   defaultTripId={trip.tripId || null}
                   embed={embed}
+                  dates={{ startOn, endOn }}
                   onClose={onClose}
                 />
               ) : kind === "flight" ? (

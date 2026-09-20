@@ -220,6 +220,11 @@ export type TxPrefill = {
   cents: number;
   accountId: string | null;
   payee: string | null;
+  // Subscriptions and irregular bills know their own budget item, so a payment
+  // logged from their card can land in the right subcategory without waiting
+  // for the payee autocomplete to guess it.
+  subId?: string | null;
+  kind?: CategoryKind;
 };
 
 // The transaction modal's trip pickers: taggable trips and each one's live
