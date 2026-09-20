@@ -639,7 +639,7 @@ export function IrregularBillsSummaryCard({
                       {b.name}
                     </button>
                     <div className="hidden justify-end sm:flex">
-                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} currency={currency} />
+                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
                     </div>
                     <span className="hidden pl-6 text-right font-medium tabular-nums sm:block">
                       {formatMoney(b.monthSpentCents ?? 0, currency)}
@@ -649,7 +649,7 @@ export function IrregularBillsSummaryCard({
                     </span>
                     <div className="flex shrink-0 items-center gap-2 sm:hidden">
                       <span className="text-xs text-muted">Plan</span>
-                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} currency={currency} />
+                      <IrregularPlannedInput id={b.id} month={monthFirstOfMonth} plannedCents={b.plannedCents ?? 0} spentCents={b.monthSpentCents ?? 0} currency={currency} />
                       <span className="text-xs text-muted">Spent</span>
                       <span className="font-medium tabular-nums">{formatMoney(b.monthSpentCents ?? 0, currency)}</span>
                     </div>
@@ -850,37 +850,67 @@ function IrregularPlannedInput({
   id,
   month,
   plannedCents,
+  spentCents,
   currency,
 }: {
   id: string;
   month: string;
   plannedCents: number;
+  spentCents: number;
   currency: string;
 }) {
   const [pending, start] = useTransition();
+  const [focused, setFocused] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const initial = centsToDisplay(plannedCents);
   const initialValue = `${currencySymbol(currency)}${initial}`;
+  // Same offer the budget rows and the Subscriptions card make: a bill that
+  // came in over (or under) plan is nearly always fixed by planning what was
+  // actually spent.
+  const canMatch = spentCents > 0 && spentCents !== plannedCents;
 
   return (
     <form
       ref={formRef}
       action={(fd) => start(() => setIrregularBillMonthPlan(fd))}
-      className="flex items-center"
+      className="relative flex items-center"
     >
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="month" value={month} />
+      {focused && canMatch ? (
+        <button
+          type="button"
+          // pointerdown lands before the input's blur, so preventing its
+          // default keeps focus — and therefore this button — alive long
+          // enough for the tap to register. A mousedown handler is too late
+          // on iOS.
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const el = inputRef.current;
+            if (!el) return;
+            el.value = `${currencySymbol(currency)}${centsToDisplay(spentCents)}`;
+            formRef.current?.requestSubmit();
+            el.blur();
+          }}
+          className={`absolute bottom-full right-0 ${MATCH_BTN_CLASS}`}
+        >
+          Match spent ({formatMoney(spentCents, currency)})
+        </button>
+      ) : null}
       <input
         key={`${month}:${initial}`}
+        ref={inputRef}
         name="planned"
         data-plan-nav=""
         type="text"
         inputMode="decimal"
         autoComplete="off"
         defaultValue={initialValue}
-        onFocus={(e) => e.currentTarget.select()}
+        onFocus={(e) => { setFocused(true); e.currentTarget.select(); }}
         onKeyDown={planNavKeyDown}
         onBlur={(e) => {
+          setFocused(false);
           if (e.currentTarget.value !== initialValue) formRef.current?.requestSubmit();
         }}
         className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-sm font-medium text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${

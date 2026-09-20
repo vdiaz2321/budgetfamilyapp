@@ -44,7 +44,15 @@ export function inYears(picked: string[], year: string | null | undefined): bool
 export function yearsLabel(picked: string[]): string {
   if (picked.length === 0) return "All years";
   const sorted = [...picked].sort();
-  return sorted.length <= 3 ? sorted.join(", ") : `${sorted.length} years`;
+  // Only a single year is spelled out; two or more collapse to a count so the
+  // button keeps a fixed, narrow width in the card headers.
+  return sorted.length === 1 ? sorted[0] : `${sorted.length} years`;
+}
+
+/** The years spelled out — for prose, where "2 years" would read as a duration. */
+export function yearsListLabel(picked: string[]): string {
+  if (picked.length === 0) return "all years";
+  return [...picked].sort().join(", ");
 }
 
 /**

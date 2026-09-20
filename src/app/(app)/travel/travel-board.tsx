@@ -1,6 +1,6 @@
 "use client";
 
-import { YearPicker, inYears, useSessionYears, yearsLabel } from "./year-picker";
+import { YearPicker, inYears, useSessionYears, yearsListLabel } from "./year-picker";
 import { SearchBox } from "./search-box";
 import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
@@ -365,7 +365,7 @@ export function TravelBoard({
   // The charts always plot every year — narrowing them to one would leave a
   // single column — so they say so, and mark the filtered year instead.
   const chartScope =
-    year.length === 0 ? "All years" : `All years · ${yearsLabel(year)} highlighted`;
+    year.length === 0 ? "All years" : `All years · ${yearsListLabel(year)} highlighted`;
 
   // Only stays that carry a CC Info label and still point at no card — those
   // are the ones the Link cards modal can actually fix. A stay with no label
@@ -535,7 +535,7 @@ export function TravelBoard({
                       it shares their label/value shape and sits on their
                       baseline instead of floating out of line. */}
                   <Figure
-                    label={`Total in ${year.length === 0 ? "all years" : yearsLabel(year)}`}
+                    label={`Total in ${yearsListLabel(year)}`}
                     value={`${shownTotals.nights} Night${shownTotals.nights === 1 ? "" : "s"}${
                       shownTotals.cancelled ? ` · ${shownTotals.cancelled} cancelled` : ""
                     }`}
@@ -918,8 +918,16 @@ export function TravelBoard({
   </ul>
   );
 
-  // The year rollup's table, shared by the inline panel and its full-width popup.
-  const yearTable = (
+  // The year rollup's table, shared by the inline panel and its full-width
+  // popup. `rows` may carry a null row — a year the Trip Log has and the stays
+  // don't, kept as a dashed line so the two rollups stay on the same lines
+  // inside the Travel Combined Log popup.
+  const renderYearTable = (
+    rows: [string, { hotel: number; pocket: number; stays: number; points: number } | null][],
+    // The popup shows a Total line under the years; the inline card carries
+    // the same figures in its header, so it leaves this off.
+    withTotals = false,
+  ) => (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
@@ -933,7 +941,7 @@ export function TravelBoard({
           </tr>
         </thead>
         <tbody>
-          {rollupRows.map(([y, row]) => (
+          {rows.map(([y, row]) => (
             <tr
               key={y}
               className={`border-b border-line/60 last:border-0 ${year.includes(y) ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
@@ -946,20 +954,67 @@ export function TravelBoard({
               >
                 {y}
               </td>
-              <td className="px-2 py-2 text-center tabular-nums text-muted">{row.stays}</td>
+              <td className="px-2 py-2 text-center tabular-nums text-muted">{row ? row.stays : DASH}</td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                {row.points > 0 ? row.points.toLocaleString() : DASH}
+                {row && row.points > 0 ? row.points.toLocaleString() : DASH}
               </td>
-              <td className="px-2 py-2 text-center tabular-nums">{formatMoney(row.hotel, currency)}</td>
-              <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoney(row.pocket, currency)}</td>
+              <td className="px-2 py-2 text-center tabular-nums">{row ? formatMoney(row.hotel, currency) : DASH}</td>
+              <td className="px-2 py-2 text-center tabular-nums text-negative">{row ? formatMoney(row.pocket, currency) : DASH}</td>
               <td className="px-2 py-2 text-center font-bold tabular-nums text-positive">
-                {formatMoney(row.hotel - row.pocket, currency)}
+                {row ? formatMoney(row.hotel - row.pocket, currency) : DASH}
               </td>
             </tr>
           ))}
         </tbody>
+        {withTotals ? (
+          <tfoot>
+            {(() => {
+              const t = rows.reduce(
+                (acc, [, row]) => ({
+                  stays: acc.stays + (row?.stays ?? 0),
+                  points: acc.points + (row?.points ?? 0),
+                  hotel: acc.hotel + (row?.hotel ?? 0),
+                  pocket: acc.pocket + (row?.pocket ?? 0),
+                }),
+                { stays: 0, points: 0, hotel: 0, pocket: 0 },
+              );
+              return (
+                <tr className="border-t-2 border-line font-bold">
+                  <td
+                    className="sticky left-0 z-10 px-2 py-2 text-center"
+                    style={{ backgroundColor: "var(--surface)" }}
+                  >
+                    Total
+                  </td>
+                  <td className="px-2 py-2 text-center tabular-nums">{t.stays}</td>
+                  <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                    {t.points > 0 ? t.points.toLocaleString() : DASH}
+                  </td>
+                  <td className="px-2 py-2 text-center tabular-nums">{formatMoney(t.hotel, currency)}</td>
+                  <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoney(t.pocket, currency)}</td>
+                  <td className="px-2 py-2 text-center tabular-nums text-positive">
+                    {formatMoney(t.hotel - t.pocket, currency)}
+                  </td>
+                </tr>
+              );
+            })()}
+          </tfoot>
+        ) : null}
       </table>
     </div>
+  );
+  const yearTable = renderYearTable(rollupRows);
+
+  // The Travel Combined Log popup shows both rollups side by side, so they
+  // share one year axis — every year either one knows about, newest first.
+  const combinedYears = useMemo(() => {
+    const ys = new Set<string>(tripSummaries.map((t) => t.start?.slice(0, 4)).filter(Boolean) as string[]);
+    for (const [y] of byYear) ys.add(y);
+    return [...ys].sort().reverse();
+  }, [tripSummaries, byYear]);
+  const combinedYearTable = renderYearTable(
+    combinedYears.map((y) => [y, byYear.find(([key]) => key === y)?.[1] ?? null]),
+    true,
   );
 
   return (
@@ -1056,7 +1111,13 @@ export function TravelBoard({
                a row of doorways, not three stacked lids. */}
           <div className="grid items-start gap-3 xl:grid-cols-3">
           {trips.length > 0 ? (
-            <TripLogPanel summaries={tripSummaries} currency={currency} onOpenTrip={setOpenTripId} />
+            <TripLogPanel
+              summaries={tripSummaries}
+              currency={currency}
+              onOpenTrip={setOpenTripId}
+              savedByYear={combinedYearTable}
+              alignYears={combinedYears}
+            />
           ) : null}
 
           {/* ---- The reservations themselves, with the filters that drive them
@@ -1073,7 +1134,7 @@ export function TravelBoard({
             /* Collapsed it says one thing: what this log came to, for the year
                picked beside it. The counts and the search belong to the table,
                and the table only ever opens full width now. */
-            meta={<Figure label="Total spent" value={formatMoney(shownTotals.pocket, currency)} tone="text-negative" />}
+            meta={<Figure label="Spent" value={formatMoney(shownTotals.pocket, currency)} tone="text-negative" />}
             control={yearSelect}
             open={openList}
             onToggle={() => setOpenList((v) => !v)}
@@ -1430,14 +1491,22 @@ function Panel({
   const inlineOpen = onExpand ? false : open;
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className={`flex flex-wrap items-center ${inlineOpen ? "border-b border-line" : ""}`}>
+      {/* The whole row is the toggle, not just the title: these headers carry
+          a control on the right, which otherwise leaves a wide dead strip in
+          between. The control stops the click so its own menu still works. */}
+      <div
+        onClick={onExpand ?? onToggle}
+        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${inlineOpen ? "border-b border-line" : ""}`}
+      >
       <button
         type="button"
-        onClick={onExpand ?? onToggle}
+        /* The row above handles the click; without this the toggle would fire
+           twice and land back where it started. */
+        onClick={(e) => { e.stopPropagation(); (onExpand ?? onToggle)(); }}
         aria-expanded={onExpand ? undefined : open}
-        className={`flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6 ${onExpand ? "" : "flex-1"} ${control ? "pr-2" : ""}`}
+        className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left sm:px-5 ${onExpand ? "" : "flex-1"} ${control ? "pr-2" : ""}`}
       >
-        <span className="flex items-center gap-2">
+        <span className="flex min-w-0 items-center gap-2">
           {onExpand ? (
             <ExpandIcon />
           ) : (
@@ -1454,15 +1523,25 @@ function Panel({
               <path d="M5 7.5 10 12.5 15 7.5" />
             </svg>
           )}
-          <span className="text-sm font-bold">{title}</span>
+          <span className="truncate text-sm font-bold">{title}</span>
         </span>
         {meta ? (
-          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{meta}</span>
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">{meta}</span>
         ) : null}
       </button>
       {/* Flush against the metas, not flung to the far edge — see the header
-          buttons above. */}
-      {control ? <div className={`shrink-0 pl-4 pr-4 sm:pr-6 ${onExpand ? "" : "ml-auto"}`}>{control}</div> : null}
+          buttons above. Same py-3 as the button beside it: the control is
+          taller than a line of text, and without the padding this header sits
+          ~5px shorter than the sibling cards in the 3-up row. Only from xl,
+          where that row exists — stacked, it would just be dead space. */}
+      {control ? (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className={`shrink-0 cursor-auto pl-3 pr-4 sm:pr-5 xl:py-3 ${onExpand ? "" : "ml-auto"}`}
+        >
+          {control}
+        </div>
+      ) : null}
       </div>
       {inlineOpen ? children : null}
     </section>
@@ -1549,8 +1628,8 @@ export function Figure({
   style?: React.CSSProperties;
 }) {
   return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
+    <span className="flex shrink-0 items-baseline gap-1.5">
+      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
       <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>{value}</span>
     </span>
   );

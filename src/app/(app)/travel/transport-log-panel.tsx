@@ -72,19 +72,27 @@ export function TransportLogPanel({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+      {/* Kept to one line — see the note on the Travel Combined Log header. */}
+      {/* Whole row opens the log — see the note on the Travel Combined Log
+          header; the year picker stops the click. */}
+      <div
+        onClick={() => setExpanded(true)}
+        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] sm:flex-nowrap dark:hover:bg-white/[0.06]"
+      >
         <button
           type="button"
-          onClick={() => setExpanded(true)}
-          className="flex items-center gap-2 text-left"
+          onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+          className="flex min-w-0 items-center gap-2 text-left"
         >
           <ExpandIcon />
-          <span className="text-sm font-bold">Flights &amp; Rentals Log</span>
+          <span className="text-sm font-bold sm:truncate">Flights &amp; Rentals Log</span>
         </button>
         {/* One figure and the year it covers; the counts and the search open
             with the list. */}
-        <Figure label="Total spent" value={formatMoney(total, currency)} className="text-negative" />
-        <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
+        <Figure label="Spent" value={formatMoney(total, currency)} className="text-negative" />
+        <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+          <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
+        </span>
       </div>
 
       {expanded ? (
@@ -96,7 +104,7 @@ export function TransportLogPanel({
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <Figure label="Total flights" value={String(shownFlights.length)} />
               <Figure label="Total rentals" value={String(shownCars.length)} />
-              <Figure label="Total spent" value={formatMoney(total, currency)} className="text-negative" />
+              <Figure label="Spent" value={formatMoney(total, currency)} className="text-negative" />
               <SearchBox value={query} onChange={setQuery} placeholder="Search airline, airport…" label="Search flights and rentals" className="w-44" />
               <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
             </span>
@@ -135,8 +143,8 @@ function GroupHeading({ title, divided }: { title: string; divided?: boolean }) 
 
 function Figure({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
+    <span className="flex shrink-0 items-baseline gap-1.5">
+      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
       <span className={`text-sm font-bold tabular-nums ${className ?? ""}`}>{value}</span>
     </span>
   );

@@ -8,7 +8,7 @@
 // stay log meant two pages to keep one story straight. Accounts keeps the
 // plain card list: what each card owes and how to pay it.
 
-import { YearPicker, inYears, useSessionYears, yearsLabel } from "./year-picker";
+import { YearPicker, inYears, useSessionYears, yearsListLabel } from "./year-picker";
 import { useRouter } from "next/navigation";
 import React, { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
@@ -444,7 +444,7 @@ function CreditCardSection({
     const pointsForCategory = (cat: "travel" | "hotel") =>
       inCategory(cat).reduce((sum, a) => sum + (a.cardDetails?.currentPoints ?? 0), 0);
     // Cash value of the points balance itself, summed with each card's own
-    // cents-per-point — the section-level total of the per-card "Total value"
+    // cents-per-point — the section-level total of the per-card "Points value"
     // metric. Free-night credits are excluded here (they show in the Travel /
     // Hotel redeemable tiles) so this tile answers "what are the points worth".
     const totalCardValueCents = rewardCards.reduce((sum, a) => {
@@ -552,7 +552,7 @@ function CreditCardSection({
               className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-slate-950"
             >
               <span className="sm:hidden">Calculator</span>
-              <span className="hidden sm:inline">Points value calculator</span>
+              <span className="hidden sm:inline">Pts value calculator</span>
               <span aria-hidden>↗</span>
             </a>
             <button
@@ -597,9 +597,9 @@ function CreditCardSection({
               ) : null}
               {allStats.totalCardValueCents > 0 ? (
                 <StatTile
-                  label="Total Card Value"
+                  label="Total Pts Value"
                   value={formatMoney(totalCardValueCents, currency)}
-                  sub="Points only"
+                  sub="All cards"
                   tone="emerald"
                 />
               ) : null}
@@ -1081,7 +1081,7 @@ function RewardsActivityLedger({
     <p className="px-4 py-4 text-sm text-muted">
       {entries.length === 0
         ? "No rewards activity yet. Open a card and choose “Rewards Activity Log” to create the first entry."
-        : `No rewards activity in ${yearsLabel(year)}.`}
+        : `No rewards activity in ${yearsListLabel(year)}.`}
     </p>
   ) : (
     <ul className="divide-y divide-line bg-background/70">
@@ -1512,7 +1512,9 @@ function CreditCardPanel({
               <MetricCell label="Charging">
                 {d?.charging ? <span className="font-semibold">{d.charging}</span> : null}
               </MetricCell>
-              <MetricCell label="Total value">
+              {/* The cash the points alone are worth — not the card's balance
+                  or any free-night credit, which have their own cells. */}
+              <MetricCell label="Total pts value" mobileLabel="Pts value">
                 {d && d.currentPoints > 0 && d.pointsValueMicros ? (
                   <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
                     ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}

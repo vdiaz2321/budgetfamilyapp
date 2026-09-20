@@ -59,10 +59,19 @@ export function TripLogPanel({
   summaries,
   currency,
   onOpenTrip,
+  savedByYear,
+  alignYears,
 }: {
   summaries: TripSummary[];
   currency: string;
   onOpenTrip: (tripId: string) => void;
+  /** The hotel year rollup, shown beside "By year" in the full-width popup —
+      the popup has the width for both, and the two answer the same question
+      from the trip side and the stay side. */
+  savedByYear?: React.ReactNode;
+  /** The shared year axis for the two rollups — every year either one covers,
+      newest first, so their rows sit on the same lines. */
+  alignYears?: string[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const years = useMemo(
@@ -100,6 +109,23 @@ export function TripLogPanel({
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [summaries]);
 
+  // The rows the popup draws: the shared year axis when there is one (a year
+  // only the hotel rollup knows about becomes a dashed line), otherwise just
+  // the years with trips.
+  const byYearRows: [string, (typeof byYear)[number][1] | null][] = alignYears
+    ? alignYears.map((y) => [y, byYear.find(([key]) => key === y)?.[1] ?? null])
+    : byYear;
+
+  const byYearTotals = byYearRows.reduce(
+    (acc, [, row]) => ({
+      trips: acc.trips + (row?.trips ?? 0),
+      total: acc.total + (row?.total ?? 0),
+      points: acc.points + (row?.points ?? 0),
+      saved: acc.saved + (row?.saved ?? 0),
+    }),
+    { trips: 0, total: 0, points: 0, saved: 0 },
+  );
+
   const money = (cents: number) => (cents > 0 ? formatMoney(cents, currency) : DASH);
 
   const table = (
@@ -126,7 +152,14 @@ export function TripLogPanel({
               className="cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
             >
               <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold">
-                <span className="block max-w-[14rem] truncate">{placeName(t.trip.name)}</span>
+                {/* The Dates column drops the year, so the row carries it here —
+                    the log reads across years when more than one is picked. */}
+                <span className="flex items-baseline gap-1">
+                  <span className="max-w-[12rem] truncate">{placeName(t.trip.name)}</span>
+                  {t.start ? (
+                    <span className="shrink-0 font-normal text-muted">- {t.start.slice(0, 4)}</span>
+                  ) : null}
+                </span>
               </td>
               <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">
                 {t.start ? sheetDateRange(t.start, t.end) : DASH}
@@ -175,23 +208,33 @@ export function TripLogPanel({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+      {/* One line from sm up: the 3-up grid gives this header ~445px, where
+          the title used to wrap under the figure. The title is the only thing
+          allowed to give up width; on a phone the row wraps as before. */}
+      {/* The whole row opens the log — the title alone was a small target on
+          a card that is otherwise all header. The year picker is the one
+          exception and stops the click from reaching this handler. The inner
+          button stays so the card is still reachable by keyboard. */}
+      <div
+        onClick={() => setExpanded(true)}
+        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] sm:flex-nowrap dark:hover:bg-white/[0.06]"
+      >
         <button
           type="button"
-          onClick={() => setExpanded(true)}
-          className="flex items-center gap-2 text-left"
+          onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+          className="flex min-w-0 items-center gap-2 text-left"
         >
           <ExpandIcon />
-          <span className="text-sm font-bold">Travel Combined Log</span>
+          <span className="text-sm font-bold sm:truncate">Travel Combined Log</span>
         </button>
         {/* Collapsed the card carries the one figure and the year it covers.
             The trip count and the search belong to the table, which only ever
             opens full width. */}
-        <span className="flex items-baseline gap-1.5">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
+        <span className="flex shrink-0 items-baseline gap-1.5">
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
           <span className="text-sm font-bold tabular-nums text-negative">{formatMoney(totalSpent, currency)}</span>
         </span>
-        {yearSelect}
+        <span className="shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
       </div>
 
       {expanded ? (
@@ -215,9 +258,11 @@ export function TripLogPanel({
           }
         >
           {table}
-          {byYear.length > 1 ? (
-            <div className="border-t border-line px-4 py-3 sm:px-6">
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">By year</h3>
+          {byYearRows.length > 1 || savedByYear ? (
+            <div className="grid items-start gap-x-8 gap-y-4 border-t border-line px-4 py-3 sm:px-6 md:grid-cols-2">
+              {byYearRows.length > 1 ? (
+              <div className="min-w-0">
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Travel Combined by Year</h3>
               <div className="overflow-x-auto">
                 <table className="min-w-[28rem] text-sm">
                   <thead>
@@ -230,20 +275,53 @@ export function TripLogPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {byYear.map(([y, row]) => (
+                    {byYearRows.map(([y, row]) => (
                       <tr key={y} className="border-t border-line/60">
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums">{y}</td>
-                        <td className="px-3 py-1.5 text-center tabular-nums">{row.trips}</td>
-                        <td className="px-3 py-1.5 text-center font-semibold tabular-nums text-negative">{formatMoney(row.total, currency)}</td>
-                        <td className="px-3 py-1.5 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                          {row.points > 0 ? row.points.toLocaleString() : DASH}
+                        <td className="px-3 py-1.5 text-center tabular-nums">{row ? row.trips : DASH}</td>
+                        <td className="px-3 py-1.5 text-center font-semibold tabular-nums text-negative">
+                          {row ? formatMoney(row.total, currency) : DASH}
                         </td>
-                        <td className="px-3 py-1.5 text-center tabular-nums text-positive">{money(row.saved)}</td>
+                        <td className="px-3 py-1.5 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                          {row && row.points > 0 ? row.points.toLocaleString() : DASH}
+                        </td>
+                        <td className="px-3 py-1.5 text-center tabular-nums text-positive">{row ? money(row.saved) : DASH}</td>
                       </tr>
                     ))}
                   </tbody>
+                  {/* The same Total line the stays rollup beside it carries. */}
+                  <tfoot>
+                    <tr className="border-t-2 border-line font-bold">
+                      <td className="px-3 py-1.5 text-center">Total</td>
+                      <td className="px-3 py-1.5 text-center tabular-nums">{byYearTotals.trips}</td>
+                      <td className="px-3 py-1.5 text-center tabular-nums text-negative">
+                        {formatMoney(byYearTotals.total, currency)}
+                      </td>
+                      <td className="px-3 py-1.5 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                        {byYearTotals.points > 0 ? byYearTotals.points.toLocaleString() : DASH}
+                      </td>
+                      <td className="px-3 py-1.5 text-center tabular-nums text-positive">{money(byYearTotals.saved)}</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
+              </div>
+              ) : null}
+              {savedByYear ? (
+                /* The rule between the two rollups, from md up — side by side
+                   they read as one table without it. It stacks on a phone,
+                   where the rule would sit across the middle of the page. */
+                <div
+                  /* The shared table rhythm: the hotel rollup keeps its own
+                     markup, but its header stays on one line and its rows take
+                     the same padding as "By year", so the two year columns sit
+                     on the same lines. */
+                  className={`min-w-0 [&_th]:whitespace-nowrap [&_th]:py-1 [&_td]:py-1.5 ${byYearRows.length > 1 ? "md:border-l md:border-line md:pl-8" : ""}`}
+                >
+                  <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Total Stays Cost/Saved by Year</h3>
+                  {savedByYear}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </ModalShell>
