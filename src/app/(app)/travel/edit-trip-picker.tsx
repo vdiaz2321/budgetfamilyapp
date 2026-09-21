@@ -13,14 +13,19 @@ export function EditTripPicker({ trips, onPick }: { trips: TravelTrip[]; onPick:
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const box = useRef<HTMLDivElement>(null);
+  // Every way the list closes starts the next opening from a blank search.
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
 
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (!box.current?.contains(e.target as Node)) setOpen(false);
+      if (!box.current?.contains(e.target as Node)) close();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") close();
     }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -30,12 +35,15 @@ export function EditTripPicker({ trips, onPick }: { trips: TravelTrip[]; onPick:
     };
   }, [open]);
 
-  // This year's and upcoming trips first (newest first), then older ones —
-  // a search looks through all of them.
+  // This year's and future trips, newest first down to the oldest. A trip
+  // with no dates yet (just named) counts as upcoming. A search still looks
+  // through every trip, so a past year's one stays reachable.
   const thisYear = String(new Date().getFullYear());
   const byNewest = (a: TravelTrip, b: TravelTrip) => (b.startOn ?? "9999").localeCompare(a.startOn ?? "9999");
   const q = query.trim().toLowerCase();
-  const matches = trips.filter((t) => !q || t.name.toLowerCase().includes(q));
+  const matches = trips.filter((t) =>
+    q ? t.name.toLowerCase().includes(q) : !t.startOn || t.startOn.slice(0, 4) >= thisYear,
+  );
   const current = matches.filter((t) => !t.startOn || t.startOn.slice(0, 4) >= thisYear).sort(byNewest);
   const past = matches.filter((t) => t.startOn && t.startOn.slice(0, 4) < thisYear).sort(byNewest);
 
@@ -44,8 +52,7 @@ export function EditTripPicker({ trips, onPick }: { trips: TravelTrip[]; onPick:
       <button
         type="button"
         onClick={() => {
-          setOpen(false);
-          setQuery("");
+          close();
           onPick(t.id);
         }}
         className="w-full px-3 py-2 text-left text-sm transition hover:bg-sky-100 dark:hover:bg-sky-900/40"
@@ -59,7 +66,7 @@ export function EditTripPicker({ trips, onPick }: { trips: TravelTrip[]; onPick:
     <div ref={box} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="listbox"
         aria-expanded={open}
         className="flex items-center gap-1.5 rounded-lg border border-black/25 bg-background px-4 py-2 text-base font-bold transition hover:border-sky-400 hover:bg-sky-100 sm:text-lg dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"

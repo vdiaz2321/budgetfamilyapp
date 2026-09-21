@@ -35,7 +35,7 @@ import {
   upsertCardDetails,
 } from "../accounts/actions";
 import { ModalShell } from "@/components/modal-shell";
-import { OpenFullWidthButton } from "./open-full-width-button";
+import { ExpandIcon } from "./travel-board";
 import { StayModal } from "./stay-modal";
 import type { TravelBrand, TravelCard } from "./types";
 
@@ -391,6 +391,44 @@ function CreditCardSection({
   const otherOpen = groupOpen.other !== false || focusedCategory === "other";
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
+  // The group's share of the stat tiles above: points held, what they are
+  // worth, and what can be redeemed (points value plus free-night credit).
+  const groupRewards = (cards: AccountData[]) => {
+    let points = 0, value = 0, redeemable = 0;
+    for (const a of cards) {
+      const d = a.cardDetails;
+      if (!d) continue;
+      const v = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
+      points += d.currentPoints;
+      value += v;
+      redeemable += v + (d.freeNightCreditCents ?? 0);
+    }
+    return { points, value, redeemable };
+  };
+  const groupFigures = (cards: AccountData[]) => {
+    const { points, value, redeemable } = groupRewards(cards);
+    // Fixed-width slots from sm up, so the Travel and Hotel rows line their
+    // figures up in columns; a slot with nothing to show still holds its
+    // place so the ones after it don't shift.
+    const figure = (show: boolean, width: string, label: string, text: string, className: string) =>
+      show ? (
+        <span className={`flex shrink-0 items-baseline gap-1.5 ${width}`}>
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
+          <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${className}`}>{text}</span>
+        </span>
+      ) : (
+        <span aria-hidden className={`hidden shrink-0 sm:block ${width}`} />
+      );
+    return (
+      <>
+        {figure(points > 0, "sm:w-44", "Current pts", points.toLocaleString(), "")}
+        {figure(value > 0, "sm:w-40", "Pts value", formatMoney(value, currency), "text-positive")}
+        {/* Only when free-night credit makes it more than the points value —
+            otherwise it would repeat the same figure. */}
+        {figure(redeemable > value, "sm:w-44", "Redeemable", formatMoney(redeemable, currency), "text-positive")}
+      </>
+    );
+  };
   const renderCards = (cards: AccountData[]) => (
     <ul className="divide-y divide-line">
       {cards.map((a) => (
@@ -824,7 +862,7 @@ function CreditCardSection({
                       type="button"
                       onClick={() => toggleGroup("travel")}
                       aria-expanded={travelOpen}
-                      className="flex items-center gap-2 text-left sm:gap-2.5"
+                      className="flex items-center gap-2 text-left sm:w-[16.5rem] sm:gap-2.5"
                     >
                     <GroupChevron open={travelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
@@ -840,9 +878,10 @@ function CreditCardSection({
                     {/* Right beside the card count, not flung to the far edge:
                         on a wide screen the figure was a screen away from the
                         name it belongs to. */}
-                    <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                    <span className={`whitespace-nowrap text-sm font-bold tabular-nums sm:w-36 ${travelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(travelOwed, currency)} owed
                     </span>
+                    {groupFigures(travelCards)}
                   </div>
                   {!travelOpen ? null : travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-muted">No travel cards yet.</p>}
                 </section>
@@ -854,7 +893,7 @@ function CreditCardSection({
                       type="button"
                       onClick={() => toggleGroup("hotel")}
                       aria-expanded={hotelOpen}
-                      className="flex items-center gap-2 text-left sm:gap-2.5"
+                      className="flex items-center gap-2 text-left sm:w-[16.5rem] sm:gap-2.5"
                     >
                     <GroupChevron open={hotelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
@@ -868,9 +907,10 @@ function CreditCardSection({
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
-                    <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
+                    <span className={`whitespace-nowrap text-sm font-bold tabular-nums sm:w-36 ${hotelOwed > 0 ? "text-negative" : "text-muted"}`}>
                       {formatMoney(hotelOwed, currency)} owed
                     </span>
+                    {groupFigures(hotelCards)}
                   </div>
                   {!hotelOpen ? null : hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-muted">No hotel cards yet.</p>}
                 </section>
@@ -1057,16 +1097,12 @@ function RewardsActivityLedger({
   const years = [...new Set([thisYear, ...entries.map((e) => e.occurredOn.slice(0, 4))])].sort().reverse();
   const [year, setYear] = useSessionYears("travel-rewards-activity-years", () => [thisYear]);
   const visibleEntries = entries.filter((e) => inYears(year, e.occurredOn.slice(0, 4)));
-  // Starts collapsed on a fresh login — it sits below Card payments and is
-  // reference data, not something to scan on every visit; sessionStorage still
-  // carries whatever it was last set to while moving around the app.
-  const [openState, setOpenState] = useSessionCollapse("travel-rewards-activity-open", () => ({ open: false }));
-  const open = openState.open;
   // Held by id and looked up in the live list, so deleting from inside the
   // popup closes it with the row instead of leaving a form for a gone entry.
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingEntry = editingId ? entries.find((e) => e.id === editingId) ?? null : null;
-  // The same list, in a wide popup where the detail column isn't cut short.
+  // The list only opens in a wide popup — the log sits in a third of a row
+  // beside the charts, too narrow for its columns.
   const [expanded, setExpanded] = useState(false);
 
   const yearSelect = (
@@ -1128,30 +1164,25 @@ function RewardsActivityLedger({
 
   return (
     <section>
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line px-4 py-3">
+      {/* Whole row opens the log, like the Flights & Rentals Log; the year
+          picker stops the click. */}
+      <div
+        onClick={() => setExpanded(true)}
+        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+      >
         <button
           type="button"
-          onClick={() => setOpenState((s) => ({ ...s, open: !s.open }))}
-          aria-expanded={open}
+          onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
           className="flex min-w-0 items-center gap-2 text-left"
         >
-          <svg
-            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-          >
-            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="min-w-0">
-            <span className="block text-sm font-bold">Rewards Points Transactions Log</span>
-          </span>
+          <ExpandIcon />
+          <span className="text-sm font-bold">Rewards Points Transactions Log</span>
         </button>
-        <div className="flex shrink-0 items-center gap-2">
-          {yearSelect}
+        <span className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {entryCount}
-          <OpenFullWidthButton onClick={() => setExpanded(true)} />
-        </div>
+          {yearSelect}
+        </span>
       </div>
-      {open ? list : null}
       {expanded ? (
         <ModalShell title="Rewards Points Transactions Log" onClose={() => setExpanded(false)} className="sm:max-w-5xl" headerExtra={entryCount}>
           <div className="flex justify-end border-b border-line px-4 py-2 sm:px-6">{yearSelect}</div>

@@ -14,7 +14,6 @@ import { FlightModal } from "./flight-modal";
 import { CarModal } from "./car-modal";
 import { TransportLogPanel } from "./transport-log-panel";
 import { TripLogPanel } from "./trip-log-panel";
-import { OpenFullWidthButton } from "./open-full-width-button";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
 import { sheetDateRange, summarizeTrips } from "./trip-summary";
@@ -159,21 +158,27 @@ export function TravelBoard({
   });
   const [brand, setBrand] = useState<string>(ALL);
   const [query, setQuery] = useState("");
+  // Clicking a year on either chart opens the Hotel Log full width on that
+  // year's stays — the rows behind the bar. Other filters are cleared so the
+  // popup lists exactly what the chart added up.
+  const openLogForYear = (y: string) => {
+    setYear([y]);
+    setBrand(ALL);
+    setQuery("");
+    setExpanded(true);
+  };
   const [bfastOnly, setBfastOnly] = useState(false);
   const [ptsOnly, setPtsOnly] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "checkIn",
     dir: "desc",
   });
-  const [openYears, setOpenYears] = useState(true);
-  const [openBrands, setOpenBrands] = useState(true);
   // One period for the two side-by-side tallies (brand and card): they answer
   // the same question two ways, so reading them against different years was
   // never what was wanted. Independent of the Reservations filter above them.
   // Both tallies open on this year.
   const [tallyYear, setTallyYear] = useSessionYears("travel-brand-tally-years", () => [today.slice(0, 4)]);
   const [cardYear, setCardYear] = useSessionYears("travel-card-tally-years", () => [today.slice(0, 4)]);
-  const [openCards, setOpenCards] = useState(true);
   // The log starts collapsed on a fresh login — it's the longest section on
   // the page — but sessionStorage carries whatever you last set for as long as
   // you're still moving around the app.
@@ -184,7 +189,7 @@ export function TravelBoard({
   // The reservations log opened in a popup, where the sheet's full column set
   // has room. Desktop only — see the button in the panel header.
   const [expanded, setExpanded] = useState(false);
-  const [expandedYears, setExpandedYears] = useState(false);
+  const [expandedTally, setExpandedTally] = useState<"brands" | "cards" | null>(null);
   const [expandedUpcoming, setExpandedUpcoming] = useState<"hotels" | "flights" | "cars" | null>(null);
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
@@ -293,18 +298,6 @@ export function TravelBoard({
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [live]);
 
-  // The rollup table's own year picker — every year until you narrow it, since
-  // the table exists to compare years.
-  const [rollupYears, setRollupYears] = useSessionYears("travel-year-rollup-years", () => []);
-  const rollupRows = byYear.filter(([y]) => inYears(rollupYears, y));
-  const rollupTotals = rollupRows.reduce(
-    (t, [, row]) => ({ spent: t.spent + row.pocket, saved: t.saved + row.hotel - row.pocket }),
-    { spent: 0, saved: 0 },
-  );
-  const rollupPicker = (
-    <YearPicker years={years} value={rollupYears} onChange={setRollupYears} label="Total Cost Saved by Year years" />
-  );
-
   const yearPoints: YearPoint[] = useMemo(
     () => byYear.map(([year, row]) => ({ year, hotel: row.hotel, pocket: row.pocket, stays: row.stays })),
     [byYear],
@@ -361,11 +354,6 @@ export function TravelBoard({
       }))
       .sort((a, b) => b.stays - a.stays || a.label.localeCompare(b.label));
   }, [stays]);
-
-  // The charts always plot every year — narrowing them to one would leave a
-  // single column — so they say so, and mark the filtered year instead.
-  const chartScope =
-    year.length === 0 ? "All years" : `All years · ${yearsListLabel(year)} highlighted`;
 
   // Only stays that carry a CC Info label and still point at no card — those
   // are the ones the Link cards modal can actually fix. A stay with no label
@@ -1003,7 +991,6 @@ export function TravelBoard({
       </table>
     </div>
   );
-  const yearTable = renderYearTable(rollupRows);
 
   // The Travel Combined Log popup shows both rollups side by side, so they
   // share one year axis — every year either one knows about, newest first.
@@ -1012,6 +999,82 @@ export function TravelBoard({
     for (const [y] of byYear) ys.add(y);
     return [...ys].sort().reverse();
   }, [tripSummaries, byYear]);
+  // The two "who did we stay with" tallies: the same money cut by hotel brand
+  // and by the card that paid. They sit under the points ledger in a third of
+  // a row, so — like it — they only open full width.
+  const brandTable = (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[520px] text-sm sm:min-w-0">
+        <thead>
+          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+            {/* Pinned: on a phone these five columns still need a
+                sideways swipe, and without an anchor you arrive at
+                Total saved with no idea whose row you are reading. */}
+            <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Brand</th>
+            <th className="px-3 py-2 text-center font-semibold">Stays</th>
+            <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Total Pts Used</th>
+            <th className="px-3 py-2 text-center font-semibold">Total spent</th>
+            <th className="px-3 py-2 text-center font-semibold">Total saved</th>
+          </tr>
+        </thead>
+        <tbody>
+          {brandTally.map(([b, row]) => (
+            <tr key={b} className="border-b border-line/60 last:border-0">
+              <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold">{b}</td>
+              <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>
+              <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
+              </td>
+              <td className="px-3 py-2 text-center tabular-nums text-negative">
+                {formatMoney(row.spent, currency)}
+              </td>
+              <td className="px-3 py-2 text-center font-semibold tabular-nums text-positive">
+                {formatMoney(row.saved, currency)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+  const cardTable = (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[520px] text-sm sm:min-w-0">
+        <thead>
+          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+            <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Card</th>
+            <th className="px-2 py-2 text-center font-semibold">Stays</th>
+            <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Total Pts Used</th>
+            <th className="px-2 py-2 text-center font-semibold">Total spent</th>
+            <th className="px-2 py-2 text-center font-semibold">Total saved</th>
+          </tr>
+        </thead>
+        <tbody>
+          {cardTally.map(([name, row]) => (
+            <tr key={name} className="border-b border-line/60 last:border-0">
+              {/* One line, even on a phone: the table already scrolls
+                  sideways, and wrapping broke "1002 Hilton Aspire Amex
+                  V" into four stacked words per row. */}
+              <td className={`sticky left-0 z-10 whitespace-nowrap bg-surface px-2 py-2 text-left font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
+                {name}
+              </td>
+              <td className="px-2 py-2 text-center tabular-nums">{row.stays}</td>
+              <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
+              </td>
+              <td className="px-2 py-2 text-center tabular-nums text-negative">
+                {formatMoney(row.spent, currency)}
+              </td>
+              <td className="px-2 py-2 text-center font-semibold tabular-nums text-positive">
+                {formatMoney(row.saved, currency)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   const combinedYearTable = renderYearTable(
     combinedYears.map((y) => [y, byYear.find(([key]) => key === y)?.[1] ?? null]),
     true,
@@ -1035,7 +1098,12 @@ export function TravelBoard({
             >
               Add Travel Log
             </button>
-            <EditTripPicker trips={trips} onPick={setOpenTripId} />
+            <EditTripPicker
+              // A trip saved with just a name has no dates of its own; its
+              // first booking places it in the year and the order.
+              trips={tripSummaries.map((t) => ({ ...t.trip, startOn: t.start }))}
+              onPick={setOpenTripId}
+            />
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
                 it stays out of the way until a new unlinked stay appears. */}
@@ -1043,13 +1111,18 @@ export function TravelBoard({
                 halfway down the page; they are what you come here to check, so
                 they sit in the header and open straight into the full-width
                 popup — no expanding a narrow column first. */}
+            {/* Boxed together so the label reads as the heading of these
+                buttons, not as one more control in the row. */}
+            {UPCOMING_BUTTONS.some(({ key }) => upcomingCounts[key] > 0) ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/15 py-0.5 pl-3 pr-1 dark:border-white/20">
+              <span className="whitespace-nowrap text-base font-bold sm:text-lg">Upcoming Travel/Trips:</span>
             {UPCOMING_BUTTONS.map(({ key, label }) =>
               upcomingCounts[key] > 0 ? (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setExpandedUpcoming(key)}
-                  className="flex items-center gap-2 rounded-lg border border-black/25 bg-background px-3 py-2 text-sm font-bold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+                  className="flex items-center gap-2 rounded-lg border border-black/25 bg-background px-3 py-1.5 text-sm font-bold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
                 >
                   {label}
                   {/* The count reads as part of the button, not as a muted
@@ -1061,6 +1134,8 @@ export function TravelBoard({
                 </button>
               ) : null,
             )}
+            </div>
+            ) : null}
             {unlinked > 0 ? (
               <button
                 type="button"
@@ -1154,164 +1229,47 @@ export function TravelBoard({
           ) : null}
           </div>
 
-          {/* ---- The two charts side by side. They are drawn narrow by
-               design, so half a row suits them; the summary tables below are
-               not, which is why they no longer share this grid. */}
-          <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {/* ---- The two charts beside the points ledger, three across from
+               xl up. The charts are drawn narrow by design, so a third of a
+               row suits them; the ledger opens full width for its columns. */}
+          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-                <h2 className="text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
-                <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
-                <CostBars years={yearPoints} currency={currency} selected={year} />
+                <h2 className="mb-3 text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
+                <CostBars years={yearPoints} currency={currency} selected={year} onPick={openLogForYear} />
               </div>
               {/* Stretched to the bar chart's height (it carries a legend this
                   one doesn't); the line sits at the bottom so both year rows line up. */}
-              <div className="flex flex-col rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-                <h2 className="text-center text-sm font-bold">Total saved per year</h2>
-                <p className="mb-3 text-center text-[11px] text-muted">{chartScope}</p>
+              <div className="flex flex-col self-stretch rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
+                <h2 className="mb-3 text-center text-sm font-bold">Total saved per year</h2>
                 <div className="flex flex-1 flex-col justify-end">
-                  <SavedLine years={yearPoints} currency={currency} selected={year} />
+                  <SavedLine years={yearPoints} currency={currency} selected={year} onPick={openLogForYear} />
                 </div>
+              </div>
+              <div className="space-y-3 lg:col-span-2 xl:col-span-1">
+                <Panel
+                  title="Total Stays by Brand"
+                  meta={<Figure label="Saved" value={formatMoney(tallyTotals.saved, currency)} tone="text-positive" />}
+                  control={tallyPeriod(tallyYear, setTallyYear, "Brand tally year")}
+                  open={false}
+                  onToggle={() => setExpandedTally("brands")}
+                  onExpand={() => setExpandedTally("brands")}
+                >
+                  {null}
+                </Panel>
+                <Panel
+                  title="Total Stays by Rewards Card"
+                  meta={<Figure label="Saved" value={formatMoney(cardTotals.saved, currency)} tone="text-positive" />}
+                  control={tallyPeriod(cardYear, setCardYear, "Card tally year")}
+                  open={false}
+                  onToggle={() => setExpandedTally("cards")}
+                  onExpand={() => setExpandedTally("cards")}
+                >
+                  {null}
+                </Panel>
+                <RewardsPointsLog />
               </div>
           </section>
 
-          {/* ---- The year rollup beside the points ledger. Half a row at xl
-               (~650px) fits the rollup's six columns; below xl they stack, and
-               either one opens full width. */}
-          <div className="grid items-start gap-3 xl:grid-cols-2">
-          <RewardsPointsLog />
-          <Panel
-            title="Total Cost Saved by Year"
-            meta={
-              <HeaderTotals
-                countLabel="Total years"
-                count={rollupRows.length}
-                spent={rollupTotals.spent}
-                saved={rollupTotals.saved}
-                currency={currency}
-              />
-            }
-            control={
-              <span className="flex items-center gap-2">
-                {rollupPicker}
-                <OpenFullWidthButton onClick={() => setExpandedYears(true)} />
-              </span>
-            }
-            open={openYears}
-            onToggle={() => setOpenYears((v) => !v)}
-          >
-            {yearTable}
-          </Panel>
-          </div>
-
-          {/* ---- The two "who did we stay with" tallies: the same money cut
-               by hotel brand and by the card that paid. Side by side only from
-               xl up — five money columns need ~560px, and below that half a
-               row hid Total saved behind a horizontal scroll. */}
-          <div className="grid items-start gap-3 xl:grid-cols-2">
-          {/* ---- Stays by brand: the sheet's right-hand tally. */}
-          <Panel
-            title="Total Stays by Brand"
-            meta={
-              <HeaderTotals
-                countLabel="Total brands"
-                count={brandTally.length}
-                spent={tallyTotals.spent}
-                saved={tallyTotals.saved}
-                currency={currency}
-              />
-            }
-            control={tallyPeriod(tallyYear, setTallyYear, "Brand tally year")}
-            open={openBrands}
-            onToggle={() => setOpenBrands((v) => !v)}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm sm:min-w-0">
-                <thead>
-                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    {/* Pinned: on a phone these five columns still need a
-                        sideways swipe, and without an anchor you arrive at
-                        Total saved with no idea whose row you are reading. */}
-                    <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Brand</th>
-                    <th className="px-3 py-2 text-center font-semibold">Stays</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-center font-semibold">Total Pts Used</th>
-                    <th className="px-3 py-2 text-center font-semibold">Total spent</th>
-                    <th className="px-3 py-2 text-center font-semibold">Total saved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {brandTally.map(([b, row]) => (
-                    <tr key={b} className="border-b border-line/60 last:border-0">
-                      <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold">{b}</td>
-                      <td className="px-3 py-2 text-center tabular-nums">{row.stays}</td>
-                      <td className="px-3 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                        {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
-                      </td>
-                      <td className="px-3 py-2 text-center tabular-nums text-negative">
-                        {formatMoney(row.spent, currency)}
-                      </td>
-                      <td className="px-3 py-2 text-center font-semibold tabular-nums text-positive">
-                        {formatMoney(row.saved, currency)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-
-          {/* ---- Stays by card: what each card in Accounts has returned. */}
-          <Panel
-            title="Total Stays by Rewards Card"
-            meta={
-              <HeaderTotals
-                countLabel="Total cards"
-                count={cardTally.length}
-                spent={cardTotals.spent}
-                saved={cardTotals.saved}
-                currency={currency}
-              />
-            }
-            control={tallyPeriod(cardYear, setCardYear, "Card tally year")}
-            open={openCards}
-            onToggle={() => setOpenCards((v) => !v)}
-          >
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[520px] text-sm sm:min-w-0">
-                <thead>
-                  <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Card</th>
-                    <th className="px-2 py-2 text-center font-semibold">Stays</th>
-                    <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Total Pts Used</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total spent</th>
-                    <th className="px-2 py-2 text-center font-semibold">Total saved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cardTally.map(([name, row]) => (
-                    <tr key={name} className="border-b border-line/60 last:border-0">
-                      {/* One line, even on a phone: the table already scrolls
-                          sideways, and wrapping broke "1002 Hilton Aspire Amex
-                          V" into four stacked words per row. */}
-                      <td className={`sticky left-0 z-10 whitespace-nowrap bg-surface px-2 py-2 text-left font-semibold ${name === "Not linked" ? "text-muted" : ""}`}>
-                        {name}
-                      </td>
-                      <td className="px-2 py-2 text-center tabular-nums">{row.stays}</td>
-                      <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                        {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
-                      </td>
-                      <td className="px-2 py-2 text-center tabular-nums text-negative">
-                        {formatMoney(row.spent, currency)}
-                      </td>
-                      <td className="px-2 py-2 text-center font-semibold tabular-nums text-positive">
-                        {formatMoney(row.saved, currency)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-          </div>
 
         </CreditCardRewardsProvider>
       )}
@@ -1354,25 +1312,25 @@ export function TravelBoard({
         </ModalShell>
       ) : null}
 
-      {expandedYears ? (
+      {expandedTally ? (
         <ModalShell
-          title="Total Cost Saved by Year"
-          onClose={() => setExpandedYears(false)}
+          title={expandedTally === "brands" ? "Total Stays by Brand" : "Total Stays by Rewards Card"}
+          onClose={() => setExpandedTally(null)}
           className="sm:max-w-5xl"
           headerExtra={
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <HeaderTotals
-                countLabel="Total years"
-                count={rollupRows.length}
-                spent={rollupTotals.spent}
-                saved={rollupTotals.saved}
-                currency={currency}
-              />
-              {rollupPicker}
+              {expandedTally === "brands" ? (
+                <HeaderTotals countLabel="Total brands" count={brandTally.length} spent={tallyTotals.spent} saved={tallyTotals.saved} currency={currency} />
+              ) : (
+                <HeaderTotals countLabel="Total cards" count={cardTally.length} spent={cardTotals.spent} saved={cardTotals.saved} currency={currency} />
+              )}
+              {expandedTally === "brands"
+                ? tallyPeriod(tallyYear, setTallyYear, "Brand tally year")
+                : tallyPeriod(cardYear, setCardYear, "Card tally year")}
             </span>
           }
         >
-          {yearTable}
+          {expandedTally === "brands" ? brandTable : cardTable}
         </ModalShell>
       ) : null}
 
@@ -1496,7 +1454,7 @@ function Panel({
           between. The control stops the click so its own menu still works. */}
       <div
         onClick={onExpand ?? onToggle}
-        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${inlineOpen ? "border-b border-line" : ""}`}
+        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${inlineOpen ? "border-b border-line" : ""} ${onExpand ? "gap-y-2 px-4 py-3 sm:px-5" : ""}`}
       >
       <button
         type="button"
@@ -1504,7 +1462,7 @@ function Panel({
            twice and land back where it started. */
         onClick={(e) => { e.stopPropagation(); (onExpand ?? onToggle)(); }}
         aria-expanded={onExpand ? undefined : open}
-        className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 text-left sm:px-5 ${onExpand ? "" : "flex-1"} ${control ? "pr-2" : ""}`}
+        className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-left ${onExpand ? "" : "flex-1 px-4 py-3 sm:px-5"} ${control ? "pr-2" : ""}`}
       >
         <span className="flex min-w-0 items-center gap-2">
           {onExpand ? (
@@ -1533,11 +1491,13 @@ function Panel({
           buttons above. Same py-3 as the button beside it: the control is
           taller than a line of text, and without the padding this header sits
           ~5px shorter than the sibling cards in the 3-up row. Only from xl,
-          where that row exists — stacked, it would just be dead space. */}
+          where that row exists — stacked, it would just be dead space. A
+          full-width-only header pads the row instead, so when the control
+          wraps under a long title it lines up with the title's left edge. */}
       {control ? (
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`shrink-0 cursor-auto pl-3 pr-4 sm:pr-5 xl:py-3 ${onExpand ? "" : "ml-auto"}`}
+          className={`shrink-0 cursor-auto ${onExpand ? "" : "ml-auto pl-3 pr-4 sm:pr-5 xl:py-3"}`}
         >
           {control}
         </div>

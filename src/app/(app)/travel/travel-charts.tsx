@@ -31,9 +31,11 @@ export function CostBars({
   years,
   currency,
   selected,
+  onPick,
 }: {
   years: YearPoint[];
   currency: string;
+  onPick?: (year: string) => void;
   // The year the Reservations list is filtered to, washed here so the filter
   // and the chart are visibly the same subject.
   selected?: string[];
@@ -79,7 +81,8 @@ export function CostBars({
                 key={y.year}
                 onMouseEnter={() => setHover(i)}
                 onMouseLeave={() => setHover((h) => (h === i ? null : h))}
-                className="relative flex h-full flex-1 flex-col justify-end rounded-t-md"
+                onClick={onPick ? () => onPick(y.year) : undefined}
+                className={`relative flex h-full flex-1 flex-col justify-end rounded-t-md ${onPick ? "cursor-pointer" : ""}`}
                 style={selected?.includes(y.year) ? { backgroundColor: "var(--viz-sel)" } : undefined}
               >
                 <div className="flex h-full items-end justify-center gap-1">
@@ -93,28 +96,9 @@ export function CostBars({
                   />
                 </div>
 
-                {/* The bar colors identify the rows as swatches, not as text
-                    color — light blue at this size is unreadable on the
-                    surface, so the numbers stay in the foreground color. */}
                 {hover === i ? (
-                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-surface px-2.5 py-1.5 text-[11px] shadow-lg ring-1 ring-line">
-                    <p className="font-bold tabular-nums">{y.year}</p>
-                    <p className="mt-0.5 flex items-center gap-1.5 tabular-nums">
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-sm"
-                        style={{ backgroundColor: "var(--viz-soft)" }}
-                      />
-                      <span className="font-semibold">{formatMoney(y.hotel, currency)}</span>
-                      <span className="text-muted">hotel cost</span>
-                    </p>
-                    <p className="flex items-center gap-1.5 tabular-nums">
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-sm"
-                        style={{ backgroundColor: "var(--viz-debt)" }}
-                      />
-                      <span className="font-semibold">{formatMoney(y.pocket, currency)}</span>
-                      <span className="text-muted">pocket cost</span>
-                    </p>
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2">
+                    <YearTip point={y} currency={currency} />
                   </div>
                 ) : null}
               </div>
@@ -144,10 +128,12 @@ export function SavedLine({
   years,
   currency,
   selected,
+  onPick,
 }: {
   years: YearPoint[];
   currency: string;
   selected?: string[];
+  onPick?: (year: string) => void;
 }) {
   const W = 320;
   const H = 120;
@@ -159,9 +145,10 @@ export function SavedLine({
   const step = years.length > 1 ? (W - padX * 2) / (years.length - 1) : 0;
   const x = (i: number) => padX + step * i;
   const y = (v: number) => padTop + (1 - v / max) * (H - padTop - padBottom);
+  const [hover, setHover] = useState<number | null>(null);
 
   return (
-    <div>
+    <div className="relative">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="h-40 w-full"
@@ -217,6 +204,65 @@ export function SavedLine({
           </g>
         ))}
       </svg>
+      {/* One invisible hover strip per year, the width of the gap between
+          marks, so the tip opens anywhere in a year's column. */}
+      {years.map((p, i) => {
+        const half = years.length > 1 ? step / 2 : W / 2;
+        const left = Math.max(0, x(i) - half);
+        const right = Math.min(W, x(i) + half);
+        const edge = i === 0 ? "left-0" : i === years.length - 1 ? "right-0" : "left-1/2 -translate-x-1/2";
+        return (
+          <div
+            key={p.year}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+            onClick={onPick ? () => onPick(p.year) : undefined}
+            className={`absolute inset-y-0 ${onPick ? "cursor-pointer" : ""}`}
+            style={{ left: `${(left / W) * 100}%`, width: `${((right - left) / W) * 100}%` }}
+          >
+            {hover === i ? (
+              <div
+                className={`pointer-events-none absolute z-10 mb-2 ${edge}`}
+                style={{ bottom: `${(1 - y(saved[i]) / H) * 100}%` }}
+              >
+                <YearTip point={p} currency={currency} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// The hover card both travel charts share: the year, what the rooms listed
+// for, what we paid, and the difference. Every row carries a swatch so the
+// figures line up in one column. The bar colors identify the rows as
+// swatches, not as text color — light blue at this size is unreadable on the
+// surface, so hotel and pocket stay in the foreground color.
+function YearTip({ point, currency }: { point: YearPoint; currency: string }) {
+  const rows = [
+    { color: "var(--viz-soft)", value: point.hotel, label: "hotel cost", tone: "" },
+    { color: "var(--viz-debt)", value: point.pocket, label: "pocket cost", tone: "" },
+    { color: "var(--positive)", value: point.hotel - point.pocket, label: "saved", tone: "text-positive" },
+  ];
+  return (
+    <div className="whitespace-nowrap rounded-md bg-surface px-2.5 py-1.5 text-[11px] shadow-lg ring-1 ring-line">
+      <p className="font-bold tabular-nums">{point.year}</p>
+      <div className="mt-0.5 grid grid-cols-[auto_auto_auto] items-center gap-x-1.5">
+        {rows.map((r, k) => (
+          <div
+            key={r.label}
+            className={`contents ${k === 2 ? "[&>*]:mt-0.5 [&>*]:border-t [&>*]:border-line [&>*]:pt-0.5" : ""}`}
+          >
+            <span className="flex h-full items-center">
+              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: r.color }} />
+            </span>
+            <span className={`text-right font-semibold tabular-nums ${r.tone}`}>{formatMoney(r.value, currency)}</span>
+            <span className="text-muted">{r.label}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

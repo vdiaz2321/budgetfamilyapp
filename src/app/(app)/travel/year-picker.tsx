@@ -202,7 +202,19 @@ export function YearPicker({
       label={label}
       align={align}
       className={className}
-      allOption={{ label: "All years", checked: value.length === 0, onClick: () => onChange([]) }}
+      allOption={{
+        label: "All years",
+        checked: value.length === 0,
+        // A second click on "All years" un-ticks it back to just the current
+        // year (or the newest listed one, if this year has nothing yet).
+        onClick: () => {
+          if (value.length > 0) return onChange([]);
+          const thisYear = String(new Date().getFullYear());
+          const fallback = [...years].sort().reverse()[0];
+          const pick = years.includes(thisYear) ? thisYear : fallback;
+          if (pick) onChange([pick]);
+        },
+      }}
       options={years.map((y) => ({ key: y, label: y, checked: value.includes(y), onToggle: () => toggle(y) }))}
     />
   );
