@@ -7,7 +7,9 @@ import type { AccountOption, BucketOption, GroupData, PayeeLineItem, SubOption, 
 import { isHiddenPaidOffDebt } from "./types";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import { throwIfAny } from "@/lib/supabase-result";
+import { attachSplitParts } from "@/lib/split-parts";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
+import { fetchTripPlans, tripPlanTotals } from "@/lib/trip-budget-plans";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -65,10 +67,11 @@ export default async function BudgetPage({
     actualsSinceAnchor,
     yearTxRows,
     { data: cardOwedRows, error: cardOwedError },
+    tripPlanRows,
   ] = await Promise.all([
     supabase
       .from("subcategories")
-      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id, is_recurring, travel_category")
+      .select("id, category_id, name, due_day, sort_order, linked_bucket_id, linked_account_id, payment_account_id, is_recurring, travel_category, receives_trip_plans")
       .eq("household_id", household.id)
       .order("sort_order"),
     // This month's plans and last month's, in one trip. Last month's feed the
@@ -94,7 +97,7 @@ export default async function BudgetPage({
     supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
       )
       .eq("household_id", household.id)
       .gte("occurred_on", prevFirstOfMonth)
@@ -197,6 +200,8 @@ export default async function BudgetPage({
       .from("v_card_balances")
       .select("account_id, owed_cents")
       .eq("household_id", household.id),
+    // Trip plans (Travel Log) for both months, added on top of budget_plans.
+    fetchTripPlans(supabase, household.id, { months: [prevFirstOfMonth, month.firstOfMonth] }),
   ]);
   throwIfAny({ subs: subsError, plans: plansError, goals: goalsError, debts: debtsError, txRows: txRowsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, irregularBillPlans: irregularBillPlansError, subscriptionPlans: subscriptionPlansError, rolloverRows: rolloverRowsError, cardOwed: cardOwedError });
 
@@ -217,6 +222,16 @@ export default async function BudgetPage({
   const actuals = actualsSinceAnchor.filter((a) => a.month === month.firstOfMonth);
 
   const plannedBySub = new Map((plans ?? []).map((p) => [p.subcategory_id, p.planned_cents]));
+  // A future trip's Planned, counted on Restaurant Travel / Traveling/Trips in
+  // the month it starts. Added to whatever was typed on the Budget for the
+  // item (budget_plans holds only that extra), never replacing it.
+  const tripPlanByKey = tripPlanTotals(tripPlanRows);
+  const tripPlannedFor = (subId: string, firstOfMonth: string) => tripPlanByKey.get(`${subId}:${firstOfMonth}`) ?? 0;
+  const tripNamesBySub = new Map<string, string[]>();
+  for (const r of tripPlanRows) {
+    if (r.month !== month.firstOfMonth) continue;
+    tripNamesBySub.set(r.subcategory_id, [...new Set([...(tripNamesBySub.get(r.subcategory_id) ?? []), r.trip_name])]);
+  }
   // Last month's actual per item, for the "Prev Mo Spent" one-click prefill on
   // recurring items. Free: allActuals is already fetched above for the
   // rollover walk and spans every month back to the anchor, so this is a
@@ -415,8 +430,7 @@ export default async function BudgetPage({
       const plannedCents =
         prevIrregularPlannedBySub.get(s.id) ??
         prevAutoPlannedBySub.get(s.id) ??
-        prevPlannedBySub.get(s.id) ??
-        0;
+        (prevPlannedBySub.get(s.id) ?? 0) + tripPlannedFor(s.id, prevFirstOfMonth);
       const spentCents = prevSpentBySub.get(s.id) ?? 0;
       if (spentCents <= plannedCents) return null;
       return { subId: s.id, name: s.name, kind, plannedCents, spentCents };
@@ -446,9 +460,7 @@ export default async function BudgetPage({
           ? irregularAutoPlannedBySub.get(s.id)!
           : isAutoSub
             ? autoPlannedBySub.get(s.id)!
-            : hasManualPlan
-              ? plannedBySub.get(s.id)!
-              : 0;
+            : (hasManualPlan ? plannedBySub.get(s.id)! : 0) + tripPlannedFor(s.id, month.firstOfMonth);
         const spentCents = spentBySub.get(s.id) ?? 0;
         const g = goalBySub.get(s.id);
         const d = debtBySub.get(s.id);
@@ -467,6 +479,8 @@ export default async function BudgetPage({
           paymentAccountId: (s as { payment_account_id?: string | null }).payment_account_id ?? null,
           travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
           plannedCents,
+          tripPlannedCents: tripPlannedFor(s.id, month.firstOfMonth),
+          tripNames: tripNamesBySub.get(s.id) ?? [],
           spentCents,
           prevSpentCents: prevSpentBySub.get(s.id) ?? 0,
           prevAccountId: prevTxDetailBySub.get(s.id)?.accountId ?? null,
@@ -616,7 +630,13 @@ export default async function BudgetPage({
     linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
     remainingCents: remainingBySub.get(s.id),
     travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
-    trimmableCents: Math.max(0, (plannedBySub.get(s.id) ?? 0) - (spentBySub.get(s.id) ?? 0)),
+    receivesTripPlans: (s as { receives_trip_plans?: boolean }).receives_trip_plans ?? false,
+    // Only the typed part of a plan can be given back — the trip part lives in
+    // the Travel Log — and never below what is already spent against the whole.
+    trimmableCents: Math.max(0, Math.min(
+      plannedBySub.get(s.id) ?? 0,
+      (plannedBySub.get(s.id) ?? 0) + tripPlannedFor(s.id, month.firstOfMonth) - (spentBySub.get(s.id) ?? 0),
+    )),
   }));
 
   // Disambiguate same-named accounts (e.g. two "Fidelity" accounts, one in
@@ -727,8 +747,10 @@ export default async function BudgetPage({
       isInvestmentTransfer: movementType === "investment_transfer",
       cleared: t.cleared ?? false,
       isWithdrawal: t.is_withdrawal ?? false,
+      splitGroupId: (t as { split_group_id?: string | null }).split_group_id ?? null,
     };
   });
+  attachSplitParts(transactions);
 
   const payeeLineItems: PayeeLineItem[] = [
     ...(subscriptions ?? [])

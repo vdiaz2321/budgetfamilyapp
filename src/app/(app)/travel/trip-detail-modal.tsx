@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, formatMoneyWhole } from "@/lib/money";
@@ -80,6 +81,18 @@ export function TripDetailModal({
     return values.length ? values.reduce((sum, v) => sum + v, 0) : null;
   };
 
+  // What this trip adds to the Budget (view v_trip_budget_plans): its spending
+  // plan plus bookings not bought yet, in the month it starts.
+  const budgetPlanCents =
+    t.plannedMisc +
+    t.bookings
+      .filter((b) => !b.cancelled && (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate)
+      .reduce((sum, b) => sum + b.pocket, 0);
+  const budgetMonth = t.start ? t.start.slice(0, 7) : null;
+  const budgetMonthLabel = budgetMonth
+    ? new Date(`${budgetMonth}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
+    : null;
+
   function run(action: () => Promise<{ error: string | null }>, after: () => void) {
     start(async () => {
       setError(null);
@@ -124,6 +137,15 @@ export function TripDetailModal({
           )}
           {t.nights != null ? <span>{t.nights} night{t.nights === 1 ? "" : "s"}</span> : null}
           {t.pax ? <span>{t.pax} pax</span> : null}
+          {budgetPlanCents > 0 ? (
+            budgetMonth ? (
+              <Link href={`/budget?month=${budgetMonth}`} className="font-semibold text-foreground underline decoration-line underline-offset-2 hover:text-sky-700 dark:hover:text-sky-300">
+                {formatMoney(budgetPlanCents, currency)} planned on Budget · {budgetMonthLabel} →
+              </Link>
+            ) : (
+              <span className="font-semibold text-negative">Add dates to put its plan on the Budget</span>
+            )
+          ) : null}
           {!editingNotes ? (
             <button type="button" onClick={() => { setNotes(t.trip.notes ?? ""); setEditingNotes(true); }} className={`${SECTION_BUTTON} text-foreground`}>
               {t.trip.notes ? "Edit notes" : "+ Add notes"}

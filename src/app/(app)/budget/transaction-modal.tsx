@@ -5,7 +5,7 @@ import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, moneyExpressionToCents } from "@/lib/money";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
-import { addTransaction, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
+import { addTransaction, addSplitTransaction, replaceWithSplit, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
 import { refreshTripTagging, useTripTagging } from "./trip-tagging-cache";
 import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
 import { EXPENSE_CATEGORIES } from "../travel/types";
@@ -130,10 +130,17 @@ export function TransactionModal({
   // original tx with N new ones (delete + insert × N) that all share the same
   // date / account / payee / memo. Refunds are stored negative but typed
   // positive, so the seed uses the absolute amount.
+  // Opening any part of a split opens the whole purchase: every part, and
+  // their sum as the total.
+  const editParts = editTx?.splitParts && editTx.splitParts.length > 1 ? editTx.splitParts : null;
+  const isSplitEdit = editParts != null;
   const [totalCents, setTotalCents] = useState(
-    editTx ? Math.abs(editTx.amountCents) : initialAmountCents ?? 0,
+    editParts
+      ? editParts.reduce((sum, p) => sum + Math.abs(p.amountCents), 0)
+      : editTx ? Math.abs(editTx.amountCents) : initialAmountCents ?? 0,
   );
   const [splits, setSplits] = useState<SplitEntry[]>(() => {
+    if (editParts) return editParts.map((p) => ({ subId: p.subId, amountCents: Math.abs(p.amountCents) }));
     const seedSubId = editTx ? editTx.subId : initialSubId;
     return seedSubId
       ? [{ subId: seedSubId, amountCents: editTx ? Math.abs(editTx.amountCents) : initialAmountCents ?? 0 }]
@@ -236,16 +243,25 @@ export function TransactionModal({
   // has one fixed column, set on its item form.
   const [travelCategory, setTravelCategory] = useState(editTx?.travelCategory ?? "other");
   const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
-  // On a trip, an item with a travel twin — same Travel Log column, "Travel"
-  // in its name (Restaurants → Restaurant Travel) — switches to that twin, so
-  // the Annual Overview files the meal under travel. Taking the trip off
-  // switches it back. Adjusted during render (not in an effect) so the form
-  // never shows the wrong item for a frame.
+  // On a trip, an item with a travel twin — a trip item (receivesTripPlans)
+  // on the same Travel Log column (Restaurants → Restaurant Travel) —
+  // switches to that twin, so the meal counts on the trip budget, not the
+  // everyday one. Taking the trip off switches it back. Adjusted during render
+  // (not in an effect) so the form never shows the wrong item for a frame.
   const travelTwinOf = (subId: string) => {
     const o = subOptions.find((x) => x.id === subId);
-    if (!o?.travelCategory || /travel/i.test(o.name)) return null;
-    return subOptions.find((x) => x.id !== o.id && x.travelCategory === o.travelCategory && /travel/i.test(x.name))?.id ?? null;
+    if (!o?.travelCategory || o.receivesTripPlans) return null;
+    return subOptions.find((x) => x.id !== o.id && x.receivesTripPlans && x.travelCategory === o.travelCategory)?.id ?? null;
   };
+  // Items with a Travel Log column but no twin (Groceries, Fuel,
+  // Entertainment…) are saved on the catch-all trip item instead, keeping
+  // their column — the server does the move per split; this only names it.
+  const tripCatchAll = subOptions.find((x) => x.receivesTripPlans && x.travelCategory === "other") ?? null;
+  const movedToCatchAll = effectiveTripId && !bookingOk && tripCatchAll
+    ? splits
+        .map((sp) => subOptions.find((o) => o.id === sp.subId))
+        .filter((o): o is SubOption => Boolean(o?.travelCategory && !o.receivesTripPlans && !travelTwinOf(o.id)))
+    : [];
   // twin id → the item it replaced, for switching back.
   const [swappedFrom, setSwappedFrom] = useState<Record<string, string>>({});
   if (effectiveTripId) {
@@ -372,34 +388,21 @@ export function TransactionModal({
     if (problems.messages.length > 0) return;
     setBusy(fd.get("cleared") === "on" ? "clear" : "save");
     start(async () => {
-      // A split writes one transaction per item, each its own server round
-      // trip. If one throws — the payee or account lookup failing on a weak
-      // connection is the realistic case — stop and say so, naming how many
-      // already landed, instead of letting the rejection vanish and leaving
-      // the user staring at a modal that did half the work.
-      let saved = 0;
+      // A split is saved in one server call (one transaction per item). If
+      // it throws — a lookup failing on a weak connection is the realistic
+      // case — say so (the server names how many parts landed) instead of
+      // letting the rejection vanish behind a modal that did half the work.
       const warnings: string[] = [];
       const note = (r: { warning?: string } | void) => { if (r?.warning) warnings.push(r.warning); };
       try {
       if (isEdit) {
-        // Splits-on-edit: replace the original transaction with N new ones
-        // that all share the same date/account/payee/memo but each get their
-        // own subcategory + amount. One-item saves stay as a plain update so
-        // ids and audit trails don't churn.
-        if (splits.length > 1 && editTx) {
-          const deleteFd = new FormData();
-          deleteFd.set("id", editTx.id);
-          await deleteTransaction(deleteFd);
-          for (const sp of splits) {
-            const sfd = new FormData();
-            fd.forEach((v, k) => {
-              if (k !== "id" && k !== "subcategoryId" && k !== "amount") sfd.append(k, v);
-            });
-            sfd.set("subcategoryId", sp.subId);
-            sfd.set("amount", (sp.amountCents / 100).toFixed(2));
-            note(await addTransaction(sfd));
-            saved++;
-          }
+        // A split (or a plain transaction being split): the server replaces
+        // every existing part with the parts on the form, in one call, under
+        // one split id. A plain one-item save stays an update so ids and
+        // audit trails don't churn.
+        if (editTx && (splits.length > 1 || isSplitEdit)) {
+          fd.set("splits", JSON.stringify(splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
+          note(await replaceWithSplit(fd));
         } else {
           fd.set("subcategoryId", splits[0].subId);
           fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
@@ -409,13 +412,14 @@ export function TransactionModal({
         onClose();
       } else {
         if (splits.length === 0) return;
-        for (const sp of splits) {
-          const sfd = new FormData();
-          fd.forEach((v, k) => { if (k !== "subcategoryId" && k !== "amount") sfd.append(k, v); });
-          sfd.set("subcategoryId", sp.subId);
-          sfd.set("amount", (sp.amountCents / 100).toFixed(2));
-          note(await addTransaction(sfd));
-          saved++;
+        if (splits.length > 1) {
+          // Every part in one server call, linked as one split.
+          fd.set("splits", JSON.stringify(splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
+          note(await addSplitTransaction(fd));
+        } else {
+          fd.set("subcategoryId", splits[0].subId);
+          fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
+          note(await addTransaction(fd));
         }
         if (warnings.length) return setSavedWarning(warnings.join(" "));
         if (fd.get("createAnother") === "on") {
@@ -429,17 +433,17 @@ export function TransactionModal({
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         setErrors([
-          saved > 0
-            ? `Saved ${saved} of ${splits.length} items, then failed — ${detail}`
-            : `Couldn't save — ${detail}`,
+          // A split that failed partway says how many parts landed.
+          `Couldn't save — ${detail}`,
           "Nothing else was written. Check your connection and try again.",
         ]);
         setErrorFields(new Set());
         setErrorSplitIds(new Set());
       }
       // A payment can change a booking (its Pocket cost, Planned → Booked),
-      // so the next open shows it as it is now.
-      void refreshTripTagging();
+      // so the next open shows it as it is now. Only a save that touched a
+      // trip can do that; refreshing after every save cost a server call.
+      if (fd.get("tripId") || editTx?.tripId) void refreshTripTagging();
     });
   }
 
@@ -524,15 +528,24 @@ export function TransactionModal({
           <form
             id="tx-form"
             ref={formRef}
-            action={handleFormAction}
+            // onSubmit, not `action=`: a form action runs inside React's own
+            // transition, which held every busy label ("Clearing…",
+            // "Saving…") back until the save had finished — so a 3-second
+            // save looked like nothing happened. The clicked button (Clear
+            // or Add) is passed as the submitter so its name/value arrive.
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleFormAction(new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter));
+            }}
             // Native bubbles ("Please fill out this field") fire on the amount
             // and date inputs before our own check runs, so half the missing
             // fields were reported one way and half another. Turning the
             // browser's validation off routes every reason through the single
             // banner above the footer, which names the field.
             noValidate
-            // Saved with a warning: React has reset the fields by now, so
-            // they'd show blanks and the wrong trip. Only the message stays.
+            // Saved with a warning: the form is finished with, and editing
+            // it again would suggest the save hadn't happened. Only the
+            // message stays.
             hidden={savedWarning != null}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
@@ -566,7 +579,7 @@ export function TransactionModal({
                     // Refunds are stored negative in the DB but always typed as
                     // positive dollars — flip the sign for display so the input
                     // reads $50 instead of −$50 while the Refund pill is on.
-                    ? centsToDisplay(Math.abs(editTx.amountCents))
+                    ? centsToDisplay(totalCents)
                     : initialAmountCents != null
                     ? centsToDisplay(initialAmountCents)
                     : ""
@@ -789,7 +802,7 @@ export function TransactionModal({
                     onChange={(e) => setTravelCategory(e.target.value)}
                     className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
-                    {(["other", "parking", "transport", "cash"] as const).map((key) => (
+                    {(["other", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash"] as const).map((key) => (
                       <option key={key} value={key}>
                         {/* In a split only the catch-all item's part uses it — say which. */}
                         {splits.length > 1
@@ -806,7 +819,7 @@ export function TransactionModal({
                       ? paidBooking?.hasCard
                         ? "Sets that booking's Pocket cost to its payments added up, marks it Booked, and takes the points off its card."
                         : "Sets that booking's Pocket cost to its payments added up and marks it Booked. No card is linked on it, so points are recorded but not taken from any card."
-                      : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}`}
+                      : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}${movedToCatchAll.length ? ` ${movedToCatchAll.map((o) => o.name).join(", ")} will save on ${tripCatchAll!.name} (${movedToCatchAll.map((o) => EXPENSE_CATEGORIES.find((c) => c.key === o.travelCategory)?.label ?? o.name).join(", ")} column), not your everyday budget.` : ""}`}
                   </span>
                 ) : null}
               </div>
@@ -897,9 +910,13 @@ export function TransactionModal({
                 name="cleared"
                 value="on"
                 disabled={pending}
-                className="whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200 transition hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 transition disabled:cursor-wait ${
+                  pending && busy === "clear"
+                    ? "bg-emerald-600 text-white ring-emerald-600"
+                    : "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 disabled:opacity-60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-800/60 dark:hover:bg-emerald-900/40"
+                }`}
               >
-                {pending && busy === "clear" ? "Clearing..." : "Clear"}
+                {pending && busy === "clear" ? <><Spinner />Clearing…</> : "Clear"}
               </button>
             ) : (
               <>
@@ -954,10 +971,12 @@ export function TransactionModal({
               type="submit"
               form="tx-form"
               disabled={pending}
-              className={"rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
+              className={"inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-bold transition-colors disabled:cursor-wait disabled:opacity-60 sm:px-3.5 sm:py-1.5 sm:text-sm " + BTN_COLOR[txType] + " " + BTN_TEXT[txType]}
             >
-              {pending && busy === "save"
-                ? "Saving..."
+              {/* A save takes a few seconds; Clear is a save too, so both show
+                  it here, on the button the eye goes to. */}
+              {pending && (busy === "save" || busy === "clear")
+                ? <><Spinner />Saving…</>
                 : isRefund
                 ? isEdit
                   ? "Save Refund"
@@ -1608,5 +1627,15 @@ function PayeeField({
         </ul>
       ) : null}
     </div>
+  );
+}
+
+// Small busy indicator for the footer buttons while a save is in flight.
+function Spinner() {
+  return (
+    <svg className="h-3 w-3 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
   );
 }

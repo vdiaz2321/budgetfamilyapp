@@ -10,6 +10,7 @@ import type { CatMonthGroup, CatMonthRow } from "./category-months-table";
 import type { BreakdownKind } from "./annual-breakdown-history";
 import { ScrollToTop } from "@/components/scroll-to-top";
 import { throwIfAny } from "@/lib/supabase-result";
+import { fetchTripPlans } from "@/lib/trip-budget-plans";
 
 export const metadata = { title: "Annual Overview · Capitall" };
 
@@ -88,6 +89,7 @@ export default async function AnnualOverviewPage({
     { data: investmentAccounts, error: investmentAccountsError },
     { data: investmentBuckets, error: investmentBucketsError },
     { data: payees, error: payeesError },
+    tripPlanRows,
   ] = await Promise.all([
     supabase
       .from("subcategories")
@@ -148,6 +150,8 @@ export default async function AnnualOverviewPage({
       .from("payees")
       .select("id, name")
       .eq("household_id", household.id),
+    // Trip plans (Travel Log) are added on top of budget_plans, as on Budget.
+    fetchTripPlans(supabase, household.id, { from: yearStart, to: yearEnd }),
   ]);
   throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, breakdownRows: breakdownRowsError, investmentContributionRows: investmentContributionRowsError, investmentAccounts: investmentAccountsError, investmentBuckets: investmentBucketsError, payees: payeesError });
 
@@ -182,7 +186,7 @@ export default async function AnnualOverviewPage({
   const planned = Array.from({ length: 12 }, emptyKinds);
   const actual = Array.from({ length: 12 }, emptyKinds);
 
-  for (const p of plans ?? []) {
+  for (const p of [...(plans ?? []), ...tripPlanRows]) {
     const kind = kindBySub.get(p.subcategory_id);
     if (!kind) continue;
     const monthIdx = parseInt(p.month.slice(5, 7), 10) - 1;

@@ -1,8 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { displayToCents, moneyExpressionToCents } from "@/lib/money";
 import { captureSnapshots } from "@/lib/snapshots";
 import { resolvePayeeId } from "@/lib/payees";
@@ -11,6 +9,8 @@ import { adjustDebtBalance } from "@/lib/debts";
 import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 import { unwrap } from "@/lib/supabase-result";
+import { getSessionContext } from "@/lib/auth-context";
+import { fetchTripPlans } from "@/lib/trip-budget-plans";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
 import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef } from "@/app/(app)/travel/booking-payments";
@@ -40,6 +40,54 @@ function travelCategoryOf(
   if (!tripId || booking || itemCategory !== "other") return null;
   const raw = String(formData.get("travelCategory") ?? "").trim();
   return TRAVEL_CATEGORY_KEYS.has(raw) && raw !== "other" ? raw : null;
+}
+
+// Trip spending belongs on the trip items (Restaurant Travel, Traveling/Trips —
+// subcategories.receives_trip_plans), never on everyday Groceries, Fuel or
+// Entertainment, or it eats their monthly budget. A trip purchase on another
+// item with a Travel Log row moves to the trip item for that row when there is
+// one (Restaurants → Restaurant Travel), else to the catch-all, keeping its
+// row on the purchase (Groceries → Traveling/Trips, Groceries column). The
+// form shows the same move; this is where it is enforced, one split at a time.
+// Booking payments are left alone — they settle a booking, not a column.
+const TRIP_SUB_SELECT = "id, category_id, name, linked_bucket_id, linked_account_id, travel_category, receives_trip_plans, categories(kind)";
+type TripRoutableSub = {
+  category_id: string;
+  name: string;
+  linked_bucket_id: string | null;
+  linked_account_id: string | null;
+  travel_category: string | null;
+  receives_trip_plans: boolean;
+  categories: { kind: string } | null;
+};
+async function routeTripPurchase<S extends TripRoutableSub>(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  subcategoryId: string,
+  sub: S,
+  tripId: string | null,
+  booking: BookingRef | null,
+): Promise<{ subcategoryId: string; sub: S; forcedCategory: string | null }> {
+  const keep = { subcategoryId, sub, forcedCategory: null };
+  if (!tripId || booking || !sub.travel_category || sub.receives_trip_plans) return keep;
+  const tripItems = unwrap(
+    await supabase
+      .from("subcategories")
+      .select(TRIP_SUB_SELECT)
+      .eq("household_id", householdId)
+      .eq("receives_trip_plans", true)
+      .returns<(TripRoutableSub & { id: string })[]>(),
+    "trip budget items",
+  ) ?? [];
+  const target =
+    tripItems.find((t) => t.travel_category === sub.travel_category) ??
+    tripItems.find((t) => t.travel_category === "other");
+  if (!target) return keep;
+  return {
+    subcategoryId: target.id,
+    sub: target as unknown as S,
+    forcedCategory: target.travel_category === "other" ? sub.travel_category : null,
+  };
 }
 
 // The bucket a Savings subcategory contributes to, if any linked — null when
@@ -120,24 +168,12 @@ async function adjustLinkedAccountBalance(
   return true;
 }
 
+// The shared, request-cached session: the sign-in is verified locally (no
+// auth-server trip) and profile + household come in one query. The page
+// re-render that follows a save in the same request reuses the same result.
 async function requireHousehold() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  // A failed read is not "this user has no household" — redirecting on it
-  // would drop a signed-in user into onboarding and invite a second household.
-  if (profileError) throw new Error(`Could not load your profile: ${profileError.message}`);
-  if (!profile) redirect("/onboarding");
-
-  return { supabase, householdId: profile.household_id };
+  const { supabase, household } = await getSessionContext();
+  return { supabase, householdId: household.id };
 }
 
 const CUSTOM_GROUP_KINDS = new Set(["income", "bills", "expenses", "savings"]);
@@ -456,7 +492,15 @@ export async function upsertPlan(formData: FormData) {
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01
   if (!subcategoryId || !month) return;
 
-  const plannedCents = moneyExpressionToCents(String(formData.get("planned") ?? "0"));
+  const typedCents = moneyExpressionToCents(String(formData.get("planned") ?? "0"));
+  // The Budget shows an item's plan WITH its trips (Travel Log) added in, so
+  // the figure typed here is that total. Only the part above the trips is
+  // stored — the trips are read live, and storing them too would count them
+  // twice. Typing less than the trips alone stores $0 extra.
+  const tripCents = (await fetchTripPlans(supabase, householdId, { months: [month] }))
+    .filter((r) => r.subcategory_id === subcategoryId)
+    .reduce((sum, r) => sum + r.planned_cents, 0);
+  const plannedCents = Math.max(0, typedCents - tripCents);
 
   await supabase.from("budget_plans").upsert(
     {
@@ -1111,9 +1155,19 @@ async function resolvePropertyId(
   return data?.id ?? null;
 }
 
-export async function addTransaction(formData: FormData) {
-  const { supabase, householdId } = await requireHousehold();
-  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+type SaveOutcome = { bookingWarning: string | null; balancesMoved: boolean; touchedDebt: boolean };
+
+// One transaction written with all its side effects (bucket, debt, account
+// ledger, booking) — everything except re-taking the snapshot and
+// revalidating pages, which the caller does once for the whole save. A split
+// runs this once per part. Null when the form is missing a required field.
+async function insertTransactionCore(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  formData: FormData,
+  splitGroupId: string | null,
+): Promise<SaveOutcome | null> {
+  const pickedSubId = String(formData.get("subcategoryId") ?? "");
   const occurredOn = String(formData.get("date") ?? "");
   const enteredCents = displayToCents(String(formData.get("amount") ?? "0"));
   const payeeName = String(formData.get("payee") ?? "").trim();
@@ -1126,54 +1180,56 @@ export async function addTransaction(formData: FormData) {
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   const isRefund = formData.get("isRefund") === "on";
   const cleared = formData.get("cleared") === "on";
-  if (!subcategoryId || !occurredOn || enteredCents <= 0) return;
+  if (!pickedSubId || !occurredOn || enteredCents <= 0) return null;
   // Refund posts as a negative amount on the same subcategory + account.
   // Everything downstream — v_monthly_actuals (sums), account ledger
   // (via ledgerDelta which multiplies by ±1 per kind), Annual Overview,
   // Insights — handles the sign naturally, so no other code has to know.
   const amountCents = isRefund ? -enteredCents : enteredCents;
 
-  // Pull every subcategory field the rest of this action needs in ONE query
-  // — the linked bucket/account ids and the category's kind (via FK join),
-  // so the follow-up helpers below can read them from memory instead of
-  // firing three more sequential lookups (each ~150ms from Frankfurt/EU).
-  const sub = unwrap(
-    await supabase
+  // Every lookup the insert needs, fired at once. None depends on another
+  // (only the booking waits on its trip), and each is a round trip to a
+  // database an ocean away — run one after another they were most of the
+  // wait on Add / Clear. Every one still throws on a failed read.
+  const [pickedSub, tripAndBooking, payeeId, accountId, propertyId] = await Promise.all([
+    // Every subcategory field the rest of this action needs, in ONE query —
+    // the linked bucket/account ids and the category's kind (via FK join).
+    supabase
       .from("subcategories")
-      .select("category_id, name, linked_bucket_id, linked_account_id, travel_category, categories(kind)")
-      .eq("id", subcategoryId)
+      .select(TRIP_SUB_SELECT)
+      .eq("id", pickedSubId)
       .eq("household_id", householdId)
-      .maybeSingle<{
-        category_id: string;
-        name: string;
-        linked_bucket_id: string | null;
-        linked_account_id: string | null;
-        travel_category: string | null;
-        categories: { kind: string } | null;
-      }>(),
-    "subcategories",
-  );
-  if (!sub) return;
-
-  // Case-insensitive: "aldi" reuses the existing "Aldi" rather than creating a
-  // second payee that then splits the shop's totals on the Annual Overview.
-  const payeeId = payeeName ? await resolvePayeeId(supabase, householdId, payeeName) : null;
-
-  // Only attach the account if it belongs to this household.
-  let accountId: string | null = null;
-  if (accountIdRaw) {
-    // Same reasoning as resolvePayeeId: a failed lookup used to collapse to
-    // `null` and write an account-less row. Only a genuine "not in this
-    // household" answer is allowed to null it out.
-    const { data: account, error: accountError } = await supabase
-      .from("accounts")
-      .select("id")
-      .eq("id", accountIdRaw)
-      .eq("household_id", householdId)
-      .maybeSingle();
-    if (accountError) throw new Error(`Could not verify the account: ${accountError.message}`);
-    accountId = account?.id ?? null;
-  }
+      .maybeSingle<TripRoutableSub>()
+      .then((r) => unwrap(r, "subcategories")),
+    resolveTripTag(supabase, householdId, tripIdRaw).then(async (tripId) => ({
+      tripId,
+      booking: await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId),
+    })),
+    // Case-insensitive: "aldi" reuses the existing "Aldi" rather than creating
+    // a second payee that then splits the shop's totals on the Annual Overview.
+    payeeName ? resolvePayeeId(supabase, householdId, payeeName) : Promise.resolve(null),
+    // Only attach the account if it belongs to this household. A failed
+    // lookup throws rather than writing an account-less row; only a genuine
+    // "not in this household" answer nulls it out.
+    accountIdRaw
+      ? supabase
+          .from("accounts")
+          .select("id")
+          .eq("id", accountIdRaw)
+          .eq("household_id", householdId)
+          .maybeSingle()
+          .then(({ data, error }) => {
+            if (error) throw new Error(`Could not verify the account: ${error.message}`);
+            return (data?.id as string | undefined) ?? null;
+          })
+      : Promise.resolve(null),
+    resolvePropertyId(supabase, householdId, propertyIdRaw),
+  ]);
+  if (!pickedSub) return null;
+  const { tripId, booking } = tripAndBooking;
+  const routed = await routeTripPurchase(supabase, householdId, pickedSubId, pickedSub, tripId, booking);
+  const subcategoryId = routed.subcategoryId;
+  const sub = routed.sub;
 
   // Choosing the shared Irregular Bills budget item is intentionally enough to
   // start tracking a one-off bill. The entered payee becomes a managed detail
@@ -1229,8 +1285,6 @@ export async function addTransaction(formData: FormData) {
     directBucketId = b?.id ?? null;
   }
 
-  const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
-  const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
   unwrap(await supabase.from("transactions").insert({
     household_id: householdId,
     occurred_on: occurredOn,
@@ -1240,14 +1294,15 @@ export async function addTransaction(formData: FormData) {
     payee_id: payeeId,
     account_id: accountId,
     bucket_id: directBucketId,
-    property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
+    property_id: propertyId,
     trip_id: tripId,
     ...bookingColumns(booking),
-    travel_category: travelCategoryOf(formData, sub.travel_category, tripId, booking),
+    travel_category: routed.forcedCategory ?? travelCategoryOf(formData, sub.travel_category, tripId, booking),
     memo,
     is_withdrawal: isWithdrawal,
     cleared,
     source: "manual",
+    split_group_id: splitGroupId,
   }), "saving the transaction");
   const bookingWarning = booking ? await syncBookings(supabase, householdId, bookingPointsOf(formData), booking) : null;
 
@@ -1257,44 +1312,54 @@ export async function addTransaction(formData: FormData) {
   // Refunds are skipped: they only affect the source account + monthly
   // spend actuals; touching a savings bucket or a debt principal on a refund
   // would double-count.
+  // Any balance moved below means this month's snapshot is re-taken — once, at
+  // the end, after every balance has moved (it reads them all fresh).
+  let balancesMoved = false;
   const bucketId = sub.linked_bucket_id;
   if (!isRefund && bucketId) {
     await adjustBucketBalance(supabase, householdId, bucketId, isWithdrawal ? -amountCents : amountCents);
-    await captureSnapshots(supabase, householdId, { force: true });
+    balancesMoved = true;
   }
 
   // Direct-bucket attribution (investment sub-account). adjustBucketBalance
   // also rolls the parent account total via syncAccountFromBuckets.
   if (!isRefund && directBucketId && directBucketId !== bucketId) {
     await adjustBucketBalance(supabase, householdId, directBucketId, isWithdrawal ? -amountCents : amountCents);
-    await captureSnapshots(supabase, householdId, { force: true });
+    balancesMoved = true;
   }
 
   // Bare investment account link (TSP, M1, …) — contribution posts straight
   // to the account balance. Only fires when there's no linked bucket.
   if (!isRefund && !bucketId && sub.linked_account_id) {
     await adjustLinkedAccountBalance(supabase, householdId, sub.linked_account_id, isWithdrawal ? -amountCents : amountCents);
+    balancesMoved = true;
+  }
+
+  // A payment logged against a debt lowers its outstanding balance, and the
+  // chosen account's running ledger moves (income adds, everything else
+  // spends out — skipped for investment/bucketed accounts, which stay
+  // manual). Different tables, so the two run side by side.
+  const [touchedDebt, touchedLedger] = await Promise.all([
+    !isRefund ? adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents) : Promise.resolve(false),
+    accountId
+      ? adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(sub.categories?.kind ?? null, amountCents))
+      : Promise.resolve(false),
+  ]);
+  return { bookingWarning, balancesMoved: balancesMoved || touchedLedger, touchedDebt };
+}
+
+// After one or more inserts: re-take this month's snapshot once if any
+// balance moved (it reads every balance fresh), and revalidate once.
+async function finishTransactionSave(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  outcomes: SaveOutcome[],
+) {
+  const touchedDebt = outcomes.some((o) => o.touchedDebt);
+  if (touchedDebt) revalidatePath("/snowball");
+  if (touchedDebt || outcomes.some((o) => o.balancesMoved)) {
     await captureSnapshots(supabase, householdId, { force: true });
   }
-
-  // A payment logged against a debt lowers its outstanding balance.
-  const touchedDebt = !isRefund
-    ? await adjustDebtBalance(supabase, householdId, subcategoryId, -amountCents)
-    : false;
-  if (touchedDebt) {
-    await captureSnapshots(supabase, householdId, { force: true });
-    revalidatePath("/snowball");
-  }
-
-  // Post to the chosen account's running ledger (income adds, everything
-  // else spends out) — skipped for investment/bucketed accounts, which stay
-  // manual. Kind comes from the sub's joined category, no extra query.
-  if (accountId) {
-    if (await adjustAccountLedger(supabase, householdId, accountId, ledgerDelta(sub.categories?.kind ?? null, amountCents))) {
-      await captureSnapshots(supabase, householdId, { force: true });
-    }
-  }
-
   revalidatePath("/budget");
   revalidatePath("/transactions");
   revalidatePath("/accounts");
@@ -1303,13 +1368,120 @@ export async function addTransaction(formData: FormData) {
   revalidatePath("/annual");
   revalidatePath("/insights");
   revalidatePath("/invest");
-  return bookingWarning ? { warning: bookingWarning } : undefined;
+  const warnings = outcomes.map((o) => o.bookingWarning).filter((w): w is string => Boolean(w));
+  return warnings.length ? { warning: warnings.join(" ") } : undefined;
+}
+
+export async function addTransaction(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const outcome = await insertTransactionCore(supabase, householdId, formData, null);
+  if (!outcome) return;
+  return finishTransactionSave(supabase, householdId, [outcome]);
+}
+
+// The parts of a split, as the modal sends them: JSON in "splits",
+// [{ subcategoryId, amountCents }]. Everything else on the form is shared.
+function splitPartsOf(formData: FormData): { subcategoryId: string; amountCents: number }[] {
+  try {
+    const raw = JSON.parse(String(formData.get("splits") ?? "[]"));
+    return Array.isArray(raw)
+      ? raw
+          .map((p) => ({ subcategoryId: String(p?.subcategoryId ?? ""), amountCents: Math.trunc(Number(p?.amountCents)) }))
+          .filter((p) => p.subcategoryId && Number.isFinite(p.amountCents) && p.amountCents > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+// Write each part as its own transaction under one split_group_id, in ONE
+// server call — one sign-in check, one snapshot, one page refresh — where the
+// modal used to send a full save per part. Parts go one after another, not
+// side by side: they usually share an account, and each moves its balance.
+async function insertSplitParts(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  formData: FormData,
+  parts: { subcategoryId: string; amountCents: number }[],
+  splitGroupId: string | null,
+): Promise<SaveOutcome[]> {
+  const outcomes: SaveOutcome[] = [];
+  for (const [i, part] of parts.entries()) {
+    const fd = new FormData();
+    formData.forEach((v, k) => {
+      if (k !== "id" && k !== "subcategoryId" && k !== "amount" && k !== "splits") fd.append(k, v);
+    });
+    fd.set("subcategoryId", part.subcategoryId);
+    fd.set("amount", (part.amountCents / 100).toFixed(2));
+    try {
+      const outcome = await insertTransactionCore(supabase, householdId, fd, splitGroupId);
+      if (outcome) outcomes.push(outcome);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(i > 0 ? `Saved ${i} of ${parts.length} split items, then failed — ${detail}` : detail);
+    }
+  }
+  return outcomes;
+}
+
+export async function addSplitTransaction(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const parts = splitPartsOf(formData);
+  if (parts.length === 0) return;
+  const outcomes = await insertSplitParts(supabase, householdId, formData, parts, parts.length > 1 ? crypto.randomUUID() : null);
+  return finishTransactionSave(supabase, householdId, outcomes);
+}
+
+// Editing a split (or splitting a plain transaction): every existing part is
+// deleted the normal way — so each one's balances are put back — and the parts
+// on the form are written fresh. A split kept as a split keeps its group id.
+export async function replaceWithSplit(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const parts = splitPartsOf(formData);
+  if (!id || parts.length === 0) return;
+  const ids = await splitGroupIdsOf(supabase, householdId, id);
+  const existing = unwrap(
+    await supabase.from("transactions").select("split_group_id, cleared").eq("id", id).eq("household_id", householdId).maybeSingle(),
+    "transactions",
+  );
+  const existingGroup = (existing?.split_group_id as string | null | undefined) ?? null;
+  // The edit form has no Cleared field; a cleared purchase stays cleared.
+  if (existing?.cleared && !formData.get("cleared")) formData.set("cleared", "on");
+  const removed: DeleteOutcome[] = [];
+  for (const rowId of ids) {
+    const result = await deleteSingleTransaction(supabase, householdId, rowId);
+    if ("error" in result) return { warning: result.error };
+    removed.push(result);
+  }
+  const groupId = parts.length > 1 ? existingGroup ?? crypto.randomUUID() : null;
+  const outcomes = await insertSplitParts(supabase, householdId, formData, parts, groupId);
+  // One snapshot and one refresh for the removals and the new parts together.
+  return finishTransactionSave(supabase, householdId, [...outcomes, ...removed.map((r) => ({ ...r, bookingWarning: null }))]);
+}
+
+// Every row of the split this transaction belongs to — or just itself.
+async function splitGroupIdsOf(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  id: string,
+): Promise<string[]> {
+  const row = unwrap(
+    await supabase.from("transactions").select("split_group_id").eq("id", id).eq("household_id", householdId).maybeSingle(),
+    "transactions",
+  );
+  if (!row?.split_group_id) return [id];
+  const rows = unwrap(
+    await supabase.from("transactions").select("id").eq("household_id", householdId).eq("split_group_id", row.split_group_id),
+    "split transactions",
+  ) ?? [];
+  return rows.length ? rows.map((r) => r.id as string) : [id];
 }
 
 export async function updateTransaction(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");
-  const subcategoryId = String(formData.get("subcategoryId") ?? "");
+  const pickedSubId = String(formData.get("subcategoryId") ?? "");
   const occurredOn = String(formData.get("date") ?? "");
   const enteredCents = displayToCents(String(formData.get("amount") ?? "0"));
   const payeeName = String(formData.get("payee") ?? "").trim();
@@ -1321,7 +1493,7 @@ export async function updateTransaction(formData: FormData) {
   const bookingRefRaw = String(formData.get("bookingRef") ?? "").trim();
   const isWithdrawal = formData.get("isWithdrawal") === "on";
   const isRefund = formData.get("isRefund") === "on";
-  if (!id || !subcategoryId || !occurredOn || enteredCents <= 0) return;
+  if (!id || !pickedSubId || !occurredOn || enteredCents <= 0) return;
   // Refund posts as negative on the same sub/account; toggling the pill
   // off restores a positive spend. Bucket/debt side-effects are skipped in
   // both directions so we never double-count.
@@ -1356,22 +1528,21 @@ export async function updateTransaction(formData: FormData) {
   // of this action reads these fields from memory instead of firing three
   // more sequential lookups (getLinkedBucketId, getLinkedAccountId,
   // categoryKindOf) as it used to — the biggest source of save latency.
-  const sub = unwrap(
+  const pickedSub = unwrap(
     await supabase
       .from("subcategories")
-      .select("category_id, linked_bucket_id, linked_account_id, travel_category, categories(kind)")
-      .eq("id", subcategoryId)
+      .select(TRIP_SUB_SELECT)
+      .eq("id", pickedSubId)
       .eq("household_id", householdId)
-      .maybeSingle<{
-        category_id: string;
-        linked_bucket_id: string | null;
-        linked_account_id: string | null;
-        travel_category: string | null;
-        categories: { kind: string } | null;
-      }>(),
+      .maybeSingle<TripRoutableSub>(),
     "subcategories",
   );
-  if (!sub) return;
+  if (!pickedSub) return;
+  const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
+  const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
+  const routed = await routeTripPurchase(supabase, householdId, pickedSubId, pickedSub, tripId, booking);
+  const subcategoryId = routed.subcategoryId;
+  const sub = routed.sub;
   const prevLinkedBucketId = prevTx?.subcategories?.linked_bucket_id ?? null;
   const prevLinkedAccountId = prevTx?.subcategories?.linked_account_id ?? null;
   const prevKind = prevTx?.categories?.kind ?? null;
@@ -1426,8 +1597,6 @@ export async function updateTransaction(formData: FormData) {
       "transactions",
     ) ?? {},
   );
-  const tripId = await resolveTripTag(supabase, householdId, tripIdRaw);
-  const booking = await resolveBookingRef(supabase, householdId, bookingRefRaw, tripId);
   unwrap(await supabase
     .from("transactions")
     .update({
@@ -1441,7 +1610,7 @@ export async function updateTransaction(formData: FormData) {
       property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
       trip_id: tripId,
       ...bookingColumns(booking),
-      travel_category: travelCategoryOf(formData, sub.travel_category, tripId, booking),
+      travel_category: routed.forcedCategory ?? travelCategoryOf(formData, sub.travel_category, tripId, booking),
       memo,
       is_withdrawal: isWithdrawal,
     })
@@ -1744,20 +1913,70 @@ async function reverseMovementTransaction(
   await captureSnapshots(supabase, householdId, { force: true });
 }
 
+// Deleting any part of a split deletes the whole purchase — from the modal
+// and from a row's trash icon alike. Each row is removed the normal way, so
+// its balances are put back.
 export async function deleteTransaction(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const id = String(formData.get("id") ?? "");
   if (!id) return;
+  const outcomes: DeleteOutcome[] = [];
+  for (const rowId of await splitGroupIdsOf(supabase, householdId, id)) {
+    const result = await deleteSingleTransaction(supabase, householdId, rowId);
+    if ("error" in result) return { error: result.error };
+    outcomes.push(result);
+  }
+  await finishTransactionDelete(supabase, householdId, outcomes);
+}
 
+type DeleteOutcome = { balancesMoved: boolean; touchedDebt: boolean };
+
+// After one or more deletes: one snapshot if any balance moved, one refresh.
+async function finishTransactionDelete(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  outcomes: DeleteOutcome[],
+) {
+  if (outcomes.some((o) => o.touchedDebt)) revalidatePath("/snowball");
+  if (outcomes.some((o) => o.balancesMoved || o.touchedDebt)) {
+    await captureSnapshots(supabase, householdId, { force: true });
+  }
+  revalidatePath("/budget");
+  revalidatePath("/transactions");
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
+  revalidatePath("/networth");
+  revalidatePath("/annual");
+  revalidatePath("/insights");
+  revalidatePath("/invest");
+}
+
+// One row removed with every balance it moved put back. Transfers and card
+// payments settle their own snapshot; an ordinary row reports what it moved
+// so the caller re-takes the snapshot once for the whole delete.
+async function deleteSingleTransaction(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  id: string,
+): Promise<DeleteOutcome | { error: string }> {
+  // The row with its item's links and its category's kind in ONE query —
+  // they used to be three more lookups after it, one after another.
   const tx = unwrap(
     await supabase
       .from("transactions")
-      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id")
+      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
       .eq("id", id)
       .eq("household_id", householdId)
-      .maybeSingle(),
+      .maybeSingle<{
+        subcategory_id: string | null; category_id: string | null; account_id: string | null; bucket_id: string | null;
+        paid_to_account_id: string | null; amount_cents: number; is_withdrawal: boolean | null; movement_type: string | null;
+        travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null;
+        subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
+        categories: { kind: string } | null;
+      }>(),
     "transactions",
   );
+  const none: DeleteOutcome = { balancesMoved: false, touchedDebt: false };
   const deletedBooking = tx ? bookingRefOf(tx) : null;
 
   if (tx?.movement_type === "account_transfer") {
@@ -1776,16 +1995,7 @@ export async function deleteTransaction(formData: FormData) {
     // in place when it throws, so silently returning here showed the user a
     // transfer that "wouldn't delete" with no reason given.
     if (error) return { error: error.message || "Couldn't delete that transfer — please try again." };
-    await captureSnapshots(supabase, householdId, { force: true });
-    revalidatePath("/budget");
-    revalidatePath("/transactions");
-    revalidatePath("/accounts");
-    revalidatePath("/travel");
-    revalidatePath("/networth");
-    revalidatePath("/annual");
-    revalidatePath("/insights");
-    revalidatePath("/invest");
-    return;
+    return { balancesMoved: true, touchedDebt: false };
   }
 
   // Card payments and investment transfers also carry a destination leg. They
@@ -1794,17 +2004,9 @@ export async function deleteTransaction(formData: FormData) {
   // has a transaction behind it.
   if (tx?.paid_to_account_id) {
     await reverseMovementTransaction(supabase, householdId, { ...tx, id });
-    revalidatePath("/budget");
-    revalidatePath("/transactions");
-    revalidatePath("/accounts");
-    revalidatePath("/travel");
-    revalidatePath("/networth");
-    revalidatePath("/annual");
-    revalidatePath("/insights");
-    revalidatePath("/invest");
-    revalidatePath("/snowball");
-    return;
+    return { balancesMoved: false, touchedDebt: true };
   }
+  if (!tx) return none;
 
   await supabase
     .from("transactions")
@@ -1812,56 +2014,38 @@ export async function deleteTransaction(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId);
 
-  let linkedBucketId: string | null = null;
-  if (tx?.subcategory_id) {
-    linkedBucketId = await getLinkedBucketId(supabase, householdId, tx.subcategory_id);
-    if (linkedBucketId) {
-      const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
-      await adjustBucketBalance(supabase, householdId, linkedBucketId, undoDelta);
-      await captureSnapshots(supabase, householdId, { force: true });
-    } else {
-      // No bucket, but maybe a bare-account link — undo that too.
-      const linkedAccountId = await getLinkedAccountId(supabase, householdId, tx.subcategory_id);
-      if (linkedAccountId) {
-        const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
-        await adjustLinkedAccountBalance(supabase, householdId, linkedAccountId, undoDelta);
-        await captureSnapshots(supabase, householdId, { force: true });
-      }
-    }
-
-    // Deleting a debt payment adds its amount back to the outstanding balance.
-    if (await adjustDebtBalance(supabase, householdId, tx.subcategory_id, tx.amount_cents)) {
-      await captureSnapshots(supabase, householdId, { force: true });
-      revalidatePath("/snowball");
-    }
+  let balancesMoved = false;
+  const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
+  const linkedBucketId = tx.subcategory_id ? tx.subcategories?.linked_bucket_id ?? null : null;
+  if (linkedBucketId) {
+    await adjustBucketBalance(supabase, householdId, linkedBucketId, undoDelta);
+    balancesMoved = true;
+  } else if (tx.subcategory_id && tx.subcategories?.linked_account_id) {
+    // No bucket, but maybe a bare-account link — undo that too.
+    await adjustLinkedAccountBalance(supabase, householdId, tx.subcategories.linked_account_id, undoDelta);
+    balancesMoved = true;
   }
 
   // Undo direct-bucket attribution (investment sub-account) — skip if this
   // was the same bucket the savings-linked path already reversed.
-  if (tx?.bucket_id && tx.bucket_id !== linkedBucketId) {
-    const undoDelta = tx.is_withdrawal ? tx.amount_cents : -tx.amount_cents;
+  if (tx.bucket_id && tx.bucket_id !== linkedBucketId) {
     await adjustBucketBalance(supabase, householdId, tx.bucket_id, undoDelta);
-    await captureSnapshots(supabase, householdId, { force: true });
+    balancesMoved = true;
   }
 
-  if (tx?.account_id) {
-    const kind = tx.category_id ? await categoryKindOf(supabase, tx.category_id) : null;
-    if (await adjustAccountLedger(supabase, householdId, tx.account_id, -ledgerDelta(kind, tx.amount_cents))) {
-      await captureSnapshots(supabase, householdId, { force: true });
-    }
-  }
+  // A deleted debt payment adds its amount back to the outstanding balance,
+  // and the account's ledger is put back. Different tables, side by side.
+  const [touchedDebt, touchedLedger] = await Promise.all([
+    tx.subcategory_id ? adjustDebtBalance(supabase, householdId, tx.subcategory_id, tx.amount_cents) : Promise.resolve(false),
+    tx.account_id
+      ? adjustAccountLedger(supabase, householdId, tx.account_id, -ledgerDelta(tx.categories?.kind ?? null, tx.amount_cents))
+      : Promise.resolve(false),
+  ]);
 
   // The booking this payment was on now adds up without it.
   if (deletedBooking) await syncBookings(supabase, householdId, null, deletedBooking);
 
-  revalidatePath("/budget");
-  revalidatePath("/transactions");
-  revalidatePath("/accounts");
-  revalidatePath("/travel");
-  revalidatePath("/networth");
-  revalidatePath("/annual");
-  revalidatePath("/insights");
-  revalidatePath("/invest");
+  return { balancesMoved: balancesMoved || touchedLedger, touchedDebt };
 }
 
 export async function deleteTransactions(ids: string[]) {
@@ -1879,10 +2063,12 @@ export async function toggleCleared(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
 
+  // Clear / Unclear covers the whole purchase when it's a split.
+  const ids = await splitGroupIdsOf(supabase, householdId, id);
   await supabase
     .from("transactions")
     .update({ cleared: formData.get("cleared") === "true" })
-    .eq("id", id)
+    .in("id", ids)
     .eq("household_id", householdId);
 
   revalidatePath("/budget");

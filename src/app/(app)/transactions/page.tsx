@@ -4,6 +4,8 @@ import { resolveMonth } from "@/lib/month";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { TransactionsTable } from "./transactions-table";
 import { throwIfAny } from "@/lib/supabase-result";
+import { attachSplitParts } from "@/lib/split-parts";
+import { fetchTripPlans, tripPlanTotals } from "@/lib/trip-budget-plans";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 
 export const metadata = { title: "Transactions · Capitall" };
@@ -29,6 +31,7 @@ type TransactionQueryRow = {
   movement_type: "account_transfer" | "card_payment" | "investment_transfer" | null;
   cleared: boolean | null;
   is_withdrawal: boolean | null;
+  split_group_id: string | null;
 };
 
 // A `YYYY-MM-DD` that is also a real day — "2026-13-45" and "2026-02-30" are
@@ -64,14 +67,15 @@ export default async function TransactionsPage({
 
   const { supabase, household } = await getSessionContext();
 
-  const categories = await ensureCategories(supabase, household.id);
-  const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
+  // Started now, awaited with the other reads below — it used to run alone
+  // first, one more round trip before anything else began.
+  const categoriesPromise = ensureCategories(supabase, household.id);
 
   const buildTransactionsQuery = () => {
     let query = supabase
       .from("transactions")
       .select(
-        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal",
+        "id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, property_id, trip_id, travel_category, travel_stay_id, travel_flight_id, travel_car_id, paid_to_account_id, paid_to_bucket_id, movement_type, cleared, is_withdrawal, split_group_id",
       )
       .eq("household_id", household.id);
     if (hasRange) {
@@ -97,11 +101,11 @@ export default async function TransactionsPage({
   };
   const transactionRowsPromise = loadTransactions();
 
-  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, { data: planRows, error: planRowsError }, { data: actualRows, error: actualRowsError }, { data: cardOwedRows, error: cardOwedError }] =
+  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, { data: planRows, error: planRowsError }, { data: actualRows, error: actualRowsError }, { data: cardOwedRows, error: cardOwedError }, tripPlanRows] =
     await Promise.all([
       supabase
         .from("subcategories")
-        .select("id, category_id, name, linked_bucket_id, travel_category")
+        .select("id, category_id, name, linked_bucket_id, travel_category, receives_trip_plans")
         .eq("household_id", household.id)
         .order("sort_order"),
       transactionRowsPromise,
@@ -151,12 +155,20 @@ export default async function TransactionsPage({
         .from("v_card_balances")
         .select("account_id, owed_cents")
         .eq("household_id", household.id),
+      // Trip plans (Travel Log) sit on top of budget_plans, as on the Budget.
+      fetchTripPlans(supabase, household.id, { months: [month.firstOfMonth] }),
     ]);
+  const categories = await categoriesPromise;
+  const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
   throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, planRows: planRowsError, actualRows: actualRowsError, cardOwed: cardOwedError });
 
   const plannedBySub = new Map<string, number>(
     (planRows ?? []).map((p) => [p.subcategory_id as string, p.planned_cents ?? 0]),
   );
+  for (const [key, cents] of tripPlanTotals(tripPlanRows)) {
+    const subId = key.split(":")[0];
+    plannedBySub.set(subId, (plannedBySub.get(subId) ?? 0) + cents);
+  }
   const actualBySub = new Map<string, number>(
     (actualRows ?? []).map((a) => [a.subcategory_id as string, a.actual_cents ?? 0]),
   );
@@ -179,6 +191,7 @@ export default async function TransactionsPage({
       linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
       remainingCents: planned - actual,
       travelCategory: s.travel_category ?? null,
+      receivesTripPlans: s.receives_trip_plans ?? false,
     };
   });
 
@@ -259,8 +272,10 @@ export default async function TransactionsPage({
       isInvestmentTransfer: movementType === "investment_transfer",
       cleared: t.cleared ?? false,
       isWithdrawal: t.is_withdrawal ?? false,
+      splitGroupId: (t as { split_group_id?: string | null }).split_group_id ?? null,
     };
   });
+  attachSplitParts(transactions);
 
   const payeeLineItems: PayeeLineItem[] = [
     ...(subscriptions ?? []).map((s) => ({

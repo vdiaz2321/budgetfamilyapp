@@ -96,6 +96,10 @@ function DueAccountIndicator({ dueDay, compact = false }: { dueDay: number; comp
 
 export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver, compact, detailsExpanded, onSelect, onDragStart, autoPlanned }: Props) {
   const remaining = row.plannedCents - row.spentCents;
+  // Part of this plan comes from trips in the Travel Log (details in the panel).
+  const tripMark = (row.tripPlannedCents ?? 0) > 0 ? (
+    <span className="shrink-0 text-[11px] text-muted" aria-label="Includes trip plans">✈</span>
+  ) : null;
   const elapsedPct = monthElapsedPct(monthKey);
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
@@ -153,6 +157,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
           className="flex min-w-0 items-center gap-1.5 text-left text-sm text-foreground"
         >
           <span className="min-w-0 truncate">{row.name}</span>
+          {tripMark}
           {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} compact /> : null}
         </button>
 
@@ -242,6 +247,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
           <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
             {row.name}
           </span>
+          {tripMark}
           {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} /> : null}
         </button>
 

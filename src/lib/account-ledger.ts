@@ -17,22 +17,28 @@ export async function adjustAccountLedger(
   // Every error below is thrown rather than swallowed. Returning false on a
   // failed read looked identical to "this account is manual by design", so the
   // transaction saved and the balance silently never moved.
-  const { data: account, error: accountError } = await supabase
-    .from("accounts")
-    .select("id, kind, current_balance_cents")
-    .eq("id", accountId)
-    .eq("household_id", householdId)
-    .maybeSingle();
+  // The account and its bucket count are read side by side — neither needs
+  // the other, and every round trip here is felt on each save.
+  const [
+    { data: account, error: accountError },
+    // A failed count used to read as `null`, which is falsy, so a BUCKETED
+    // account fell through to the direct write below — the second competing
+    // source of truth this helper exists to prevent.
+    { count, error: countError },
+  ] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("id, kind, current_balance_cents")
+      .eq("id", accountId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    supabase
+      .from("buckets")
+      .select("id", { count: "exact", head: true })
+      .eq("account_id", accountId),
+  ]);
   if (accountError) throw new Error(`Could not read the account: ${accountError.message}`);
   if (!account || account.kind === "investment") return false;
-
-  // This one was worse than a no-op: a failed count read as `null`, which is
-  // falsy, so a BUCKETED account fell through to the direct write below — the
-  // second competing source of truth this helper exists to prevent.
-  const { count, error: countError } = await supabase
-    .from("buckets")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", accountId);
   if (countError) throw new Error(`Could not check the account's buckets: ${countError.message}`);
   if (count) return false;
 

@@ -67,6 +67,11 @@ export type RowData = {
   // The Travel Log spending row this item's trip-tagged purchases count in.
   travelCategory: string | null;
   plannedCents: number;
+  // The part of plannedCents that comes from future trips in the Travel Log
+  // (Restaurant Travel / Traveling/Trips only), and those trips' names. The
+  // rest is what was typed on the Budget.
+  tripPlannedCents?: number;
+  tripNames?: string[];
   spentCents: number;
   // What this item actually cost last month. Drives the "Prev Mo Spent"
   // prefill; 0 when the item had no activity (the chip stays hidden).
@@ -132,6 +137,9 @@ export type SubOption = {
   // (subcategories.travel_category). "other" marks the catch-all item, whose
   // purchases can pick a more exact row on the transaction form.
   travelCategory?: string | null;
+  // Restaurant Travel / Traveling/Trips: the items that take trip plans and
+  // trip spending. A trip purchase on any other travel item is moved to one.
+  receivesTripPlans?: boolean;
 };
 
 // An account option for the add-transaction form.
@@ -211,6 +219,10 @@ export type TxData = {
   isInvestmentTransfer: boolean;
   cleared: boolean;
   isWithdrawal: boolean;
+  // Every part of a split purchase shares this id (null on a plain one), and
+  // each part carries the whole split so the modal can open it as one.
+  splitGroupId?: string | null;
+  splitParts?: { subId: string; amountCents: number }[];
 };
 
 // What the item panel's "Prev Mo Spent" chip hands the transaction modal:

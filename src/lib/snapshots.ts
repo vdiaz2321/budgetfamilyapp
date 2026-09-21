@@ -76,8 +76,10 @@ export async function captureSnapshots(
   ]);
   throwIfAny({ accounts: accountsError, debts: debtsError, buckets: bucketsError });
 
-  if (accounts?.length) {
-    await supabase.from("account_snapshots").upsert(
+  // The three snapshot tables are independent, so they are written together.
+  await Promise.all([
+    accounts?.length &&
+    supabase.from("account_snapshots").upsert(
       accounts.map((a) => ({
         household_id: householdId,
         month,
@@ -87,11 +89,9 @@ export async function captureSnapshots(
         updated_at: now,
       })),
       { onConflict: "household_id,month,account_id" },
-    );
-  }
-
-  if (debts?.length) {
-    await supabase.from("debt_snapshots").upsert(
+    ),
+    debts?.length &&
+    supabase.from("debt_snapshots").upsert(
       debts.map((d) => ({
         household_id: householdId,
         month,
@@ -100,11 +100,9 @@ export async function captureSnapshots(
         updated_at: now,
       })),
       { onConflict: "household_id,month,subcategory_id" },
-    );
-  }
-
-  if (buckets?.length) {
-    await supabase.from("bucket_snapshots").upsert(
+    ),
+    buckets?.length &&
+    supabase.from("bucket_snapshots").upsert(
       buckets.map((b) => ({
         household_id: householdId,
         month,
@@ -114,6 +112,6 @@ export async function captureSnapshots(
         updated_at: now,
       })),
       { onConflict: "household_id,month,bucket_id" },
-    );
-  }
+    ),
+  ]);
 }

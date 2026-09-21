@@ -377,6 +377,8 @@ export function ItemPanel({
               subId={row.subId}
               monthKey={monthKey}
               plannedCents={row.plannedCents}
+              tripPlannedCents={row.tripPlannedCents ?? 0}
+              tripNames={row.tripNames ?? []}
               spentCents={row.spentCents}
               itemName={row.name}
               currency={currency}
@@ -766,6 +768,8 @@ function PlannedForm({
   currency,
   subOptions,
   dueDay,
+  tripPlannedCents,
+  tripNames,
   paymentAccountId,
   paymentAccountOptions,
   travelCategory,
@@ -785,6 +789,9 @@ function PlannedForm({
   currency: string;
   subOptions: SubOption[];
   dueDay?: number | null;
+  // Part of plannedCents that comes from trips in the Travel Log.
+  tripPlannedCents: number;
+  tripNames: string[];
   paymentAccountId: string | null;
   paymentAccountOptions: AccountOption[];
   // The Travel Log spending row this item's trip-tagged purchases count in.
@@ -818,6 +825,16 @@ function PlannedForm({
       />
     </label>
   );
+  // Trips feed this plan from the Travel Log. The box holds the whole figure;
+  // saving keeps the trip part and stores only what's typed above it.
+  const tripNote = tripPlannedCents > 0 ? (
+    <p className="mb-3 mt-1.5 text-[11px] leading-snug text-muted">
+      Includes <span className="font-semibold text-foreground tabular-nums">{formatMoney(tripPlannedCents, currency)}</span> from{" "}
+      {tripNames.join(", ")} (Travel Log). Extra on top:{" "}
+      <span className="font-semibold text-foreground tabular-nums">{formatMoney(Math.max(0, plannedCents - tripPlannedCents), currency)}</span>.
+      Change the trip&apos;s amounts in the Travel Log.
+    </p>
+  ) : null;
 
   return (
     <>
@@ -857,6 +874,7 @@ function PlannedForm({
                 />
               </label>
             </div>
+            {tripNote}
             {paymentAccountOptions.length > 0 ? (
               <label className="block">
                 <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted">Charged to (optional)</span>
@@ -878,6 +896,7 @@ function PlannedForm({
         ) : (
           <Section title="Planned amount">
             {plannedInput}
+            {tripNote}
           </Section>
         )}
         {showTravel ? (
