@@ -36,6 +36,16 @@ export function useSessionYears(key: string, initial: () => string[]) {
   return [years, setYears] as const;
 }
 
+/**
+ * The default pick for a booking log: this year plus every later year that
+ * already has something booked, so upcoming trips show without extra ticking.
+ * `dataYears` are the years the log has rows for.
+ */
+export function thisAndFutureYears(dataYears: Iterable<string>, thisYear = String(new Date().getFullYear())): string[] {
+  const future = [...new Set(dataYears)].filter((y) => y > thisYear);
+  return [thisYear, ...future].sort().reverse();
+}
+
 /** No years ticked means every year. */
 export function inYears(picked: string[], year: string | null | undefined): boolean {
   return picked.length === 0 || (!!year && picked.includes(year));

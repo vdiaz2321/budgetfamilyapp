@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ExpandIcon } from "./travel-board";
 import { SearchBox } from "./search-box";
-import { YearPicker, inYears, useSessionYears } from "./year-picker";
+import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney } from "@/lib/money";
 import { sheetDateRange, type TripSummary } from "./trip-summary";
@@ -82,8 +82,9 @@ export function TripLogPanel({
         .reverse(),
     [summaries],
   );
-  // This year on a fresh login; a pick afterwards is remembered for the session.
-  const [year, setYear] = useSessionYears("travel-trip-log-years", () => [String(new Date().getFullYear())]);
+  // This year plus any later year with a trip on a fresh login; a pick
+  // afterwards is remembered for the session.
+  const [year, setYear] = useSessionYears("travel-trip-log-years", () => thisAndFutureYears(years));
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const shown = summaries.filter(

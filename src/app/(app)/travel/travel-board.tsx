@@ -1,6 +1,6 @@
 "use client";
 
-import { YearPicker, inYears, useSessionYears, yearsListLabel } from "./year-picker";
+import { YearPicker, inYears, thisAndFutureYears, useSessionYears, yearsListLabel } from "./year-picker";
 import { SearchBox } from "./search-box";
 import { useMemo, useState } from "react";
 import { formatMoney } from "@/lib/money";
@@ -152,9 +152,12 @@ export function TravelBoard({
   rewards: CreditCardBoardData;
 }) {
   // Years ticked in the log's picker; none ticked means every year.
+  // Opens on this year plus any later year with a booking; every year (none
+  // ticked) when neither has a stay.
   const [year, setYear] = useSessionYears("travel-reservations-log-years", () => {
     const current = today.slice(0, 4);
-    return stays.some((s) => stayYear(s) === current) ? [current] : [];
+    const stayYears = stays.map(stayYear);
+    return stayYears.some((y) => y >= current) ? thisAndFutureYears(stayYears, current) : [];
   });
   const [brand, setBrand] = useState<string>(ALL);
   const [query, setQuery] = useState("");
@@ -176,9 +179,13 @@ export function TravelBoard({
   // One period for the two side-by-side tallies (brand and card): they answer
   // the same question two ways, so reading them against different years was
   // never what was wanted. Independent of the Reservations filter above them.
-  // Both tallies open on this year.
-  const [tallyYear, setTallyYear] = useSessionYears("travel-brand-tally-years", () => [today.slice(0, 4)]);
-  const [cardYear, setCardYear] = useSessionYears("travel-card-tally-years", () => [today.slice(0, 4)]);
+  // Both tallies open on this year plus any later year with a booking.
+  const [tallyYear, setTallyYear] = useSessionYears("travel-brand-tally-years", () =>
+    thisAndFutureYears(stays.map(stayYear), today.slice(0, 4)),
+  );
+  const [cardYear, setCardYear] = useSessionYears("travel-card-tally-years", () =>
+    thisAndFutureYears(stays.map(stayYear), today.slice(0, 4)),
+  );
   // The log starts collapsed on a fresh login — it's the longest section on
   // the page — but sessionStorage carries whatever you last set for as long as
   // you're still moving around the app.
@@ -1124,7 +1131,7 @@ export function TravelBoard({
                   onClick={() => setExpandedUpcoming(key)}
                   className="flex items-center gap-2 rounded-lg border border-black/25 bg-background px-3 py-1.5 text-sm font-bold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
                 >
-                  {label}
+                  <span>{label}:</span>
                   {/* The count reads as part of the button, not as a muted
                       chip bolted onto it — a grey pill here was all weight and
                       no colour. */}
@@ -1341,7 +1348,7 @@ export function TravelBoard({
       {openTrip ? (
         <TripDetailModal
           // Remounted per trip so notes and edit state start fresh on a switch.
-          key={openTrip.trip.id}
+          key={`trip-${openTrip.trip.id}`}
           summary={openTrip}
           allTrips={tripSummaries}
           onSwitchTrip={setOpenTripId}
@@ -1365,7 +1372,7 @@ export function TravelBoard({
       {adding && spendingOnly ? (
         <MiscModal
           // Remounted per trip so opening another trip's spending starts fresh.
-          key={addTripId ?? "new"}
+          key={`spending-${addTripId ?? "new"}`}
           trips={trips}
           expenses={expenses}
           stays={stays}

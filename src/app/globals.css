@@ -4,6 +4,15 @@
    (via the toggle) instead of the OS prefers-color-scheme. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* Tailwind v4 resets buttons to the arrow cursor; every button here is
+   clickable, so show the hand (disabled ones keep the arrow). */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+}
+
 :root {
   --background: #faf8f4; /* subtle warm off-white app canvas */
   --surface: #ffffff; /* cards */

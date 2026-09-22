@@ -7,7 +7,7 @@ import { ExpandIcon } from "./travel-board";
 import { CarsList } from "./cars-panel";
 import { FlightsList } from "./flights-panel";
 import { SearchBox } from "./search-box";
-import { YearPicker, inYears, useSessionYears } from "./year-picker";
+import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import type { TravelCar, TravelFlight } from "./types";
 
 // What the search matches on a flight: airline, booking code, flight numbers,
@@ -55,10 +55,11 @@ export function TransportLogPanel({
         .reverse(),
     [flights, cars],
   );
-  // This year when it has anything booked, otherwise every year (none ticked).
+  // This year plus any later year with a booking; every year (none ticked)
+  // when neither has anything.
   const [year, setYear] = useSessionYears("travel-transport-log-years", () => {
     const current = String(new Date().getFullYear());
-    return years.includes(current) ? [current] : [];
+    return years.some((y) => y >= current) ? thisAndFutureYears(years, current) : [];
   });
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();

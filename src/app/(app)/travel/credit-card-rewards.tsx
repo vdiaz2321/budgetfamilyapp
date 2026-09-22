@@ -857,10 +857,12 @@ function CreditCardSection({
               <div className="grid grid-cols-1 divide-y divide-line">
                 {hideTravelColumn ? null : (
                 <section>
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
+                  <div
+                    onClick={() => toggleGroup("travel")}
+                    className="flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3"
+                  >
                     <button
                       type="button"
-                      onClick={() => toggleGroup("travel")}
                       aria-expanded={travelOpen}
                       className="flex items-center gap-2 text-left sm:w-[16.5rem] sm:gap-2.5"
                     >
@@ -888,10 +890,12 @@ function CreditCardSection({
                 )}
                 {hideHotelColumn ? null : (
                 <section>
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3">
+                  <div
+                    onClick={() => toggleGroup("hotel")}
+                    className="flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3"
+                  >
                     <button
                       type="button"
-                      onClick={() => toggleGroup("hotel")}
                       aria-expanded={hotelOpen}
                       className="flex items-center gap-2 text-left sm:w-[16.5rem] sm:gap-2.5"
                     >
@@ -918,10 +922,12 @@ function CreditCardSection({
               </div>
               {otherCards.length > 0 && !showOnlyTravelRedeem && !showOnlyHotelRedeem && categoryFilter === null ? (
                 <section className="border-t border-line">
-                  <div className="flex items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10">
+                  <div
+                    onClick={() => toggleGroup("other")}
+                    className="flex cursor-pointer items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10"
+                  >
                     <button
                       type="button"
-                      onClick={() => toggleGroup("other")}
                       aria-expanded={otherOpen}
                       className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                     >
