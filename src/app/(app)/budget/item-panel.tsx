@@ -733,7 +733,7 @@ function TxRow({
         className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden py-1.5 text-left text-xs disabled:cursor-default"
         aria-label={t.isCardPayment ? "Card payment" : "Edit transaction"}
       >
-        <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
+        <span className="w-12 shrink-0 whitespace-nowrap tabular-nums text-muted">{dateLabel(t.date)}</span>
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium">{t.payee ?? "—"}</span>
           {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}

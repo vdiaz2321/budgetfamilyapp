@@ -126,6 +126,8 @@ export type SubOption = {
   // Budget remaining for this item this month (planned − spent). Shown in
   // the multi-select picker so the user can see how much is left per item.
   remainingCents?: number;
+  // This month's plan for the item — shown beside Remaining in the picker.
+  plannedCents?: number;
   // How much of this item's STORED plan can actually be given back:
   // budget_plans.planned_cents − spent, floored at zero. Deliberately not the
   // same as `remainingCents`: for auto-calculated rows (Subscriptions,

@@ -5,7 +5,7 @@ import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/
 import { TransactionsTable } from "./transactions-table";
 import { throwIfAny } from "@/lib/supabase-result";
 import { attachSplitParts } from "@/lib/split-parts";
-import { fetchTripPlans, tripPlanTotals } from "@/lib/trip-budget-plans";
+import { buildPlanResolver, fetchPlanInputs } from "@/lib/planned-by-sub";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
 
 export const metadata = { title: "Transactions · Capitall" };
@@ -101,7 +101,7 @@ export default async function TransactionsPage({
   };
   const transactionRowsPromise = loadTransactions();
 
-  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, { data: planRows, error: planRowsError }, { data: actualRows, error: actualRowsError }, { data: cardOwedRows, error: cardOwedError }, tripPlanRows] =
+  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, planInputs, { data: actualRows, error: actualRowsError }, { data: cardOwedRows, error: cardOwedError }] =
     await Promise.all([
       supabase
         .from("subcategories")
@@ -139,12 +139,9 @@ export default async function TransactionsPage({
         .select("name, subcategory_id")
         .eq("household_id", household.id),
       // Planned + actuals for the current month so the picker can show
-      // "Remaining" ($planned − $spent) per budget item.
-      supabase
-        .from("budget_plans")
-        .select("subcategory_id, planned_cents")
-        .eq("household_id", household.id)
-        .eq("month", month.firstOfMonth),
+      // Planned and Remaining ($planned − $spent) per budget item — planned by
+      // the Budget page's own rule, so the two pages always agree.
+      fetchPlanInputs(supabase, household.id, [month.firstOfMonth]),
       supabase
         .from("v_monthly_actuals")
         .select("subcategory_id, actual_cents")
@@ -155,20 +152,12 @@ export default async function TransactionsPage({
         .from("v_card_balances")
         .select("account_id, owed_cents")
         .eq("household_id", household.id),
-      // Trip plans (Travel Log) sit on top of budget_plans, as on the Budget.
-      fetchTripPlans(supabase, household.id, { months: [month.firstOfMonth] }),
     ]);
   const categories = await categoriesPromise;
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
-  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, planRows: planRowsError, actualRows: actualRowsError, cardOwed: cardOwedError });
+  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, actualRows: actualRowsError, cardOwed: cardOwedError });
 
-  const plannedBySub = new Map<string, number>(
-    (planRows ?? []).map((p) => [p.subcategory_id as string, p.planned_cents ?? 0]),
-  );
-  for (const [key, cents] of tripPlanTotals(tripPlanRows)) {
-    const subId = key.split(":")[0];
-    plannedBySub.set(subId, (plannedBySub.get(subId) ?? 0) + cents);
-  }
+  const plan = buildPlanResolver(planInputs);
   const actualBySub = new Map<string, number>(
     (actualRows ?? []).map((a) => [a.subcategory_id as string, a.actual_cents ?? 0]),
   );
@@ -182,7 +171,7 @@ export default async function TransactionsPage({
   const accountKindById = new Map((accounts ?? []).map((a) => [a.id, a.kind]));
 
   const subOptions: SubOption[] = (subs ?? []).map((s) => {
-    const planned = plannedBySub.get(s.id) ?? 0;
+    const planned = plan.plannedFor(s.id, month.firstOfMonth);
     const actual = actualBySub.get(s.id) ?? 0;
     return {
       id: s.id,
@@ -190,6 +179,7 @@ export default async function TransactionsPage({
       kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
       linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
       remainingCents: planned - actual,
+      plannedCents: planned,
       travelCategory: s.travel_category ?? null,
       receivesTripPlans: s.receives_trip_plans ?? false,
     };

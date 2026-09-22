@@ -984,26 +984,25 @@ export function MonthPayments({
 
   return (
     <div className="rounded-xl bg-background/60 p-3 ring-1 ring-line">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-          This month
-        </h3>
-        <span className={`text-xs font-semibold ${status.className}`}>{status.label}</span>
-      </div>
-
       {txs.length === 0 ? (
-        <p className="mt-2 text-xs text-muted">No charge logged for this month yet.</p>
+        <div className="flex items-center justify-between gap-2 px-1 text-xs text-muted">
+          <span>No charge logged for this month yet.</span>
+          <span className={`shrink-0 font-semibold ${status.className}`}>{status.label}</span>
+        </div>
       ) : (
-        <ul className="mt-2 space-y-1">
-          {txs.map((t) => {
+        <ul className="space-y-1">
+          {txs.map((t, i) => {
             const acct = t.accountId ? accountNameById.get(t.accountId) : null;
             const content = (
               <>
-                <span className="w-10 shrink-0 tabular-nums text-muted">{dateLabel(t.date)}</span>
+                <span className="w-12 shrink-0 whitespace-nowrap tabular-nums text-muted">{dateLabel(t.date)}</span>
                 <span className="min-w-0 flex-1 truncate text-left">
                   <span className="font-medium">{t.payee ?? "—"}</span>
                   {acct ? <span className="ml-1 text-muted">· {acct}</span> : null}
                 </span>
+                {i === 0 && (
+                  <span className={`shrink-0 font-semibold ${status.className}`}>{status.label}</span>
+                )}
                 <span className="shrink-0 tabular-nums text-negative">
                   {formatMoney(t.amountCents, currency)}
                 </span>

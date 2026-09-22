@@ -1335,10 +1335,12 @@ function AccountPicker({
 function PickerRow({
   option,
   checked,
+  showPlanned,
   onToggle,
 }: {
   option: SubOption;
   checked: boolean;
+  showPlanned: boolean;
   onToggle: (id: string) => void;
 }) {
   return (
@@ -1354,16 +1356,35 @@ function PickerRow({
           </svg>
         )}
       </span>
-      <span className="flex-1 text-sm font-medium">{option.name}</span>
-      {option.remainingCents != null && (
-        <span className={`shrink-0 text-sm tabular-nums ${option.remainingCents < 0 ? "rounded-full bg-negative/25 px-2 py-0.5 font-medium text-foreground" : "text-muted"}`}>
-          {option.remainingCents < 0
-            ? "−$" + (Math.abs(option.remainingCents) / 100).toFixed(2)
-            : "$" + (option.remainingCents / 100).toFixed(2)}
+      {/* Break after a slash ("Talkatone/<wbr>Phone") so a narrow phone column
+          wraps at the slash rather than mid-word. */}
+      <span className="min-w-0 flex-1 text-sm font-medium break-words">
+        {option.name.split("/").map((part, i) => (
+          <Fragment key={i}>{i > 0 && <>/<wbr /></>}{part}</Fragment>
+        ))}
+      </span>
+      {showPlanned && (
+        <span className={`${PICKER_AMOUNT_COL} text-sm tabular-nums text-muted`}>
+          {option.plannedCents != null ? pickerMoney(option.plannedCents) : ""}
         </span>
       )}
+      <span className={`${PICKER_AMOUNT_COL} text-sm tabular-nums`}>
+        {option.remainingCents != null && (
+          <span className={option.remainingCents < 0 ? "rounded-full bg-negative/20 px-2 py-0.5 font-medium text-negative" : option.remainingCents > 0 ? "text-positive" : "text-muted"}>
+            {pickerMoney(option.remainingCents)}
+          </span>
+        )}
+      </span>
     </button>
   );
+}
+
+// Planned and Remaining share one fixed width so each column's figures stack
+// under a centered header, whatever the item name's length.
+const PICKER_AMOUNT_COL = "w-[5.5rem] shrink-0 text-center sm:w-28";
+
+function pickerMoney(cents: number) {
+  return (cents < 0 ? "−$" : "$") + (Math.abs(cents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Full-screen budget item picker with search + checkboxes + remaining amounts.
@@ -1385,6 +1406,8 @@ function BudgetItemPicker({
   const filtered = search
     ? options.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
     : options;
+  // Snowball's debt picker carries balances only, no plan — skip the column there.
+  const showPlanned = options.some((o) => o.plannedCents != null);
 
   function toggle(id: string) {
     setChecked((prev) => {
@@ -1446,9 +1469,10 @@ function BudgetItemPicker({
       </div>
 
       {/* Header row */}
-      <div className="flex items-center justify-between border-b border-line/40 bg-background/60 px-4 py-1.5">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Item</span>
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted">Remaining</span>
+      <div className="flex items-center gap-3 border-b border-line/40 bg-background/60 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+        <span className="flex-1">Item</span>
+        {showPlanned && <span className={PICKER_AMOUNT_COL}>Planned</span>}
+        <span className={PICKER_AMOUNT_COL}>Remaining</span>
       </div>
 
       {/* Item list */}
@@ -1461,7 +1485,7 @@ function BudgetItemPicker({
               const multiKind = new Set(unselectedFiltered.map((o) => o.kind)).size > 1;
 
               const renderItem = (o: SubOption) => (
-                <PickerRow key={o.id} option={o} checked={checked.has(o.id)} onToggle={toggle} />
+                <PickerRow key={o.id} option={o} checked={checked.has(o.id)} showPlanned={showPlanned} onToggle={toggle} />
               );
 
               return (

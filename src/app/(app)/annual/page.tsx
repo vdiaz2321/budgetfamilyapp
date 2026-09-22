@@ -10,7 +10,6 @@ import type { CatMonthGroup, CatMonthRow } from "./category-months-table";
 import type { BreakdownKind } from "./annual-breakdown-history";
 import { ScrollToTop } from "@/components/scroll-to-top";
 import { throwIfAny } from "@/lib/supabase-result";
-import { fetchTripPlans } from "@/lib/trip-budget-plans";
 
 export const metadata = { title: "Annual Overview · Capitall" };
 
@@ -32,7 +31,7 @@ const COLUMNS: { kind: CategoryKind; label: string }[] = [
 type MonthRow = {
   idx: number; // 0-11
   name: string;
-  // Displayed value per kind: actuals for past/current months, planned for future.
+  // Displayed value per kind: actuals in every month.
   values: Record<CategoryKind, number>;
   net: number;
   status: "past" | "current" | "future";
@@ -81,7 +80,6 @@ export default async function AnnualOverviewPage({
 
   const [
     { data: subs, error: subsError },
-    { data: plans, error: plansError },
     { data: actuals, error: actualsError },
     { data: breakdownRows, error: breakdownRowsError },
     liveTxRows,
@@ -89,19 +87,12 @@ export default async function AnnualOverviewPage({
     { data: investmentAccounts, error: investmentAccountsError },
     { data: investmentBuckets, error: investmentBucketsError },
     { data: payees, error: payeesError },
-    tripPlanRows,
   ] = await Promise.all([
     supabase
       .from("subcategories")
       .select("id, category_id, name, sort_order, linked_account_id, linked_bucket_id")
       .eq("household_id", household.id)
       .order("sort_order"),
-    supabase
-      .from("budget_plans")
-      .select("subcategory_id, planned_cents, month")
-      .eq("household_id", household.id)
-      .gte("month", yearStart)
-      .lte("month", yearEnd),
     supabase
       .from("v_monthly_actuals")
       .select("subcategory_id, actual_cents, month")
@@ -150,10 +141,8 @@ export default async function AnnualOverviewPage({
       .from("payees")
       .select("id, name")
       .eq("household_id", household.id),
-    // Trip plans (Travel Log) are added on top of budget_plans, as on Budget.
-    fetchTripPlans(supabase, household.id, { from: yearStart, to: yearEnd }),
   ]);
-  throwIfAny({ subs: subsError, plans: plansError, actuals: actualsError, breakdownRows: breakdownRowsError, investmentContributionRows: investmentContributionRowsError, investmentAccounts: investmentAccountsError, investmentBuckets: investmentBucketsError, payees: payeesError });
+  throwIfAny({ subs: subsError, actuals: actualsError, breakdownRows: breakdownRowsError, investmentContributionRows: investmentContributionRowsError, investmentAccounts: investmentAccountsError, investmentBuckets: investmentBucketsError, payees: payeesError });
 
   const kindBySub = new Map(
     (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
@@ -175,30 +164,15 @@ export default async function AnnualOverviewPage({
       .map((b) => b.id),
   );
 
-  // Per-subcategory actuals and planned by month (cents), for the Category by Months table.
+  // Per-subcategory actuals by month (cents), for the Category by Months table.
   const actualBySub = new Map<string, number[]>();
-  const plannedBySub = new Map<string, number[]>();
 
-  // planned[monthIdx][kind] and actual[monthIdx][kind], all cents.
+  // actual[monthIdx][kind], all cents.
   const emptyKinds = (): Record<CategoryKind, number> => ({
     income: 0, savings: 0, bills: 0, expenses: 0, debt: 0,
   });
-  const planned = Array.from({ length: 12 }, emptyKinds);
   const actual = Array.from({ length: 12 }, emptyKinds);
 
-  for (const p of [...(plans ?? []), ...tripPlanRows]) {
-    const kind = kindBySub.get(p.subcategory_id);
-    if (!kind) continue;
-    const monthIdx = parseInt(p.month.slice(5, 7), 10) - 1;
-    planned[monthIdx][kind] += p.planned_cents;
-
-    let pMonths = plannedBySub.get(p.subcategory_id);
-    if (!pMonths) {
-      pMonths = Array(12).fill(0);
-      plannedBySub.set(p.subcategory_id, pMonths);
-    }
-    pMonths[monthIdx] += p.planned_cents;
-  }
   for (const a of actuals ?? []) {
     const kind = kindBySub.get(a.subcategory_id);
     if (!kind) continue;

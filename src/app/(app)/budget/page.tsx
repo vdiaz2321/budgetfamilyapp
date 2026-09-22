@@ -9,7 +9,8 @@ import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import { throwIfAny } from "@/lib/supabase-result";
 import { attachSplitParts } from "@/lib/split-parts";
 import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
-import { fetchTripPlans, tripPlanTotals } from "@/lib/trip-budget-plans";
+import { fetchTripPlans } from "@/lib/trip-budget-plans";
+import { buildPlanResolver, subscriptionChargesIn } from "@/lib/planned-by-sub";
 
 export const metadata = { title: "Budget · Capitall" };
 
@@ -152,7 +153,7 @@ export default async function BudgetPage({
       .gte("month", yearReadStart)
       .lt("month", yearEnd),
     // Per-month plan overrides for subscriptions. One wins over the sticker
-    // price in any month it exists — see subscriptionPlannedFor below.
+    // price in any month it exists — see subscriptionPlannedFor in planned-by-sub.
     supabase
       .from("subscription_plans")
       .select("month, subscription_id, planned_cents")
@@ -209,14 +210,7 @@ export default async function BudgetPage({
   const txRows = (txWindow ?? []).filter((t) => t.occurred_on >= month.firstOfMonth);
   const prevTxRows = (txWindow ?? []).filter((t) => t.occurred_on < month.firstOfMonth);
   const plans = (planRows ?? []).filter((p) => p.month === month.firstOfMonth);
-  const prevPlans = (planRows ?? []).filter((p) => p.month === prevFirstOfMonth);
   const irregularBillPlans = (irregularPlanRows ?? []).filter((p) => p.month === month.firstOfMonth);
-  const prevIrregularBillPlans = (irregularPlanRows ?? []).filter((p) => p.month === prevFirstOfMonth);
-  // Subscription overrides, keyed "<subscriptionId>:<month>" so both months
-  // are looked up the same way.
-  const subscriptionPlanOverrides = new Map<string, number>(
-    (subscriptionPlanRows ?? []).map((p) => [`${p.subscription_id}:${p.month}`, p.planned_cents as number]),
-  );
   // v_monthly_actuals now arrives as one range through the viewed month.
   const allActuals = actualsSinceAnchor.filter((a) => a.month < month.firstOfMonth);
   const actuals = actualsSinceAnchor.filter((a) => a.month === month.firstOfMonth);
@@ -225,8 +219,17 @@ export default async function BudgetPage({
   // A future trip's Planned, counted on Restaurant Travel / Traveling/Trips in
   // the month it starts. Added to whatever was typed on the Budget for the
   // item (budget_plans holds only that extra), never replacing it.
-  const tripPlanByKey = tripPlanTotals(tripPlanRows);
-  const tripPlannedFor = (subId: string, firstOfMonth: string) => tripPlanByKey.get(`${subId}:${firstOfMonth}`) ?? 0;
+  // Every Planned figure below comes from the shared rule in
+  // src/lib/planned-by-sub.ts, the same one the Transactions page reads.
+  const plan = buildPlanResolver({
+    budgetPlans: planRows ?? [],
+    tripPlans: tripPlanRows,
+    subscriptions: subscriptions ?? [],
+    subscriptionPlans: subscriptionPlanRows ?? [],
+    irregularBills: irregularBills ?? [],
+    irregularBillPlans: irregularPlanRows ?? [],
+  });
+  const tripPlannedFor = plan.tripFor;
   const tripNamesBySub = new Map<string, string[]>();
   for (const r of tripPlanRows) {
     if (r.month !== month.firstOfMonth) continue;
@@ -301,51 +304,12 @@ export default async function BudgetPage({
       txIds: matchingTransactions.map((tx) => tx.id as string),
     });
   }
-  // Auto-planned totals: subcategory rows linked to subscriptions or irregular
-  // bills show a derived planned amount and are not directly editable.
-  // Whether a subscription charges in a given month. Kept as a function of the
-  // month so last month can be re-derived the same way for the "overspent in
-  // <prev month>" chip, instead of being judged against this month's rule.
-  const subscriptionChargesIn = (
-    sub: { is_active: boolean | null; next_renewal_date: string | null; billing_cycle: string; subcategory_id: string | null },
-    monthKey: string,
-  ) => {
-    if (!sub.subcategory_id || !sub.is_active || !sub.next_renewal_date) return false;
-    if (sub.billing_cycle === "monthly") return true;
-    // next_renewal_date advances by a year after each charge, so compare
-    // just the month number (annual subs always charge in the same month).
-    if (sub.billing_cycle === "annual") return sub.next_renewal_date.slice(5, 7) === monthKey.slice(5);
-    // quarterly / weekly: next_renewal_date is the exact next occurrence
-    return sub.next_renewal_date.slice(0, 7) === monthKey;
-  };
-  // What one subscription plans in one month: that month's own figure (a
-  // subscription_plans row) when there is one, otherwise its amount in the
-  // months it charges and $0 in the rest. The override covers an off-cycle
-  // charge, and it also holds a past month's old price — a price change
-  // freezes the previous price into earlier months (updateSubscriptionAmount)
-  // so lowering Disney in September doesn't rewrite August's plan.
-  const subscriptionPlannedFor = (
-    sub: { id: string; is_active: boolean | null; next_renewal_date: string | null; billing_cycle: string; subcategory_id: string | null; amount_cents: number },
-    monthKey: string,
-    firstOfMonth: string,
-  ) =>
-    subscriptionPlanOverrides.get(`${sub.id}:${firstOfMonth}`) ??
-    (subscriptionChargesIn(sub, monthKey) ? sub.amount_cents : 0);
-  const autoPlannedBySub = new Map<string, number>();
-  // Same rule, kept per subscription so the card can show a row's own Plan.
+  // Per subscription, so the card can show a row's own Plan.
   const subMonthPlannedById = new Map<string, number>();
-  const prevAutoPlannedBySub = new Map<string, number>();
   for (const sub of subscriptions ?? []) {
     if (!sub.subcategory_id) continue;
-    const planned = subscriptionPlannedFor(sub, month.key, month.firstOfMonth);
-    if (planned > 0) {
-      subMonthPlannedById.set(sub.id, planned);
-      autoPlannedBySub.set(sub.subcategory_id, (autoPlannedBySub.get(sub.subcategory_id) ?? 0) + planned);
-    }
-    const prevPlanned = subscriptionPlannedFor(sub, month.prevKey, prevFirstOfMonth);
-    if (prevPlanned > 0) {
-      prevAutoPlannedBySub.set(sub.subcategory_id, (prevAutoPlannedBySub.get(sub.subcategory_id) ?? 0) + prevPlanned);
-    }
+    const planned = plan.subscriptionPlannedFor(sub, month.firstOfMonth);
+    if (planned > 0) subMonthPlannedById.set(sub.id, planned);
   }
 
   // Per-subscription spend for the month. Subscriptions share one subcategory,
@@ -382,17 +346,6 @@ export default async function BudgetPage({
   const irregularPlannedByBillId = new Map<string, number>(
     (irregularBillPlans ?? []).map((p) => [p.bill_id as string, p.planned_cents as number]),
   );
-  // Only months that actually carry per-bill plans are driven by the card.
-  // Months from before the Irregular Bills card existed have their planned
-  // amount recorded the old way, as a plain budget_plans row on the
-  // subcategory — treating those as "auto, therefore $0" would erase the
-  // history. So the card only takes over a subcategory once that month has
-  // at least one per-bill plan; otherwise the manual row still wins.
-  const irregularSubIdsWithPlans = new Set(
-    (irregularBills ?? [])
-      .filter((b) => b.subcategory_id && irregularPlannedByBillId.has(b.id))
-      .map((b) => b.subcategory_id as string),
-  );
   // Every subcategory fed by the Irregular Bills card. Its budget row is
   // read-only whether or not this month has per-bill plans yet: the card is
   // the one place those amounts are entered, so an editable row here would be
@@ -400,37 +353,19 @@ export default async function BudgetPage({
   const irregularSubcategoryIds = new Set(
     (irregularBills ?? []).filter((b) => b.subcategory_id).map((b) => b.subcategory_id!),
   );
-  const irregularAutoPlannedBySub = new Map<string, number>();
-  for (const bill of irregularBills ?? []) {
-    if (!bill.subcategory_id) continue;
-    if (!irregularSubIdsWithPlans.has(bill.subcategory_id)) continue;
-    irregularAutoPlannedBySub.set(bill.subcategory_id, (irregularAutoPlannedBySub.get(bill.subcategory_id) ?? 0) + (irregularPlannedByBillId.get(bill.id) ?? 0));
-  }
 
   // ---- Unfinished business from last month -------------------------------
   // Spending lands in a month long after you stop looking at it: a late
   // transaction on an August item pushes it past its August plan, and nothing
   // on the September board would ever say so. This collects those items so the
   // month you ARE looking at can point back at them.
-  const prevPlannedBySub = new Map((prevPlans ?? []).map((p) => [p.subcategory_id as string, p.planned_cents as number]));
-  const prevIrregularPlannedBySub = new Map<string, number>();
-  for (const bill of irregularBills ?? []) {
-    if (!bill.subcategory_id) continue;
-    const planned = (prevIrregularBillPlans ?? []).find((p) => p.bill_id === bill.id)?.planned_cents;
-    if (planned === undefined) continue;
-    prevIrregularPlannedBySub.set(bill.subcategory_id, (prevIrregularPlannedBySub.get(bill.subcategory_id) ?? 0) + planned);
-  }
   const prevOverspentItems = (subs ?? [])
     .map((s) => {
       const kind = kindBySub.get(s.id);
       if (kind !== "bills" && kind !== "expenses") return null;
-      // The board's own precedence — irregular plans, then subscriptions,
-      // then the month's budget_plans row — re-derived for last month, so
-      // this figure is the one that month's board shows.
-      const plannedCents =
-        prevIrregularPlannedBySub.get(s.id) ??
-        prevAutoPlannedBySub.get(s.id) ??
-        (prevPlannedBySub.get(s.id) ?? 0) + tripPlannedFor(s.id, prevFirstOfMonth);
+      // The board's own rule, re-derived for last month, so this figure is
+      // the one that month's board shows.
+      const plannedCents = plan.plannedFor(s.id, prevFirstOfMonth);
       const spentCents = prevSpentBySub.get(s.id) ?? 0;
       if (spentCents <= plannedCents) return null;
       return { subId: s.id, name: s.name, kind, plannedCents, spentCents };
@@ -446,21 +381,12 @@ export default async function BudgetPage({
     const rows = (subs ?? [])
       .filter((s) => s.category_id === cat.id)
       .map((s) => {
-        const isAutoSub = autoPlannedBySub.has(s.id);
-        const isAutoIrregular = irregularAutoPlannedBySub.has(s.id);
-        // For subscriptions, a budget_plans row overrides the auto-derived amount
-        // (absorbs off-cycle variance). Irregular Bills is authoritative — its
-        // sum from the Irregular Bills card always wins, so the budget row stays
-        // in sync and can't be edited from two places.
-        const hasManualPlan = plannedBySub.has(s.id);
-        // Both irregular bills and subscriptions are authoritative sources —
-        // their cards are the single place to update planned amounts, so we
-        // never let a stale budget_plans row override them.
-        const plannedCents = isAutoIrregular
-          ? irregularAutoPlannedBySub.get(s.id)!
-          : isAutoSub
-            ? autoPlannedBySub.get(s.id)!
-            : (hasManualPlan ? plannedBySub.get(s.id)! : 0) + tripPlannedFor(s.id, month.firstOfMonth);
+        // Irregular Bills and Subscriptions are authoritative — their cards are
+        // the single place to update planned amounts, so a stale budget_plans
+        // row never overrides them (the rule lives in plan.plannedFor).
+        const isAutoSub = plan.subscriptionTotalFor(s.id, month.firstOfMonth) !== undefined;
+        const isAutoIrregular = plan.irregularTotalFor(s.id, month.firstOfMonth) !== undefined;
+        const plannedCents = plan.plannedFor(s.id, month.firstOfMonth);
         const spentCents = spentBySub.get(s.id) ?? 0;
         const g = goalBySub.get(s.id);
         const d = debtBySub.get(s.id);
@@ -617,9 +543,11 @@ export default async function BudgetPage({
   };
 
   const remainingBySub = new Map<string, number>();
+  const pickerPlannedBySub = new Map<string, number>();
   for (const group of groups) {
     for (const row of group.rows) {
       remainingBySub.set(row.subId, row.plannedCents - row.spentCents);
+      pickerPlannedBySub.set(row.subId, row.plannedCents);
     }
   }
 
@@ -629,6 +557,7 @@ export default async function BudgetPage({
     kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
     linkedBucketId: linkedBucketBySub.get(s.id) ?? null,
     remainingCents: remainingBySub.get(s.id),
+    plannedCents: pickerPlannedBySub.get(s.id),
     travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
     receivesTripPlans: (s as { receives_trip_plans?: boolean }).receives_trip_plans ?? false,
     // Only the typed part of a plan can be given back — the trip part lives in
@@ -785,7 +714,7 @@ export default async function BudgetPage({
     monthPlannedCents: subMonthPlannedById.get(s.id) ?? 0,
     // Charging months edit the subscription's own amount; quiet months edit
     // that month's override. The Plan cell needs to know which it is.
-    chargesThisMonth: subscriptionChargesIn(s, month.key),
+    chargesThisMonth: subscriptionChargesIn(s, month.firstOfMonth),
     monthSpentCents: subMonthSpentById.get(s.id) ?? 0,
     monthTxIds: subMonthTxIdsById.get(s.id) ?? [],
     prevSpentCents: subPrevSpentById.get(s.id) ?? 0,
@@ -854,7 +783,7 @@ export default async function BudgetPage({
     (subscriptions ?? []).filter((s) => s.subcategory_id).map((s) => s.subcategory_id!),
   );
   const subscriptionMonthPlanned = [...subSubcategoryIds].reduce(
-    (sum, id) => sum + (autoPlannedBySub.get(id) ?? 0),
+    (sum, id) => sum + (plan.subscriptionTotalFor(id, month.firstOfMonth) ?? 0),
     0,
   );
   const subscriptionMonthSpent = [...subSubcategoryIds].reduce(
@@ -867,7 +796,7 @@ export default async function BudgetPage({
   // the subcategory's manual budget_plans figure, so it agrees with the Bills
   // group row instead of contradicting it with $0.
   const irregularMonthPlanned = [...irregularSubcategoryIds].reduce(
-    (sum, id) => sum + (irregularAutoPlannedBySub.get(id) ?? plannedBySub.get(id) ?? 0),
+    (sum, id) => sum + (plan.irregularTotalFor(id, month.firstOfMonth) ?? plannedBySub.get(id) ?? 0),
     0,
   );
 
