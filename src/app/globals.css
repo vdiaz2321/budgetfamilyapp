@@ -64,28 +64,31 @@
   --sidebar: #0B0E1B;
 }
 
+/* Dark theme: neutral charcoal, modeled on Google's dark surfaces
+   (#202124 canvas, #e8eaed text, #9aa0a6 secondary). The old midnight-navy
+   canvas tinted every surface blue and was tiring to read; color now comes
+   only from the data, never from the background. */
 :root[data-theme="dark"] {
-  /* A calmer midnight navy, inspired by the softer YNAB-style dark canvas.
-     It preserves comfortable contrast without feeling like pure black. */
-  --background: #171a30;
-  --surface: #222640;
-  --foreground: #f4f6fb;
-  --muted: #b6bfd3;
-  --border: #373d59;
+  color-scheme: dark; /* native inputs, date pickers, scrollbars go dark too */
+  --background: #202124;
+  --surface: #292a2d;
+  --foreground: #e8eaed;
+  --muted: #9aa0a6;
+  --border: #3c4043;
 
-  --brand: #98a2ff;
-  --brand-strong: #7f89e8;
-  --brand-soft: #343963;
+  --brand: #a4aaf0;
+  --brand-strong: #8d94e6;
+  --brand-soft: #36374a; /* faint violet tint on charcoal, not a navy block */
   --accent: #d4a05a; /* muted amber */
-  --positive: #6db988; /* soft sage — dims the "Christmas-lights" green */
-  --negative: #c87878; /* soft rose — dims the harsh red text/borders */
+  --positive: #81c995; /* Google's dark-mode green */
+  --negative: #e08a8a; /* soft rose */
   --warning: #d4a05a;
-  --chart-1: #7ea9d1; /* muted blue */
-  --chart-5: #6dbabf; /* muted cyan */
+  --chart-1: #8ab4f8; /* muted blue */
+  --chart-5: #78d9ec; /* muted cyan */
 
   /* Softer category tones for the hero cards + donut. Same hues as light
      mode but pulled toward gray so nothing screams on a dim canvas. */
-  --cat-income: #6db988;
+  --cat-income: #81c995;
   --cat-savings: #9498d0;
   --cat-bills: #d4a05a;
   --cat-expenses: #d4a05a;
@@ -106,10 +109,18 @@
   --viz-bills: #4fb8ab;
   --viz-expenses: #8ed3f5;
   --viz-debt: #d76b83;
-  --viz-grid: #373d59;
-  --viz-sel: #2b3153;
+  --viz-grid: #3c4043;
+  --viz-sel: #33353a;
 
-  --sidebar: #1a1d36;
+  --sidebar: #18191b; /* a step darker than the canvas, no blue */
+}
+
+/* Dark mode's brand is a light lavender, so the white label every primary
+   button carries (`bg-brand text-white`) drops to ~2:1 contrast. Flip it to
+   the canvas color there — Google's light-button-dark-text pattern — once,
+   here, instead of in each of the ~60 buttons. */
+:root[data-theme="dark"] :is(.bg-brand, .bg-brand-strong).text-white {
+  color: var(--background);
 }
 
 @theme inline {

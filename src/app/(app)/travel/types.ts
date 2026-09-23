@@ -242,6 +242,17 @@ export type TripExpense = {
   // and the typed figure is set aside — one source, never both.
   txActualCents: number | null;
   txCount: number;
+  // Those purchases one by one, so the trip popup can list what a row's
+  // actual is made of ("8 purchases" opens them).
+  txList: TripTaggedPurchase[];
+};
+
+export type TripTaggedPurchase = {
+  id: string;
+  date: string;
+  payee: string | null;
+  item: string;
+  amountCents: number;
 };
 
 // The row's actual: what the tagged transactions add up to, or, on a trip

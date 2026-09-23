@@ -187,7 +187,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
             key={tab.href}
             href={tab.href}
             className={`relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition-colors ${
-              active ? "text-[#8B80F9]" : "text-slate-400"
+              active ? "text-[#8B80F9]" : "text-slate-400 dark:text-neutral-400"
             }`}
           >
             <Icon>{tab.icon}</Icon>
@@ -213,7 +213,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
           aria-haspopup="menu"
           aria-label="More pages"
           className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-medium transition-colors ${
-            moreOpen || moreActive ? "text-[#8B80F9]" : "text-slate-400"
+            moreOpen || moreActive ? "text-[#8B80F9]" : "text-slate-400 dark:text-neutral-400"
           }`}
         >
           <Icon>
@@ -246,7 +246,7 @@ export function MobileTabBar({ badges }: { badges?: Record<string, number> }) {
                   role="menuitem"
                   onClick={() => setMoreOpen(false)}
                   className={`${link.phoneHidden ? "hidden sm:flex" : "flex"} items-center gap-3 px-4 py-3 text-sm font-medium transition-colors ${
-                    active ? "bg-white/10 text-[#8B80F9]" : "text-slate-300 hover:bg-white/5"
+                    active ? "bg-white/10 text-[#8B80F9]" : "text-slate-300 hover:bg-white/5 dark:text-neutral-300"
                   }`}
                 >
                   <Icon>{link.icon}</Icon>

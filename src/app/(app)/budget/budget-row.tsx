@@ -18,14 +18,17 @@ const ACTUAL_WORD: Record<CategoryKind, string> = {
   debt: "paid",
 };
 
-// Positive/warning/negative per the spec's remaining-amount rule, adapted so
+// Positive/neutral/negative per the spec's remaining-amount rule, adapted so
 // income's "less remaining to receive" reads as good, not tight — the
 // generic (remaining/planned < 15%) rule only applies to money going out.
+// No amber: a line used up exactly (Left $0.00) is done, so it goes gray, and
+// a nearly-used line drops from green to plain text rather than warning orange.
 export function remainingColorClass(kind: CategoryKind, remaining: number, plannedCents: number): string {
   if (kind === "income") return remaining < 0 ? "text-negative" : "text-positive";
   if (plannedCents <= 0) return remaining < 0 ? "text-negative" : "text-foreground";
   if (remaining < 0) return "text-negative";
-  if (remaining / plannedCents < 0.15) return "text-warning";
+  if (remaining === 0) return "text-muted";
+  if (remaining / plannedCents < 0.15) return "text-foreground";
   return "text-positive";
 }
 

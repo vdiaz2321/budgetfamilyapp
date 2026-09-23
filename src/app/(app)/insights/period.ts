@@ -121,6 +121,9 @@ const inYearRange = (year: string) => {
   return y >= 2000 && y <= 2100;
 };
 
+export const isGranularity = (v: string | null | undefined): v is Granularity =>
+  v === "weekly" || v === "monthly" || v === "quarterly" || v === "yearly";
+
 // Inclusive [from, to] date-string range covered by a period key.
 export function periodRange(g: Granularity, key: string): { from: string; to: string } {
   switch (g) {
@@ -139,6 +142,30 @@ export function periodRange(g: Granularity, key: string): { from: string; to: st
       return { from: `${key}-01`, to: ymd(new Date(y, m + 1, 0)) };
     }
   }
+}
+
+// While the selected period is still in progress, compare it to the SAME
+// stretch of the prior period — Sept 1–23 against Aug 1–23, not all of August.
+// A partial month against a full one read as "56% less" on nearly every line
+// simply because month-end pay and bills hadn't landed yet. Returns null once
+// the period is over (or hasn't started), so completed periods compare whole.
+// The prior end clamps to its own last day (Mar 1–31 → Feb 1–28).
+export function priorToDate(
+  sel: { from: string; to: string },
+  pri: { from: string; to: string },
+  today: string,
+): { from: string; to: string } | null {
+  if (today < sel.from || today >= sel.to) return null;
+  const elapsed = Math.round((utcOf(today) - utcOf(sel.from)) / DAY);
+  const to = utcYmd(utcOf(pri.from) + elapsed * DAY);
+  return { from: pri.from, to: to < pri.to ? to : pri.to };
+}
+
+// "Aug 1–23", or "Aug 28–Sep 3" when the range crosses a month.
+export function shortRangeLabel(from: string, to: string): string {
+  const [fm, fd] = [Number(from.slice(5, 7)) - 1, Number(from.slice(8, 10))];
+  const [tm, td] = [Number(to.slice(5, 7)) - 1, Number(to.slice(8, 10))];
+  return fm === tm ? `${MON[fm]} ${fd}–${td}` : `${MON[fm]} ${fd}–${MON[tm]} ${td}`;
 }
 
 // The key of the period immediately before `key`.

@@ -33,9 +33,9 @@ export function CarsList({
                   <span className="truncate text-sm font-semibold">
                     {rental ? c.company ?? "Car rental" : places || "Drive"}
                   </span>
-                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                     {rental ? "Rental" : "Our car"}
-                    {c.bookingCode ? <span className="text-slate-700 dark:text-slate-200"> · {c.bookingCode}</span> : null}
+                    {c.bookingCode ? <span className="text-slate-700 dark:text-neutral-200"> · {c.bookingCode}</span> : null}
                   </span>
                   {c.isEstimate ? (
                     <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">

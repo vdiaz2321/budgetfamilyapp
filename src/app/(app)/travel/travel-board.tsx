@@ -771,8 +771,8 @@ export function TravelBoard({
               <span className="text-sm font-semibold">{s.propertyName}</span>
               {/* Same chip as the card panel's "Owner:" / "Bank:". */}
               {s.brand ? (
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                  Booked Thru: <span className="text-slate-700 dark:text-slate-200">{s.brand}</span>
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                  Booked Thru: <span className="text-slate-700 dark:text-neutral-200">{s.brand}</span>
                 </span>
               ) : null}
             </span>
@@ -831,9 +831,9 @@ export function TravelBoard({
             <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                   {f.airline}
-                  {f.bookingCode ? <span className="text-slate-700 dark:text-slate-200"> · {f.bookingCode}</span> : null}
+                  {f.bookingCode ? <span className="text-slate-700 dark:text-neutral-200"> · {f.bookingCode}</span> : null}
                 </span>
               </span>
               {/* The next flight: its date, number, time and route. */}
@@ -877,8 +877,8 @@ export function TravelBoard({
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
               {c.bookingCode ? (
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                  Booking: <span className="text-slate-700 dark:text-slate-200">{c.bookingCode}</span>
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                  Booking: <span className="text-slate-700 dark:text-neutral-200">{c.bookingCode}</span>
                 </span>
               ) : null}
             </span>

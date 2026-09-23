@@ -2,7 +2,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { loadCreditCardBoardData } from "@/lib/credit-card-data";
 import { throwIfAny } from "@/lib/supabase-result";
 import { TravelBoard } from "./travel-board";
-import type { CarKind, ExpenseCategory, PocketPaidWith, TravelBrand, TravelCar, TravelCard, TravelFlight, TravelStay, TravelTrip, TripExpense, Traveller } from "./types";
+import type { CarKind, ExpenseCategory, PocketPaidWith, TravelBrand, TravelCar, TravelCard, TravelFlight, TravelStay, TravelTrip, TripExpense, TripTaggedPurchase, Traveller } from "./types";
 
 export const metadata = { title: "Travel Log · Capitall" };
 
@@ -70,7 +70,7 @@ export default async function TravelPage() {
     // are negative and come off it. Untagged or unmapped ones stay out.
     supabase
       .from("transactions")
-      .select("trip_id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, travel_category, subcategories(travel_category)")
+      .select("id, occurred_on, trip_id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, travel_category, subcategories(name, travel_category), payees(name)")
       .eq("household_id", household.id)
       .not("trip_id", "is", null),
   ]);
@@ -87,13 +87,18 @@ export default async function TravelPage() {
     transactions: tripTx.error,
   });
 
+  const sortByDate = (list: TripTaggedPurchase[]) =>
+    [...list].sort((a, b) => a.date.localeCompare(b.date) || b.amountCents - a.amountCents);
+
   // Tagged purchases summed per trip and Spending row.
-  const txByRow = new Map<string, { cents: number; count: number }>();
+  const txByRow = new Map<string, { cents: number; count: number; list: TripTaggedPurchase[] }>();
   type TripTxRow = {
+    id: string; occurred_on: string;
     trip_id: string | null; amount_cents: number;
     travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null;
     travel_category: string | null;
-    subcategories: { travel_category: string | null } | { travel_category: string | null }[] | null;
+    subcategories: { name: string; travel_category: string | null } | { name: string; travel_category: string | null }[] | null;
+    payees: { name: string } | { name: string }[] | null;
   };
   for (const t of (tripTx.data ?? []) as unknown as TripTxRow[]) {
     // Paying for a booking is the booking's pocket cost, not spending on top.
@@ -104,8 +109,16 @@ export default async function TravelPage() {
     const category = t.travel_category ?? sub?.travel_category;
     if (!t.trip_id || !category) continue;
     const key = `${t.trip_id}:${category}`;
-    const cur = txByRow.get(key) ?? { cents: 0, count: 0 };
-    txByRow.set(key, { cents: cur.cents + Number(t.amount_cents), count: cur.count + 1 });
+    const cur = txByRow.get(key) ?? { cents: 0, count: 0, list: [] };
+    const payee = Array.isArray(t.payees) ? t.payees[0] : t.payees;
+    cur.list.push({
+      id: t.id,
+      date: t.occurred_on,
+      payee: payee?.name ?? null,
+      item: sub?.name ?? "—",
+      amountCents: Number(t.amount_cents),
+    });
+    txByRow.set(key, { cents: cur.cents + Number(t.amount_cents), count: cur.count + 1, list: cur.list });
   }
   const expenseRows: TripExpense[] = (expenses.data ?? []).map((e): TripExpense => {
     const tx = txByRow.get(`${e.trip_id}:${e.category}`);
@@ -120,6 +133,7 @@ export default async function TravelPage() {
       note: e.note ?? null,
       txActualCents: tx?.cents ?? null,
       txCount: tx?.count ?? 0,
+      txList: sortByDate(tx?.list ?? []),
     };
   });
   // A row that only exists because purchases were tagged to it — no plan
@@ -131,7 +145,7 @@ export default async function TravelPage() {
     expenseRows.push({
       tripId, category: category as ExpenseCategory,
       plannedCents: null, plannedEurCents: null, actualCents: null, actualEurCents: null,
-      accountId: null, note: null, txActualCents: tx.cents, txCount: tx.count,
+      accountId: null, note: null, txActualCents: tx.cents, txCount: tx.count, txList: sortByDate(tx.list),
     });
   }
 

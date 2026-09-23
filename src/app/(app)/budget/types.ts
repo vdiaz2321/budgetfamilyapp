@@ -252,6 +252,28 @@ export type TripBookingOption = {
   pointsUsed: boolean;
   hasCard: boolean;
 };
+// One untagged purchase dated during a trip, offered by the trip popup's
+// "Match purchases" list (listTripPurchaseCandidates).
+export type TripPurchaseCandidate = {
+  id: string;
+  date: string;
+  amountCents: number;
+  payee: string | null;
+  itemName: string;
+  // The Travel Log row it would land on once tagged (restaurants, groceries,
+  // …, other). Items with no row of their own land on "other".
+  column: string;
+  // True on the catch-all trip item (Traveling/Trips): the purchase picks its
+  // own column, like the transaction modal. Only travel-type items are ever
+  // listed, so every candidate has a Travel Log row.
+  catchAll: boolean;
+  // A booking on this trip the payee looks like ("Four Points" → the Four
+  // Points stay) — probably the booking's payment, already counted there.
+  looksLike: string | null;
+  // Where that booking already counts on the Travel Log.
+  looksLikeColumn: "Hotels" | "Flights" | "Rental" | null;
+};
+
 export type TripTagging = {
   trips: { id: string; name: string; startOn: string | null; endOn: string | null }[];
   bookingsByTrip: Record<string, TripBookingOption[]>;

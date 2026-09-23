@@ -76,7 +76,7 @@ export function SidebarAccounts({ groups }: Props) {
           aria-expanded={expanded}
           className="flex w-full items-center justify-between rounded-xl bg-white/[0.04] px-3 py-3 text-left transition hover:bg-white/[0.07]"
         >
-          <p className="text-[15px] font-bold uppercase tracking-wide text-slate-300">Net Worth</p>
+          <p className="text-[15px] font-bold uppercase tracking-wide text-slate-300 dark:text-neutral-300">Net Worth</p>
           <span className="flex items-center gap-2">
             {/* Shown collapsed as well as open: collapsing is meant to put the
                 account list away, not the one number the section exists to
@@ -93,7 +93,7 @@ export function SidebarAccounts({ groups }: Props) {
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className={`shrink-0 text-slate-500 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+              className={`shrink-0 text-slate-500 dark:text-neutral-500 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
               aria-hidden
             >
               <path d="M9 6l6 6-6 6" />
@@ -141,17 +141,17 @@ function AccountGroup({ group, showDivider }: { group: SidebarGroup; showDivider
           strokeWidth="2.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={`shrink-0 text-slate-500 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+          className={`shrink-0 text-slate-500 dark:text-neutral-500 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
           aria-hidden
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-400">
+        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-400 dark:text-neutral-400">
           {group.label}
         </span>
         <span
           className={`shrink-0 text-[12px] font-medium tabular-nums ${
-            sign * total < 0 ? "text-red-400" : "text-slate-400"
+            sign * total < 0 ? "text-red-400" : "text-slate-400 dark:text-neutral-400"
           }`}
         >
           {formatWhole(sign * total)}
@@ -168,10 +168,10 @@ function AccountGroup({ group, showDivider }: { group: SidebarGroup; showDivider
                   style={{ backgroundColor: dotColorFor(a.name) }}
                   aria-hidden
                 />
-                <span className="min-w-0 flex-1 truncate text-[12px] text-slate-400">{a.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[12px] text-slate-400 dark:text-neutral-400">{a.name}</span>
                 <span
                   className={`shrink-0 text-[13px] tabular-nums ${
-                    sign * a.balanceCents < 0 ? "text-red-400" : "text-slate-400"
+                    sign * a.balanceCents < 0 ? "text-red-400" : "text-slate-400 dark:text-neutral-400"
                   }`}
                 >
                   {formatWhole(sign * a.balanceCents)}

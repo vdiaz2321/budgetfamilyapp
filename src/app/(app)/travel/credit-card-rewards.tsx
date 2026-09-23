@@ -574,7 +574,7 @@ function CreditCardSection({
                   className={`order-last w-full shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-semibold transition sm:order-none sm:w-auto ${
                     showOnlyUnbookedNights
                       ? "border-transparent text-white"
-                      : "border-black/25 bg-background text-foreground hover:bg-slate-100 dark:border-white/30 dark:hover:bg-slate-800"
+                      : "border-black/25 bg-background text-foreground hover:bg-slate-100 dark:border-white/30 dark:hover:bg-neutral-800"
                   }`}
                   style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
                 >
@@ -587,7 +587,7 @@ function CreditCardSection({
               href="https://www.dailydrop.com/calculator"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-slate-950"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-neutral-950"
             >
               <span className="sm:hidden">Calculator</span>
               <span className="hidden sm:inline">Pts value calculator</span>
@@ -596,7 +596,7 @@ function CreditCardSection({
             <button
               type="button"
               onClick={onToggle}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
               aria-label={open ? "Collapse credit card rewards" : "Expand credit card rewards"}
             >
               <svg
@@ -691,7 +691,7 @@ function CreditCardSection({
                 <button
                   type="button"
                   onClick={() => setShowOnlyFeeCards((v) => !v)}
-                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground hover:bg-slate-100 dark:hover:bg-neutral-800"}`}
                 >
                   Active fees <span className="tabular-nums text-negative">{formatMoney(feesPaid, currency)}/yr</span>
                 </button>
@@ -717,7 +717,7 @@ function CreditCardSection({
                   `rounded-md px-2 py-1 font-semibold transition ${
                     active
                       ? "text-white"
-                      : "text-foreground hover:bg-slate-100 dark:hover:bg-slate-800"
+                      : "text-foreground hover:bg-slate-100 dark:hover:bg-neutral-800"
                   }`;
                 return (
                   <div className="flex items-center gap-1">
@@ -788,7 +788,7 @@ function CreditCardSection({
                       className={`rounded-md border px-1.5 py-0.5 transition ${
                         active
                           ? "border-transparent text-white"
-                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-slate-800"
+                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-neutral-800"
                       }`}
                       style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
                     >
@@ -873,7 +873,7 @@ function CreditCardSection({
                       </svg>
                     </span>
                     <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-neutral-800 dark:text-neutral-300">
                       {travelCards.length} card{travelCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
@@ -907,7 +907,7 @@ function CreditCardSection({
                       </svg>
                     </span>
                     <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-200/70 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:bg-neutral-800 dark:text-neutral-300">
                       {hotelCards.length} card{hotelCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
@@ -924,7 +924,7 @@ function CreditCardSection({
                 <section className="border-t border-line">
                   <div
                     onClick={() => toggleGroup("other")}
-                    className="flex cursor-pointer items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-slate-500/10"
+                    className="flex cursor-pointer items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-neutral-500/10"
                   >
                     <button
                       type="button"
@@ -932,14 +932,14 @@ function CreditCardSection({
                       className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                     >
                     <GroupChevron open={otherOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-slate-400">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-neutral-400">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <rect x="2" y="5" width="20" height="14" rx="2" />
                         <path d="M2 10h20" />
                       </svg>
                     </span>
                     <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Other Cards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-neutral-300">
                       {otherCards.length} card{otherCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
@@ -1395,7 +1395,7 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
           <button
             type="button"
             onClick={() => setConfirming(true)}
-            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-slate-950 dark:hover:bg-negative/20"
+            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-neutral-950 dark:hover:bg-negative/20"
           >
             Delete
           </button>
@@ -1500,13 +1500,13 @@ function CreditCardPanel({
             {/* Labelled "Owner:" the way the authorized user is labelled "AU:"
                 — a bare name beside the bank chip read as another bank. */}
             {card.holder ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                Owner: <span className="text-slate-700 dark:text-slate-200">{card.holder}</span>
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                Owner: <span className="text-slate-700 dark:text-neutral-200">{card.holder}</span>
               </span>
             ) : null}
             {bank ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700">
-                Bank: <span className="text-slate-700 dark:text-slate-200">{bank}</span>
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700">
+                Bank: <span className="text-slate-700 dark:text-neutral-200">{bank}</span>
               </span>
             ) : null}
             {/* Authorized user sits right of the bank so the row reads
@@ -1614,7 +1614,7 @@ function CreditCardPanel({
             href={externalCardUrl(d.cardUrl)}
             target="_blank"
             rel="noreferrer"
-            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-8 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-slate-950"
+            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-8 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-neutral-950"
           >
             Visit site <span aria-hidden>↗</span>
           </a>
@@ -1641,7 +1641,7 @@ function CreditCardPanel({
               <button
                 type="button"
                 onClick={() => setLoggingRewards(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-neutral-950"
               >
                 <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards Activity Log</span>
               </button>
@@ -1655,7 +1655,7 @@ function CreditCardPanel({
               <button
                 type="button"
                 onClick={() => setStayOpen(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-slate-950"
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-neutral-950"
               >
                 <span className="sm:hidden">Book stay</span><span className="hidden sm:inline">Book a stay</span>
               </button>
@@ -1984,7 +1984,7 @@ function EditCreditCardForm({
       className={`h-8 min-w-0 whitespace-nowrap px-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-sm ${
         activeTab === id
           ? "text-sky-700 dark:text-sky-400 shadow-[inset_0_-2px_0_var(--color-sky-700)]"
-          : "text-muted hover:bg-slate-50 hover:text-foreground dark:hover:bg-slate-900"
+          : "text-muted hover:bg-slate-50 hover:text-foreground dark:hover:bg-neutral-900"
       }`}
       aria-pressed={activeTab === id}
     >
@@ -2012,7 +2012,7 @@ function EditCreditCardForm({
             onDone();
           })
         }
-        className="flex flex-col gap-3 [&_input]:!bg-white [&_select]:!bg-white dark:[&_input]:!bg-slate-950 dark:[&_select]:!bg-slate-950"
+        className="flex flex-col gap-3 [&_input]:!bg-white [&_select]:!bg-white dark:[&_input]:!bg-neutral-900 dark:[&_select]:!bg-neutral-900"
       >
         <input type="hidden" name="id" value={card.id} />
         <input type="hidden" name="accountId" value={card.id} />
@@ -2030,7 +2030,7 @@ function EditCreditCardForm({
         {/* Tab 1: Key fields (default) */}
         <div className={activeTab === "key" ? "" : "hidden"}>
           <div className="rounded-lg border border-line bg-background/60 p-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-slate-300 [&_select]:bg-white [&_select]:ring-slate-300 dark:[&_input]:bg-slate-950 dark:[&_input]:ring-slate-700 dark:[&_select]:bg-slate-950 dark:[&_select]:ring-slate-700">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-slate-300 [&_select]:bg-white [&_select]:ring-slate-300 dark:[&_input]:bg-neutral-900 dark:[&_input]:ring-neutral-700 dark:[&_select]:bg-neutral-900 dark:[&_select]:ring-neutral-700">
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
               <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
               <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />

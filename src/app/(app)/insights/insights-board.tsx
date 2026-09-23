@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import {
   outflowOf,
@@ -11,19 +12,67 @@ import {
   type KindSlice,
   type OutflowKind,
 } from "./types";
-import { Donut, KIND_COLOR, KIND_LABEL, TrendChart } from "./insights-charts";
+import { Donut, KIND_COLOR, KIND_LABEL, TrendChart, type SelectMode } from "./insights-charts";
 import { PeriodPicker } from "./insights-period-picker";
-import { currentPeriodKey } from "./period";
+import { computeInsights, todayDate, type InsightsRaw } from "./compute";
+import { currentPeriodKey, isGranularity, normalizePeriodKey, type Granularity } from "./period";
 
-export function InsightsBoard({ data }: { data: InsightsData }) {
-  const router = useRouter();
-  // Toggle behavior: clicking the bar that's already selected returns to the
-  // current period at the same granularity, so a stray click can be undone
-  // without hunting through the menu.
-  const selectPeriod = (key: string) => {
-    const target = key === data.periodKey ? currentPeriodKey(data.granularity) : key;
-    router.push(`/insights?g=${data.granularity}&p=${encodeURIComponent(target)}`);
+export function InsightsBoard({ raw }: { raw: InsightsRaw }) {
+  // The period lives in the URL (?g=&p=) so Back and bookmarks work, but
+  // changing it never goes to the server: pushState updates useSearchParams
+  // and the numbers are recomputed here from rows the page already has.
+  const sp = useSearchParams();
+  const rawG = sp.get("g");
+  const granularity: Granularity = isGranularity(rawG) ? rawG : "monthly";
+  // Normalized, never trusted raw: an unparseable ?p= used to crash the page
+  // (see normalizePeriodKey), and an off-Monday weekly key silently produced
+  // a window no other panel agreed with.
+  // ?p= holds one key, or several joined by commas (Ctrl/⌘-click picks).
+  const currentKey = currentPeriodKey(granularity, todayDate(raw.today));
+  const pParam = sp.get("p") ?? "";
+  const picked = [
+    ...new Set(
+      pParam
+        .split(",")
+        .map((k) => normalizePeriodKey(granularity, k))
+        .filter((k): k is string => k != null),
+    ),
+  ].sort();
+  const keysParam = (picked.length ? picked : [currentKey]).join(",");
+  const data: InsightsData = useMemo(
+    () => computeInsights(raw, granularity, keysParam.split(",")),
+    [raw, granularity, keysParam],
+  );
+  const go = (g: Granularity, keys: string | string[]) => {
+    const p = Array.isArray(keys) ? [...keys].sort().join(",") : keys;
+    window.history.pushState(null, "", `/insights?g=${g}&p=${encodeURIComponent(p)}`);
   };
+  // Plain click: that period alone — or, on the only selected bar, back to the
+  // current period so a stray click can be undone. Ctrl/⌘-click adds or drops
+  // a bar; Shift-click selects every bar from the first pick to this one.
+  // The page then totals everything selected.
+  const selectPeriod = (key: string, mode: SelectMode) => {
+    const cur = data.periodKeys;
+    if (mode === "toggle") {
+      const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+      go(data.granularity, next.length ? next : [currentKey]);
+    } else if (mode === "range") {
+      const order = data.buckets.map((b) => b.key);
+      const a = order.indexOf(cur[0]);
+      const b = order.indexOf(key);
+      if (a < 0 || b < 0) return go(data.granularity, key);
+      go(data.granularity, order.slice(Math.min(a, b), Math.max(a, b) + 1));
+    } else {
+      go(data.granularity, cur.length === 1 && cur[0] === key ? currentKey : key);
+    }
+  };
+  const multi = !data.comparable;
+  const unit =
+    data.granularity === "weekly" ? "weeks"
+      : data.granularity === "monthly" ? "months"
+      : data.granularity === "quarterly" ? "quarters"
+      : "years";
+  const combinedNote = multi ? `${data.periodKeys.length} ${unit} combined` : undefined;
 
   const outTotal = outflowOf(data.totals);
   const hasData = data.totals.income !== 0 || outTotal !== 0;
@@ -40,8 +89,9 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
   const priorComparable = priorActivity >= curActivity * 0.1;
   const deltaFor = (current: number, prior: number): number | null => {
     if (!priorComparable || Math.abs(prior) < 10_00) return null;
-    const pct = ((current - prior) / Math.abs(prior)) * 100;
-    return Math.abs(pct) > 500 ? null : pct;
+    // Swings past MUCH_MORE (e.g. month-end pay vs a quiet prior stretch) are
+    // real, just not worth a precise figure — StatCard words them "much more".
+    return ((current - prior) / Math.abs(prior)) * 100;
   };
 
   const stat = (pick: (f: Flows) => number) => ({
@@ -59,18 +109,19 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
         <h1 className="text-2xl font-semibold">Insights</h1>
         <PeriodPicker
           granularity={data.granularity}
-          periodKey={data.periodKey}
+          periodKey={multi ? "" : data.periodKey}
           label={data.periodLabel}
           minYear={data.minYear}
+          onSelect={go}
         />
       </div>
 
       {/* Hero stats — the selected period */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Income" {...income} color="var(--positive)" deltaGoodWhen="up" currency={data.currency} priorLabel={data.priorLabel} />
-        <StatCard label="Spending" {...spending} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} />
-        <StatCard label="Savings" {...savings} color="var(--viz-savings)" deltaGoodWhen="up" currency={data.currency} priorLabel={data.priorLabel} />
-        <StatCard label="Debt paid" {...debt} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} />
+        <StatCard label="Income" {...income} color="var(--positive)" deltaGoodWhen="up" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
+        <StatCard label="Spending" {...spending} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
+        <StatCard label="Savings" {...savings} color="var(--viz-savings)" deltaGoodWhen="up" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
+        <StatCard label="Debt paid" {...debt} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
       </div>
 
       {/* Trend — click a bar to jump the whole page to that period. Clicking
@@ -81,19 +132,16 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
       <section
         className="rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10"
         onClick={(e) => {
-          if (data.periodKey === currentPeriodKey(data.granularity)) return;
+          if (!multi && data.periodKey === currentKey) return;
           if ((e.target as HTMLElement).closest("button")) return;
-          router.push(
-            `/insights?g=${data.granularity}&p=${encodeURIComponent(
-              currentPeriodKey(data.granularity),
-            )}`,
-          );
+          go(data.granularity, currentKey);
         }}
       >
         <div className="mb-3 flex items-baseline gap-2">
           <h2 className="text-sm font-semibold">Income vs. spending</h2>
           <span className="text-[11px] uppercase tracking-wide text-muted">
             tap a bar to jump to that period
+            <span className="hidden sm:inline"> · Ctrl/⌘-click to add more</span>
           </span>
         </div>
         <TrendChart buckets={data.buckets} currency={data.currency} onSelect={selectPeriod} />
@@ -119,13 +167,13 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
                 </span>
               </div>
               <Donut slices={data.kinds} total={outTotal} currency={data.currency} />
-              <table className="mt-4 w-full text-sm">
+              <table className="mt-4 w-full table-fixed text-sm">
                 <thead>
                   <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
                     <th className="pb-2 text-left font-medium">Category</th>
-                    <th className="pb-2 text-right font-medium">% Out</th>
-                    <th className="pb-2 text-right font-medium">Change</th>
-                    <th className="pb-2 text-right font-medium">Amount</th>
+                    <th className="hidden w-12 sm:w-14 whitespace-nowrap pb-2 text-center font-medium sm:table-cell">% Out</th>
+                    {multi ? null : <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">vs {data.priorLabel}</th>}
+                    <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -136,6 +184,7 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
                       priorAmount={priorForKind(k.kind, data.prior)}
                       outTotal={outTotal}
                       currency={data.currency}
+                      showChange={!multi}
                     />
                   ))}
                 </tbody>
@@ -154,13 +203,13 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
                   No categorized spending in this period.
                 </p>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead>
                     <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
                       <th className="pb-2 text-left font-medium">Category</th>
-                      <th className="pb-2 text-right font-medium">% Spend</th>
-                      <th className="pb-2 text-right font-medium">Change</th>
-                      <th className="pb-2 text-right font-medium">Amount</th>
+                      <th className="hidden w-12 sm:w-14 whitespace-nowrap pb-2 text-center font-medium sm:table-cell">% Spend</th>
+                      {multi ? null : <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">vs {data.priorLabel}</th>}
+                      <th className="w-[5.5rem] sm:w-28 whitespace-nowrap pb-2 text-center font-medium">Amount</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
@@ -170,6 +219,7 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
                         row={c}
                         outTotal={outTotal}
                         currency={data.currency}
+                        showChange={!multi}
                       />
                     ))}
                   </tbody>
@@ -247,6 +297,15 @@ export function InsightsBoard({ data }: { data: InsightsData }) {
   );
 }
 
+// Above this, a percentage stops meaning anything useful (+1,089% because
+// last month's pay hadn't landed yet), so it reads "much more" instead of
+// being hidden behind a "no prior data" that isn't true.
+const MUCH_MORE = 500;
+function changeWords(pct: number): string {
+  if (pct > MUCH_MORE) return "much more";
+  return `${Math.abs(pct).toFixed(0)}% ${pct > 0 ? "more" : "less"}`;
+}
+
 function StatCard({
   label,
   value,
@@ -255,6 +314,7 @@ function StatCard({
   delta,
   deltaGoodWhen,
   priorLabel,
+  note,
 }: {
   label: string;
   value: number;
@@ -263,6 +323,8 @@ function StatCard({
   delta: number | null;
   deltaGoodWhen: "up" | "down";
   priorLabel: string;
+  // Replaces the comparison line (e.g. "3 months combined" for a multi-pick).
+  note?: string;
 }) {
   // No arrows: the wording ("less than" / "more than") already carries
   // direction, and the color carries whether that direction is good — an arrow
@@ -281,16 +343,18 @@ function StatCard({
       <p className="mt-0.5 text-xl font-bold tabular-nums" style={{ color }}>
         {formatMoney(value, currency)}
       </p>
-      {delta == null ? (
+      {note ? (
+        <p className="mt-0.5 text-xs text-muted">{note}</p>
+      ) : delta == null ? (
         <p className="mt-0.5 text-xs text-muted">no prior data</p>
       ) : flat ? (
-        <p className="mt-0.5 text-xs text-muted">about the same as {priorLabel}</p>
+        <p className="mt-0.5 text-xs text-muted">about the same as <span className="whitespace-nowrap">{priorLabel}</span></p>
       ) : (
         <p className="mt-0.5 text-xs">
           <span className={good ? "font-semibold text-positive" : "font-semibold text-negative"}>
-            {Math.abs(delta).toFixed(0)}% {delta > 0 ? "more" : "less"}
+            {changeWords(delta)}
           </span>{" "}
-          <span className="text-muted">than {priorLabel}</span>
+          <span className="text-muted">than <span className="whitespace-nowrap">{priorLabel}</span></span>
         </p>
       )}
     </div>
@@ -310,24 +374,26 @@ function KindTableRow({
   priorAmount,
   outTotal,
   currency,
+  showChange,
 }: {
   slice: KindSlice;
   priorAmount: number | null;
   outTotal: number;
   currency: string;
+  showChange: boolean;
 }) {
   const pctOut = outTotal > 0 ? (slice.amount / outTotal) * 100 : null;
   let changePct: number | null = null;
   if (priorAmount != null && Math.abs(priorAmount) >= 10_00) {
     const raw = ((slice.amount - priorAmount) / Math.abs(priorAmount)) * 100;
-    if (Math.abs(raw) <= 500) changePct = raw;
+    changePct = raw;
   }
   const changeText =
     changePct == null
       ? "—"
       : Math.abs(changePct) < 0.5
       ? "flat"
-      : `${Math.abs(changePct).toFixed(0)}% ${changePct > 0 ? "more" : "less"}`;
+      : changeWords(changePct);
   const changeClass =
     changePct == null || Math.abs(changePct) < 0.5
       ? "text-muted"
@@ -337,6 +403,9 @@ function KindTableRow({
 
   return (
     <tr className="text-sm">
+      {/* The table is table-fixed: the figure columns take the set widths on
+          their <th>, and the name gets what's left and truncates — so the
+          figures keep breathing room and nothing runs past the card. */}
       <td className="py-2 pr-2">
         <span className="flex items-center gap-2">
           <span
@@ -346,11 +415,12 @@ function KindTableRow({
           <span className="truncate">{KIND_LABEL[slice.kind]}</span>
         </span>
       </td>
-      <td className="py-2 pr-2 text-right tabular-nums text-muted">
+      {/* Hidden on phones, like % Spend below: the name needs the width. */}
+      <td className="hidden whitespace-nowrap py-2 text-center tabular-nums text-muted sm:table-cell">
         {pctOut == null ? "—" : `${pctOut.toFixed(0)}%`}
       </td>
-      <td className={`py-2 pr-2 text-right tabular-nums ${changeClass}`}>{changeText}</td>
-      <td className="py-2 text-right font-semibold tabular-nums">
+      {showChange ? <td className={`whitespace-nowrap py-2 text-center tabular-nums ${changeClass}`}>{changeText}</td> : null}
+      <td className="whitespace-nowrap py-2 text-center font-semibold tabular-nums">
         {formatMoney(slice.amount, currency)}
       </td>
     </tr>
@@ -361,10 +431,12 @@ function CategoryTableRow({
   row,
   outTotal,
   currency,
+  showChange,
 }: {
   row: CategoryRow;
   outTotal: number;
   currency: string;
+  showChange: boolean;
 }) {
   const pctSpend = outTotal > 0 ? (row.amount / outTotal) * 100 : null;
   const prior = row.priorAmount;
@@ -373,14 +445,14 @@ function CategoryTableRow({
   let changePct: number | null = null;
   if (prior != null && Math.abs(prior) >= 10_00) {
     const raw = ((row.amount - prior) / Math.abs(prior)) * 100;
-    if (Math.abs(raw) <= 500) changePct = raw;
+    changePct = raw;
   }
   const changeText =
     changePct == null
       ? "—"
       : Math.abs(changePct) < 0.5
       ? "flat"
-      : `${Math.abs(changePct).toFixed(0)}% ${changePct > 0 ? "more" : "less"}`;
+      : changeWords(changePct);
   // Category spending: a drop is good (green), a rise is bad (red). "flat" and
   // "—" stay muted so they never masquerade as feedback.
   const changeClass =
@@ -392,6 +464,9 @@ function CategoryTableRow({
 
   return (
     <tr className="text-sm">
+      {/* The table is table-fixed: the figure columns take the set widths on
+          their <th>, and the name gets what's left and truncates — so the
+          figures keep breathing room and nothing runs past the card. */}
       <td className="py-2 pr-2">
         <span className="flex items-center gap-2">
           <span
@@ -401,11 +476,12 @@ function CategoryTableRow({
           <span className="truncate">{row.name}</span>
         </span>
       </td>
-      <td className="py-2 pr-2 text-right tabular-nums text-muted">
+      {/* Hidden on phones: the category name needs that width more. */}
+      <td className="hidden whitespace-nowrap py-2 text-center tabular-nums text-muted sm:table-cell">
         {pctSpend == null ? "—" : `${pctSpend.toFixed(0)}%`}
       </td>
-      <td className={`py-2 pr-2 text-right tabular-nums ${changeClass}`}>{changeText}</td>
-      <td className="py-2 text-right font-semibold tabular-nums">
+      {showChange ? <td className={`whitespace-nowrap py-2 text-center tabular-nums ${changeClass}`}>{changeText}</td> : null}
+      <td className="whitespace-nowrap py-2 text-center font-semibold tabular-nums">
         {formatMoney(row.amount, currency)}
       </td>
     </tr>

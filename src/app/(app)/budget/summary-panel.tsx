@@ -2,23 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { formatMoney } from "@/lib/money";
+import type { CategoryKind } from "@/lib/categories";
 import type { GroupData, ViewMode } from "./types";
 
-// Distinct arc colors, assigned to outflow groups in order. Values reference
-// the theme-aware --cat-* tokens so dark mode gets softened tones — the raw
-// #hex versions read as neon on a dim canvas.
-const PALETTE = [
-  "var(--cat-savings)",
-  "var(--cat-debt)",
-  "var(--cat-bills)",
-  "var(--cat-income)",
-  "var(--cat-sky)",
-  "var(--cat-violet)",
-  "var(--cat-pink)",
-  "var(--cat-teal)",
-  "var(--cat-orange)",
-  "var(--cat-lime)",
-];
+// Each arc takes its group's own category color — the same --viz-* token as
+// the row dot and hero bar (see DOT in category-icons.tsx) — so Expenses is
+// sky in the donut AND on its row. Assigning by position used to hand out
+// amber and swap Bills/Debt colors. A second group of the same kind (a custom
+// "+ Cat Group") falls through to these extra cool tones so arcs stay apart.
+const KIND_COLOR: Partial<Record<CategoryKind, string>> = {
+  savings: "var(--viz-savings)",
+  bills: "var(--viz-bills)",
+  expenses: "var(--viz-expenses)",
+  debt: "var(--viz-debt)",
+};
+const EXTRA = ["var(--viz-soft)", "var(--chart-5)", "var(--viz-income)", "var(--cat-lime)"];
 
 type Props = {
   groups: GroupData[];
@@ -52,12 +50,23 @@ export function SummaryPanel({ groups, currency }: Props) {
   const STROKE = 10; // stroke width of the ring (thinner = more elegant)
   const C = 2 * Math.PI * R;
 
+  const usedKinds = new Set<CategoryKind>();
+  let extraIdx = 0;
+  const colors = outflow.map((g) => {
+    const own = KIND_COLOR[g.kind];
+    if (own && !usedKinds.has(g.kind)) {
+      usedKinds.add(g.kind);
+      return own;
+    }
+    return EXTRA[extraIdx++ % EXTRA.length];
+  });
+
   const base = outflow.map((g, i) => {
     const value = mode === "spent" ? g.spentTotal : g.plannedTotal;
     return {
       categoryId: g.categoryId,
       name: g.name,
-      color: PALETTE[i % PALETTE.length],
+      color: colors[i],
       // Negative "remaining" (overspent) can't size an arc — clamp to 0 for the
       // ring, but keep the true value for the legend.
       arcValue: Math.max(0, value),

@@ -60,7 +60,7 @@ export function PeriodPicker({
   const isOther = !isThisMonth && !isLastMonth;
 
   const seg = (active: boolean) =>
-    `rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
+    `whitespace-nowrap rounded-full px-2 py-1.5 text-[15px] font-medium transition sm:px-3.5 sm:text-sm ${
       active
         ? "bg-surface text-foreground shadow-sm"
         : "text-muted hover:text-foreground"
@@ -68,7 +68,7 @@ export function PeriodPicker({
 
   return (
     <div className="relative">
-      <div className="inline-flex items-center gap-0.5 rounded-full bg-black/[0.06] p-1 dark:bg-white/10">
+      <div className="inline-flex items-center rounded-full bg-black/[0.06] p-1 sm:gap-0.5 dark:bg-white/10">
         <button type="button" className={seg(isLastMonth)} onClick={() => go("monthly", lastMonth)}>
           Last month
         </button>
@@ -84,7 +84,9 @@ export function PeriodPicker({
           }}
           aria-expanded={open}
         >
-          {isOther ? label : "More"}
+          {/* A long label ("Jun–Aug 2026", a multi-pick) truncates on a phone
+              instead of wrapping every segment onto two lines. */}
+          <span className="block max-w-[7.5rem] truncate sm:max-w-none">{isOther ? label : "More"}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M6 9l6 6 6-6" />
           </svg>

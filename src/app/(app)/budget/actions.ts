@@ -14,7 +14,7 @@ import { fetchTripPlans } from "@/lib/trip-budget-plans";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
 import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef } from "@/app/(app)/travel/booking-payments";
-import type { TripTagging } from "./types";
+import type { TripPurchaseCandidate, TripTagging } from "./types";
 
 const TRAVEL_CATEGORY_KEYS = new Set(["restaurants", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash", "other"]);
 
@@ -1078,12 +1078,13 @@ export async function listTripTagging(): Promise<TripTagging> {
   const tripIds = trips.map((t) => t.id);
   if (tripIds.length === 0) return { trips, bookingsByTrip: {} };
 
-  const [stays, flights, cars] = await Promise.all([
-    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+  const [stays, flights, cars, legs] = await Promise.all([
+    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
-    supabase.from("travel_cars").select("id, trip_id, company, pickup_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_cars").select("id, trip_id, company, pickup_on, return_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_flight_legs").select("flight_id, flight_on").eq("household_id", householdId),
   ]);
-  const problem = stays.error ?? flights.error ?? cars.error;
+  const problem = stays.error ?? flights.error ?? cars.error ?? legs.error;
   if (problem) throw new Error(`Could not load the trips' bookings: ${problem.message}`);
   const day = (iso: string) => {
     const [y, m, d] = iso.split("-");
@@ -1104,7 +1105,247 @@ export async function listTripTagging(): Promise<TripTagging> {
   ].sort((a, b) => a.on.localeCompare(b.on));
   const bookingsByTrip: TripTagging["bookingsByTrip"] = {};
   for (const { on: _on, tripId, ...r } of rows) (bookingsByTrip[tripId] ??= []).push(r);
-  return { trips, bookingsByTrip };
+
+  // A trip with no dates of its own (Barcelona · Oct 2026 has only bookings)
+  // takes its bookings' span — the same rule the Travel Log's trip rows use
+  // (summarizeTrips) — so a purchase on those days still picks the trip.
+  const lastLeg = new Map<string, string>();
+  for (const l of legs.data ?? []) {
+    if (l.flight_on && l.flight_on > (lastLeg.get(l.flight_id) ?? "")) lastLeg.set(l.flight_id, l.flight_on);
+  }
+  const addDays = (iso: string, n: number) => {
+    const d = new Date(`${iso}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const span = new Map<string, { from: string; to: string }>();
+  const widen = (tripId: string | null, from: string, to: string) => {
+    if (!tripId) return;
+    const cur = span.get(tripId);
+    span.set(tripId, {
+      from: cur && cur.from < from ? cur.from : from,
+      to: cur && cur.to > to ? cur.to : to,
+    });
+  };
+  for (const s of stays.data ?? []) widen(s.trip_id, s.check_in, addDays(s.check_in, Number(s.nights ?? 0)));
+  for (const f of flights.data ?? []) widen(f.trip_id, f.first_flight_on, lastLeg.get(f.id) ?? f.first_flight_on);
+  for (const c of cars.data ?? []) widen(c.trip_id, c.pickup_on, c.return_on ?? c.pickup_on);
+  const datedTrips = trips.map((t) => {
+    const b = span.get(t.id);
+    return {
+      ...t,
+      startOn: t.startOn ?? b?.from ?? null,
+      endOn: t.endOn ?? b?.to ?? null,
+    };
+  });
+  return { trips: datedTrips, bookingsByTrip };
+}
+
+// ---- "Match purchases": back-tagging a trip's purchases in one go --------
+//
+// Trip tagging only reached purchases entered after it was built, so every
+// trip before it carried hand-typed actuals that never matched the cards. The
+// trip popup lists the untagged purchases dated inside the trip and tags the
+// ticked ones exactly as the transaction modal would (routeTripPurchase):
+// trip spending moves onto the trip items, keeping its Travel Log column.
+
+// Purchases that can be tagged: bills/expenses spending on a travel-type item
+// with no savings/investment link, off the kids' accounts, not a transfer, not a
+// booking payment and not already on a trip. Changing their budget item never
+// moves an account balance (only income flips the ledger's sign).
+const TRIP_CANDIDATE_SELECT =
+  "id, occurred_on, amount_cents, subcategory_id, paid_to_account_id, is_withdrawal, " +
+  "account_id, subcategories(id, category_id, name, linked_bucket_id, linked_account_id, travel_category, receives_trip_plans, categories(kind)), " +
+  "payees(name)";
+type TripCandidateRow = {
+  id: string;
+  occurred_on: string;
+  amount_cents: number;
+  subcategory_id: string | null;
+  paid_to_account_id: string | null;
+  is_withdrawal: boolean | null;
+  account_id: string | null;
+  subcategories: (TripRoutableSub & { id: string }) | null;
+  payees: { name: string } | null;
+};
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function isTaggableCandidate(t: TripCandidateRow, kidsAccounts: Set<string>): boolean {
+  const sub = t.subcategories;
+  if (!sub || !t.subcategory_id) return false;
+  // Card payments and investment transfers are money moving, not spending;
+  // the kids' own money is never family trip spending.
+  if (t.paid_to_account_id || t.is_withdrawal) return false;
+  if (t.account_id && kidsAccounts.has(t.account_id)) return false;
+  if (sub.linked_bucket_id || sub.linked_account_id) return false;
+  // Only travel-type items (those with a Travel Log row — Restaurant Travel,
+  // Traveling/Trips, Groceries, Fuel, Cash…). Everyday buys that happen to
+  // fall on trip days (Hygienes, clothing, school supplies) are not trip
+  // spending and never appear — Victor's call, 2026-09-23.
+  if (!sub.travel_category) return false;
+  const kind = sub.categories?.kind;
+  return kind === "bills" || kind === "expenses";
+}
+
+async function loadTripCandidates(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  from: string,
+  to: string,
+  ids?: string[],
+): Promise<TripCandidateRow[]> {
+  let q = supabase
+    .from("transactions")
+    .select(TRIP_CANDIDATE_SELECT)
+    .eq("household_id", householdId)
+    .gte("occurred_on", from)
+    .lte("occurred_on", to)
+    .is("trip_id", null)
+    .is("travel_stay_id", null)
+    .is("travel_flight_id", null)
+    .is("travel_car_id", null)
+    .not("subcategory_id", "is", null);
+  if (ids) q = q.in("id", ids);
+  // Two FKs join transactions to accounts (account_id, paid_to_account_id),
+  // so the kids' accounts are read on their own rather than embedded.
+  const [rows, kids] = await Promise.all([
+    q.order("occurred_on").returns<TripCandidateRow[]>().then((r) => unwrap(r, "trip purchases") ?? []),
+    supabase.from("accounts").select("id").eq("household_id", householdId).eq("is_kids_account", true)
+      .then((r) => unwrap(r, "kids accounts") ?? []),
+  ]);
+  const kidsAccounts = new Set(kids.map((a) => a.id as string));
+  return rows.filter((t) => isTaggableCandidate(t, kidsAccounts));
+}
+
+export async function listTripPurchaseCandidates(
+  tripId: string,
+  from: string,
+  to: string,
+): Promise<TripPurchaseCandidate[]> {
+  const { supabase, householdId } = await requireHousehold();
+  const trip = await resolveTripTag(supabase, householdId, tripId);
+  if (!trip || !ISO_DAY.test(from) || !ISO_DAY.test(to)) return [];
+
+  const [rows, stays, flights, cars] = await Promise.all([
+    loadTripCandidates(supabase, householdId, from, to),
+    supabase.from("travel_stays").select("property_name, brand").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
+    supabase.from("travel_flights").select("airline").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
+    supabase.from("travel_cars").select("company").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
+  ]);
+  const problem = stays.error ?? flights.error ?? cars.error;
+  if (problem) throw new Error(`Could not load the trip's bookings: ${problem.message}`);
+
+  // A payee sharing a real word (4+ letters) with one of the trip's bookings
+  // is most likely that booking's payment — it already counts under Hotels /
+  // Flights, so it starts unticked with the booking named beside it.
+  // Each booking name with the Travel Log column it already counts under.
+  const bookingNames: { name: string; column: "Hotels" | "Flights" | "Rental" }[] = [
+    ...(stays.data ?? []).flatMap((s) => [s.property_name, s.brand].map((name) => ({ name, column: "Hotels" as const }))),
+    ...(flights.data ?? []).map((f) => ({ name: f.airline, column: "Flights" as const })),
+    ...(cars.data ?? []).map((c) => ({ name: c.company, column: "Rental" as const })),
+  ].filter((b): b is { name: string; column: "Hotels" | "Flights" | "Rental" } => Boolean(b.name));
+  const words = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+  const looksLike = (payee: string | null) => {
+    if (!payee) return null;
+    const mine = new Set(words(payee));
+    return bookingNames.find((b) => words(b.name).some((w) => mine.has(w))) ?? null;
+  };
+
+  return rows.map((t) => {
+    const sub = t.subcategories!;
+    const payee = t.payees?.name ?? null;
+    const booking = looksLike(payee);
+    return {
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: Number(t.amount_cents),
+      payee,
+      itemName: sub.name,
+      column: sub.travel_category ?? "other",
+      // Traveling/Trips itself: the purchase picks its own column.
+      catchAll: sub.travel_category === "other",
+      looksLike: booking?.name ?? null,
+      looksLikeColumn: booking?.column ?? null,
+    };
+  });
+}
+
+export async function tagTripPurchases(
+  tripId: string,
+  from: string,
+  to: string,
+  // Each purchase to tag, with the Travel Log column picked for it when it
+  // lands on the catch-all trip item (Parking, Public transport…). Ignored
+  // for anything the item's own row decides.
+  picks: { id: string; column?: string | null }[],
+): Promise<{ tagged: number }> {
+  const { supabase, householdId } = await requireHousehold();
+  const trip = await resolveTripTag(supabase, householdId, tripId);
+  if (!trip) throw new Error("That trip no longer exists.");
+  if (!ISO_DAY.test(from) || !ISO_DAY.test(to)) throw new Error("The trip has no dates to match purchases against.");
+  const columnOf = new Map(picks.map((p) => [p.id, p.column ?? null]));
+  const ids = [...columnOf.keys()].filter(Boolean);
+  if (ids.length === 0) return { tagged: 0 };
+
+  // Re-read and re-check on the server: only purchases still untagged, inside
+  // the trip's dates and taggable at all are touched, whatever was sent.
+  const rows = await loadTripCandidates(supabase, householdId, from, to, ids);
+  // Same destination the transaction modal picks (routeTripPurchase).
+  const updates = new Map<string, { subcategory_id: string; category_id: string; travel_category: string | null; pre_trip_subcategory_id: string | null; ids: string[] }>();
+  for (const t of rows) {
+    const sub = t.subcategories!;
+    // Reassigned below when the catch-all takes a picked column.
+    let target: { subcategoryId: string; sub: TripRoutableSub; forcedCategory: string | null } =
+      await routeTripPurchase(supabase, householdId, sub.id, sub, trip, null);
+    // On the catch-all item the purchase carries its own column: the one
+    // picked in the list, else the routed item's row. "other" is stored as
+    // null, same as the transaction modal.
+    if (target.sub.travel_category === "other") {
+      const picked = columnOf.get(t.id);
+      const column = picked && TRAVEL_CATEGORY_KEYS.has(picked) ? picked : target.forcedCategory;
+      target = { ...target, forcedCategory: column && column !== "other" ? column : null };
+    }
+    // Moved off its own item (Groceries -> Traveling/Trips)? Record where it
+    // was (transactions.pre_trip_subcategory_id).
+    const moved = target.subcategoryId !== sub.id ? sub.id : null;
+    const key = `${target.subcategoryId}|${target.forcedCategory ?? ""}|${moved ?? ""}`;
+    const cur = updates.get(key) ?? {
+      subcategory_id: target.subcategoryId,
+      category_id: target.sub.category_id,
+      travel_category: target.forcedCategory,
+      pre_trip_subcategory_id: moved,
+      ids: [],
+    };
+    cur.ids.push(t.id);
+    updates.set(key, cur);
+  }
+
+  let tagged = 0;
+  for (const u of updates.values()) {
+    unwrap(
+      await supabase
+        .from("transactions")
+        .update({
+          trip_id: trip,
+          subcategory_id: u.subcategory_id,
+          category_id: u.category_id,
+          travel_category: u.travel_category,
+          pre_trip_subcategory_id: u.pre_trip_subcategory_id,
+        })
+        .eq("household_id", householdId)
+        .is("trip_id", null)
+        .in("id", u.ids),
+      "tagging the purchases",
+    );
+    tagged += u.ids.length;
+  }
+
+  revalidatePath("/travel");
+  revalidatePath("/budget");
+  revalidatePath("/transactions");
+  revalidatePath("/annual");
+  revalidatePath("/insights");
+  return { tagged };
 }
 
 // A payment linked to a booking sets that booking's pocket cost and marks it
@@ -1298,6 +1539,9 @@ async function insertTransactionCore(
     trip_id: tripId,
     ...bookingColumns(booking),
     travel_category: routed.forcedCategory ?? travelCategoryOf(formData, sub.travel_category, tripId, booking),
+    // The item it was picked on, when a trip tag moved it (Groceries ->
+    // Traveling/Trips) — a record of where it came from.
+    pre_trip_subcategory_id: routed.subcategoryId !== pickedSubId ? pickedSubId : null,
     memo,
     is_withdrawal: isWithdrawal,
     cleared,
@@ -1611,6 +1855,16 @@ export async function updateTransaction(formData: FormData) {
       trip_id: tripId,
       ...bookingColumns(booking),
       travel_category: routed.forcedCategory ?? travelCategoryOf(formData, sub.travel_category, tripId, booking),
+      // See the insert path: remembers the item a trip tag moved it off. An
+      // edit that keeps the trip without moving it again (fixing the amount
+      // of the Commissary run already on Traveling/Trips) must not forget
+      // where it came from, so the field is left alone then; dropping the
+      // trip clears it.
+      ...(routed.subcategoryId !== pickedSubId
+        ? { pre_trip_subcategory_id: pickedSubId }
+        : tripId
+          ? {}
+          : { pre_trip_subcategory_id: null }),
       memo,
       is_withdrawal: isWithdrawal,
     })

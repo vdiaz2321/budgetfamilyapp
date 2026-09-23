@@ -43,7 +43,7 @@ const HEADER_TINT: Record<CategoryKind, string> = {
 const BTN_COLOR: Record<CategoryKind, string> = {
   income: "bg-emerald-200 hover:bg-emerald-300 dark:bg-emerald-800/70 dark:hover:bg-emerald-700",
   savings: "bg-sky-600 hover:bg-sky-700",
-  bills: "bg-slate-700 hover:bg-slate-800 dark:bg-slate-500 dark:hover:bg-slate-400",
+  bills: "bg-slate-700 hover:bg-slate-800 dark:bg-neutral-500 dark:hover:bg-neutral-400",
   expenses: "bg-rose-100 hover:bg-rose-200 dark:bg-rose-900/50 dark:hover:bg-rose-900/70",
   debt: "bg-rose-600 hover:bg-rose-700",
 };

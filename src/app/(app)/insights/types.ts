@@ -66,7 +66,13 @@ export type PurchaseRow = {
 
 export type InsightsData = {
   granularity: Granularity;
+  // First (earliest) selected period; `periodKeys` holds every pick when
+  // several bars are Ctrl/⌘-clicked together.
   periodKey: string;
+  periodKeys: string[];
+  // False for a multi-pick: there's no single "prior period" to compare to,
+  // so deltas and the "vs" column are hidden.
+  comparable: boolean;
   periodLabel: string;
   priorLabel: string;
   minYear: number;

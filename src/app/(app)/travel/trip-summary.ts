@@ -133,7 +133,22 @@ export type TripSummary = {
   actualMisc: number;
   /** Anything still on estimate: a category with a plan and no actual. */
   hasEstimates: boolean;
+  /** Everything above added up — spent AND still-planned money. */
   total: number;
+  /** The part of each figure that is only a plan so far: a booking not
+   *  bought yet, or a spending row with a plan and no actual. The log greys
+   *  these out and keeps them out of "Spent". */
+  planOnly: {
+    flights: number;
+    hotels: number;
+    rentals: number;
+    misc: Record<ExpenseCategory, number>;
+    bookings: number;
+    miscTotal: number;
+    total: number;
+  };
+  /** Money that actually left the wallet: total less planOnly.total. */
+  spent: number;
   /** Cash value of flights, hotels and rentals, less what was paid for them. */
   saved: number;
   points: number;
@@ -177,6 +192,21 @@ export function summarizeTrips(
       tripExpenses.forEach((e) => (misc[e.category] += expenseCents(e)));
       const miscTotal = Object.values(misc).reduce((a, b) => a + b, 0);
 
+      // Plan-only parts, for "Spent" vs "Planned".
+      const estimatePart = (kind: Booking["kind"]) =>
+        live
+          .filter((b) => b.kind === kind && (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate)
+          .reduce((sum, b) => sum + b.pocket, 0);
+      const planMisc = Object.fromEntries(EXPENSE_CATEGORIES.map((c) => [c.key, 0])) as Record<ExpenseCategory, number>;
+      tripExpenses.forEach((e) => {
+        if (actualCents(e) == null) planMisc[e.category] += e.plannedCents ?? 0;
+      });
+      const planFlights = estimatePart("flight");
+      const planHotels = estimatePart("stay");
+      const planRentals = estimatePart("car");
+      const planMiscTotal = Object.values(planMisc).reduce((a, b) => a + b, 0);
+      const planTotal = planFlights + planHotels + planRentals + planMiscTotal;
+
       const flightsPaid = part("flight", "pocket");
       const hotelsPaid = part("stay", "pocket");
       const rentalsPaid = part("car", "pocket");
@@ -203,6 +233,16 @@ export function summarizeTrips(
           tripExpenses.some((e) => e.plannedCents != null && actualCents(e) == null) ||
           live.some((b) => (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate),
         total: flightsPaid + hotelsPaid + rentalsPaid + miscTotal,
+        planOnly: {
+          flights: planFlights,
+          hotels: planHotels,
+          rentals: planRentals,
+          misc: planMisc,
+          bookings: planFlights + planHotels + planRentals,
+          miscTotal: planMiscTotal,
+          total: planTotal,
+        },
+        spent: flightsPaid + hotelsPaid + rentalsPaid + miscTotal - planTotal,
         saved: Math.max(0, cashValue - (flightsPaid + hotelsPaid + rentalsPaid)),
         points: live.reduce((sum, b) => sum + b.points, 0),
         counts,

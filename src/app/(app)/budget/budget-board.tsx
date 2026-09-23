@@ -1156,7 +1156,8 @@ function CategoryProgressCard({
           <span className="whitespace-nowrap font-semibold text-foreground">{formatMoney(planned, currency)}</span>{" "}
           <span className="whitespace-nowrap">
             <span className="text-muted">/ {actualLabel} </span>
-            <span className={`font-semibold ${actualColorClass}`}>{formatMoney(actual, currency)}</span>
+            {/* Nothing in yet reads gray, not green/red — same as actualColorClass on the rows. */}
+            <span className={`font-semibold ${actual === 0 ? "text-muted" : actualColorClass}`}>{formatMoney(actual, currency)}</span>
           </span>
         </span>
       </div>

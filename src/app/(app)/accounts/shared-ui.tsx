@@ -98,8 +98,8 @@ const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; va
   slate: {
     bg: "bg-slate-500/10",
     ring: "ring-slate-500/30",
-    label: "text-slate-700 dark:text-slate-400",
-    value: "text-slate-700 dark:text-slate-300",
+    label: "text-slate-700 dark:text-neutral-400",
+    value: "text-slate-700 dark:text-neutral-300",
     activeBg: "bg-slate-500/25",
   },
   emerald: {

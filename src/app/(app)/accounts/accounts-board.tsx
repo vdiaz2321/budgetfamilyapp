@@ -705,7 +705,7 @@ export function AccountsBoard({
         <button
           type="button"
           onClick={() => setOverviewCollapsed((c) => ({ ...c, overview: !c.overview }))}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
           aria-label={overviewOpen ? "Collapse account groups" : "Expand account groups"}
         >
           <svg
@@ -938,7 +938,7 @@ function CreditCardListSection({
         <Link
           href="/travel"
           onClick={(e) => e.stopPropagation()}
-          className="shrink-0 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-slate-950"
+          className="shrink-0 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-neutral-950"
         >
           Points & rewards →
         </Link>
@@ -952,7 +952,7 @@ function CreditCardListSection({
         </div>
         <button
           type="button"
-          className="order-2 ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-slate-800 sm:order-3 sm:ml-0"
+          className="order-2 ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:order-3 sm:ml-0"
           aria-label={open ? `Collapse ${section.label}` : `Expand ${section.label}`}
         >
           <svg

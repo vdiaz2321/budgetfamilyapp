@@ -31,10 +31,11 @@ function searchText(t: TripSummary): string {
 }
 
 // The whole-trip columns: flights and hotels, the day-to-day spending, then
-// the rental last.
-const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number }[] = [
-  { label: "Flights", read: (t) => t.flights },
-  { label: "Hotels", read: (t) => t.hotels },
+// the rental last. `plan` is the part of the figure that is only a plan so
+// far — a cell that is all plan renders grey, and none of it counts as Spent.
+const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number; plan: (t: TripSummary) => number }[] = [
+  { label: "Flights", read: (t) => t.flights, plan: (t) => t.planOnly.flights },
+  { label: "Hotels", read: (t) => t.hotels, plan: (t) => t.planOnly.hotels },
   ...(
     [
       ["restaurants", "Restaurants"],
@@ -46,8 +47,8 @@ const MONEY_COLUMNS: { label: string; read: (t: TripSummary) => number }[] = [
       ["cash", "Cash"],
       ["other", "Other"],
     ] as [ExpenseCategory, string][]
-  ).map(([key, label]) => ({ label, read: (t: TripSummary) => t.misc[key] })),
-  { label: "Rental", read: (t) => t.rentals },
+  ).map(([key, label]) => ({ label, read: (t: TripSummary) => t.misc[key], plan: (t: TripSummary) => t.planOnly.misc[key] })),
+  { label: "Rental", read: (t) => t.rentals, plan: (t) => t.planOnly.rentals },
 ];
 
 /**
@@ -92,17 +93,22 @@ export function TripLogPanel({
   );
 
   const sum = (read: (t: TripSummary) => number) => shown.reduce((total, t) => total + read(t), 0);
-  const totalSpent = sum((t) => t.total);
+  // Spent is money that left the wallet; Planned is what the upcoming trips
+  // (and unbought bookings) are expected to cost. They used to be one "Total
+  // spent" figure, so plans for 2027 read as money already gone.
+  const totalSpent = sum((t) => t.spent);
+  const totalPlanned = sum((t) => t.planOnly.total);
 
   // The sheet's year block: what each year's trips came to.
   const byYear = useMemo(() => {
-    const map = new Map<string, { trips: number; total: number; saved: number; points: number }>();
+    const map = new Map<string, { trips: number; total: number; planned: number; saved: number; points: number }>();
     for (const t of summaries) {
       const y = t.start?.slice(0, 4);
       if (!y) continue;
-      const row = map.get(y) ?? { trips: 0, total: 0, saved: 0, points: 0 };
+      const row = map.get(y) ?? { trips: 0, total: 0, planned: 0, saved: 0, points: 0 };
       row.trips += 1;
-      row.total += t.total;
+      row.total += t.spent;
+      row.planned += t.planOnly.total;
       row.saved += t.saved;
       row.points += t.points;
       map.set(y, row);
@@ -121,13 +127,17 @@ export function TripLogPanel({
     (acc, [, row]) => ({
       trips: acc.trips + (row?.trips ?? 0),
       total: acc.total + (row?.total ?? 0),
+      planned: acc.planned + (row?.planned ?? 0),
       points: acc.points + (row?.points ?? 0),
       saved: acc.saved + (row?.saved ?? 0),
     }),
-    { trips: 0, total: 0, points: 0, saved: 0 },
+    { trips: 0, total: 0, planned: 0, points: 0, saved: 0 },
   );
 
   const money = (cents: number) => (cents > 0 ? formatMoney(cents, currency) : DASH);
+  // A cell that is nothing but a plan reads grey, so a row of upcoming trips
+  // is visibly "not spent yet" without a second line under each figure.
+  const planClass = (value: number, plan: number) => (value > 0 && plan >= value ? "text-muted" : "");
 
   const table = (
     <div className="overflow-x-auto">
@@ -140,7 +150,8 @@ export function TripLogPanel({
             {MONEY_COLUMNS.map((c) => (
               <th key={c.label} className="px-2 py-2 text-center font-semibold">{c.label}</th>
             ))}
-            <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Total spent</th>
+            <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Spent</th>
+            <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Planned</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Pts used</th>
             <th className="px-2 py-2 text-center font-semibold">Saved</th>
           </tr>
@@ -167,11 +178,13 @@ export function TripLogPanel({
               </td>
               <td className="px-2 py-2 text-center tabular-nums">{t.nights ?? DASH}</td>
               {MONEY_COLUMNS.map((c) => (
-                <td key={c.label} className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{money(c.read(t))}</td>
+                <td key={c.label} className={`whitespace-nowrap px-2 py-2 text-center tabular-nums ${planClass(c.read(t), c.plan(t))}`}>{money(c.read(t))}</td>
               ))}
               <td className="whitespace-nowrap px-2 py-2 text-center font-bold tabular-nums text-negative">
-                {money(t.total)}
-                {t.hasEstimates ? <span className="block text-[10px] font-semibold text-muted">incl. planned</span> : null}
+                {t.spent > 0 ? formatMoney(t.spent, currency) : <span className="font-normal text-muted">{DASH}</span>}
+              </td>
+              <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums text-muted">
+                {money(t.planOnly.total)}
               </td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {t.points > 0 ? t.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
@@ -189,9 +202,10 @@ export function TripLogPanel({
               <td className="px-2 py-2 text-center text-xs font-semibold text-muted">{shown.length} trips</td>
               <td className="px-2 py-2 text-center tabular-nums">{sum((t) => t.nights ?? 0)}</td>
               {MONEY_COLUMNS.map((c) => (
-                <td key={c.label} className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{money(sum(c.read))}</td>
+                <td key={c.label} className={`whitespace-nowrap px-2 py-2 text-center tabular-nums ${planClass(sum(c.read), sum(c.plan))}`}>{money(sum(c.read))}</td>
               ))}
               <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-negative">{money(totalSpent)}</td>
+              <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">{money(totalPlanned)}</td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {sum((t) => t.points) > 0 ? sum((t) => t.points).toLocaleString() : DASH}
               </td>
@@ -250,9 +264,15 @@ export function TripLogPanel({
                 <span className="text-sm font-bold tabular-nums">{shown.length}</span>
               </span>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
                 <span className="text-sm font-bold tabular-nums text-negative">{formatMoney(totalSpent, currency)}</span>
               </span>
+              {totalPlanned > 0 ? (
+                <span className="flex items-baseline gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Planned:</span>
+                  <span className="text-sm font-bold tabular-nums text-muted">{formatMoney(totalPlanned, currency)}</span>
+                </span>
+              ) : null}
               <SearchBox value={query} onChange={setQuery} placeholder="Search trip, hotel, flight…" label="Search trips" className="w-44" />
               {yearSelect}
             </span>
@@ -270,7 +290,8 @@ export function TripLogPanel({
                     <tr className="text-[10px] uppercase tracking-wide text-muted">
                       <th className="px-3 py-1 text-center font-semibold">Year</th>
                       <th className="px-3 py-1 text-center font-semibold">Trips</th>
-                      <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Total spent</th>
+                      <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Spent</th>
+                      <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Planned</th>
                       <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Pts used</th>
                       <th className="px-3 py-1 text-center font-semibold">Saved</th>
                     </tr>
@@ -281,7 +302,10 @@ export function TripLogPanel({
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums">{y}</td>
                         <td className="px-3 py-1.5 text-center tabular-nums">{row ? row.trips : DASH}</td>
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums text-negative">
-                          {row ? formatMoney(row.total, currency) : DASH}
+                          {row ? money(row.total) : DASH}
+                        </td>
+                        <td className="px-3 py-1.5 text-center tabular-nums text-muted">
+                          {row ? money(row.planned) : DASH}
                         </td>
                         <td className="px-3 py-1.5 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                           {row && row.points > 0 ? row.points.toLocaleString() : DASH}
@@ -297,6 +321,9 @@ export function TripLogPanel({
                       <td className="px-3 py-1.5 text-center tabular-nums">{byYearTotals.trips}</td>
                       <td className="px-3 py-1.5 text-center tabular-nums text-negative">
                         {formatMoney(byYearTotals.total, currency)}
+                      </td>
+                      <td className="px-3 py-1.5 text-center tabular-nums text-muted">
+                        {money(byYearTotals.planned)}
                       </td>
                       <td className="px-3 py-1.5 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                         {byYearTotals.points > 0 ? byYearTotals.points.toLocaleString() : DASH}

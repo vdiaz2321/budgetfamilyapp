@@ -38,6 +38,10 @@ function axisMoney(cents: number, currency: string): string {
 // ---- Trend: grouped income-vs-spending bars, one group per period ----
 // Plain HTML/CSS bars: rounded tops, a real gap between the pair, correct
 // theming, gridlines behind, and a per-group hover tooltip.
+// How a bar click changes the selection: that bar alone, add/remove it
+// (Ctrl/⌘-click), or everything from the first pick to it (Shift-click).
+export type SelectMode = "single" | "toggle" | "range";
+
 export function TrendChart({
   buckets,
   currency,
@@ -45,7 +49,7 @@ export function TrendChart({
 }: {
   buckets: ChartBucket[];
   currency: string;
-  onSelect?: (key: string) => void;
+  onSelect?: (key: string, mode: SelectMode) => void;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...buckets.flatMap((b) => [b.income, b.spending]));
@@ -104,7 +108,16 @@ export function TrendChart({
               <button
                 type="button"
                 key={b.key}
-                onClick={() => onSelect?.(b.key)}
+                onClick={(e) =>
+                  onSelect?.(b.key, e.metaKey || e.ctrlKey ? "toggle" : e.shiftKey ? "range" : "single")
+                }
+                // On a Mac, Ctrl-click opens the context menu instead of
+                // firing a click — treat it as the same add/remove pick.
+                onContextMenu={(e) => {
+                  if (!e.ctrlKey) return;
+                  e.preventDefault();
+                  onSelect?.(b.key, "toggle");
+                }}
                 onMouseEnter={() => setHover(i)}
                 onMouseLeave={() => setHover((h) => (h === i ? null : h))}
                 className="group relative flex h-full flex-1 cursor-pointer flex-col justify-end rounded-t-md transition"

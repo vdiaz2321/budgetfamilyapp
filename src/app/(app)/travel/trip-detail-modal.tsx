@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoney, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { bookingPlanActual, sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
-import { EXPENSE_CATEGORIES, actualCents } from "./types";
+import { bookingPlanActual, sheetDate, sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
+import { EXPENSE_CATEGORIES, actualCents, type TripTaggedPurchase } from "./types";
+import { MatchPurchasesModal } from "./match-purchases-modal";
 
 const DASH = "—";
 const KIND_LABEL = { flight: "Flight", stay: "Stay", car: "Rental" } as const;
@@ -49,6 +50,12 @@ export function TripDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
   const [editingNotes, setEditingNotes] = useState(false);
+  const [matching, setMatching] = useState(false);
+  // The Spending row whose tagged purchases are listed under it.
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  // Purchases can only be matched once the trip has begun and has dates.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const canMatch = Boolean(t.start && t.end && t.start <= todayIso);
   const [name, setName] = useState(t.trip.name);
   const [startOn, setStartOn] = useState(t.trip.startOn ?? "");
   const [endOn, setEndOn] = useState(t.trip.endOn ?? "");
@@ -64,6 +71,13 @@ export function TripDetailModal({
       },
       { rows: 0, planned: 0, actual: 0 },
     );
+
+  // The Spending Total's difference covers only rows with both a plan and an
+  // actual (see spendingDiff); with none, it's a dash too.
+  const comparedRows = t.expenses
+    .map((e) => spendingDiff(e.plannedCents, actualCents(e)))
+    .filter((d): d is number => d != null);
+  const spendingTotalDiff = comparedRows.length ? comparedRows.reduce((a, b) => a + b, 0) : null;
 
   // The spending table rounds to whole units and keeps dollars and euros on
   // one line — "$507 / €428" — instead of stacking ".00" figures.
@@ -193,13 +207,25 @@ export function TripDetailModal({
         {/* What the trip came to, left to right as it adds up: the two parts,
             then their total, then what the points and credits saved. */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {/* Each box counts only money that left the wallet; what's still
+              a plan (unbought bookings, spending with no actual yet) sits
+              under it as "+ $X planned" — same split as the Combined Log. */}
           <Stat
             label="Bookings"
-            value={formatMoney(t.flights + t.hotels + t.rentals, currency)}
-            note="flights · stays · rental"
+            value={formatMoney(t.flights + t.hotels + t.rentals - t.planOnly.bookings, currency)}
+            note={t.planOnly.bookings > 0 ? `+ ${formatMoney(t.planOnly.bookings, currency)} planned` : "flights · stays · rental"}
           />
-          <Stat label="Spending" value={formatMoney(t.miscTotal, currency)} note="day to day" />
-          <Stat label="Total spent" value={formatMoney(t.total, currency)} className="text-negative" note={t.hasEstimates ? "incl. planned" : undefined} />
+          <Stat
+            label="Spending"
+            value={formatMoney(t.miscTotal - t.planOnly.miscTotal, currency)}
+            note={t.planOnly.miscTotal > 0 ? `+ ${formatMoney(t.planOnly.miscTotal, currency)} planned` : "day to day"}
+          />
+          <Stat
+            label="Total spent"
+            value={formatMoney(t.spent, currency)}
+            className={t.spent > 0 ? "text-negative" : "text-muted"}
+            note={t.planOnly.total > 0 ? `+ ${formatMoney(t.planOnly.total, currency)} planned` : undefined}
+          />
           <Stat
             label={t.points > 0 ? "Pts used · saved" : "Saved"}
             value={t.points > 0 ? `${t.points.toLocaleString()} · ${formatMoney(t.saved, currency)}` : formatMoney(t.saved, currency)}
@@ -234,7 +260,7 @@ export function TripDetailModal({
                   <li key={`${b.kind}-${b.id}`} className={b.cancelled ? "opacity-60" : ""}>
                     <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-black/[0.04] dark:active:bg-white/[0.06]">
                       <span className="flex min-w-0 items-start gap-2">
-                        <span className="mt-0.5 w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        <span className="mt-0.5 w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
                           {KIND_LABEL[b.kind]}
                         </span>
                         <span className="flex min-w-0 flex-col">
@@ -287,9 +313,9 @@ export function TripDetailModal({
                   Planned / Actual / Difference columns line up. */}
               <table className="w-full min-w-[34rem] table-fixed text-sm">
                 <colgroup>
-                  <col className="w-[46%]" />
+                  <col className="w-[40%]" />
                   <col className="w-[18%]" />
-                  <col className="w-[18%]" />
+                  <col className="w-[24%]" />
                   <col className="w-[18%]" />
                 </colgroup>
                 <thead>
@@ -312,7 +338,7 @@ export function TripDetailModal({
                       >
                         <td className="px-3 py-2 text-left">
                           <button type="button" onClick={(e) => { e.stopPropagation(); onEditBooking(b); }} className="flex min-w-0 items-center gap-2 text-left">
-                            <span className="w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            <span className="w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
                               {KIND_LABEL[b.kind]}
                             </span>
                             <span className="flex min-w-0 flex-col">
@@ -381,7 +407,15 @@ export function TripDetailModal({
             >
               {t.expenses.length ? "Edit spending" : "+ Add spending"}
             </button>
+            {/* Tags the card purchases dated inside the trip — how a trip from
+                before trip tagging gets its real actuals. */}
+            {canMatch ? (
+              <button type="button" onClick={() => setMatching(true)} className={SECTION_BUTTON}>
+                Match purchases
+              </button>
+            ) : null}
           </div>
+          {matching ? <MatchPurchasesModal summary={t} currency={currency} onClose={() => setMatching(false)} /> : null}
           {t.expenses.length ? (
             <>
             {/* Phones: one row per category, its three figures side by side
@@ -391,12 +425,12 @@ export function TripDetailModal({
                 const e = t.expenses.find((x) => x.category === key);
                 if (!e) return null;
                 const actual = actualCents(e);
-                const diff = e.plannedCents != null || actual != null ? (e.plannedCents ?? 0) - (actual ?? 0) : null;
+                const diff = spendingDiff(e.plannedCents, actual);
                 return (
                   <li key={key} className="px-3 py-2">
                     <span className="text-sm font-semibold">
                       {label}
-                      {e.txCount > 0 ? <span className="ml-1.5 text-[10px] font-normal text-muted">{e.txCount} tx</span> : null}
+                      {e.txCount > 0 ? <PurchasesToggle count={e.txCount} open={openRow === key} onClick={() => setOpenRow(openRow === key ? null : key)} /> : null}
                     </span>
                     <MobileFigures
                       planned={
@@ -414,6 +448,7 @@ export function TripDetailModal({
                       diff={diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
                       diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
                     />
+                    {openRow === key ? <TaggedPurchaseList list={e.txList} currency={currency} /> : null}
                   </li>
                 );
               })}
@@ -432,17 +467,17 @@ export function TripDetailModal({
                       {eurTotal("actualEurCents") != null ? <span className="block text-[11px] font-normal text-muted">{euros(eurTotal("actualEurCents"))}</span> : null}
                     </>
                   }
-                  diff={`${t.plannedMisc - t.actualMisc >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(t.plannedMisc - t.actualMisc), currency)}`}
-                  diffClass={t.plannedMisc - t.actualMisc >= 0 ? "text-positive" : "text-negative"}
+                  diff={spendingTotalDiff == null ? DASH : `${spendingTotalDiff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(spendingTotalDiff), currency)}`}
+                  diffClass={spendingTotalDiff == null ? "text-muted" : spendingTotalDiff >= 0 ? "text-positive" : "text-negative"}
                 />
               </li>
             </ul>
             <div className="hidden overflow-x-auto rounded-lg ring-1 ring-line sm:block">
               <table className="w-full min-w-[34rem] table-fixed text-sm">
                 <colgroup>
-                  <col className="w-[46%]" />
+                  <col className="w-[40%]" />
                   <col className="w-[18%]" />
-                  <col className="w-[18%]" />
+                  <col className="w-[24%]" />
                   <col className="w-[18%]" />
                 </colgroup>
                 <thead>
@@ -460,24 +495,36 @@ export function TripDetailModal({
                     // Blank counts as zero, same as the spending form, so the
                     // Total row's difference is its planned minus its actual.
                     const actual = actualCents(e);
-                    const diff = e.plannedCents != null || actual != null ? (e.plannedCents ?? 0) - (actual ?? 0) : null;
+                    const diff = spendingDiff(e.plannedCents, actual);
                     return (
-                      <tr key={key} className="border-b border-line/60 last:border-0">
+                      <Fragment key={key}>
+                      <tr className="border-b border-line/60 last:border-0">
                         <td className="px-3 py-1.5 text-left font-semibold">{label}</td>
                         <td className="px-3 py-1.5 text-center tabular-nums">
                           {money(e.plannedCents)}
                           {e.plannedEurCents != null ? <span className="text-muted"> / {euros(e.plannedEurCents)}</span> : null}
                         </td>
-                        <td className="px-3 py-1.5 text-center font-semibold tabular-nums">
+                        {/* One line: the amount and "8 purchases ▾" side by side
+                            (the Actual column is sized for it). */}
+                        <td className="whitespace-nowrap px-3 py-1.5 text-center font-semibold tabular-nums">
                           {money(actual)}
                           {actualEur(e) != null ? <span className="font-normal text-muted"> / {euros(actualEur(e))}</span> : null}
-                          {/* From the Budget: how many tagged purchases make this figure. */}
-                          {e.txCount > 0 ? <span className="ml-1 text-[10px] font-normal text-muted">{e.txCount} tx</span> : null}
+                          {/* From the Budget: how many tagged purchases make this
+                              figure — click to list them under the row. */}
+                          {e.txCount > 0 ? <PurchasesToggle count={e.txCount} open={openRow === key} onClick={() => setOpenRow(openRow === key ? null : key)} /> : null}
                         </td>
                         <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
                           {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
                         </td>
                       </tr>
+                      {openRow === key ? (
+                        <tr className="border-b border-line/60">
+                          <td colSpan={4} className="px-3 pb-2">
+                            <TaggedPurchaseList list={e.txList} currency={currency} />
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -493,10 +540,10 @@ export function TripDetailModal({
                       {eurTotal("actualEurCents") != null ? <span className="font-normal text-muted"> / {euros(eurTotal("actualEurCents"))}</span> : null}
                     </td>
                     {(() => {
-                      const diff = t.plannedMisc - t.actualMisc;
+                      const diff = spendingTotalDiff;
                       return (
-                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff >= 0 ? "text-positive" : "text-negative"}`}>
-                          {`${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+                        <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
+                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
                         </td>
                       );
                     })()}
@@ -591,6 +638,14 @@ function Stat({ label, value, className, note }: { label: string; value: string;
   );
 }
 
+// Planned minus actual, only once a row has BOTH. A plan with nothing spent
+// yet used to read as green savings (+$840 before the trip), and an imported
+// actual with no plan as red overspend (Berlin −$1,460) — neither is a
+// difference, so both show a dash.
+function spendingDiff(planned: number | null, actual: number | null): number | null {
+  return planned != null && actual != null ? planned - actual : null;
+}
+
 // A phone row's Planned / Actual / Difference, side by side under its name —
 // the stacked stand-in for the desktop table's three figure columns.
 function MobileFigures({
@@ -616,5 +671,44 @@ function MobileFigures({
       {cell("Actual", actual, "font-semibold")}
       {cell("Difference", diff, diffClass)}
     </span>
+  );
+}
+
+// "8 purchases ▾" beside a Spending row's actual — the purchases tagged to
+// the trip that make up that figure. (Was a bare "8 tx", which read as code.)
+function PurchasesToggle({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      className="ml-1.5 inline-flex items-center gap-0.5 rounded px-1 text-[11px] font-semibold text-sky-700 underline decoration-sky-700/40 underline-offset-2 transition hover:decoration-sky-700 dark:text-sky-300 dark:decoration-sky-300/40 dark:hover:decoration-sky-300"
+    >
+      {count} purchase{count === 1 ? "" : "s"}
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={open ? "rotate-180" : ""}>
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>
+  );
+}
+
+// The tagged purchases behind one Spending row, one line each — a read-only
+// look at what makes up the Actual. (A Remove button was built and taken out
+// on Victor's call, 2026-09-23: taking a purchase off a trip changes nothing
+// outside the Travel Log, so it read as a delete that wasn't one.)
+function TaggedPurchaseList({ list, currency }: { list: TripTaggedPurchase[]; currency: string }) {
+  return (
+    <ul className="mt-1.5 divide-y divide-line/60 rounded-md bg-background/60 text-xs ring-1 ring-line">
+      {list.map((p) => (
+        <li key={p.id} className="flex items-center gap-3 px-2.5 py-1.5">
+          <span className="shrink-0 whitespace-nowrap tabular-nums text-muted">{sheetDate(p.date)}</span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-semibold">{p.payee ?? "—"}</span>
+            <span className="text-muted"> · {p.item}</span>
+          </span>
+          <span className="shrink-0 font-semibold tabular-nums">{formatMoney(p.amountCents, currency)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
