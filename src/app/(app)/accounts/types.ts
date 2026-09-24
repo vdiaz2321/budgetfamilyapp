@@ -38,6 +38,13 @@ export type CardDetails = {
   bonusSpendCents: number | null;
   bonusSpendDeadline: string | null;
   bonusEarned: boolean;
+  /**
+   * Charges inside the sign-up bonus window (opened → deadline), summed by
+   * v_card_bonus_progress. Only the Travel board's loader fetches it, so it is
+   * absent — not zero — where nobody asked; a missing figure must never read
+   * as "spent nothing".
+   */
+  bonusProgressCents?: number | null;
   currentPoints: number;
   feesPaidCents: number;
   freeNightCreditCents: number | null;

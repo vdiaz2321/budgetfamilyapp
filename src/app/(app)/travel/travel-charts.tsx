@@ -8,6 +8,12 @@ export type YearPoint = {
   hotel: number;
   pocket: number;
   stays: number;
+  /**
+   * The year hasn't finished yet — this year, or one further out that holds
+   * nothing but bookings already made. Its figure is a running total, not a
+   * result, and the charts say so rather than drawing it as a collapse.
+   */
+  partial?: boolean;
 };
 
 // Compact axis money: $0 / $1.5k / $5.3k — keeps the gutter narrow, same
@@ -166,29 +172,61 @@ export function SavedLine({
             strokeWidth={1}
           />
         ))}
+        {/* The line is solid only across finished years. A year still running
+            — and especially one that holds nothing but next spring's bookings
+            — is drawn dashed and hollow, because a solid mark at $0 reads as
+            "we saved nothing" rather than "this hasn't happened yet". */}
         {years.length > 1 ? (
-          <polyline
-            points={saved.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
-            fill="none"
-            stroke="var(--positive)"
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
+          <>
+            <polyline
+              points={saved
+                .map((v, i) => (years[i].partial ? null : `${x(i)},${y(v)}`))
+                .filter(Boolean)
+                .join(" ")}
+              fill="none"
+              stroke="var(--positive)"
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            {/* Joins the last finished year to the running ones. */}
+            <polyline
+              points={saved
+                .map((v, i) =>
+                  years[i].partial || years[i + 1]?.partial ? `${x(i)},${y(v)}` : null,
+                )
+                .filter(Boolean)
+                .join(" ")}
+              fill="none"
+              stroke="var(--positive)"
+              strokeWidth={2}
+              strokeDasharray="3 3"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              opacity={0.6}
+            />
+          </>
         ) : null}
         {saved.map((v, i) => (
           <g key={years[i].year}>
             {selected?.includes(years[i].year) ? (
               <circle cx={x(i)} cy={y(v)} r={7} fill="var(--positive)" opacity={0.25} />
             ) : null}
-            <circle cx={x(i)} cy={y(v)} r={3.5} fill="var(--positive)" />
+            {years[i].partial ? (
+              <circle
+                cx={x(i)} cy={y(v)} r={3.5}
+                fill="var(--surface)" stroke="var(--positive)" strokeWidth={1.5}
+              />
+            ) : (
+              <circle cx={x(i)} cy={y(v)} r={3.5} fill="var(--positive)" />
+            )}
             <text
               x={x(i)}
               y={y(v) - 8}
               // The end labels would run off the viewBox if they were centred.
               textAnchor={i === 0 ? "start" : i === saved.length - 1 ? "end" : "middle"}
               className="fill-current text-[10px] font-semibold tabular-nums"
-              style={{ fill: "var(--positive)" }}
+              style={{ fill: "var(--positive)", opacity: years[i].partial ? 0.65 : 1 }}
             >
               {formatMoney(v, currency).replace(/\.\d\d$/, "")}
             </text>
@@ -248,7 +286,12 @@ function YearTip({ point, currency }: { point: YearPoint; currency: string }) {
   ];
   return (
     <div className="whitespace-nowrap rounded-md bg-surface px-2.5 py-1.5 text-[11px] shadow-lg ring-1 ring-line">
-      <p className="font-bold tabular-nums">{point.year}</p>
+      <p className="font-bold tabular-nums">
+        {point.year}
+        {/* Says outright that the figures below are a running total, so a
+            small number in a future year isn't read as a bad year. */}
+        {point.partial ? <span className="ml-1 font-medium text-muted">· so far</span> : null}
+      </p>
       <div className="mt-0.5 grid grid-cols-[auto_auto_auto] items-center gap-x-1.5">
         {rows.map((r, k) => (
           <div

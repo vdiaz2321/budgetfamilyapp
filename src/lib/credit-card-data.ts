@@ -33,7 +33,7 @@ export async function loadCreditCardBoardData(
   const now = new Date();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, balanceRows, monthRows, debtMonth] =
+  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, balanceRows, monthRows, debtMonth, bonusRows] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -79,6 +79,13 @@ export async function loadCreditCardBoardData(
         .eq("household_id", householdId)
         .eq("month", firstOfMonth),
       loadDebtMonthPlans(supabase, householdId),
+      // Sign-up bonus progress. One row per card still working on a bonus, so
+      // normally none at all — it rides along in this Promise.all rather than
+      // costing a second round-trip on the rare month one is live.
+      supabase
+        .from("v_card_bonus_progress")
+        .select("account_id, spend_cents")
+        .eq("household_id", householdId),
     ]);
 
   throwIfAny({
@@ -90,12 +97,16 @@ export async function loadCreditCardBoardData(
     v_card_balances: balanceRows.error,
     v_card_month_spend: monthRows.error,
   });
+  // Migration 20260924120000 added the bonus view. A database that predates it
+  // still gets a working card list, minus the bonus progress line.
+  const bonusProgressRows = bonusRows.error ? [] : bonusRows.data ?? [];
   // Migration 0037 added the rewards ledger. A household whose database
   // predates it still gets a working card list, minus the activity log.
   const rewardActivityRows = rewardRows.error ? [] : rewardRows.data ?? [];
 
   const owed = new Map((balanceRows.data ?? []).map((r: any) => [r.account_id as string, (r.owed_cents as number) ?? 0]));
   const monthSpend = new Map((monthRows.data ?? []).map((r: any) => [r.account_id as string, (r.spend_cents as number) ?? 0]));
+  const bonusSpend = new Map((bonusProgressRows as any[]).map((r) => [r.account_id as string, Number(r.spend_cents ?? 0)]));
   const debtByAccount = new Map(
     (debtRows.data ?? []).filter((d: any) => d.account_id).map((d: any) => [d.account_id as string, d]),
   );
@@ -130,6 +141,9 @@ export async function loadCreditCardBoardData(
       bonusSpendCents: d.bonus_spend_cents ?? null,
       bonusSpendDeadline: d.bonus_spend_deadline ?? null,
       bonusEarned: d.bonus_earned ?? false,
+      // Absent unless this card actually has a live bonus, so the panel can
+      // tell "no bonus running" apart from "nothing spent on it yet".
+      bonusProgressCents: bonusSpend.has(d.account_id) ? bonusSpend.get(d.account_id)! : null,
       currentPoints: d.current_points ?? 0,
       feesPaidCents: d.fees_paid_cents ?? 0,
       freeNightCreditCents: d.free_night_credit_cents ?? null,

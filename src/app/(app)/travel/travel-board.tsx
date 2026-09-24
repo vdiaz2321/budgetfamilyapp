@@ -17,6 +17,7 @@ import { TripLogPanel } from "./trip-log-panel";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
 import { sheetDateRange, summarizeTrips } from "./trip-summary";
+import { redemptionsByCard } from "./points-value";
 import { AddTravelLogModal } from "./add-travel-log-modal";
 import { EditTripPicker } from "./edit-trip-picker";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
@@ -213,6 +214,13 @@ export function TravelBoard({
     () => summarizeTrips(trips, stays, flights, carList, expenses),
     [trips, stays, flights, carList, expenses],
   );
+  // Award bookings added up per card, for the rewards board's realized
+  // cents-per-point. Every booking in the household, not the filtered year —
+  // a rate is only worth reading over the whole history.
+  const redemptions = useMemo(
+    () => redemptionsByCard(stays, flights, carList),
+    [stays, flights, carList],
+  );
   // Airlines already on a saved flight, one spelling each, for the flight
   // form's suggestions.
   const airlines = useMemo(() => {
@@ -306,8 +314,20 @@ export function TravelBoard({
   }, [live]);
 
   const yearPoints: YearPoint[] = useMemo(
-    () => byYear.map(([year, row]) => ({ year, hotel: row.hotel, pocket: row.pocket, stays: row.stays })),
-    [byYear],
+    () => {
+      // This year is still running and later ones hold only what's booked so
+      // far, so neither figure is a year's result yet. The charts draw those
+      // marks hollow instead of letting next spring's $0 read as a collapse.
+      const thisYear = today.slice(0, 4);
+      return byYear.map(([year, row]) => ({
+        year,
+        hotel: row.hotel,
+        pocket: row.pocket,
+        stays: row.stays,
+        partial: year >= thisYear,
+      }));
+    },
+    [byYear, today],
   );
 
   // Everything still ahead of you, soonest first. This is the one part of the
@@ -1181,6 +1201,10 @@ export function TravelBoard({
           nonCardAccounts={rewards.nonCardAccounts}
           allBuckets={rewards.allBuckets}
           travelBrands={rewards.travelBrands}
+          // What each card's points have actually come out at, from the award
+          // bookings in the logs below — the rewards board's stated
+          // cents-per-point has nothing to check itself against otherwise.
+          redemptions={redemptions}
         >
           {/* ---- Travel & Credit Card Rewards: the points that pay for the
                stays below. Moved here from /accounts — Accounts keeps the

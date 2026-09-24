@@ -38,11 +38,39 @@ import { ModalShell } from "@/components/modal-shell";
 import { ExpandIcon } from "./travel-board";
 import { StayModal } from "./stay-modal";
 import type { TravelBrand, TravelCard } from "./types";
+import {
+  UNLINKED,
+  centsPerPoint,
+  emptyRedemption,
+  statedCentsPerPoint,
+  type CardRedemption,
+} from "./points-value";
 
 // A card's own site, opened from its panel. Stored without a scheme more
 // often than not, so add one rather than resolving it against /travel.
 function externalCardUrl(value: string): string {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+/** Whole days from today to an ISO date; negative once it's past. */
+function daysUntil(iso: string, today: string): number {
+  return Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+}
+
+/**
+ * How much warning a benefit gets before it lapses. A free night needs award
+ * availability found and a trip built around it, so the date it stops being
+ * comfortable is months out, not weeks — the only thing on this page that
+ * silently turns into nothing if it isn't watched.
+ */
+const EXPIRY_SOON_DAYS = 90;
+
+/** "12 days left" / "in 3 months" — the number the date alone doesn't give. */
+function expiryLabel(days: number): string {
+  if (days <= 0) return "expired";
+  if (days === 1) return "1 day left";
+  if (days < 45) return `${days} days left`;
+  return `${Math.round(days / 30)} months left`;
 }
 
 // Everything the shared Add stay modal needs, made available to the card
@@ -73,6 +101,7 @@ const RewardsDataContext = React.createContext<{
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
   rewardEntries: Array<RewardActivity & { cardName: string; cardId: string }>;
+  redemptions: Map<string, CardRedemption>;
   collapsed: Record<string, boolean>;
   toggleSection: (key: string) => void;
 } | null>(null);
@@ -95,6 +124,7 @@ export function CreditCardRewardsProvider({
   nonCardAccounts,
   allBuckets,
   travelBrands,
+  redemptions,
 }: {
   children: React.ReactNode;
   // Every credit card in the household, closed ones included — the closed
@@ -104,6 +134,8 @@ export function CreditCardRewardsProvider({
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
   travelBrands: TravelBrand[];
+  /** Award bookings per card id, from the logs below. */
+  redemptions: Map<string, CardRedemption>;
 }) {
   const [focusCardId, setFocusCardId] = useState<string | null>(null);
   // Each card section remembers its own open/closed state for the session.
@@ -157,6 +189,7 @@ export function CreditCardRewardsProvider({
             nonCardAccounts,
             allBuckets,
             rewardEntries,
+            redemptions,
             collapsed,
             toggleSection,
           }}
@@ -171,7 +204,7 @@ export function CreditCardRewardsProvider({
 /** The credit-card sections themselves. Sits above the reservations log. */
 export function CreditCardSections() {
   const {
-    accounts, currency, nonCardAccounts, allBuckets, collapsed, toggleSection,
+    accounts, currency, nonCardAccounts, allBuckets, redemptions, collapsed, toggleSection,
   } = useRewardsData();
   return (
     <div className="space-y-3">
@@ -187,6 +220,7 @@ export function CreditCardSections() {
             currency={currency}
             nonCardAccounts={nonCardAccounts}
             allBuckets={allBuckets}
+            redemptions={redemptions}
             open={!collapsed[section.key]}
             onToggle={() => toggleSection(section.key)}
           />
@@ -227,6 +261,7 @@ function CreditCardSection({
   currency,
   nonCardAccounts,
   allBuckets,
+  redemptions,
   open,
   onToggle,
 }: {
@@ -236,6 +271,7 @@ function CreditCardSection({
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
+  redemptions: Map<string, CardRedemption>;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -256,6 +292,17 @@ function CreditCardSection({
   // Free-night certificates still on the table: the card grants one, nothing
   // has been booked against it, and it hasn't run out of time.
   const [showOnlyUnbookedNights, setShowOnlyUnbookedNights] = useState(false);
+  // Cards holding points that have no cents-per-point on them yet.
+  const [showOnlyUnvalued, setShowOnlyUnvalued] = useState(false);
+  // Cards whose unspent benefit runs out soon.
+  const [showOnlyExpiring, setShowOnlyExpiring] = useState(false);
+  // The holder / bank / opened controls, shut until asked for.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Opened-on range. Answers "which cards did we open in this window" — the
+  // question behind application spacing and issuer rules, without the page
+  // having to take a position on what those rules are.
+  const [openedFrom, setOpenedFrom] = useState("");
+  const [openedTo, setOpenedTo] = useState("");
   // Which rewards column the section is showing. Null = both, plus Other.
   const [categoryFilter, setCategoryFilter] = useState<"travel" | "hotel" | null>(null);
   // Holder filter — clicking a name (Vic / Johana / …) limits the visible
@@ -265,25 +312,59 @@ function CreditCardSection({
   const hasActiveFee = (a: AccountData) => !a.feeWaived && (a.annualFeeCents ?? 0) > 0;
   const hasOwed = (a: AccountData) => (a.owedCents ?? 0) > 0;
   const hasPts = (a: AccountData) => (a.cardDetails?.currentPoints ?? 0) > 0;
-  // "Available" is all three: there is a night credit, no stay has been booked
-  // against it (benefitUsedOn is the booking), and its expiry hasn't passed —
-  // an expired certificate is no more spendable than a used one.
   const sectionToday = new Date().toISOString().slice(0, 10);
-  const hasUnbookedNight = (a: AccountData) => {
-    const d = a.cardDetails;
+  // Two different benefits share one set of columns, and only one of them is a
+  // free night. A cap in points or hotel category is a certificate — a night,
+  // whatever it lists for. A dollar figure is the card's annual credit, which
+  // buys a night's worth of anything. Counting them together said "6 free
+  // nights" when three of them were statement credits.
+  const isNightCert = (d: AccountData["cardDetails"]) =>
+    Boolean(d && (d.freeNightPointsLimit || d.freeNightCategoryMax));
+  const annualCreditCents = (d: AccountData["cardDetails"]) => d?.freeNightCreditCents ?? 0;
+  // Still spendable: nothing booked against it (benefitUsedOn is the booking),
+  // and its expiry hasn't passed. An expired benefit is no more spendable than
+  // a used one — and neither belongs in a "redeemable" total.
+  const benefitLive = (d: AccountData["cardDetails"]) => {
     if (!d) return false;
-    if (!d.freeNightCreditCents && !d.freeNightPointsLimit && !d.freeNightCategoryMax) return false;
     if (d.benefitUsedOn) return false;
     if (d.freeNightExpiresOn && d.freeNightExpiresOn < sectionToday) return false;
     return true;
   };
+  const hasUnbookedNight = (a: AccountData) => isNightCert(a.cardDetails) && benefitLive(a.cardDetails);
+  const hasLiveCredit = (a: AccountData) =>
+    annualCreditCents(a.cardDetails) > 0 && benefitLive(a.cardDetails);
+  /**
+   * An unspent benefit with an expiry close enough to act on. A used one
+   * can't lapse and an already-expired one is past warning — this is only
+   * the window where doing something still changes the outcome.
+   */
+  const expiringSoon = (a: AccountData) => {
+    const d = a.cardDetails;
+    if (!d?.freeNightExpiresOn) return false;
+    if (!isNightCert(d) && annualCreditCents(d) <= 0) return false;
+    if (!benefitLive(d)) return false;
+    const days = daysUntil(d.freeNightExpiresOn, sectionToday);
+    return days >= 0 && days <= EXPIRY_SOON_DAYS;
+  };
+  /** The card's annual credit, counted only while it can still be spent. */
+  const liveCreditCents = (d: AccountData["cardDetails"]) =>
+    benefitLive(d) ? annualCreditCents(d) : 0;
+  const pointsValueCents = (d: AccountData["cardDetails"]) =>
+    d?.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
+  // Points sitting on a card with no cents-per-point typed on it. They count
+  // toward "Current Pts" and contribute nothing to every value figure on the
+  // page, which is how a six-figure balance can read as worth nothing.
+  const unvaluedPointsOn = (a: AccountData) => {
+    const d = a.cardDetails;
+    if (!d || d.currentPoints <= 0 || d.pointsValueMicros) return 0;
+    return d.currentPoints;
+  };
   // A card "contributes" to the Redeemable tile when it's in that rewards
-  // category and has redeemable value (points × micro-value + free-night credit).
+  // category and has redeemable value (points × micro-value + live credit).
   const hasRedeemableIn = (a: AccountData, cat: "travel" | "hotel") => {
     const d = a.cardDetails;
     if (!d || d.rewardsCategory !== cat) return false;
-    const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
-    return pts + (d.freeNightCreditCents ?? 0) > 0;
+    return pointsValueCents(d) + liveCreditCents(d) > 0;
   };
   const toggleBank = (bank: string) => setCollapsedBanks((prev) => {
     const next = new Set(prev);
@@ -349,14 +430,29 @@ function CreditCardSection({
   const ptsFilter = (a: AccountData) => !showOnlyPtsCards || hasPts(a);
   const holderFilterFn = (a: AccountData) => !holderFilter || (a.holder ?? "") === holderFilter;
   const bankFilterFn = (a: AccountData) => !bankFilter || cardBank(a) === bankFilter;
-  const nightFilter = (a: AccountData) => !showOnlyUnbookedNights || hasUnbookedNight(a);
+  // The chip counts nights and credits separately but presses as one: it asks
+  // "what is still unspent on these cards", and both answers belong.
+  const nightFilter = (a: AccountData) =>
+    !showOnlyUnbookedNights || hasUnbookedNight(a) || hasLiveCredit(a);
+  const unvaluedFilter = (a: AccountData) => !showOnlyUnvalued || unvaluedPointsOn(a) > 0;
+  const expiringFilter = (a: AccountData) => !showOnlyExpiring || expiringSoon(a);
+  // A card with no opened date is out as soon as a range is set: the filter
+  // asks what was opened when, and "unknown" isn't an answer to that.
+  const openedFilterFn = (a: AccountData) => {
+    if (!openedFrom && !openedTo) return true;
+    if (!a.dateOpened) return false;
+    if (openedFrom && a.dateOpened < openedFrom) return false;
+    if (openedTo && a.dateOpened > openedTo) return false;
+    return true;
+  };
   // A card jumped to from the Rewards activity ledger is always shown, whatever
   // the section is filtered down to — otherwise the card the click is aiming at
   // is filtered out, its panel never mounts, and the click looks broken.
   const isFocused = (a: AccountData) => a.id === focusCardId;
   const passesFilters = (a: AccountData) =>
     isFocused(a)
-    || (feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && bankFilterFn(a) && nightFilter(a));
+    || (feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && bankFilterFn(a)
+      && nightFilter(a) && unvaluedFilter(a) && openedFilterFn(a) && expiringFilter(a));
   // Per-category "contributes to Redeemable" filters — scoped to their own
   // section so clicking Travel Redeemable doesn't empty the Hotel list.
   const travelCards = localAccounts.filter((a) =>
@@ -394,19 +490,20 @@ function CreditCardSection({
   // The group's share of the stat tiles above: points held, what they are
   // worth, and what can be redeemed (points value plus free-night credit).
   const groupRewards = (cards: AccountData[]) => {
-    let points = 0, value = 0, redeemable = 0;
+    let points = 0, value = 0, redeemable = 0, unvalued = 0;
     for (const a of cards) {
       const d = a.cardDetails;
       if (!d) continue;
-      const v = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
+      const v = pointsValueCents(d);
       points += d.currentPoints;
       value += v;
-      redeemable += v + (d.freeNightCreditCents ?? 0);
+      redeemable += v + liveCreditCents(d);
+      unvalued += unvaluedPointsOn(a);
     }
-    return { points, value, redeemable };
+    return { points, value, redeemable, unvalued };
   };
   const groupFigures = (cards: AccountData[]) => {
-    const { points, value, redeemable } = groupRewards(cards);
+    const { points, value, redeemable, unvalued } = groupRewards(cards);
     // Fixed-width slots from sm up, so the Travel and Hotel rows line their
     // figures up in columns; a slot with nothing to show still holds its
     // place so the ones after it don't shift.
@@ -423,9 +520,12 @@ function CreditCardSection({
       <>
         {figure(points > 0, "sm:w-44", "Current pts", points.toLocaleString(), "")}
         {figure(value > 0, "sm:w-40", "Pts value", formatMoney(value, currency), "text-positive")}
-        {/* Only when free-night credit makes it more than the points value —
-            otherwise it would repeat the same figure. */}
+        {/* Only when a live annual credit makes it more than the points value
+            — otherwise it would repeat the same figure. */}
         {figure(redeemable > value, "sm:w-44", "Redeemable", formatMoney(redeemable, currency), "text-positive")}
+        {/* The figure beside it is only as complete as the cents-per-point
+            typed on the cards, so say how much of the balance isn't in it. */}
+        {figure(unvalued > 0, "sm:w-40", "No value set", `${compactNum(unvalued)} pts`, "text-negative")}
       </>
     );
   };
@@ -449,7 +549,7 @@ function CreditCardSection({
   // Every headline figure and count respects both people-and-bank filters, so
   // the tiles never describe a wider set than the list under them.
   const holderScoped = <T extends AccountData>(list: T[]) =>
-    list.filter((a) => holderFilterFn(a) && bankFilterFn(a));
+    list.filter((a) => holderFilterFn(a) && bankFilterFn(a) && openedFilterFn(a));
   // Compact number formatter tuned so the sub-line's pieces still visibly add
   // up to the headline value. E.g. 1,025,563 → "1.03M" (not "1.0M"), so
   // Travel 395k + Hotel 1.03M reads consistent with total 1,420,563.
@@ -485,17 +585,17 @@ function CreditCardSection({
     // cents-per-point — the section-level total of the per-card "Points value"
     // metric. Free-night credits are excluded here (they show in the Travel /
     // Hotel redeemable tiles) so this tile answers "what are the points worth".
-    const totalCardValueCents = rewardCards.reduce((sum, a) => {
-      const d = a.cardDetails;
-      if (!d || d.currentPoints <= 0 || !d.pointsValueMicros) return sum;
-      return sum + Math.round((d.currentPoints * d.pointsValueMicros) / 10_000);
-    }, 0);
+    const totalCardValueCents = rewardCards.reduce((sum, a) => sum + pointsValueCents(a.cardDetails), 0);
+    // Points the figure above can say nothing about, and the cards holding
+    // them — the missing denominator behind every value on this board.
+    const unvaluedCards = rewardCards.filter((a) => unvaluedPointsOn(a) > 0);
+    const unvaluedPoints = unvaluedCards.reduce((sum, a) => sum + unvaluedPointsOn(a), 0);
+    // A used or expired benefit is not redeemable value; only a live one is.
     const redeemableForCategory = (cat: "travel" | "hotel") =>
-      inCategory(cat).reduce((sum, a) => {
-        const d = a.cardDetails!;
-        const pts = d.pointsValueMicros ? Math.round((d.currentPoints * d.pointsValueMicros) / 10_000) : 0;
-        return sum + pts + (d.freeNightCreditCents ?? 0);
-      }, 0);
+      inCategory(cat).reduce(
+        (sum, a) => sum + pointsValueCents(a.cardDetails) + liveCreditCents(a.cardDetails),
+        0,
+      );
     // ---- Credit utilisation: balances owed as a share of total credit limit.
     // The single biggest lever on a credit score, and computable from limits
     // already stored per card. Only cards with a recorded limit are counted, so
@@ -516,18 +616,26 @@ function CreditCardSection({
       travelPoints: pointsForCategory("travel"),
       hotelPoints: pointsForCategory("hotel"),
       totalCardValueCents,
+      unvaluedCards,
+      unvaluedPoints,
       travelRedeemable: redeemableForCategory("travel"),
       hotelRedeemable: redeemableForCategory("hotel"),
       totalLimitCents,
       utilisationPct: totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null,
       unbookedNights: open.filter(hasUnbookedNight).length,
+      liveCredits: open.filter(hasLiveCredit).length,
+      expiringSoon: open.filter(expiringSoon).length,
     };
   };
+  // With nothing narrowing the card list, the tiles speak for the whole
+  // household — including award bookings made before cards were tracked.
+  const noCardFilter = holderFilter == null && bankFilter == null && !openedFrom && !openedTo;
   const stats = computeStats(holderScoped);
   const allStats = computeStats((list) => list);
   const {
     openCards, feesPaid, feesAll, totalOwed, totalPoints, travelPoints, hotelPoints,
-    totalCardValueCents, travelRedeemable, hotelRedeemable, totalLimitCents, utilisationPct,
+    totalCardValueCents, unvaluedCards, unvaluedPoints,
+    travelRedeemable, hotelRedeemable, totalLimitCents, utilisationPct,
   } = stats;
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -562,7 +670,7 @@ function CreditCardSection({
             {(() => {
               // Present whenever any card holds one, so the filters re-count
               // it in place rather than removing it from the title row.
-              if (allStats.unbookedNights === 0) return null;
+              if (allStats.unbookedNights === 0 && allStats.liveCredits === 0) return null;
               return (
                 <button
                   type="button"
@@ -578,11 +686,36 @@ function CreditCardSection({
                   }`}
                   style={showOnlyUnbookedNights ? { backgroundColor: "var(--viz-savings)" } : undefined}
                 >
-                  Free nights unbooked:{" "}
-                  <span className="tabular-nums">{stats.unbookedNights}</span>
+                  {/* A certificate and an annual credit are not the same
+                      benefit and were being added together. Both are still
+                      one press — what's unspent on the cards — but the count
+                      now says which is which. */}
+                  Unused benefits:{" "}
+                  <span className="tabular-nums">{stats.unbookedNights}</span> free night
+                  {stats.unbookedNights === 1 ? "" : "s"} ·{" "}
+                  <span className="tabular-nums">{stats.liveCredits}</span> credit
+                  {stats.liveCredits === 1 ? "" : "s"}
                 </button>
               );
             })()}
+            {/* The one thing on this board that stops existing if it isn't
+                acted on. It gets its own control, in the warning colour, and
+                only when something is actually running out — a permanent
+                "0 expiring" chip is how a warning stops being read. */}
+            {allStats.expiringSoon > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowOnlyExpiring((v) => !v)}
+                className={`shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-bold transition ${
+                  showOnlyExpiring
+                    ? "border-transparent bg-negative text-white"
+                    : "border-negative/40 bg-background text-negative hover:bg-negative/10"
+                }`}
+              >
+                <span className="tabular-nums">{stats.expiringSoon}</span> expiring within{" "}
+                {EXPIRY_SOON_DAYS} days
+              </button>
+            ) : null}
             <a
               href="https://www.dailydrop.com/calculator"
               target="_blank"
@@ -637,8 +770,19 @@ function CreditCardSection({
                 <StatTile
                   label="Total Pts Value"
                   value={formatMoney(totalCardValueCents, currency)}
-                  sub="All cards"
+                  // The tile is only as true as the cents-per-point behind it.
+                  // Where a balance has none, say so here rather than letting
+                  // the figure pass as the whole answer — and make it the way
+                  // to find those cards.
+                  sub={
+                    unvaluedPoints > 0
+                      ? `${compactNum(unvaluedPoints)} pts unvalued on ${unvaluedCards.length} card${unvaluedCards.length === 1 ? "" : "s"}`
+                      : "All cards"
+                  }
+                  subColor={unvaluedPoints > 0 ? "var(--negative)" : undefined}
                   tone="emerald"
+                  onClick={unvaluedPoints > 0 ? () => setShowOnlyUnvalued((v) => !v) : undefined}
+                  active={showOnlyUnvalued}
                 />
               ) : null}
               {allStats.travelRedeemable > 0 ? (
@@ -683,10 +827,17 @@ function CreditCardSection({
               ) : null}
             </div>
           ) : null}
-          {/* Fees, holder filter and card counts belong to the open section —
-              collapsing leaves only the headline stat tiles. */}
+          {/* Fees, card counts and the filters belong to the open section —
+              collapsing leaves only the headline stat tiles.
+
+              Two rows, not one. The first is what the section IS: what the
+              cards cost to hold and how many there are. The second is the
+              machinery for narrowing them, and it stays shut until asked for
+              — four controls had accreted onto this line, and the figures
+              worth reading were competing with the knobs for the same width. */}
           {open ? (
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-muted">
+            <div className="mt-3 border-t border-line pt-3 text-xs text-muted">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               {allStats.feesPaid > 0 ? (
                 <button
                   type="button"
@@ -701,6 +852,103 @@ function CreditCardSection({
                   Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoney(feesAll, currency)}/yr</span>
                 </span>
               ) : null}
+              {/* One control in place of four. Closed it still says what is
+                  narrowing the list, so a filter left on is never invisible —
+                  that, not the space, is what a hidden filter row costs. */}
+              {(() => {
+                const on = [holderFilter, bankFilter, openedFrom || openedTo ? "opened" : null]
+                  .filter(Boolean) as string[];
+                return (
+                  <span className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setFiltersOpen((v) => !v)}
+                      aria-expanded={filtersOpen}
+                      className={`flex items-center gap-1 rounded-md px-2 py-1 font-semibold transition ${
+                        on.length > 0
+                          ? "text-white"
+                          : "text-foreground hover:bg-slate-100 dark:hover:bg-neutral-800"
+                      }`}
+                      style={on.length > 0 ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                    >
+                      Filters{on.length > 0 ? `: ${on.join(" · ")}` : ""}
+                      <svg
+                        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                        className={`shrink-0 transition-transform ${filtersOpen ? "" : "-rotate-90"}`}
+                        aria-hidden
+                      >
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                    {/* Getting back to every card without first reopening the
+                        panel that hid the filter. */}
+                    {on.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHolderFilter(null);
+                          setBankFilter(null);
+                          setOpenedFrom("");
+                          setOpenedTo("");
+                        }}
+                        className="rounded-md px-2 py-1 font-semibold text-foreground transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </span>
+                );
+              })()}
+              {/* The card counts double as the column filter: travel shows the
+                  travel column alone, hotel the hotel one, total puts both
+                  back with Other underneath. */}
+              {(() => {
+                const scoped = holderScoped(accounts);
+                const count = (cat: "travel" | "hotel" | null) =>
+                  cat === null
+                    ? scoped.length
+                    : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
+                // Outlined so all three read as pressable, filled only when
+                // one is actually narrowing the list. "Total" is the resting
+                // state, so a filled pill there said a filter was on when
+                // none was.
+                const countChip = (cat: "travel" | "hotel" | null, label: string) => {
+                  const active = cat !== null && categoryFilter === cat;
+                  return (
+                    <button
+                      type="button"
+                      // Clicking the chip that's already on clears the filter,
+                      // so getting back to everything doesn't mean hunting for
+                      // "total".
+                      onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
+                      className={`rounded-md border px-1.5 py-0.5 transition ${
+                        active
+                          ? "border-transparent text-white"
+                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-neutral-800"
+                      }`}
+                      style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
+                    >
+                      <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
+                        {count(cat)}
+                      </span>{" "}
+                      {label}
+                    </button>
+                  );
+                };
+                return (
+                  <span className="flex items-center gap-1 sm:ml-auto">
+                    {countChip("travel", "travel")}
+                    {countChip("hotel", "hotel")}
+                    {countChip(null, "total")}
+                  </span>
+                );
+              })()}
+              </div>
+              {/* The knobs themselves. Shut by default; whatever is on is
+                  named on the button above, so closing never hides state. */}
+              {filtersOpen ? (
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
               {/* Holder filter — chip per unique cardholder plus an "All" reset.
                   Clicking narrows every card list (Travel / Hotel / Other) to
                   that person's cards. */}
@@ -763,50 +1011,51 @@ function CreditCardSection({
                   </select>
                 );
               })()}
-              {/* The card counts double as the column filter: travel shows the
-                  travel column alone, hotel the hotel one, total puts both
-                  back with Other underneath. */}
+              {/* Opened-on range. Application spacing is the one card question
+                  this board couldn't answer — "what did we open between these
+                  dates" — and the dates are already on every card. */}
               {(() => {
-                const scoped = holderScoped(accounts);
-                const count = (cat: "travel" | "hotel" | null) =>
-                  cat === null
-                    ? scoped.length
-                    : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
-                // Outlined so all three read as pressable, filled only when
-                // one is actually narrowing the list. "Total" is the resting
-                // state, so a filled pill there said a filter was on when
-                // none was.
-                const countChip = (cat: "travel" | "hotel" | null, label: string) => {
-                  const active = cat !== null && categoryFilter === cat;
-                  return (
-                    <button
-                      type="button"
-                      // Clicking the chip that's already on clears the filter,
-                      // so getting back to everything doesn't mean hunting for
-                      // "total".
-                      onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
-                      className={`rounded-md border px-1.5 py-0.5 transition ${
-                        active
-                          ? "border-transparent text-white"
-                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-neutral-800"
-                      }`}
-                      style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                    >
-                      <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
-                        {count(cat)}
-                      </span>{" "}
-                      {label}
-                    </button>
-                  );
-                };
+                // A date input carries its own intrinsic width, and two of
+                // them plus the label are wider than a phone. They take the
+                // row and share it from min-w-0 up, rather than running off
+                // the right edge.
+                const dateBox =
+                  "min-w-0 flex-1 sm:flex-none rounded-md bg-background px-1.5 py-1 text-xs font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500";
+                const active = Boolean(openedFrom || openedTo);
                 return (
-                  <span className="flex items-center gap-1 sm:ml-auto">
-                    {countChip("travel", "travel")}
-                    {countChip("hotel", "hotel")}
-                    {countChip(null, "total")}
-                  </span>
+                  <div className="flex w-full items-center gap-1 sm:w-auto">
+                    <span className="shrink-0 font-semibold text-foreground">Opened</span>
+                    <input
+                      type="date"
+                      value={openedFrom}
+                      max={openedTo || undefined}
+                      onChange={(e) => setOpenedFrom(e.target.value)}
+                      aria-label="Opened on or after"
+                      className={dateBox}
+                    />
+                    <span aria-hidden className="shrink-0">–</span>
+                    <input
+                      type="date"
+                      value={openedTo}
+                      min={openedFrom || undefined}
+                      onChange={(e) => setOpenedTo(e.target.value)}
+                      aria-label="Opened on or before"
+                      className={dateBox}
+                    />
+                    {active ? (
+                      <button
+                        type="button"
+                        onClick={() => { setOpenedFrom(""); setOpenedTo(""); }}
+                        className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-foreground transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })()}
+              </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -851,6 +1100,14 @@ function CreditCardSection({
             </p>
           ) : isMain ? (
             <div>
+              {/* Stated value against realized, per card — the check on every
+                  money figure in the header above it. */}
+              <PointsByCard
+                cards={holderScoped(allCreditCards)}
+                redemptions={redemptions}
+                currency={currency}
+                includeUnlinked={noCardFilter}
+              />
               {/* Travel stacks above Hotel at every width. Side-by-side halves
                   squeezed each card's badges into a 3-4 line pile; full width
                   lets the per-card metrics line up in columns left-to-right. */}
@@ -1038,6 +1295,185 @@ function GroupChevron({ open }: { open: boolean }) {
     >
       <path d="M6 9l6 6 6-6" />
     </svg>
+  );
+}
+
+/**
+ * What every card's points are worth, stated against realized.
+ *
+ * The board's value tiles are all built on the cents-per-point typed on each
+ * card, and a card with none contributes zero to every one of them — a
+ * six-figure balance that reads as worth nothing. This table is where that
+ * shows: the stated rate beside the rate the card's own award bookings
+ * actually came out at, so a figure that was guessed once in 2019 has
+ * something to be checked against.
+ *
+ * Per card rather than per program: `rewards_program` is free text and has
+ * been filled in with the issuer as often as the program ("Chase" on an IHG
+ * card), while `account_id` on a booking is exact. A card IS its program in
+ * practice, and the two Marriott cards read as the two Marriott cards.
+ */
+function PointsByCard({
+  cards,
+  redemptions,
+  currency,
+  includeUnlinked,
+}: {
+  cards: AccountData[];
+  redemptions: Map<string, CardRedemption>;
+  currency: string;
+  includeUnlinked: boolean;
+}) {
+  const [openState, setOpenState] = useSessionCollapse(
+    "travel-points-by-card-open",
+    () => ({ open: false }),
+  );
+  const open = openState.open === true;
+
+  const rows = cards
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      points: a.cardDetails?.currentPoints ?? 0,
+      stated: statedCentsPerPoint(a.cardDetails?.pointsValueMicros),
+      valueCents: a.cardDetails?.pointsValueMicros
+        ? Math.round(((a.cardDetails.currentPoints ?? 0) * a.cardDetails.pointsValueMicros) / 10_000)
+        : 0,
+      redeemed: redemptions.get(a.id) ?? emptyRedemption(),
+    }))
+    // A card with neither a balance nor a redemption has nothing to say here.
+    .filter((r) => r.points > 0 || r.redeemed.points > 0)
+    .sort((a, b) => b.points - a.points || b.redeemed.points - a.redeemed.points);
+
+  const unlinked = includeUnlinked ? redemptions.get(UNLINKED) : undefined;
+  if (rows.length === 0 && !unlinked) return null;
+
+  const total = rows.reduce(
+    (acc, r) => ({
+      points: acc.points + r.points,
+      valueCents: acc.valueCents + r.valueCents,
+      redeemed: {
+        points: acc.redeemed.points + r.redeemed.points,
+        valueCents: acc.redeemed.valueCents + r.redeemed.valueCents,
+        bookings: acc.redeemed.bookings + r.redeemed.bookings,
+      },
+    }),
+    { points: 0, valueCents: 0, redeemed: emptyRedemption() },
+  );
+  if (unlinked) {
+    total.redeemed = {
+      points: total.redeemed.points + unlinked.points,
+      valueCents: total.redeemed.valueCents + unlinked.valueCents,
+      bookings: total.redeemed.bookings + unlinked.bookings,
+    };
+  }
+  const totalRate = centsPerPoint(total.redeemed);
+  const cents = (v: number) => `${v.toFixed(2)}¢`;
+
+  // Each row is the same metric grid the card rows below use, so the two read
+  // as one board rather than a table bolted above a list.
+  const row = (
+    key: string,
+    name: string,
+    points: number,
+    stated: number | null,
+    valueCents: number,
+    redeemed: CardRedemption,
+    strong = false,
+  ) => {
+    const rate = centsPerPoint(redeemed);
+    return (
+      <li key={key} className={`px-4 py-2.5 ${strong ? "bg-background/60 font-semibold" : ""}`}>
+        <span className={`block text-sm ${strong ? "font-bold" : "font-semibold"}`}>{name}</span>
+        <span className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1.5 min-[420px]:grid-cols-3 lg:grid-cols-5">
+          <MetricCell label="Balance">
+            {points > 0 ? <span className="tabular-nums font-bold">{points.toLocaleString()}</span> : null}
+          </MetricCell>
+          <MetricCell label="Your value" mobileLabel="Your ¢">
+            {points > 0 && stated != null ? (
+              <span className="tabular-nums font-semibold">{cents(stated)}/pt</span>
+            ) : points > 0 && !strong ? (
+              // The whole point of the table: the cards the value tiles can
+              // say nothing about, named. Never on the totals row, where a
+              // single rate across nine programs would mean nothing and
+              // "Not set" reads as an error.
+              <span className="font-bold text-negative">Not set</span>
+            ) : null}
+          </MetricCell>
+          <MetricCell label="Balance worth" mobileLabel="Worth">
+            {valueCents > 0 ? (
+              <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
+                {formatMoney(valueCents, currency)}
+              </span>
+            ) : null}
+          </MetricCell>
+          <MetricCell label="Redeemed">
+            {redeemed.points > 0 ? (
+              <span className="tabular-nums font-semibold">
+                {redeemed.points.toLocaleString()} → {formatMoney(redeemed.valueCents, currency)}
+              </span>
+            ) : null}
+          </MetricCell>
+          <MetricCell label="Realized rate" mobileLabel="Got ¢">
+            {rate != null ? (
+              <span className="tabular-nums font-bold" style={{ color: "var(--viz-savings)" }}>
+                {cents(rate)}/pt
+              </span>
+            ) : null}
+          </MetricCell>
+        </span>
+      </li>
+    );
+  };
+
+  return (
+    <div className="border-b border-line">
+      <button
+        type="button"
+        onClick={() => setOpenState((s) => ({ ...s, open: s.open !== true }))}
+        aria-expanded={open}
+        className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-4 py-3 text-left transition hover:bg-background/40"
+      >
+        <svg
+          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+          className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+          aria-hidden
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+        <span className="shrink-0 whitespace-nowrap text-sm font-bold sm:text-base">Points by card</span>
+        {totalRate != null ? (
+          <span className="flex shrink-0 items-baseline gap-1.5">
+            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Realized:
+            </span>
+            <span className="whitespace-nowrap text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
+              {cents(totalRate)}/pt
+            </span>
+          </span>
+        ) : null}
+        {total.redeemed.points > 0 ? (
+          <span className="flex shrink-0 items-baseline gap-1.5">
+            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Redeemed:
+            </span>
+            <span className="whitespace-nowrap text-sm font-bold tabular-nums">
+              {total.redeemed.points.toLocaleString()} pts → {formatMoney(total.redeemed.valueCents, currency)}
+            </span>
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <ul className="divide-y divide-line border-t border-line">
+          {rows.map((r) => row(r.id, r.name, r.points, r.stated, r.valueCents, r.redeemed))}
+          {unlinked
+            ? row(UNLINKED, "Award bookings with no card on them", 0, null, 0, unlinked)
+            : null}
+          {row("total", "All cards", total.points, null, total.valueCents, total.redeemed, true)}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -1454,7 +1890,36 @@ function CreditCardPanel({
   const today = new Date().toISOString().slice(0, 10);
   const fnExpires = d?.freeNightExpiresOn ?? null;
   const fnExpired = fnExpires ? fnExpires < today : false;
-  const fnExpiresColor = fnExpired ? "text-negative font-semibold" : "text-foreground font-semibold";
+  // A benefit already booked against can't lapse, so it gets no countdown —
+  // only one still sitting there unspent does.
+  const fnUnspent = Boolean(fnExpires) && !d?.benefitUsedOn && !fnExpired
+    && Boolean(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax);
+  const fnDaysLeft = fnExpires && fnUnspent ? daysUntil(fnExpires, today) : null;
+  const fnUrgent = fnDaysLeft != null && fnDaysLeft <= EXPIRY_SOON_DAYS;
+  const fnExpiresColor = fnExpired || fnUrgent ? "text-negative font-semibold" : "text-foreground font-semibold";
+
+  // A sign-up bonus still being worked toward. The minimum spend and the
+  // deadline were stored on the card from the start; what was missing is how
+  // far along it is, which is the only part that changes. A deadline more than
+  // a month gone is history and drops off — a 2017 bonus is not a task.
+  const bonus = (() => {
+    if (!d?.bonusSpendCents || !d.bonusSpendDeadline || d.bonusEarned) return null;
+    const days = daysUntil(d.bonusSpendDeadline, today);
+    if (days < -30) return null;
+    const required = d.bonusSpendCents;
+    // Undefined means nobody asked the database for it; null-safe either way,
+    // but a blank figure must not render as "$0 spent".
+    const spent = d.bonusProgressCents ?? null;
+    const met = spent != null && spent >= required;
+    return {
+      spent,
+      required,
+      days,
+      met,
+      pct: spent == null ? 0 : Math.min(100, Math.round((spent / required) * 100)),
+      color: met ? "var(--positive)" : days <= 30 ? "var(--negative)" : "var(--viz-savings)",
+    };
+  })();
   const bank = cardBank(card) || null;
   // One card showing any reward figure turns the metric grid on for that row;
   // plain cards (no points, no night credit) keep the single identity line.
@@ -1552,10 +2017,17 @@ function CreditCardPanel({
               {/* The cash the points alone are worth — not the card's balance
                   or any free-night credit, which have their own cells. */}
               <MetricCell label="Total pts value" mobileLabel="Pts value">
-                {d && d.currentPoints > 0 && d.pointsValueMicros ? (
-                  <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
-                    ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}
-                  </span>
+                {d && d.currentPoints > 0 ? (
+                  d.pointsValueMicros ? (
+                    <span className="tabular-nums font-bold text-emerald-700 dark:text-emerald-300">
+                      ${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}
+                    </span>
+                  ) : (
+                    // A blank cell here read as "worth nothing"; it means
+                    // nobody has said what a point on this card is worth, and
+                    // that is what keeps it out of every total on the board.
+                    <span className="font-bold text-negative">No value set</span>
+                  )
                 ) : null}
               </MetricCell>
               <MetricCell label="Night credit">
@@ -1573,6 +2045,16 @@ function CreditCardPanel({
                 {d?.freeNightExpiresOn ? (
                   <span className={`tabular-nums ${fnExpiresColor}`}>
                     {d.freeNightExpiresOn.replace(/-/g, "\u2011")}
+                    {/* The date alone never said how long that is. An unspent
+                        benefit carries the countdown; an urgent one says it
+                        in the warning colour. */}
+                    {fnDaysLeft != null ? (
+                      <span
+                        className={`block text-[10px] font-bold ${fnUrgent ? "text-negative" : "text-muted"}`}
+                      >
+                        {expiryLabel(fnDaysLeft)}
+                      </span>
+                    ) : null}
                   </span>
                 ) : null}
               </MetricCell>
@@ -1587,6 +2069,38 @@ function CreditCardPanel({
                   </span>
                 ) : null}
               </MetricCell>
+            </span>
+          ) : null}
+          {/* On the collapsed row, not inside the panel: a minimum-spend clock
+              that has to be opened to be seen is one that gets missed. Only
+              cards actually working on a bonus carry it. */}
+          {bonus ? (
+            <span className="mt-2 block">
+              <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
+                <span className="font-semibold uppercase tracking-wide text-muted">Bonus spend</span>
+                <span className="font-bold tabular-nums">
+                  {bonus.spent == null ? "—" : formatMoney(bonus.spent, currency)} of{" "}
+                  {formatMoney(bonus.required, currency)}
+                </span>
+                <span className="font-bold" style={{ color: bonus.color }}>
+                  {bonus.met
+                    ? "met"
+                    : bonus.days < 0
+                      ? "deadline passed"
+                      : expiryLabel(bonus.days)}
+                </span>
+                {d?.bonusInfo ? (
+                  <span className="text-muted">
+                    for <span className="font-semibold text-foreground">{d.bonusInfo}</span> pts
+                  </span>
+                ) : null}
+              </span>
+              <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                <span
+                  className="block h-full rounded-full transition-[width]"
+                  style={{ width: `${bonus.pct}%`, backgroundColor: bonus.color }}
+                />
+              </span>
             </span>
           ) : null}
         </span>
