@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
+import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger, type RewardDraw } from "./reward-ledger";
 
@@ -30,7 +31,8 @@ export type FlightPayload = {
   accountId: string;
   cardLabel: string;
   holder: string;
-  pointsValue: string;
+  /** Typed in cents per point: "1.2" = 1.2¢. */
+  pointsValueCents: string;
   pocketCost: string;
   remarks: string;
   /** Not bought yet — the fares are an estimate. */
@@ -46,11 +48,6 @@ export type FlightPayload = {
   passengers: Array<{ travellerId: string | null; name: string; fare: string; fareEur: string; pointsUsed: boolean; points: string }>;
 };
 
-function dollarsToMicros(raw: string): number | null {
-  const value = Number(raw.replace(/[$,\s]/g, ""));
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return Math.round(value * 1_000_000);
-}
 
 const flightNote = (airline: string, bookingCode: string | null) =>
   bookingCode ? `${airline} ${bookingCode}` : airline;
@@ -125,7 +122,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
   // Typed, the rate is what was typed; blank, it is what the points tickets
   // would have cost in cash divided by the points they took.
   const pointsValueMicros =
-    dollarsToMicros(payload.pointsValue) ??
+    centsPerPointToMicros(payload.pointsValueCents) ??
     (pointsCost > 0 && pointsFares > 0 ? Math.round((pointsFares / pointsCost) * 10_000) : null);
 
   const trip = await resolveTripId(supabase, householdId, payload.tripId, payload.newTripName);

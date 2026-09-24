@@ -608,11 +608,15 @@ export async function upsertCardDetails(formData: FormData) {
     const n = parseInt(v, 10);
     return Number.isFinite(n) ? n : 0;
   };
-  const optMicros = (k: string) => {
+  // Value per point is typed in cents ("0.75" = 0.75¢), the unit every
+  // valuation guide and every figure on the board uses. Stored as millionths
+  // of a dollar, so 1¢ = 10,000 micros. The field was renamed from
+  // "pointsValue" (dollars) so a stale form can't post dollars into it.
+  const optCentsPerPointMicros = (k: string) => {
     const v = String(formData.get(k) ?? "").trim();
     if (!v) return null;
     const n = Number(v);
-    return Number.isFinite(n) && n >= 0 ? Math.round(n * 1_000_000) : null;
+    return Number.isFinite(n) && n >= 0 ? Math.round(n * 10_000) : null;
   };
   const rawCardUrl = optText("cardUrl");
   const cardUrl = rawCardUrl && !/^https?:\/\//i.test(rawCardUrl) ? `https://${rawCardUrl}` : rawCardUrl;
@@ -672,7 +676,7 @@ export async function upsertCardDetails(formData: FormData) {
     household_id: householdId,
     rewards_category: ["travel", "hotel"].includes(String(formData.get("rewardsCategory") ?? "")) ? String(formData.get("rewardsCategory")) : null,
     rewards_program: optText("rewardsProgram"),
-    points_value_micros: optMicros("pointsValue"),
+    points_value_micros: optCentsPerPointMicros("pointsValueCents"),
     five24_countable: formData.get("five24Countable") === "on",
     bank: optText("bank"),
     auth_user: optText("authUser"),

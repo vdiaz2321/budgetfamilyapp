@@ -5,7 +5,7 @@ import { ExpandIcon } from "./travel-board";
 import { SearchBox } from "./search-box";
 import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { sheetDateRange, type TripSummary } from "./trip-summary";
 import type { ExpenseCategory } from "./types";
 
@@ -134,7 +134,7 @@ export function TripLogPanel({
     { trips: 0, total: 0, planned: 0, points: 0, saved: 0 },
   );
 
-  const money = (cents: number) => (cents > 0 ? formatMoney(cents, currency) : DASH);
+  const money = (cents: number) => (cents > 0 ? formatMoneyWhole(cents, currency) : DASH);
   // A cell that is nothing but a plan reads grey, so a row of upcoming trips
   // is visibly "not spent yet" without a second line under each figure.
   const planClass = (value: number, plan: number) => (value > 0 && plan >= value ? "text-muted" : "");
@@ -181,7 +181,7 @@ export function TripLogPanel({
                 <td key={c.label} className={`whitespace-nowrap px-2 py-2 text-center tabular-nums ${planClass(c.read(t), c.plan(t))}`}>{money(c.read(t))}</td>
               ))}
               <td className="whitespace-nowrap px-2 py-2 text-center font-bold tabular-nums text-negative">
-                {t.spent > 0 ? formatMoney(t.spent, currency) : <span className="font-normal text-muted">{DASH}</span>}
+                {t.spent > 0 ? formatMoneyWhole(t.spent, currency) : <span className="font-normal text-muted">{DASH}</span>}
               </td>
               <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums text-muted">
                 {money(t.planOnly.total)}
@@ -190,7 +190,7 @@ export function TripLogPanel({
                 {t.points > 0 ? t.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
               </td>
               <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums text-positive">
-                {t.saved > 0 ? formatMoney(t.saved, currency) : <span className="font-normal text-muted">{DASH}</span>}
+                {t.saved > 0 ? formatMoneyWhole(t.saved, currency) : <span className="font-normal text-muted">{DASH}</span>}
               </td>
             </tr>
           ))}
@@ -247,7 +247,7 @@ export function TripLogPanel({
             opens full width. */}
         <span className="flex shrink-0 items-baseline gap-1.5">
           <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
-          <span className="text-sm font-bold tabular-nums text-negative">{formatMoney(totalSpent, currency)}</span>
+          <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
         </span>
         <span className="shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
       </div>
@@ -265,12 +265,12 @@ export function TripLogPanel({
               </span>
               <span className="flex items-baseline gap-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
-                <span className="text-sm font-bold tabular-nums text-negative">{formatMoney(totalSpent, currency)}</span>
+                <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
               </span>
               {totalPlanned > 0 ? (
                 <span className="flex items-baseline gap-1.5">
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Planned:</span>
-                  <span className="text-sm font-bold tabular-nums text-muted">{formatMoney(totalPlanned, currency)}</span>
+                  <span className="text-sm font-bold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
                 </span>
               ) : null}
               <SearchBox value={query} onChange={setQuery} placeholder="Search trip, hotel, flight…" label="Search trips" className="w-44" />
@@ -320,7 +320,7 @@ export function TripLogPanel({
                       <td className="px-3 py-1.5 text-center">Total</td>
                       <td className="px-3 py-1.5 text-center tabular-nums">{byYearTotals.trips}</td>
                       <td className="px-3 py-1.5 text-center tabular-nums text-negative">
-                        {formatMoney(byYearTotals.total, currency)}
+                        {formatMoneyWhole(byYearTotals.total, currency)}
                       </td>
                       <td className="px-3 py-1.5 text-center tabular-nums text-muted">
                         {money(byYearTotals.planned)}

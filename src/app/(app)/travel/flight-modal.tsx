@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
-import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/lib/money";
+import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import {
   addTraveller,
   deleteTraveller,
@@ -19,6 +19,7 @@ import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
 import type { Embed, SectionHandle } from "./embedded-section";
 import type { TravelCard, TravelFlight, TravelTrip, Traveller } from "./types";
+import { formatCentsPerPoint, microsToCentsField } from "./points-value";
 
 type LegDraft = {
   key: number;
@@ -45,7 +46,7 @@ const emptyLeg = (from = "", to = ""): LegDraft => ({
 });
 const emptyPassenger = (): PassengerDraft => ({ key: nextKey++, travellerId: null, name: "", fare: "", fareEur: "", pointsUsed: false, points: "" });
 
-const rateDisplay = (micros: number) => String(Number((micros / 1_000_000).toFixed(4)));
+const rateDisplay = (micros: number) => microsToCentsField(micros);
 
 export function FlightModal({
   flight,
@@ -232,7 +233,7 @@ export function FlightModal({
         accountId,
         cardLabel,
         holder,
-        pointsValue,
+        pointsValueCents: pointsValue,
         pocketCost,
         remarks,
         isEstimate,
@@ -600,7 +601,7 @@ export function FlightModal({
           <div className="mt-2 grid grid-cols-[1.75rem_minmax(0,1fr)_4.5rem_4.5rem] items-baseline gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[1.75rem_minmax(0,12rem)_6.5rem_6.5rem_6.5rem]">
             <span aria-hidden />
             <span>Total</span>
-            <span className="text-center">{formatMoney(fareCents, currency)}</span>
+            <span className="text-center">{formatMoneyWhole(fareCents, currency)}</span>
             <span className="text-center">€{centsToDisplay(fareEurCents)}</span>
             <span className="hidden text-center sm:block">{pointsTyped ? pointsTyped.toLocaleString() : ""}</span>
           </div>
@@ -635,7 +636,7 @@ export function FlightModal({
             {/* The points tickets above, added up. */}
             <input value={pointsTyped ? pointsTyped.toLocaleString() : ""} readOnly tabIndex={-1} className={`${inputClass} opacity-70`} />
           </Field>
-          <Field label="Value per pt">
+          <Field label="Value per pt (¢)">
             <input
               value={pointsValue}
               onChange={(e) => setPointsValue(e.target.value)}
@@ -645,8 +646,8 @@ export function FlightModal({
             />
             {impliedMicros ? (
               <span className="mt-0.5 block text-[10px] font-medium text-muted">
-                <span style={{ color: "var(--viz-savings)" }}>{(impliedMicros / 10_000).toFixed(2)}¢/pt</span> ={" "}
-                {formatMoney(pointsFareCents, currency)} ÷ {pointsTyped.toLocaleString()} pts
+                <span style={{ color: "var(--viz-savings)" }}>{formatCentsPerPoint(impliedMicros / 10_000)}/pt</span> ={" "}
+                {formatMoneyWhole(pointsFareCents, currency)} ÷ {pointsTyped.toLocaleString()} pts
               </span>
             ) : null}
           </Field>
@@ -732,7 +733,7 @@ export function FlightModal({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · {isEstimate ? "Planned flight cost" : "Flight cost"}{" "}
-            <span className="font-bold tabular-nums text-foreground">{formatMoney(fareCents, currency)}</span>
+            <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(fareCents, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {flight ? (

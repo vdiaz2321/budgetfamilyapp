@@ -31,6 +31,28 @@ export function centsPerPoint(r: CardRedemption): number | null {
   return r.valueCents / r.points;
 }
 
+/**
+ * Every "Value per pt" box — on a card and on a stay, flight or car booking —
+ * is typed in cents ("0.75" = 0.75¢), the unit valuation guides use. Stored
+ * as millionths of a dollar, so 1¢ = 10,000 micros.
+ */
+export function centsPerPointToMicros(raw: string): number | null {
+  const value = Number(raw.replace(/[¢,\s]/g, ""));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value * 10_000);
+}
+
+/** Micros back to the cents a box shows: "0.75", never "0.7500". */
+export function microsToCentsField(micros: number, places = 2): string {
+  return String(Number((micros / 10_000).toFixed(places)));
+}
+
+/** Cents per point for display, to two places with trailing zeros dropped —
+ *  "1¢", "0.2¢", "0.48¢" — never "1.00¢". */
+export function formatCentsPerPoint(cents: number): string {
+  return `${Number(cents.toFixed(2))}¢`;
+}
+
 /** The same figure the card stores, in cents per point, for comparison. */
 export function statedCentsPerPoint(pointsValueMicros: number | null | undefined): number | null {
   if (!pointsValueMicros) return null;

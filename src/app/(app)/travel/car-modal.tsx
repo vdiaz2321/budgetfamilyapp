@@ -4,14 +4,15 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter } from "@/components/currency-converter";
-import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/lib/money";
+import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import { Field, PlannedPointsNote, PlannedSwitch, Section, inputClass, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
+import { formatCentsPerPoint, microsToCentsField } from "./points-value";
 
-const rateDisplay = (micros: number) => String(Number((micros / 1_000_000).toFixed(4)));
+const rateDisplay = (micros: number) => microsToCentsField(micros);
 
 /**
  * A rental car booking. Driving the family car is not a booking — its fuel,
@@ -98,7 +99,7 @@ export function CarModal({
     kind: "rental" as const,
     company, bookingCode, reservedOn,
     pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace,
-    accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValue, remarks, isEstimate,
+    accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValueCents: pointsValue, remarks, isEstimate,
   });
 
   useEffect(() => {
@@ -247,7 +248,7 @@ export function CarModal({
             <Field label={pointsUsed ? "Points used" : "Pts if used"}>
               <input type="number" min="0" step="1" value={points} onChange={(e) => setPoints(e.target.value)} className={inputClass} />
             </Field>
-            <Field label="Value per pt">
+            <Field label="Value per pt (¢)">
               <input
                 value={pointsValue}
                 onChange={(e) => setPointsValue(e.target.value)}
@@ -257,8 +258,8 @@ export function CarModal({
               />
               {impliedMicros ? (
                 <span className="mt-0.5 block text-[10px] font-medium text-muted">
-                  <span style={{ color: "var(--viz-savings)" }}>{(impliedMicros / 10_000).toFixed(2)}¢/pt</span> ={" "}
-                  {formatMoney(costCents, currency)} ÷ {pointsTyped.toLocaleString()} pts
+                  <span style={{ color: "var(--viz-savings)" }}>{formatCentsPerPoint(impliedMicros / 10_000)}/pt</span> ={" "}
+                  {formatMoneyWhole(costCents, currency)} ÷ {pointsTyped.toLocaleString()} pts
                 </span>
               ) : null}
             </Field>
@@ -299,7 +300,7 @@ export function CarModal({
         {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
-            Pocket cost <span className="font-bold tabular-nums text-foreground">{formatMoney(pocketCents, currency)}</span>
+            Pocket cost <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(pocketCents, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {car ? (

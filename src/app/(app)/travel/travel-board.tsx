@@ -3,7 +3,7 @@
 import { YearPicker, inYears, thisAndFutureYears, useSessionYears, yearsListLabel } from "./year-picker";
 import { SearchBox } from "./search-box";
 import { useMemo, useState } from "react";
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
@@ -17,7 +17,7 @@ import { TripLogPanel } from "./trip-log-panel";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
 import { sheetDateRange, summarizeTrips } from "./trip-summary";
-import { redemptionsByCard } from "./points-value";
+import { formatCentsPerPoint, redemptionsByCard } from "./points-value";
 import { AddTravelLogModal } from "./add-travel-log-modal";
 import { EditTripPicker } from "./edit-trip-picker";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
@@ -96,7 +96,7 @@ function spentPointsValue(stay: TravelStay): number {
 }
 
 function money(cents: number, currency: string): string {
-  return cents > 0 ? formatMoney(cents, currency) : DASH;
+  return cents > 0 ? formatMoneyWhole(cents, currency) : DASH;
 }
 
 // Whole days between two ISO dates — both are plain dates, so no clocks or
@@ -106,14 +106,15 @@ function daysUntil(from: string, to: string): number {
   return Math.max(0, Math.round(ms / 86_400_000));
 }
 
-// Column E: what a point was worth on this stay, to three decimals. A rate
+// Column E: what a point was worth on this stay, in cents like every other
+// per-point figure on the page ("0.6¢", not "$0.006"). A rate
 // worked out from the hotel cost (rather than typed into the sheet) is shown
 // in muted type, so a calculated cell is never mistaken for a recorded one.
 function cashValue(stay: TravelStay): { text: string; derived: boolean } {
   const micros = effectivePointsValueMicros(stay);
   if (!micros) return { text: DASH, derived: false };
   return {
-    text: `$${(micros / 1_000_000).toFixed(3)}`,
+    text: formatCentsPerPoint(micros / 10_000),
     derived: !stay.pointsValueMicros,
   };
 }
@@ -556,7 +557,7 @@ export function TravelBoard({
                     }`}
                     tone=""
                   />
-                  <Figure label="Total hotel cost" value={formatMoney(shownTotals.hotel, currency)} tone="" />
+                  <Figure label="Total hotel cost" value={formatMoneyWhole(shownTotals.hotel, currency)} tone="" />
                   <Figure
                     label="Total pts used"
                     value={shownTotals.points.toLocaleString()}
@@ -567,7 +568,7 @@ export function TravelBoard({
                       on each stay — the whole point of redeeming them. */}
                   <Figure
                     label="Total pts worth"
-                    value={formatMoney(shownTotals.pointsValue, currency)}
+                    value={formatMoneyWhole(shownTotals.pointsValue, currency)}
                     tone=""
                     style={{ color: "var(--viz-savings)" }}
                   />
@@ -585,7 +586,7 @@ export function TravelBoard({
                       <SortTh label="Check in date" col="checkIn" sort={sort} onSort={sortBy} nowrap />
                       <SortTh label="Hotel name" col="propertyName" sort={sort} onSort={sortBy} />
                       <SortTh label="Points used" col="pointsCost" sort={sort} onSort={sortBy} />
-                      <SortTh label="Cash value" col="pointsValue" sort={sort} onSort={sortBy} />
+                      <SortTh label="Value per pt" col="pointsValue" sort={sort} onSort={sortBy} />
                       <SortTh label="Hotel credit" col="hotelCredit" sort={sort} onSort={sortBy} />
                       <SortTh label="Hotel cost" col="hotelCost" sort={sort} onSort={sortBy} />
                       <SortTh label="Pocket cost" col="pocketCost" sort={sort} onSort={sortBy} />
@@ -660,7 +661,7 @@ export function TravelBoard({
                             word for what covered it — "Pts", never "$0.00". */}
                         <td className="px-2 py-2 text-center tabular-nums text-negative">
                           {s.pocketCostCents > 0 ? (
-                            formatMoney(s.pocketCostCents, currency)
+                            formatMoneyWhole(s.pocketCostCents, currency)
                           ) : (
                             <span className="text-[11px] font-semibold text-muted">{coveredBy(s)}</span>
                           )}
@@ -711,7 +712,7 @@ export function TravelBoard({
                         </span>
                         <span className="shrink-0 text-sm font-bold tabular-nums text-negative">
                           {s.pocketCostCents > 0 ? (
-                            formatMoney(s.pocketCostCents, currency)
+                            formatMoneyWhole(s.pocketCostCents, currency)
                           ) : (
                             <span className="text-xs text-muted">{coveredBy(s)}</span>
                           )}
@@ -745,13 +746,13 @@ export function TravelBoard({
                         <span>
                           <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel credit</span>
                           <span className="tabular-nums font-semibold" style={{ color: "var(--viz-bills)" }}>
-                            {s.hotelCreditCents > 0 ? formatMoney(s.hotelCreditCents, currency) : "—"}
+                            {s.hotelCreditCents > 0 ? formatMoneyWhole(s.hotelCreditCents, currency) : "—"}
                           </span>
                         </span>
                         <span>
                           <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel cost</span>
                           <span className="tabular-nums font-semibold">
-                            {s.hotelCostCents > 0 ? formatMoney(s.hotelCostCents, currency) : "—"}
+                            {s.hotelCostCents > 0 ? formatMoneyWhole(s.hotelCostCents, currency) : "—"}
                           </span>
                         </span>
                       </div>
@@ -815,14 +816,14 @@ export function TravelBoard({
             />
             <Figure
               label="Hotel cost"
-              value={s.hotelCostCents > 0 ? formatMoney(s.hotelCostCents, currency) : DASH}
+              value={s.hotelCostCents > 0 ? formatMoneyWhole(s.hotelCostCents, currency) : DASH}
               tone=""
             />
             <Figure
               label="Pocket cost"
               value={
                 s.pocketCostCents > 0
-                  ? formatMoney(s.pocketCostCents, currency)
+                  ? formatMoneyWhole(s.pocketCostCents, currency)
                   : coveredBy(s)
               }
               tone={s.pocketCostCents > 0 ? "text-negative" : "text-muted"}
@@ -868,12 +869,12 @@ export function TravelBoard({
             </span>
             <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
               <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} />
-              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoney(f.flightCostCents, currency) : DASH} tone="" />
+              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoneyWhole(f.flightCostCents, currency) : DASH} tone="" />
               {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
               {f.pocketCostCents !== f.flightCostCents ? (
                 <Figure
                   label="Pocket cost"
-                  value={f.pocketCostCents > 0 ? formatMoney(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
+                  value={f.pocketCostCents > 0 ? formatMoneyWhole(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
                   tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
                 />
               ) : null}
@@ -918,11 +919,11 @@ export function TravelBoard({
               tone=""
               style={{ color: "var(--viz-savings)" }}
             />
-            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoney(c.costCents, currency) : DASH} tone="" />
+            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoneyWhole(c.costCents, currency) : DASH} tone="" />
             {c.pocketCostCents !== c.costCents ? (
               <Figure
                 label="Pocket cost"
-                value={c.pocketCostCents > 0 ? formatMoney(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
+                value={c.pocketCostCents > 0 ? formatMoneyWhole(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
                 tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
               />
             ) : null}
@@ -973,10 +974,10 @@ export function TravelBoard({
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {row && row.points > 0 ? row.points.toLocaleString() : DASH}
               </td>
-              <td className="px-2 py-2 text-center tabular-nums">{row ? formatMoney(row.hotel, currency) : DASH}</td>
-              <td className="px-2 py-2 text-center tabular-nums text-negative">{row ? formatMoney(row.pocket, currency) : DASH}</td>
+              <td className="px-2 py-2 text-center tabular-nums">{row ? formatMoneyWhole(row.hotel, currency) : DASH}</td>
+              <td className="px-2 py-2 text-center tabular-nums text-negative">{row ? formatMoneyWhole(row.pocket, currency) : DASH}</td>
               <td className="px-2 py-2 text-center font-bold tabular-nums text-positive">
-                {row ? formatMoney(row.hotel - row.pocket, currency) : DASH}
+                {row ? formatMoneyWhole(row.hotel - row.pocket, currency) : DASH}
               </td>
             </tr>
           ))}
@@ -1005,10 +1006,10 @@ export function TravelBoard({
                   <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                     {t.points > 0 ? t.points.toLocaleString() : DASH}
                   </td>
-                  <td className="px-2 py-2 text-center tabular-nums">{formatMoney(t.hotel, currency)}</td>
-                  <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoney(t.pocket, currency)}</td>
+                  <td className="px-2 py-2 text-center tabular-nums">{formatMoneyWhole(t.hotel, currency)}</td>
+                  <td className="px-2 py-2 text-center tabular-nums text-negative">{formatMoneyWhole(t.pocket, currency)}</td>
                   <td className="px-2 py-2 text-center tabular-nums text-positive">
-                    {formatMoney(t.hotel - t.pocket, currency)}
+                    {formatMoneyWhole(t.hotel - t.pocket, currency)}
                   </td>
                 </tr>
               );
@@ -1053,10 +1054,10 @@ export function TravelBoard({
                 {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
               </td>
               <td className="px-3 py-2 text-center tabular-nums text-negative">
-                {formatMoney(row.spent, currency)}
+                {formatMoneyWhole(row.spent, currency)}
               </td>
               <td className="px-3 py-2 text-center font-semibold tabular-nums text-positive">
-                {formatMoney(row.saved, currency)}
+                {formatMoneyWhole(row.saved, currency)}
               </td>
             </tr>
           ))}
@@ -1090,10 +1091,10 @@ export function TravelBoard({
                 {row.points > 0 ? row.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
               </td>
               <td className="px-2 py-2 text-center tabular-nums text-negative">
-                {formatMoney(row.spent, currency)}
+                {formatMoneyWhole(row.spent, currency)}
               </td>
               <td className="px-2 py-2 text-center font-semibold tabular-nums text-positive">
-                {formatMoney(row.saved, currency)}
+                {formatMoneyWhole(row.saved, currency)}
               </td>
             </tr>
           ))}
@@ -1240,7 +1241,7 @@ export function TravelBoard({
             /* Collapsed it says one thing: what this log came to, for the year
                picked beside it. The counts and the search belong to the table,
                and the table only ever opens full width now. */
-            meta={<Figure label="Spent" value={formatMoney(shownTotals.pocket, currency)} tone="text-negative" />}
+            meta={<Figure label="Spent" value={formatMoneyWhole(shownTotals.pocket, currency)} tone="text-negative" />}
             control={yearSelect}
             open={openList}
             onToggle={() => setOpenList((v) => !v)}
@@ -1279,7 +1280,7 @@ export function TravelBoard({
               <div className="space-y-3 lg:col-span-2 xl:col-span-1">
                 <Panel
                   title="Total Stays by Brand"
-                  meta={<Figure label="Saved" value={formatMoney(tallyTotals.saved, currency)} tone="text-positive" />}
+                  meta={<Figure label="Saved" value={formatMoneyWhole(tallyTotals.saved, currency)} tone="text-positive" />}
                   control={tallyPeriod(tallyYear, setTallyYear, "Brand tally year")}
                   open={false}
                   onToggle={() => setExpandedTally("brands")}
@@ -1289,7 +1290,7 @@ export function TravelBoard({
                 </Panel>
                 <Panel
                   title="Total Stays by Rewards Card"
-                  meta={<Figure label="Saved" value={formatMoney(cardTotals.saved, currency)} tone="text-positive" />}
+                  meta={<Figure label="Saved" value={formatMoneyWhole(cardTotals.saved, currency)} tone="text-positive" />}
                   control={tallyPeriod(cardYear, setCardYear, "Card tally year")}
                   open={false}
                   onToggle={() => setExpandedTally("cards")}
@@ -1601,8 +1602,8 @@ function HeaderTotals({
   return (
     <>
       <Figure label={countLabel} value={String(count)} tone="" />
-      <Figure label="Total spent" value={formatMoney(spent, currency)} tone="text-negative" />
-      <Figure label="Total saved" value={formatMoney(saved, currency)} tone="text-positive" />
+      <Figure label="Total spent" value={formatMoneyWhole(spent, currency)} tone="text-negative" />
+      <Figure label="Total saved" value={formatMoneyWhole(saved, currency)} tone="text-positive" />
     </>
   );
 }

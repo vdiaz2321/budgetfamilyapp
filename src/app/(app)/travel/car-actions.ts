@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionContext } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
+import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger } from "./reward-ledger";
 import type { CarKind } from "./types";
@@ -39,17 +40,13 @@ export type CarPayload = {
   pocketCost: string;
   pointsUsed: boolean;
   points: string;
-  pointsValue: string;
+  /** Typed in cents per point: "1.2" = 1.2¢. */
+  pointsValueCents: string;
   remarks: string;
   /** Not booked yet — the cost is an estimate. */
   isEstimate: boolean;
 };
 
-function dollarsToMicros(raw: string): number | null {
-  const value = Number(raw.replace(/[$,\s]/g, ""));
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return Math.round(value * 1_000_000);
-}
 
 const carNote = (company: string | null, bookingCode: string | null) =>
   [company ?? "Car rental", bookingCode].filter(Boolean).join(" ");
@@ -91,7 +88,7 @@ export async function saveTravelCar(payload: CarPayload) {
     ? Math.max(0, displayToCents(payload.pocketCost))
     : pointsUsed ? 0 : cost;
   const pointsValueMicros =
-    dollarsToMicros(payload.pointsValue) ?? (points > 0 && cost > 0 ? Math.round((cost / points) * 10_000) : null);
+    centsPerPointToMicros(payload.pointsValueCents) ?? (points > 0 && cost > 0 ? Math.round((cost / points) * 10_000) : null);
 
   const trip = await resolveTripId(supabase, householdId, payload.tripId, payload.newTripName);
   if (trip.error) return { error: trip.error };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 
 export type YearPoint = {
   year: string;
@@ -20,10 +20,10 @@ export type YearPoint = {
 // shorthand the Insights charts use.
 function axisMoney(cents: number, currency: string): string {
   const dollars = cents / 100;
-  const symbol = formatMoney(0, currency).replace(/[\d.,]/g, "");
+  const symbol = formatMoneyWhole(0, currency).replace(/[\d.,]/g, "");
   if (dollars >= 1000) {
     const k = dollars / 1000;
-    return `${symbol}${k >= 100 ? Math.round(k) : k.toFixed(1)}k`;
+    return `${symbol}${k >= 100 ? Math.round(k) : Number(k.toFixed(1))}k`;
   }
   return `${symbol}${Math.round(dollars)}`;
 }
@@ -228,7 +228,7 @@ export function SavedLine({
               className="fill-current text-[10px] font-semibold tabular-nums"
               style={{ fill: "var(--positive)", opacity: years[i].partial ? 0.65 : 1 }}
             >
-              {formatMoney(v, currency).replace(/\.\d\d$/, "")}
+              {formatMoneyWhole(v, currency).replace(/\.\d\d$/, "")}
             </text>
             <text
               x={x(i)}
@@ -301,7 +301,7 @@ function YearTip({ point, currency }: { point: YearPoint; currency: string }) {
             <span className="flex h-full items-center">
               <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: r.color }} />
             </span>
-            <span className={`text-right font-semibold tabular-nums ${r.tone}`}>{formatMoney(r.value, currency)}</span>
+            <span className={`text-right font-semibold tabular-nums ${r.tone}`}>{formatMoneyWhole(r.value, currency)}</span>
             <span className="text-muted">{r.label}</span>
           </div>
         ))}

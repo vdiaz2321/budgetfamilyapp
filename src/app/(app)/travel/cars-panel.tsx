@@ -1,6 +1,6 @@
 "use client";
 
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { sheetDateRange } from "./trip-summary";
 import type { TravelCar } from "./types";
 
@@ -59,12 +59,12 @@ export function CarsList({
                 {c.pointsUsed && c.pointsCost > 0 ? (
                   <Figure label="Pts used" value={c.pointsCost.toLocaleString()} style={{ color: "var(--viz-savings)" }} />
                 ) : null}
-                <Figure label={rental ? "Rental cost" : "Fuel & tolls"} value={formatMoney(c.costCents, currency)} />
+                <Figure label={rental ? "Rental cost" : "Fuel & tolls"} value={formatMoneyWhole(c.costCents, currency)} />
                 {/* Only when points paid part of it — otherwise it repeats the cost. */}
                 {c.pocketCostCents !== c.costCents ? (
                   <Figure
                     label="Pocket cost"
-                    value={formatMoney(c.pocketCostCents, currency)}
+                    value={formatMoneyWhole(c.pocketCostCents, currency)}
                     className={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
                   />
                 ) : null}

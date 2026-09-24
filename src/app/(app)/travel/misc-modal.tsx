@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
-import { centsToDisplay, currencySymbol, displayToCents, formatMoney } from "@/lib/money";
+import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { saveTripExpenses } from "./expense-actions";
 import { Field, inputClass } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
@@ -180,7 +180,7 @@ export function MiscModal({
   const totalDiff = totals.planned || totals.actual ? totals.planned - totals.actual : null;
   const diffCell = (d: number | null) => (
     <span className={`tabular-nums ${d == null ? "text-muted" : d >= 0 ? "text-positive" : "text-negative"}`}>
-      {d == null ? "—" : `${d >= 0 ? "" : "−"}${formatMoney(Math.abs(d), currency)}`}
+      {d == null ? "—" : `${d >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(d), currency)}`}
     </span>
   );
 
@@ -275,9 +275,9 @@ export function MiscModal({
                   {b.label}
                   <span className="text-[10px] font-normal uppercase tracking-wide text-muted">Booked</span>
                 </span>
-                <BookedCell label={`Planned (${currencySymbol(currency)})`} value={b.planned ? formatMoney(b.planned, currency) : "—"} />
+                <BookedCell label={`Planned (${currencySymbol(currency)})`} value={b.planned ? formatMoneyWhole(b.planned, currency) : "—"} />
                 <BookedCell label="Planned (€)" value="—" />
-                <BookedCell label={`Actual (${currencySymbol(currency)})`} value={b.actual ? formatMoney(b.actual, currency) : "—"} />
+                <BookedCell label={`Actual (${currencySymbol(currency)})`} value={b.actual ? formatMoneyWhole(b.actual, currency) : "—"} />
                 <BookedCell label="Actual (€)" value="—" />
                 <span className="col-span-2 flex items-baseline justify-between text-sm font-semibold sm:col-span-1 sm:block sm:text-center">
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">Difference</span>
@@ -310,9 +310,9 @@ export function MiscModal({
 
           <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[8.5rem_1fr_1fr_1fr_1fr_1fr] sm:text-center">
             <span className="col-span-2 sm:col-span-1 sm:text-left">Total</span>
-            <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Planned </span>{formatMoney(totals.planned, currency)}</span>
+            <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Planned </span>{formatMoneyWhole(totals.planned, currency)}</span>
             <span>€{centsToDisplay(totals.plannedEur)}</span>
-            <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Actual </span>{formatMoney(totals.actual, currency)}</span>
+            <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Actual </span>{formatMoneyWhole(totals.actual, currency)}</span>
             <span>€{centsToDisplay(totals.actualEur)}</span>
             <span className="col-span-2 sm:col-span-1">
               <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference </span>

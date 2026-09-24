@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
+import { centsPerPointToMicros } from "./points-value";
 import { syncFreeNightStamp, syncRewardLedger, type RewardDraw } from "./reward-ledger";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 
@@ -38,13 +39,6 @@ const text = (formData: FormData, key: string) =>
 const int = (formData: FormData, key: string) =>
   Math.max(0, Math.trunc(Number(String(formData.get(key) ?? "0").replace(/,/g, "")) || 0));
 
-// Dollars-per-point typed as "0.006" -> 6000 micros. Kept in one place so the
-// stay form and the card's own valuation stay on the same scale.
-function dollarsToMicros(raw: string): number | null {
-  const value = Number(raw.replace(/[$,\s]/g, ""));
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return Math.round(value * 1_000_000);
-}
 
 
 export async function saveTravelStay(formData: FormData) {
@@ -121,7 +115,7 @@ export async function saveTravelStay(formData: FormData) {
     check_in: checkIn,
     nights,
     pax: paxRaw > 0 ? paxRaw : null,
-    points_value_micros: dollarsToMicros(String(formData.get("pointsValue") ?? "")),
+    points_value_micros: centsPerPointToMicros(String(formData.get("pointsValueCents") ?? "")),
     hotel_credit_cents: hotelCredit,
     hotel_cost_cents: Math.max(0, displayToCents(String(formData.get("hotelCost") ?? "0"))),
     pocket_cost_cents: pocketCost,

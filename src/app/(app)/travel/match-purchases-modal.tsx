@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { listTripPurchaseCandidates, tagTripPurchases } from "@/app/(app)/budget/actions";
 import type { TripPurchaseCandidate } from "@/app/(app)/budget/types";
 import { sheetDate, sheetDateRange, type TripSummary } from "./trip-summary";
@@ -195,7 +195,7 @@ export function MatchPurchasesModal({
                       ) : null}
                     </span>
                     {/* Fixed width so every row's column picker lines up. */}
-                    <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums">{formatMoney(r.amountCents, currency)}</span>
+                    <span className="w-20 shrink-0 text-right text-sm font-semibold tabular-nums">{formatMoneyWhole(r.amountCents, currency)}</span>
                   </label>
                 </li>
               ))}
@@ -209,7 +209,7 @@ export function MatchPurchasesModal({
             {leftOut.map((r, i) => (
               <span key={r.id}>
                 {i ? "; " : ""}
-                <span className="font-semibold text-foreground">{r.payee ?? r.itemName} {formatMoney(r.amountCents, currency)}</span>
+                <span className="font-semibold text-foreground">{r.payee ?? r.itemName} {formatMoneyWhole(r.amountCents, currency)}</span>
                 {` — payment for ${r.looksLike}, already under ${r.looksLikeColumn ?? "Hotels"}`}
               </span>
             ))}
@@ -227,12 +227,12 @@ export function MatchPurchasesModal({
                   <span className="font-semibold">{p.label}</span>
                   {p.after == null ? (
                     <span className="tabular-nums text-muted">
-                      {formatMoney(p.before ?? 0, currency)}{p.typed ? " typed" : ""} — stays
+                      {formatMoneyWhole(p.before ?? 0, currency)}{p.typed ? " typed" : ""} — stays
                     </span>
                   ) : (
                     <span className="tabular-nums text-muted">
-                      {p.before != null ? `${formatMoney(p.before, currency)}${p.typed ? " typed" : ""} → ` : ""}
-                      <span className="font-semibold text-foreground">{formatMoney(p.after, currency)}</span>
+                      {p.before != null ? `${formatMoneyWhole(p.before, currency)}${p.typed ? " typed" : ""} → ` : ""}
+                      <span className="font-semibold text-foreground">{formatMoneyWhole(p.after, currency)}</span>
                       {` from ${p.count} purchase${p.count === 1 ? "" : "s"}`}
                     </span>
                   )}

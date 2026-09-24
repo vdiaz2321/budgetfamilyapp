@@ -2614,7 +2614,16 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
               <LabeledInput label="Date closed" name="dateClosed" type="date" />
               <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
               <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
-              <LabeledInput label="Value per point ($)" name="pointsValue" type="number" step="0.0001" placeholder="0.0020" />
+              <LabeledInput label="Value per pt (¢)" name="pointsValueCents" type="number" step="any" min="0" hint={
+                <a
+                  href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-neutral-950 dark:text-sky-400 dark:hover:bg-sky-900/40"
+                >
+                  TPG point values <span aria-hidden>↗</span>
+                </a>
+              } placeholder="0.75" />
               <LabeledInput label="Auth user" name="authUser" />
               <LabeledInput label="Charging" name="charging" placeholder="Netflix, Google Drive" />
               <LabeledInput label="Bonus info" name="bonusInfo" placeholder="60,000 pts" />

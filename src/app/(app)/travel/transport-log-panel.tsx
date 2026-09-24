@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ModalShell } from "@/components/modal-shell";
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { ExpandIcon } from "./travel-board";
 import { CarsList } from "./cars-panel";
 import { FlightsList } from "./flights-panel";
@@ -90,7 +90,7 @@ export function TransportLogPanel({
         </button>
         {/* One figure and the year it covers; the counts and the search open
             with the list. */}
-        <Figure label="Spent" value={formatMoney(total, currency)} className="text-negative" />
+        <Figure label="Spent" value={formatMoneyWhole(total, currency)} className="text-negative" />
         <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
           <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
         </span>
@@ -105,7 +105,7 @@ export function TransportLogPanel({
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <Figure label="Total flights" value={String(shownFlights.length)} />
               <Figure label="Total rentals" value={String(shownCars.length)} />
-              <Figure label="Spent" value={formatMoney(total, currency)} className="text-negative" />
+              <Figure label="Spent" value={formatMoneyWhole(total, currency)} className="text-negative" />
               <SearchBox value={query} onChange={setQuery} placeholder="Search airline, airport…" label="Search flights and rentals" className="w-44" />
               <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
             </span>

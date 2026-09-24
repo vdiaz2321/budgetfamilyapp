@@ -4,7 +4,7 @@ import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { formatMoney, formatMoneyWhole } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
 import { bookingPlanActual, sheetDate, sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
@@ -154,7 +154,7 @@ export function TripDetailModal({
           {budgetPlanCents > 0 ? (
             budgetMonth ? (
               <Link href={`/budget?month=${budgetMonth}`} className="font-semibold text-foreground underline decoration-line underline-offset-2 hover:text-sky-700 dark:hover:text-sky-300">
-                {formatMoney(budgetPlanCents, currency)} planned on Budget · {budgetMonthLabel} →
+                {formatMoneyWhole(budgetPlanCents, currency)} planned on Budget · {budgetMonthLabel} →
               </Link>
             ) : (
               <span className="font-semibold text-negative">Add dates to put its plan on the Budget</span>
@@ -212,23 +212,23 @@ export function TripDetailModal({
               under it as "+ $X planned" — same split as the Combined Log. */}
           <Stat
             label="Bookings"
-            value={formatMoney(t.flights + t.hotels + t.rentals - t.planOnly.bookings, currency)}
-            note={t.planOnly.bookings > 0 ? `+ ${formatMoney(t.planOnly.bookings, currency)} planned` : "flights · stays · rental"}
+            value={formatMoneyWhole(t.flights + t.hotels + t.rentals - t.planOnly.bookings, currency)}
+            note={t.planOnly.bookings > 0 ? `+ ${formatMoneyWhole(t.planOnly.bookings, currency)} planned` : "flights · stays · rental"}
           />
           <Stat
             label="Spending"
-            value={formatMoney(t.miscTotal - t.planOnly.miscTotal, currency)}
-            note={t.planOnly.miscTotal > 0 ? `+ ${formatMoney(t.planOnly.miscTotal, currency)} planned` : "day to day"}
+            value={formatMoneyWhole(t.miscTotal - t.planOnly.miscTotal, currency)}
+            note={t.planOnly.miscTotal > 0 ? `+ ${formatMoneyWhole(t.planOnly.miscTotal, currency)} planned` : "day to day"}
           />
           <Stat
             label="Total spent"
-            value={formatMoney(t.spent, currency)}
+            value={formatMoneyWhole(t.spent, currency)}
             className={t.spent > 0 ? "text-negative" : "text-muted"}
-            note={t.planOnly.total > 0 ? `+ ${formatMoney(t.planOnly.total, currency)} planned` : undefined}
+            note={t.planOnly.total > 0 ? `+ ${formatMoneyWhole(t.planOnly.total, currency)} planned` : undefined}
           />
           <Stat
             label={t.points > 0 ? "Pts used · saved" : "Saved"}
-            value={t.points > 0 ? `${t.points.toLocaleString()} · ${formatMoney(t.saved, currency)}` : formatMoney(t.saved, currency)}
+            value={t.points > 0 ? `${t.points.toLocaleString()} · ${formatMoneyWhole(t.saved, currency)}` : formatMoneyWhole(t.saved, currency)}
             className="text-positive"
           />
         </div>
@@ -274,11 +274,11 @@ export function TripDetailModal({
                         </span>
                       </span>
                       <MobileFigures
-                        planned={planned != null ? formatMoney(planned, currency) : DASH}
+                        planned={planned != null ? formatMoneyWhole(planned, currency) : DASH}
                         actual={
                           <>
                             {actual != null ? (
-                              <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoney(actual, currency)}</span>
+                              <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(actual, currency)}</span>
                             ) : (
                               <span className="font-normal text-muted">{DASH}</span>
                             )}
@@ -289,7 +289,7 @@ export function TripDetailModal({
                             ) : null}
                           </>
                         }
-                        diff={diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoney(Math.abs(diff), currency)}`}
+                        diff={diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
                         diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
                       />
                     </button>
@@ -300,8 +300,8 @@ export function TripDetailModal({
                 <li className="border-t-2 border-line px-3 py-2 font-bold">
                   <span className="text-sm">Total</span>
                   <MobileFigures
-                    planned={bookingTotals.planned ? formatMoney(bookingTotals.planned, currency) : DASH}
-                    actual={bookingTotals.actual ? formatMoney(bookingTotals.actual, currency) : DASH}
+                    planned={bookingTotals.planned ? formatMoneyWhole(bookingTotals.planned, currency) : DASH}
+                    actual={bookingTotals.actual ? formatMoneyWhole(bookingTotals.actual, currency) : DASH}
                     diff={DASH}
                     diffClass="text-muted"
                   />
@@ -353,11 +353,11 @@ export function TripDetailModal({
                           </button>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
-                          {planned != null ? formatMoney(planned, currency) : DASH}
+                          {planned != null ? formatMoneyWhole(planned, currency) : DASH}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-center font-semibold tabular-nums">
                           {actual != null ? (
-                            <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoney(actual, currency)}</span>
+                            <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(actual, currency)}</span>
                           ) : (
                             <span className="font-normal text-muted">{DASH}</span>
                           )}
@@ -368,7 +368,7 @@ export function TripDetailModal({
                           ) : null}
                         </td>
                         <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
-                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoney(Math.abs(diff), currency)}`}
+                          {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
                         </td>
                       </tr>
                     );
@@ -379,10 +379,10 @@ export function TripDetailModal({
                     <tr className="border-t-2 border-line font-bold">
                       <td className="px-3 py-1.5 text-left">Total</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
-                        {bookingTotals.planned ? formatMoney(bookingTotals.planned, currency) : DASH}
+                        {bookingTotals.planned ? formatMoneyWhole(bookingTotals.planned, currency) : DASH}
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
-                        {bookingTotals.actual ? formatMoney(bookingTotals.actual, currency) : DASH}
+                        {bookingTotals.actual ? formatMoneyWhole(bookingTotals.actual, currency) : DASH}
                       </td>
                       <td />
                     </tr>
@@ -706,7 +706,7 @@ function TaggedPurchaseList({ list, currency }: { list: TripTaggedPurchase[]; cu
             <span className="font-semibold">{p.payee ?? "—"}</span>
             <span className="text-muted"> · {p.item}</span>
           </span>
-          <span className="shrink-0 font-semibold tabular-nums">{formatMoney(p.amountCents, currency)}</span>
+          <span className="shrink-0 font-semibold tabular-nums">{formatMoneyWhole(p.amountCents, currency)}</span>
         </li>
       ))}
     </ul>

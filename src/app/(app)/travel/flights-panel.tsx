@@ -1,6 +1,6 @@
 "use client";
 
-import { formatMoney } from "@/lib/money";
+import { formatMoneyWhole } from "@/lib/money";
 import { sheetDateRange } from "./trip-summary";
 import type { TravelFlight } from "./types";
 
@@ -69,12 +69,12 @@ export function FlightsList({
                 {f.pointsUsed && f.pointsCost > 0 ? (
                   <Figure label="Pts used" value={f.pointsCost.toLocaleString()} style={{ color: "var(--viz-savings)" }} />
                 ) : null}
-                <Figure label="Flight cost" value={formatMoney(f.flightCostCents, currency)} />
+                <Figure label="Flight cost" value={formatMoneyWhole(f.flightCostCents, currency)} />
                 {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
                 {f.pocketCostCents !== f.flightCostCents ? (
                   <Figure
                     label="Pocket cost"
-                    value={formatMoney(f.pocketCostCents, currency)}
+                    value={formatMoneyWhole(f.pocketCostCents, currency)}
                     className={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
                   />
                 ) : null}

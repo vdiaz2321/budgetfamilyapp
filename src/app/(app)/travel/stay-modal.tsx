@@ -3,20 +3,21 @@
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { centsToDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { centsToDisplay, currencySymbol, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { PlannedPointsNote, PlannedSwitch, outsideTripNote } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
+import { formatCentsPerPoint, microsToCentsField } from "./points-value";
 
 const NO_CARD = "";
 
 // The rate is read at four decimals and stored at six — see the field's own
 // note in the form below.
-const rateDisplay = (micros: number) => String(Number((micros / 1_000_000).toFixed(4)));
-const rateExact = (micros: number) => String(Number((micros / 1_000_000).toFixed(6)));
+const rateDisplay = (micros: number) => microsToCentsField(micros);
+const rateExact = (micros: number) => microsToCentsField(micros, 4);
 
 export function StayModal({
   stay,
@@ -72,7 +73,7 @@ export function StayModal({
         // name gets "Enter the hotel name" rather than "nothing to add".
         return [
           "propertyName", "city", "reservedOn", "checkIn", "pax", "brand", "accountId", "cardLabel", "holder",
-          "freeNightPoints", "pointsCost", "pointsValue", "hotelCost", "pocketCost", "hotelCredit", "remarks",
+          "freeNightPoints", "pointsCost", "pointsValueCents", "hotelCost", "pocketCost", "hotelCredit", "remarks",
         ].every((k) => !String(fd.get(k) ?? "").trim());
       },
       save: async () => {
@@ -358,7 +359,7 @@ export function StayModal({
                 </span>
                 {card.freeNightCreditCents ? (
                   <span className="min-w-0 truncate" style={{ color: "var(--viz-bills)" }}>
-                    {formatMoney(card.freeNightCreditCents, currency).replace(/\.00$/, "")} night credit
+                    {formatMoneyWhole(card.freeNightCreditCents, currency)} night credit
                   </span>
                 ) : null}
                 {card.freeNightPointsLimit ? (
@@ -456,7 +457,7 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
-          <Field label={pointsUsed ? "Value per point" : "Value per pt"}>
+          <Field label="Value per pt (¢)">
             <input
               value={pointsValue}
               onChange={(e) => {
@@ -467,16 +468,16 @@ export function StayModal({
               className={inputClass}
             />
             {/* What actually posts: the rounded display never reaches the row. */}
-            <input type="hidden" name="pointsValue" value={exactRate ?? pointsValue} />
+            <input type="hidden" name="pointsValueCents" value={exactRate ?? pointsValue} />
             {/* The sum spelled out, in the unit the hobby speaks. Shown even
                 once the rate has been typed over, so a hand-entered number can
                 be read against what the room actually prices points at. */}
             {showRateHint ? (
               <span className="mt-0.5 block text-[10px] font-medium text-muted">
                 <span style={{ color: "var(--viz-savings)" }}>
-                  {(impliedMicros / 10_000).toFixed(2)}¢/pt
+                  {formatCentsPerPoint(impliedMicros / 10_000)}/pt
                 </span>{" "}
-                = {formatMoney(hotelCentsTyped, currency)} ÷ {pointsTyped.toLocaleString()} pts
+                = {formatMoneyWhole(hotelCentsTyped, currency)} ÷ {pointsTyped.toLocaleString()} pts
                 {rateEdited && microsToField(impliedMicros) !== pointsValue.trim() ? (
                   <>
                     {" · "}
@@ -625,7 +626,7 @@ export function StayModal({
             Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
             {[
               draw.points ? `${Math.abs(draw.points).toLocaleString()} pts` : null,
-              draw.credit ? `${formatMoney(Math.abs(draw.credit), currency)} night credit` : null,
+              draw.credit ? `${formatMoneyWhole(Math.abs(draw.credit), currency)} night credit` : null,
             ]
               .filter(Boolean)
               .join(" and ")}{" "}
@@ -668,7 +669,7 @@ export function StayModal({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             Saved on this stay{" "}
-            <span className="font-bold tabular-nums text-positive">{formatMoney(saved, currency)}</span>
+            <span className="font-bold tabular-nums text-positive">{formatMoneyWhole(saved, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {/* A family of five books two rooms: the second starts as a copy of
