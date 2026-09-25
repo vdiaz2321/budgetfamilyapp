@@ -67,6 +67,29 @@ export function bookingPlanActual(b: Booking): { planned: number | null; actual:
     : { planned: booking.plannedCostCents, actual: b.pocket };
 }
 
+/**
+ * The same booking's figures in its other currency (euros, pounds, …), for the
+ * "$810 / €700" pair. Null where that side was never typed.
+ */
+export function bookingForeign(b: Booking): { code: string; planned: number | null; actual: number | null } {
+  if (b.kind === "flight") {
+    const f = b.flight;
+    return f.isEstimate
+      ? { code: f.foreignCurrency, planned: f.flightCostEurCents, actual: null }
+      : { code: f.foreignCurrency, planned: f.plannedCostForeignCents, actual: f.flightCostEurCents };
+  }
+  if (b.kind === "stay") {
+    const s = b.stay;
+    return s.isEstimate
+      ? { code: s.foreignCurrency, planned: s.costForeignCents, actual: null }
+      : { code: s.foreignCurrency, planned: s.plannedCostForeignCents, actual: s.costForeignCents };
+  }
+  const c = b.car;
+  return c.isEstimate
+    ? { code: c.foreignCurrency, planned: c.costEurCents, actual: null }
+    : { code: c.foreignCurrency, planned: c.plannedCostForeignCents, actual: c.costEurCents };
+}
+
 function flightBooking(f: TravelFlight): Booking {
   const start = f.legs[0]?.flightOn ?? f.firstFlightOn;
   return {
@@ -278,4 +301,34 @@ export function bookingTotalsFor(
         { planned: 0, actual: 0 },
       );
   return { stay: add(stays), flight: add(flights), car: add(cars) };
+}
+
+/**
+ * The same per-kind totals in a foreign currency — only the bookings kept in
+ * `code` (a booking in pounds can't be added to euros). Null where none of
+ * them has a figure on that side.
+ */
+export function bookingForeignTotalsFor(
+  tripId: string,
+  stays: TravelStay[],
+  flights: TravelFlight[],
+  cars: TravelCar[],
+  code: string,
+): Record<"stay" | "flight" | "car", { planned: number | null; actual: number | null }> {
+  const add = (bookings: Booking[]) => {
+    const fx = bookings
+      .filter((b) => !b.cancelled)
+      .map(bookingForeign)
+      .filter((f) => f.code === code);
+    const sum = (vals: (number | null)[]) => {
+      const typed = vals.filter((v): v is number => v != null);
+      return typed.length ? typed.reduce((a, b) => a + b, 0) : null;
+    };
+    return { planned: sum(fx.map((f) => f.planned)), actual: sum(fx.map((f) => f.actual)) };
+  };
+  return {
+    stay: add(stays.filter((s) => s.tripId === tripId).map(stayBooking)),
+    flight: add(flights.filter((f) => f.tripId === tripId).map(flightBooking)),
+    car: add(cars.filter((c) => c.tripId === tripId).map(carBooking)),
+  };
 }

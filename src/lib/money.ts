@@ -102,6 +102,22 @@ export function currencySymbol(currency: string | null | undefined): string {
   return currency.length <= 2 ? currency : "$";
 }
 
+/**
+ * The sign a foreign currency is written with — "€", "£", "Kč", "CHF". Unlike
+ * currencySymbol (which only knows the household's own), this covers any ISO
+ * code, falling back to the code itself.
+ */
+export function foreignSymbol(code: string): string {
+  try {
+    const part = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" })
+      .formatToParts(0)
+      .find((p) => p.type === "currency");
+    return part?.value ?? code;
+  } catch {
+    return code;
+  }
+}
+
 export function formatMoney(cents: number, currency = "$"): string {
   const symbol = currencySymbol(currency);
   const abs = Math.abs(cents);
@@ -119,6 +135,12 @@ export function formatMoney(cents: number, currency = "$"): string {
  * Investments holdings card), where a column of ".00" is noise. Anything a
  * figure has to tie out against keeps formatMoney.
  */
+/** Whole units in any ISO currency — "€700", "CHF700", "Kč700". */
+export function formatForeignWhole(cents: number, code: string): string {
+  const units = Math.round(Math.abs(cents) / 100);
+  return `${cents < 0 ? "-" : ""}${foreignSymbol(code)}${units.toLocaleString("en-US")}`;
+}
+
 export function formatMoneyWhole(cents: number, currency = "$"): string {
   const symbol = currencySymbol(currency);
   const dollars = Math.round(Math.abs(cents) / 100);

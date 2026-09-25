@@ -501,7 +501,7 @@ function CreditCardSection({
     }
     return { points, value, redeemable, unvalued };
   };
-  const groupFigures = (cards: AccountData[]) => {
+  const groupFigures = (cards: AccountData[], cat: "travel" | "hotel") => {
     const { points, value, redeemable, unvalued } = groupRewards(cards);
     // Fixed-width slots from sm up, so the Travel and Hotel rows line their
     // figures up in columns; a slot with nothing to show still holds its
@@ -513,9 +513,9 @@ function CreditCardSection({
     const slots = [
       { show: points > 0, width: "sm:min-w-[7.25rem]", label: "Pts", text: points.toLocaleString(), className: "" },
       { show: value > 0, width: "sm:min-w-28", label: "Value", text: formatMoneyWhole(value, currency), className: "text-positive" },
-      // Only when a live annual credit makes it more than the points value
-      // — otherwise it would repeat the same figure.
-      { show: redeemable > value, width: "sm:min-w-[9.5rem]", label: "Redeemable", text: formatMoneyWhole(redeemable, currency), className: "text-positive" },
+      // Named for its group and shown on both rows, so the two line up and
+      // the Unused chip after it sits in one column.
+      { show: redeemable > 0, width: "sm:min-w-[11.5rem]", label: cat === "travel" ? "Travel Redeemable" : "Hotel Redeemable", text: formatMoneyWhole(redeemable, currency), className: "text-positive" },
       // The figure beside it is only as complete as the cents-per-point
       // typed on the cards, so say how much of the balance isn't in it.
       { show: unvalued > 0, width: "sm:min-w-40", label: "No value set", text: `${compactNum(unvalued)} pts`, className: "text-negative" },
@@ -1157,7 +1157,7 @@ function CreditCardSection({
                         {formatMoneyWhole(travelOwed, currency)}
                       </span>
                     </span>
-                    {groupFigures(travelCards)}
+                    {groupFigures(travelCards, "travel")}
                     {groupUnusedChip("travel")}
                   </div>
                   {!travelOpen ? null : travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-foreground/75">No travel cards yet.</p>}
@@ -1189,7 +1189,7 @@ function CreditCardSection({
                         {formatMoneyWhole(hotelOwed, currency)}
                       </span>
                     </span>
-                    {groupFigures(hotelCards)}
+                    {groupFigures(hotelCards, "hotel")}
                     {groupUnusedChip("hotel")}
                   </div>
                   {!hotelOpen ? null : hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-foreground/75">No hotel cards yet.</p>}
@@ -1488,8 +1488,12 @@ function PointsByCard({
         type="button"
         onClick={() => setOpenState((s) => ({ ...s, open: s.open !== true }))}
         aria-expanded={open}
-        className="flex w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-4 py-3 text-left transition hover:bg-background/40"
+        // Same columns as the Travel / Hotel Rewards rows above: a 12rem
+        // title slot, then "Total pts used" across their Owed + Pts slots so
+        // "Total cash saved" lands under Value.
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-left transition hover:bg-background/40"
       >
+        <span className="flex items-center gap-2 sm:min-w-48">
         <svg
           width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
@@ -1498,10 +1502,13 @@ function PointsByCard({
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
+        {/* Holds the place of the rows icon above, so the title lines up. */}
+        <span aria-hidden className="h-8 w-8 shrink-0" />
         <span className="shrink-0 whitespace-nowrap text-sm font-bold sm:text-base">Points by card</span>
+        </span>
         {total.redeemed.points > 0 ? (
           <>
-            <span className="flex shrink-0 items-baseline gap-1.5">
+            <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[16.75rem]">
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">
                 Total pts used:
               </span>

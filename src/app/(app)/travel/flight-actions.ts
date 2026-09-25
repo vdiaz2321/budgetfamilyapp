@@ -35,8 +35,8 @@ export type FlightPayload = {
   pointsValueCents: string;
   pocketCost: string;
   remarks: string;
-  /** Not bought yet — the fares are an estimate. */
-  isEstimate: boolean;
+  /** The second currency the foreign figures are in ("EUR", "GBP", …). */
+  foreignCurrency: string;
   legs: Array<{
     flightOn: string;
     flightNumber: string;
@@ -45,9 +45,20 @@ export type FlightPayload = {
     departsAt: string;
     arrivesAt: string;
   }>;
-  passengers: Array<{ travellerId: string | null; name: string; fare: string; fareEur: string; pointsUsed: boolean; points: string }>;
+  /** `fare` / `fareEur` are what was spent; `planned` / `plannedForeign` the plan. */
+  passengers: Array<{
+    travellerId: string | null; name: string;
+    planned: string; plannedForeign: string; fare: string; fareEur: string;
+    pointsUsed: boolean; points: string;
+  }>;
 };
 
+
+// Blank when nothing was planned, so "no plan" never reads as a $0 plan.
+function plannedTotal<T>(rows: T[], pick: (row: T) => number | null): number | null {
+  const typed = rows.map(pick).filter((v): v is number => v != null);
+  return typed.length ? typed.reduce((a, b) => a + b, 0) : null;
+}
 
 const flightNote = (airline: string, bookingCode: string | null) =>
   bookingCode ? `${airline} ${bookingCode}` : airline;
@@ -72,14 +83,25 @@ export async function saveTravelFlight(payload: FlightPayload) {
       arrivesAt: clean(leg.arrivesAt),
     }))
     .filter((leg) => leg.flightOn || leg.flightNumber || leg.fromPlace || leg.toPlace);
-  const passengers = payload.passengers
+  const named = payload.passengers.filter((p) => p.name.trim());
+  // Bought once a Spent fare or the booking date is in; a plan until then
+  // (isPlannedOnly in travel-form, the same rule the form shows).
+  const isEstimate = !named.some((p) => p.fare.trim() || p.fareEur.trim()) && !reservedOn;
+  const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : null);
+  const passengers = named
     .map((p) => {
       const points = Math.max(0, Math.trunc(Number(p.points.replace(/,/g, "")) || 0));
+      const plannedFareCents = cents(p.planned);
+      const plannedFareForeignCents = cents(p.plannedForeign);
       return {
         travellerId: p.travellerId || null,
         name: p.name.trim(),
-        fareCents: Math.max(0, displayToCents(p.fare)),
-        fareEurCents: p.fareEur.trim() ? Math.max(0, displayToCents(p.fareEur)) : null,
+        // The fare columns hold what the seat costs now — the plan until it
+        // is bought — so every total that reads them is unchanged.
+        fareCents: (isEstimate ? plannedFareCents : cents(p.fare)) ?? 0,
+        fareEurCents: isEstimate ? plannedFareForeignCents : cents(p.fareEur),
+        plannedFareCents,
+        plannedFareForeignCents,
         // A ticket is on points only when it has points on it.
         pointsUsed: p.pointsUsed && points > 0,
         pointsCost: p.pointsUsed ? points : 0,
@@ -109,7 +131,6 @@ export async function saveTravelFlight(payload: FlightPayload) {
   // The booking's points are its points tickets added up.
   const pointsCost = passengers.reduce((sum, p) => sum + (p.pointsUsed ? p.pointsCost : 0), 0);
   const pointsUsed = pointsCost > 0;
-  const isEstimate = Boolean(payload.isEstimate);
   // What the card gives up: nothing until the tickets are actually bought.
   const drawPoints = isEstimate || !pointsUsed ? 0 : pointsCost;
   const flightCost = passengers.reduce((sum, p) => sum + p.fareCents, 0);
@@ -155,9 +176,12 @@ export async function saveTravelFlight(payload: FlightPayload) {
       : null,
     pocket_cost_cents: pocketCost,
     is_estimate: isEstimate,
-    // While an estimate, its cost is the plan; once bought the last plan stays
-    // put so the trip can compare it with what was really paid.
-    ...(isEstimate ? { planned_cost_cents: pocketCost } : {}),
+    foreign_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : "EUR",
+    // While an estimate, its cost is the plan. Once bought, the plan is the
+    // Planned column added up (cash seats, as pocket cost counts them), kept
+    // so the trip can set it beside what was really paid.
+    planned_cost_cents: isEstimate ? pocketCost : plannedTotal(passengers, (p) => (p.pointsUsed ? null : p.plannedFareCents)),
+    planned_cost_foreign_cents: plannedTotal(passengers, (p) => p.plannedFareForeignCents),
     remarks: clean(payload.remarks),
     updated_at: new Date().toISOString(),
   };
@@ -253,6 +277,8 @@ export async function saveTravelFlight(payload: FlightPayload) {
       name: p.name,
       fare_cents: p.fareCents,
       fare_eur_cents: p.fareEurCents,
+      planned_fare_cents: p.plannedFareCents,
+      planned_fare_foreign_cents: p.plannedFareForeignCents,
       points_used: p.pointsUsed,
       points_cost: p.pointsCost,
     })),

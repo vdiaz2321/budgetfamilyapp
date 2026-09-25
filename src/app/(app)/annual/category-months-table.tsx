@@ -113,27 +113,66 @@ export function CategoryMonthsTable({
 
   return (
     <section className="overflow-clip rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <button
-        type="button"
-        onClick={() => setCollapse({ open: !open })}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+      {/* Same columns as the groups below, widened by their 12px inset (the
+          p-3 wrapper), so Total and each month sit right over the groups'
+          figures. Registered with the scrollers so it follows them sideways,
+          and pinned just below the hero cards so the month names stay in
+          view down a long group. */}
+      <div
+        ref={(el) => {
+          if (el) scrollersRef.current.add(el);
+        }}
+        className="sticky z-20 border-b border-line bg-surface"
+        style={{ overflowX: "hidden", top: "var(--annual-hero-h, 0px)" }}
       >
-        <Chevron open={open} />
-        <span className="font-semibold">Category by Months</span>
-        {selected.size > 0 ? <ClearSelectionButton onClear={onClearSelection} /> : null}
-      </button>
+        <button
+          type="button"
+          onClick={() => setCollapse({ open: !open })}
+          aria-expanded={open}
+          className="grid w-full items-center gap-2 py-2.5 pr-7 text-left transition hover:bg-brand-soft/25"
+          style={{
+            gridTemplateColumns: `calc(13rem + 12px) minmax(8rem,1fr) repeat(${monthCount},minmax(7rem,1fr))`,
+            minWidth: `calc(${14 + 8 + 7 * monthCount}rem + 24px)`,
+          }}
+        >
+          {/* Clear drops under the title: beside it, it would run into the
+              Total column (this column is sized to line up, not to fit it). */}
+          <span className="sticky left-0 z-10 -my-2.5 flex flex-col justify-center gap-1 self-stretch bg-surface py-2.5 pl-4">
+            <span className="flex items-center gap-2.5">
+              <Chevron open={open} />
+              <span className="whitespace-nowrap font-semibold">Category by Months</span>
+            </span>
+            {selected.size > 0 ? (
+              <span className="pl-[25px]">
+                <ClearSelectionButton onClear={onClearSelection} />
+              </span>
+            ) : null}
+          </span>
+          {open && groups.length ? (
+            <>
+              <YearBand pad="-my-2.5">
+                <span className="w-full text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
+                  Total
+                </span>
+              </YearBand>
+              {visibleMonths(monthLabels, monthCount).map((m) => (
+                <span key={m} className={periodHeaderClass(m === currentMonthLabel)}>
+                  {m}
+                </span>
+              ))}
+            </>
+          ) : null}
+        </button>
+      </div>
 
       {open ? (
         groups.length ? (
-          <div className="space-y-3 border-t border-line bg-brand-soft/10 p-3">
+          <div className="space-y-3 bg-brand-soft/10 p-3">
             {groups.map((g) => (
               <Group
                 key={g.categoryId}
                 group={g}
-                monthLabels={visibleMonths(monthLabels, monthCount)}
                 monthCount={monthCount}
-                currentMonthLabel={currentMonthLabel}
                 currency={currency}
                 scrollersRef={scrollersRef}
                 syncScrollX={syncScrollX}
@@ -155,9 +194,7 @@ export function CategoryMonthsTable({
 
 function Group({
   group,
-  monthLabels,
   monthCount,
-  currentMonthLabel,
   currency,
   scrollersRef,
   syncScrollX,
@@ -165,9 +202,7 @@ function Group({
   onToggleCell,
 }: {
   group: CatMonthGroup;
-  monthLabels: string[];
   monthCount: number;
-  currentMonthLabel: string | null;
   currency: string;
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
@@ -187,7 +222,6 @@ function Group({
   // Only indent the plain rows when something in this group actually has a
   // chevron to line them up with.
   const anyExpandable = group.rows.some((r) => (r.details?.length ?? 0) > 0);
-  const headerRef = useRef<HTMLDivElement>(null);
 
   // What the header figure answers changes with the selection: with cells
   // picked in this group it reports their sum, so a group can be read without
@@ -216,79 +250,77 @@ function Group({
     return count > 0 ? { sum, count } : null;
   }, [group, selected]);
 
-  function syncHeader(scrollLeft: number) {
-    if (headerRef.current) headerRef.current.scrollLeft = scrollLeft;
-  }
 
   return (
     <div
       data-category-id={group.categoryId}
       className="overflow-clip rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10"
     >
-      <button
-        type="button"
-        onClick={() => setCollapse({ open: !open })}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 bg-brand-soft/40 px-4 py-2 text-left transition hover:bg-brand-soft/60"
+      {/* The group's bar carries its totals: the year in the Year total
+          column, then each month's total under that month. It scrolls with
+          the table below (it's registered with the other scrollers), so the
+          figures stay in their columns. */}
+      <div
+        ref={(el) => {
+          if (el) scrollersRef.current.add(el);
+        }}
+        className="bg-brand-soft/40"
+        style={{ overflowX: "hidden" }}
       >
-        <Chevron open={open} small />
-        <span className="text-[13px] font-bold uppercase tracking-wide">{group.label}</span>
-        <span className="ml-3 text-[13px] font-bold uppercase tracking-wide">
-          {picked ? `Selected (${picked.count}):` : "Total:"}
-        </span>
-        <span
-          className="text-[13px] font-bold tabular-nums"
-          style={{ color: picked ? KIND_COLOR[group.kind] : "var(--foreground)" }}
+        <button
+          type="button"
+          onClick={() => setCollapse({ open: !open })}
+          aria-expanded={open}
+          className="grid w-full items-center gap-2 py-2 pr-4 text-left transition hover:bg-brand-soft/30"
+          style={{ ...gridStyle(monthCount), ...trackMinWidth(monthCount) }}
         >
-          {formatMoney(picked ? picked.sum : group.total, currency)}
-        </span>
-        {picked ? (
-          <span className="text-[13px] font-bold tabular-nums">
-            of {formatMoney(group.total, currency)}
+          {/* Solid underlay so month figures scrolling beneath don't show
+              through the pinned label. */}
+          <span className="sticky left-0 z-10 -my-2 flex self-stretch bg-surface">
+            <span className="flex min-w-0 flex-1 items-center gap-2 bg-brand-soft/40 pl-4">
+              <Chevron open={open} small />
+              <span className="truncate text-[13px] font-bold uppercase tracking-wide">{group.label}</span>
+              {picked ? (
+                <span className="whitespace-nowrap text-[12px] font-semibold text-muted">
+                  {picked.count} selected
+                </span>
+              ) : null}
+            </span>
           </span>
-        ) : null}
-      </button>
+          <YearBand pad="-my-2">
+            <span className="flex w-full flex-col items-center tabular-nums">
+              <span
+                className="text-[15px] font-bold"
+                style={{ color: picked ? KIND_COLOR[group.kind] : "var(--foreground)" }}
+              >
+                {formatMoney(picked ? picked.sum : group.total, currency)}
+              </span>
+              {picked ? (
+                <span className="text-[11px] font-semibold text-muted">
+                  of {formatMoney(group.total, currency)}
+                </span>
+              ) : null}
+            </span>
+          </YearBand>
+          {visibleMonths(group.monthTotals, monthCount).map((v, i) => (
+            <span key={i} className="text-center text-[15px] font-bold tabular-nums">
+              {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
+            </span>
+          ))}
+        </button>
+      </div>
 
       {open ? (
         <>
-          <div
-            ref={headerRef}
-            className="sticky z-20 border-y border-line bg-surface"
-            // Just below the pinned hero cards, which would otherwise cover it.
-            style={{ overflowX: "hidden", top: "var(--annual-hero-h, 0px)" }}
-          >
-            <div style={trackMinWidth(monthCount)}>
-              <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle(monthCount)}>
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[15px] font-bold uppercase tracking-wide text-foreground whitespace-nowrap">
-                  Category
-                </span>
-                <YearBand pad="-my-2">
-                  <span className="w-full text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
-                    Year total
-                  </span>
-                </YearBand>
-                {monthLabels.map((m) => (
-                  <span
-                    key={m}
-                    className={periodHeaderClass(m === currentMonthLabel)}
-                  >
-                    {m}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
           <div
             ref={(el) => {
               if (el) scrollersRef.current.add(el);
             }}
             onScroll={(e) => {
               const x = e.currentTarget.scrollLeft;
-              syncHeader(x);
               syncScrollX(x);
             }}
-            className="scroll-handle overflow-x-auto"
+            className="scroll-handle overflow-x-auto border-t border-line"
           >
             <div style={trackMinWidth(monthCount)}>
               <ul className="divide-y divide-line">
@@ -421,23 +453,6 @@ function Group({
                 })}
               </ul>
 
-              {/* Subtotal */}
-              <div
-                className="grid items-center gap-2 border-t border-line pr-4 py-2"
-                style={gridStyle(monthCount)}
-              >
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[15px] font-bold">Total</span>
-                <YearBand pad="-my-2">
-                  <span className="w-full text-center text-[18px] font-bold tabular-nums">
-                    {formatMoney(group.total, currency)}
-                  </span>
-                </YearBand>
-                {visibleMonths(group.monthTotals, monthCount).map((v, i) => (
-                  <span key={i} className="text-center text-[18px] font-bold tabular-nums">
-                    {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
-                  </span>
-                ))}
-              </div>
             </div>
           </div>
         </>
@@ -452,7 +467,7 @@ function Group({
  * the month columns. `pad` cancels the row's own vertical padding so the band
  * meets the band in the row above instead of breaking into stripes.
  */
-export function YearBand({ pad, children }: { pad: "-my-2" | "-my-1.5"; children: React.ReactNode }) {
+export function YearBand({ pad, children }: { pad: "-my-2" | "-my-2.5" | "-my-1.5"; children: React.ReactNode }) {
   return (
     <span
       className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-black/[0.035] px-1 dark:bg-white/[0.05]`}

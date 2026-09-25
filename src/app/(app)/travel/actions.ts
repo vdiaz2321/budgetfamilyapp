@@ -60,14 +60,23 @@ export async function saveTravelStay(formData: FormData) {
   const freeNightUsed = formData.get("freeNightUsed") === "on";
   const freeNightPoints = int(formData, "freeNightPoints") || null;
   const pointsUsed = formData.get("pointsUsed") === "on" && pointsCost > 0 && !freeNightUsed;
-  // Not booked yet: nothing — points, night credit or certificate — leaves a
-  // card until it is switched to booked.
-  const isEstimate = formData.get("isEstimate") === "on";
+  const money = (k: string) => {
+    const v = String(formData.get(k) ?? "").trim();
+    return v ? Math.max(0, displayToCents(v)) : null;
+  };
+  // Booked once a Spent figure or the reservation date is in (isPlannedOnly
+  // in travel-form); a plan until then. A plan takes nothing — points, night
+  // credit or certificate — off a card.
+  const isEstimate = money("pocketCost") == null && money("spentForeign") == null && !reservedOn;
+  const plannedCost = money("plannedCost");
   const pointsDrawn = pointsUsed && !isEstimate ? pointsCost : 0;
   const hotelCredit = Math.max(0, displayToCents(String(formData.get("hotelCredit") ?? "0")));
   const creditDrawn = isEstimate ? 0 : hotelCredit;
   const certificateUsed = freeNightUsed && !isEstimate;
-  const pocketCost = Math.max(0, displayToCents(String(formData.get("pocketCost") ?? "0")));
+  // The pocket column holds what the stay costs now — the plan until it is
+  // booked — so every total that reads it is unchanged.
+  const pocketCost = (isEstimate ? plannedCost : money("pocketCost")) ?? 0;
+  const foreignCurrency = String(formData.get("foreignCurrency") ?? "");
 
   // How the out-of-pocket half was settled is not a choice any more: it is
   // whatever the numbers say. Money paid means the card; nothing paid means
@@ -123,8 +132,13 @@ export async function saveTravelStay(formData: FormData) {
     points_used: pointsUsed,
     pocket_paid_with: pocketPaidWith,
     is_estimate: isEstimate,
-    // While planned, its cost is the plan; once booked the last plan stays put.
-    ...(isEstimate ? { planned_cost_cents: pocketCost } : {}),
+    // While planned, its cost is the plan; once booked, the Planned figure
+    // stays beside what was paid.
+    planned_cost_cents: isEstimate ? pocketCost : plannedCost,
+    planned_cost_foreign_cents: money("plannedCostForeign"),
+    cost_foreign_cents: isEstimate ? money("plannedCostForeign") : money("spentForeign"),
+    // Absent from a form that doesn't offer it; the column's default holds.
+    ...(/^[A-Z]{3}$/.test(foreignCurrency) ? { foreign_currency: foreignCurrency } : {}),
     remarks: text(formData, "remarks"),
     breakfast_included: formData.get("breakfastIncluded") === "on",
     free_night_used: freeNightUsed,

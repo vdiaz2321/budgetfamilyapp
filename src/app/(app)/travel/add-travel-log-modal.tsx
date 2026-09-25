@@ -147,7 +147,7 @@ export function AddTravelLogModal({
       // line so a new trip has already been created by then; on its own it
       // creates the trip itself.
       if (hasDates && !done.includes("misc")) {
-        const result = await saveTripExpenses({ ...trip, startOn, endOn, rows: [] });
+        const result = await saveTripExpenses({ ...trip, startOn, endOn, foreignCurrency: "", rows: [] });
         if (result.error) failed.dates = result.error;
         else done.push("dates");
       }

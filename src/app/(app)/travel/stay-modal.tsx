@@ -7,7 +7,11 @@ import { centsToDisplay, currencySymbol, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelStay, saveTravelStay, setTravelStayCancelled } from "./actions";
 import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
-import { PlannedPointsNote, PlannedSwitch, outsideTripNote } from "./travel-form";
+import { CurrencyConverter } from "@/components/currency-converter";
+import {
+  CurrencySelect, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote,
+  type PlanSpent, type PlanSpentSlot,
+} from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
@@ -73,7 +77,7 @@ export function StayModal({
         // name gets "Enter the hotel name" rather than "nothing to add".
         return [
           "propertyName", "city", "reservedOn", "checkIn", "pax", "brand", "accountId", "cardLabel", "holder",
-          "freeNightPoints", "pointsCost", "pointsValueCents", "hotelCost", "pocketCost", "hotelCredit", "remarks",
+          "freeNightPoints", "pointsCost", "pointsValueCents", "hotelCost", "pocketCost", "plannedCost", "plannedCostForeign", "spentForeign", "hotelCredit", "remarks",
         ].every((k) => !String(fd.get(k) ?? "").trim());
       },
       save: async () => {
@@ -100,6 +104,7 @@ export function StayModal({
           hotelCreditCents: 0, hotelCostCents: 0, pocketCostCents: 0, pocketPaidWith: "card",
           remarks: null, breakfastIncluded: false, cancelledAt: null, rewardActivityId: null,
           freeNightUsed: false, isEstimate, plannedCostCents: null, freeNightPoints: null,
+          plannedCostForeignCents: null, costForeignCents: null, foreignCurrency,
           movesCardPoints: true,
         };
   }
@@ -144,11 +149,20 @@ export function StayModal({
   const datesOutOfOrder = Boolean(reservedOn && checkIn && checkIn < reservedOn);
   // Live totals so the saving is visible while typing, not only after saving.
   const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
-  const [pocketCost, setPocketCost] = useState(money(stay?.pocketCostCents));
-  const [isEstimate, setIsEstimate] = useState(stay?.isEstimate ?? roomOf?.isEstimate ?? Boolean(embed));
-  // A new stay starts Planned. Typing the date the reservation was made says
-  // it is booked, so the switch follows — unless it was set by hand.
-  const [statusTouched, setStatusTouched] = useState(Boolean(stay));
+  // Planned and Spent side by side. Spent is what left the wallet (the
+  // pocket cost). A stay still planned keeps its plan in the pocket column
+  // too; here it shows only under Planned.
+  const [fig, setFig] = useState<PlanSpent>(() => ({
+    planned: money((stay?.isEstimate ? stay.pocketCostCents : stay?.plannedCostCents) ?? undefined),
+    plannedForeign: money((stay?.isEstimate ? stay.costForeignCents : stay?.plannedCostForeignCents) ?? undefined),
+    spent: stay?.isEstimate ? "" : money(stay?.pocketCostCents),
+    spentForeign: stay?.isEstimate ? "" : money(stay?.costForeignCents ?? undefined),
+  }));
+  const [foreignCurrency, setForeignCurrency] = useState(base?.foreignCurrency ?? "EUR");
+  const lastSlot = useRef<PlanSpentSlot | null>(null);
+  // Booked once a Spent figure or the booking date is in; a plan until then.
+  const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
+  const pocketCost = isEstimate ? fig.planned : fig.spent;
   const tripNote = outsideTripNote(trips, trip.tripId, [checkIn]);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
@@ -298,10 +312,7 @@ export function StayModal({
               type="date"
               name="reservedOn"
               value={reservedOn}
-              onChange={(e) => {
-                setReservedOn(e.target.value);
-                if (e.target.value && !statusTouched) setIsEstimate(false);
-              }}
+              onChange={(e) => setReservedOn(e.target.value)}
               className={inputClass}
             />
           </Field>
@@ -390,22 +401,48 @@ export function StayModal({
           </Field>
         </div>
 
-        {/* Booked, or still a planned price — just above the prices it describes. */}
-        <div className="sm:col-span-2">
-          <PlannedSwitch
-            value={isEstimate}
-            onChange={(v) => {
-              setIsEstimate(v);
-              setStatusTouched(true);
-            }}
+        {/* Planned beside Spent, each in dollars and the stay's other
+            currency. Spent is what left the wallet. */}
+        <div className="space-y-2 sm:col-span-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
+            <div className="has-[.rounded-xl]:basis-full">
+              <CurrencyConverter
+                blue
+                defaultFrom={foreignCurrency}
+                // Fills Planned or Spent — whichever was clicked last, else
+                // Planned while it is still a plan.
+                onUse={(cents, from) => {
+                  const planned = lastSlot.current ? lastSlot.current.startsWith("planned") : isEstimate;
+                  setFig((f) => ({
+                    ...f,
+                    [planned ? "planned" : "spent"]: centsToDisplay(cents),
+                    ...(from.currency === foreignCurrency
+                      ? { [planned ? "plannedForeign" : "spentForeign"]: centsToDisplay(from.amountCents) }
+                      : {}),
+                  }));
+                }}
+              />
+            </div>
+          </div>
+          <PlanSpentFields
+            value={fig}
+            onChange={setFig}
+            currency={currency}
+            foreignCurrency={foreignCurrency}
+            onFocusSlot={(slot) => (lastSlot.current = slot)}
           />
-          {isEstimate ? <input type="hidden" name="isEstimate" value="on" /> : null}
+          <input type="hidden" name="plannedCost" value={fig.planned} />
+          <input type="hidden" name="plannedCostForeign" value={fig.plannedForeign} />
+          <input type="hidden" name="pocketCost" value={fig.spent} />
+          <input type="hidden" name="spentForeign" value={fig.spentForeign} />
+          <input type="hidden" name="foreignCurrency" value={foreignCurrency} />
         </div>
 
         {/* The six figures are all short — the free-night cap, points, a
              rate, three money amounts — so they ride on one line instead of
              eating six rows of the form. Two per row at 375px. */}
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
           {/* A category-capped certificate (World of Hyatt) has no points
               ceiling to type — the field shows the category instead, read-only,
               and the stay saves no free-night points. */}
@@ -504,15 +541,6 @@ export function StayModal({
               name="hotelCost"
               value={hotelCost}
               onChange={(e) => setHotelCost(e.target.value)}
-              inputMode="decimal"
-              className={inputClass}
-            />
-          </Field>
-          <Field label={`Pocket cost (${currencySymbol(currency)})`}>
-            <input
-              name="pocketCost"
-              value={pocketCost}
-              onChange={(e) => setPocketCost(e.target.value)}
               inputMode="decimal"
               className={inputClass}
             />

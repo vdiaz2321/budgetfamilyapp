@@ -44,6 +44,10 @@ export type TravelStay = {
   isEstimate: boolean;
   // The estimate, kept after it is booked so planned sits beside actual.
   plannedCostCents: number | null;
+  plannedCostForeignCents: number | null;
+  /** What was paid, in `foreignCurrency`. */
+  costForeignCents: number | null;
+  foreignCurrency: string;
   freeNightPoints: number | null;
   // True only for stays created in the app. Imported stays never took points
   // off a card, so editing them must not move a balance.
@@ -131,6 +135,11 @@ export type FlightPassenger = {
   // ticket too, as what the seat would have cost in cash.
   fareCents: number;
   fareEurCents: number | null;
+  // The plan for this seat, kept beside what was paid. Blank on a seat that
+  // was bought without one. `fareEurCents` and this one's foreign twin are
+  // in the flight's `foreignCurrency`, whatever the old name says.
+  plannedFareCents: number | null;
+  plannedFareForeignCents: number | null;
   pointsUsed: boolean;
   pointsCost: number;
 };
@@ -159,6 +168,9 @@ export type TravelFlight = {
   isEstimate: boolean;
   // The estimate, kept after it is bought so planned sits beside actual.
   plannedCostCents: number | null;
+  plannedCostForeignCents: number | null;
+  /** The second currency its figures are also kept in ("EUR", "GBP", …). */
+  foreignCurrency: string;
   pocketCostCents: number;
   remarks: string | null;
   cancelledAt: string | null;
@@ -194,11 +206,14 @@ export type TravelCar = {
   pointsValueMicros: number | null;
   // Rental: the cash price. Own car: fuel and tolls.
   costCents: number;
+  /** In `foreignCurrency`, whatever the old name says. */
   costEurCents: number | null;
   movesCardPoints: boolean;
   // Not booked yet — see TravelStay.isEstimate.
   isEstimate: boolean;
   plannedCostCents: number | null;
+  plannedCostForeignCents: number | null;
+  foreignCurrency: string;
   pocketCostCents: number;
   remarks: string | null;
   cancelledAt: string | null;
@@ -213,6 +228,9 @@ export type TravelTrip = {
   startOn: string | null;
   endOn: string | null;
   notes: string | null;
+  /** The second currency of its Spending table ("EUR", "GBP", …). The
+   *  expenses' *_eur_cents columns are in it, whatever their name says. */
+  spendingCurrency: string;
 };
 
 // A trip's day-to-day spending, one total per category for the whole trip.

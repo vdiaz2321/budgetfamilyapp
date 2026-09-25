@@ -7,10 +7,11 @@ import { useState } from "react";
 
 // Currencies most likely to come up on travel receipts. Add more as needed —
 // the API returns rates for ~150 currencies, but a big <select> is worse UX.
-const FX_CURRENCIES = [
+// Also the list the Travel forms offer for a booking's second currency.
+export const FX_CURRENCIES = [
   "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY",
   "MXN", "INR", "KRW", "TRY", "BRL", "SGD", "HKD",
-  "SEK", "NOK", "DKK", "PLN", "THB", "ZAR",
+  "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "THB", "ZAR",
 ] as const;
 
 // Module-level cache so the modal doesn't re-fetch every time it opens.
@@ -23,8 +24,11 @@ export type ConvertedFrom = { currency: string; amountCents: number };
 export function CurrencyConverter({
   onUse,
   blue = false,
+  defaultFrom,
 }: {
   onUse: (usdCents: number, from: ConvertedFrom) => void;
+  /** The currency it opens on — a Travel booking's own foreign currency. */
+  defaultFrom?: string;
   /** Blue instead of the indigo brand colour — the Travel forms use no purple. */
   blue?: boolean;
 }) {
@@ -43,6 +47,7 @@ export function CurrencyConverter({
   // and one-tap "Use $X.XX" always shows the number.
   function openConverter() {
     setOpen(true);
+    if (defaultFrom) setFrom(defaultFrom);
     if (rates) return;
     setLoading(true);
     setError(null);

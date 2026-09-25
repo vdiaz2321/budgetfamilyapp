@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
-import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
+import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatMoneyWhole } from "@/lib/money";
 import {
   addTraveller,
   deleteTraveller,
@@ -13,7 +13,7 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { Field, PlannedPointsNote, PlannedSwitch, Section, inputClass, outsideTripNote } from "./travel-form";
+import { CurrencySelect, Field, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -30,12 +30,19 @@ type LegDraft = {
   departsAt: string;
   arrivesAt: string;
 };
-type PassengerDraft = { key: number; travellerId: string | null; name: string; fare: string; fareEur: string; pointsUsed: boolean; points: string };
+// `fare` / `fareEur` are what was spent; `planned` / `plannedForeign` the
+// plan beside it. Both foreign figures are in the booking's other currency.
+type PassengerDraft = {
+  key: number; travellerId: string | null; name: string;
+  planned: string; plannedForeign: string; fare: string; fareEur: string;
+  pointsUsed: boolean; points: string;
+};
+type FareSlot = "planned" | "plannedForeign" | "fare" | "fareEur";
 
 type FlightCopy = {
   airline: string;
   reservedOn: string;
-  isEstimate: boolean;
+  foreignCurrency: string;
   homePlace: string;
   passengers: { travellerId: string | null; name: string }[];
 };
@@ -44,9 +51,17 @@ let nextKey = 1;
 const emptyLeg = (from = "", to = ""): LegDraft => ({
   key: nextKey++, flightOn: "", flightNumber: "", fromPlace: from, toPlace: to, departsAt: "", arrivesAt: "",
 });
-const emptyPassenger = (): PassengerDraft => ({ key: nextKey++, travellerId: null, name: "", fare: "", fareEur: "", pointsUsed: false, points: "" });
+const emptyPassenger = (): PassengerDraft => ({
+  key: nextKey++, travellerId: null, name: "", planned: "", plannedForeign: "", fare: "", fareEur: "", pointsUsed: false, points: "",
+});
+const money = (cents: number | null | undefined) => (cents ? centsToDisplay(cents) : "");
 
 const rateDisplay = (micros: number) => microsToCentsField(micros);
+
+// Passenger rows: ✕, name, Planned $ / other, Spent $ / other, points. On a
+// phone the name takes its own line and the four figures share the next.
+const PAX_GRID =
+  "grid grid-cols-[1.75rem_repeat(4,minmax(0,1fr))] gap-2 sm:grid-cols-[1.75rem_minmax(0,12rem)_repeat(5,6.5rem)]";
 
 export function FlightModal({
   flight,
@@ -86,10 +101,8 @@ export function FlightModal({
   // Not editable here any more; kept so saving leaves an existing code alone.
   const [bookingCode] = useState(flight?.bookingCode ?? "");
   const [reservedOn, setReservedOn] = useState(flight?.reservedOn ?? copyOf?.reservedOn ?? "");
-  const [isEstimate, setIsEstimate] = useState(flight?.isEstimate ?? copyOf?.isEstimate ?? Boolean(embed));
-  // Typing the booking date says the tickets are bought: the switch follows
-  // unless it was set by hand.
-  const [statusTouched, setStatusTouched] = useState(Boolean(flight));
+  const [foreignCurrency, setForeignCurrency] = useState(flight?.foreignCurrency ?? copyOf?.foreignCurrency ?? "EUR");
+  const fx = foreignSymbol(foreignCurrency);
   const [legs, setLegs] = useState<LegDraft[]>(() =>
     flight?.legs.length
       ? flight.legs.map((l) => ({
@@ -109,8 +122,12 @@ export function FlightModal({
           key: nextKey++,
           travellerId: p.travellerId,
           name: p.name,
-          fare: p.fareCents ? centsToDisplay(p.fareCents) : "",
-          fareEur: p.fareEurCents != null ? centsToDisplay(p.fareEurCents) : "",
+          // A flight still planned keeps its plan in the fare columns too;
+          // here it shows only under Planned.
+          planned: money(flight.isEstimate ? p.fareCents : p.plannedFareCents),
+          plannedForeign: money(flight.isEstimate ? p.fareEurCents : p.plannedFareForeignCents),
+          fare: flight.isEstimate ? "" : money(p.fareCents),
+          fareEur: flight.isEstimate ? "" : money(p.fareEurCents),
           pointsUsed: p.pointsUsed,
           points: p.pointsCost ? String(p.pointsCost) : "",
         }))
@@ -140,17 +157,22 @@ export function FlightModal({
 
   // The fare the currency converter fills: the one last clicked into, or else
   // the first one still empty.
-  const lastFareKey = useRef<number | null>(null);
+  const lastFare = useRef<{ key: number; slot: FareSlot } | null>(null);
+
+  // Bought once a Spent fare or the booking date is in; a plan until then.
+  const isEstimate = isPlannedOnly(passengers.some((p) => p.fare.trim() || p.fareEur.trim()), reservedOn);
+  const total = (slot: FareSlot) => passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p[slot])), 0);
+  // What the booking costs now: the plan until it is bought.
+  const effective = (p: PassengerDraft) => (isEstimate ? p.planned : p.fare);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
-  const fareCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p.fare)), 0);
-  const fareEurCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p.fareEur)), 0);
+  const fareCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(effective(p))), 0);
   const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Points on the booking are its points tickets added up; the fares of those
   // tickets are what the points bought, which is how they are valued.
   const pointsTyped = passengers.reduce((sum, p) => sum + passengerPoints(p), 0);
   const pointsFareCents = passengers.reduce(
-    (sum, p) => sum + (passengerPoints(p) > 0 ? Math.max(0, displayToCents(p.fare)) : 0),
+    (sum, p) => sum + (passengerPoints(p) > 0 ? Math.max(0, displayToCents(effective(p))) : 0),
     0,
   );
   const pointsUsed = pointsTyped > 0;
@@ -201,14 +223,20 @@ export function FlightModal({
     );
   }
 
-  // A euro receipt keeps its euros beside the dollars it converted to.
+  // A receipt in the booking's other currency keeps that figure beside the
+  // dollars it converted to, under Planned or Spent — whichever was clicked.
   function applyConverted(cents: number, from: ConvertedFrom) {
+    const last = lastFare.current;
+    const planned = last ? last.slot.startsWith("planned") : isEstimate;
+    const usdSlot = planned ? "planned" : "fare";
     const target =
-      passengers.find((p) => p.key === lastFareKey.current) ?? passengers.find((p) => !p.fare.trim()) ?? passengers[0];
+      passengers.find((p) => p.key === last?.key) ?? passengers.find((p) => !p[usdSlot].trim()) ?? passengers[0];
     if (target) {
       updatePassenger(target.key, {
-        fare: centsToDisplay(cents),
-        ...(from.currency === "EUR" ? { fareEur: centsToDisplay(from.amountCents) } : {}),
+        [usdSlot]: centsToDisplay(cents),
+        ...(from.currency === foreignCurrency
+          ? { [planned ? "plannedForeign" : "fareEur"]: centsToDisplay(from.amountCents) }
+          : {}),
       });
     }
   }
@@ -236,20 +264,21 @@ export function FlightModal({
         pointsValueCents: pointsValue,
         pocketCost,
         remarks,
-        isEstimate,
+        foreignCurrency,
         legs: legs.map((l) => ({
           flightOn: l.flightOn, flightNumber: l.flightNumber, fromPlace: l.fromPlace,
           toPlace: l.toPlace, departsAt: l.departsAt, arrivesAt: l.arrivesAt,
         })),
         passengers: passengers.map((p) => ({
-          travellerId: p.travellerId, name: p.name, fare: p.fare, fareEur: p.fareEur, pointsUsed: p.pointsUsed, points: p.points,
+          travellerId: p.travellerId, name: p.name, planned: p.planned, plannedForeign: p.plannedForeign,
+          fare: p.fare, fareEur: p.fareEur, pointsUsed: p.pointsUsed, points: p.points,
         })),
   });
 
   const ownEmpty = () =>
     ![airline, bookingCode, reservedOn, accountId, cardLabel, holder, pocketCost, remarks].some((v) => v.trim()) &&
     legs.every((l) => ![l.flightOn, l.flightNumber, l.fromPlace, l.toPlace, l.departsAt, l.arrivesAt].some((v) => v.trim())) &&
-    passengers.every((p) => !p.name && !p.fare.trim() && !p.fareEur.trim() && !p.points.trim());
+    passengers.every((p) => !p.name && ![p.planned, p.plannedForeign, p.fare, p.fareEur, p.points].some((v) => v.trim()));
 
   // Separate one-way bookings added under this one ("Booking 2", ...), each
   // its own embedded flight form, saved right after this one.
@@ -285,7 +314,7 @@ export function FlightModal({
         copy: {
           airline,
           reservedOn,
-          isEstimate,
+          foreignCurrency,
           homePlace: legs[0]?.fromPlace ?? "",
           passengers: passengers.filter((p) => p.name).map((p) => ({ travellerId: p.travellerId, name: p.name })),
         },
@@ -357,10 +386,7 @@ export function FlightModal({
             <input
               type="date"
               value={reservedOn}
-              onChange={(e) => {
-                setReservedOn(e.target.value);
-                if (e.target.value && !statusTouched) setIsEstimate(false);
-              }}
+              onChange={(e) => setReservedOn(e.target.value)}
               className={inputClass}
             />
           </Field>
@@ -467,23 +493,13 @@ export function FlightModal({
                 onChange={(e) => setPassengerCount(e.target.value)}
                 onFocus={(e) => e.target.select()}
                 onBlur={() => setCountDraft(null)}
-                // Compact, to sit level with the Bought / Planned switch and the
-                // points picker beside it.
+                // Compact, to sit level with the currency and points pickers
+                // beside it.
                 className="h-7 w-14 rounded-md bg-background px-2 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
             </label>
-            {/* Bought, or still a planned fare — right beside the fares it
-                describes. A planned fare counts in the trip as planned and
-                takes no points from a card until it is switched to Bought. */}
-            <PlannedSwitch
-              value={isEstimate}
-              onChange={(v) => {
-                setIsEstimate(v);
-                setStatusTouched(true);
-              }}
-              bookedLabel="Bought"
-              plannedLabel="Planned fare"
-            />
+            {/* The currency the second column of Planned and Spent is in. */}
+            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
             {/* Which seats were paid with points, picked in one place; each
                 ticked passenger gets a Points box on their row. */}
             <CheckPicker
@@ -512,7 +528,7 @@ export function FlightModal({
               }))}
             />
             <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
-              <CurrencyConverter onUse={applyConverted} blue />
+              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
             </div>
             <button
               type="button"
@@ -525,13 +541,41 @@ export function FlightModal({
 
           {editingNames ? <TravellerEditor travellers={travellers} /> : null}
 
+          {/* A two-level header, like a spreadsheet's: Planned and Spent each
+              span their two money columns, with the currency under each. It
+              stands in for the per-row labels, so the rows sit straight under
+              it. On a phone the four figures share the line under each name. */}
+          <div className={`${PAX_GRID} mb-1.5 items-end text-center`}>
+            <span aria-hidden className="hidden sm:block" />
+            <span className="hidden self-end pb-0.5 text-left text-[11px] font-bold uppercase tracking-wide text-muted sm:row-span-2 sm:block">
+              Passenger
+            </span>
+            <span className="col-span-2 col-start-2 border-b-2 border-line pb-0.5 text-[11px] font-bold uppercase tracking-wide text-muted sm:col-start-auto">
+              Planned
+            </span>
+            <span className="col-span-2 border-b-2 border-sky-400 pb-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground dark:border-sky-500">
+              Spent
+            </span>
+            <span aria-hidden className="hidden sm:block" />
+            <span aria-hidden className="hidden sm:block" />
+            {[
+              { code: currency, sign: currencySymbol(currency), spent: false },
+              { code: foreignCurrency, sign: fx, spent: false },
+              { code: currency, sign: currencySymbol(currency), spent: true },
+              { code: foreignCurrency, sign: fx, spent: true },
+            ].map((c, n) => (
+              <span
+                key={n}
+                className={`text-[11px] font-semibold ${c.spent ? "text-foreground" : "text-muted"} ${n === 0 ? "col-start-2 sm:col-start-auto" : ""}`}
+              >
+                {c.sign === c.code ? c.code : `${c.code} ${c.sign}`}
+              </span>
+            ))}
+            <span aria-hidden className="hidden sm:block" />
+          </div>
           <ul className="space-y-2">
             {passengers.map((p, i) => (
-              <li
-                key={p.key}
-                // 4.5rem fares at 375px leave the name box room for "Pick a name".
-                className="grid grid-cols-[1.75rem_minmax(0,1fr)_4.5rem_4.5rem] items-end gap-2 sm:grid-cols-[1.75rem_minmax(0,12rem)_6.5rem_6.5rem_6.5rem]"
-              >
+              <li key={p.key} className={`${PAX_GRID} items-end`}>
                 {/* Remove sits first, so the ✕ lines up down the left edge. */}
                 <button
                   type="button"
@@ -542,7 +586,10 @@ export function FlightModal({
                 >
                   ✕
                 </button>
-                <Field label={`Passenger ${i + 1}`}>
+                <label className="col-span-4 block min-w-0 sm:col-span-1">
+                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">
+                    Passenger {i + 1}
+                  </span>
                   <select
                     value={p.name}
                     onChange={(e) => {
@@ -556,26 +603,19 @@ export function FlightModal({
                       <option key={n.name} value={n.name}>{n.name}</option>
                     ))}
                   </select>
-                </Field>
-                <Field label={`${isEstimate ? "Planned fare" : "Fare"} (${currencySymbol(currency)})`} className="text-center">
+                </label>
+                {(["planned", "plannedForeign", "fare", "fareEur"] as const).map((slot, n) => (
                   <input
-                    value={p.fare}
-                    onChange={(e) => updatePassenger(p.key, { fare: e.target.value })}
-                    onFocus={() => (lastFareKey.current = p.key)}
+                    key={slot}
+                    aria-label={`Passenger ${i + 1} ${n < 2 ? "planned" : "spent"} ${n % 2 ? foreignCurrency : currency}`}
+                    value={p[slot]}
+                    onChange={(e) => updatePassenger(p.key, { [slot]: e.target.value })}
+                    onFocus={() => (lastFare.current = { key: p.key, slot })}
                     inputMode="decimal"
-                    className={`${inputClass} text-center`}
+                    className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""}`}
                   />
-                </Field>
-                <Field label={`${isEstimate ? "Planned fare" : "Fare"} (€)`} className="text-center">
-                  <input
-                    value={p.fareEur}
-                    onChange={(e) => updatePassenger(p.key, { fareEur: e.target.value })}
-                    onFocus={() => (lastFareKey.current = p.key)}
-                    inputMode="decimal"
-                    className={`${inputClass} text-center`}
-                  />
-                </Field>
-                {/* Points: under the name on a phone, on the same line on a
+                ))}
+                {/* Points: under the figures on a phone, on the same line on a
                     wide screen — only for the seats ticked in "Paid with points". */}
                 {p.pointsUsed ? (
                   <Field label="Points" className="col-span-2 col-start-2 text-center sm:col-span-1 sm:col-start-auto">
@@ -595,14 +635,14 @@ export function FlightModal({
             ))}
           </ul>
 
-          {/* Every seat added up. The fare columns are per passenger, so
-              without this the booking's own total was only visible further
-              down, in Flight cost. */}
-          <div className="mt-2 grid grid-cols-[1.75rem_minmax(0,1fr)_4.5rem_4.5rem] items-baseline gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[1.75rem_minmax(0,12rem)_6.5rem_6.5rem_6.5rem]">
+          {/* Every seat added up, Planned beside Spent. */}
+          <div className={`${PAX_GRID} mt-2 items-baseline border-t border-line pt-2 text-sm font-bold tabular-nums`}>
             <span aria-hidden />
-            <span>Total</span>
-            <span className="text-center">{formatMoneyWhole(fareCents, currency)}</span>
-            <span className="text-center">€{centsToDisplay(fareEurCents)}</span>
+            <span className="col-span-4 sm:col-span-1">Total</span>
+            <span className="col-start-2 text-center sm:col-start-auto">{formatMoneyWhole(total("planned"), currency)}</span>
+            <span className="text-center">{fx}{centsToDisplay(total("plannedForeign"))}</span>
+            <span className="text-center">{formatMoneyWhole(total("fare"), currency)}</span>
+            <span className="text-center">{fx}{centsToDisplay(total("fareEur"))}</span>
             <span className="hidden text-center sm:block">{pointsTyped ? pointsTyped.toLocaleString() : ""}</span>
           </div>
         </section>

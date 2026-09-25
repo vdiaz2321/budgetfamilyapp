@@ -13,7 +13,7 @@ export default async function TravelPage() {
     supabase
       .from("travel_stays")
       .select(
-        "id, trip_id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_used, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, breakfast_included, cancelled_at, reward_activity_id, free_night_used, free_night_points, moves_card_points, is_estimate, planned_cost_cents",
+        "id, trip_id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_used, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, breakfast_included, cancelled_at, reward_activity_id, free_night_used, free_night_points, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, cost_foreign_cents, foreign_currency",
       )
       .eq("household_id", household.id)
       .order("check_in", { ascending: false }),
@@ -29,7 +29,7 @@ export default async function TravelPage() {
     supabase
       .from("travel_flights")
       .select(
-        "id, trip_id, account_id, card_label, holder, airline, booking_code, reserved_on, first_flight_on, points_cost, points_used, points_value_micros, flight_cost_cents, flight_cost_eur_cents, moves_card_points, is_estimate, planned_cost_cents, pocket_cost_cents, remarks, cancelled_at, reward_activity_id",
+        "id, trip_id, account_id, card_label, holder, airline, booking_code, reserved_on, first_flight_on, points_cost, points_used, points_value_micros, flight_cost_cents, flight_cost_eur_cents, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, foreign_currency, pocket_cost_cents, remarks, cancelled_at, reward_activity_id",
       )
       .eq("household_id", household.id)
       .order("first_flight_on", { ascending: false }),
@@ -40,7 +40,7 @@ export default async function TravelPage() {
       .order("sort_order"),
     supabase
       .from("travel_flight_passengers")
-      .select("flight_id, sort_order, traveller_id, name, fare_cents, fare_eur_cents, points_used, points_cost")
+      .select("flight_id, sort_order, traveller_id, name, fare_cents, fare_eur_cents, planned_fare_cents, planned_fare_foreign_cents, points_used, points_cost")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -52,13 +52,13 @@ export default async function TravelPage() {
     supabase
       .from("travel_cars")
       .select(
-        "id, trip_id, kind, company, booking_code, reserved_on, pickup_on, pickup_time, pickup_place, return_on, return_time, return_place, account_id, card_label, holder, points_cost, points_used, points_value_micros, cost_cents, cost_eur_cents, moves_card_points, is_estimate, planned_cost_cents, pocket_cost_cents, remarks, cancelled_at, reward_activity_id",
+        "id, trip_id, kind, company, booking_code, reserved_on, pickup_on, pickup_time, pickup_place, return_on, return_time, return_place, account_id, card_label, holder, points_cost, points_used, points_value_micros, cost_cents, cost_eur_cents, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, foreign_currency, pocket_cost_cents, remarks, cancelled_at, reward_activity_id",
       )
       .eq("household_id", household.id)
       .order("pickup_on", { ascending: false }),
     supabase
       .from("travel_trips")
-      .select("id, name, start_on, end_on, notes")
+      .select("id, name, start_on, end_on, notes, spending_currency")
       .eq("household_id", household.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -197,6 +197,9 @@ export default async function TravelPage() {
     movesCardPoints: s.moves_card_points ?? false,
     isEstimate: s.is_estimate ?? false,
     plannedCostCents: s.planned_cost_cents == null ? null : Number(s.planned_cost_cents),
+    plannedCostForeignCents: s.planned_cost_foreign_cents == null ? null : Number(s.planned_cost_foreign_cents),
+    costForeignCents: s.cost_foreign_cents == null ? null : Number(s.cost_foreign_cents),
+    foreignCurrency: s.foreign_currency ?? "EUR",
   }));
 
   const flightRows: TravelFlight[] = (flights.data ?? []).map((f) => ({
@@ -217,6 +220,8 @@ export default async function TravelPage() {
     movesCardPoints: f.moves_card_points ?? true,
     isEstimate: f.is_estimate ?? false,
     plannedCostCents: f.planned_cost_cents == null ? null : Number(f.planned_cost_cents),
+    plannedCostForeignCents: f.planned_cost_foreign_cents == null ? null : Number(f.planned_cost_foreign_cents),
+    foreignCurrency: f.foreign_currency ?? "EUR",
     pocketCostCents: Number(f.pocket_cost_cents ?? 0),
     remarks: f.remarks ?? null,
     cancelledAt: f.cancelled_at ?? null,
@@ -238,6 +243,8 @@ export default async function TravelPage() {
         name: p.name,
         fareCents: Number(p.fare_cents ?? 0),
         fareEurCents: p.fare_eur_cents == null ? null : Number(p.fare_eur_cents),
+        plannedFareCents: p.planned_fare_cents == null ? null : Number(p.planned_fare_cents),
+        plannedFareForeignCents: p.planned_fare_foreign_cents == null ? null : Number(p.planned_fare_foreign_cents),
         pointsUsed: p.points_used ?? false,
         pointsCost: p.points_cost ?? 0,
       })),
@@ -267,6 +274,8 @@ export default async function TravelPage() {
     movesCardPoints: c.moves_card_points ?? true,
     isEstimate: c.is_estimate ?? false,
     plannedCostCents: c.planned_cost_cents == null ? null : Number(c.planned_cost_cents),
+    plannedCostForeignCents: c.planned_cost_foreign_cents == null ? null : Number(c.planned_cost_foreign_cents),
+    foreignCurrency: c.foreign_currency ?? "EUR",
     pocketCostCents: Number(c.pocket_cost_cents ?? 0),
     remarks: c.remarks ?? null,
     cancelledAt: c.cancelled_at ?? null,
@@ -281,6 +290,7 @@ export default async function TravelPage() {
         startOn: t.start_on ?? null,
         endOn: t.end_on ?? null,
         notes: t.notes ?? null,
+        spendingCurrency: t.spending_currency ?? "EUR",
       }))}
       expenses={expenseRows}
       cars={carRows}

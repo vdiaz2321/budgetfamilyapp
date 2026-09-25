@@ -101,7 +101,7 @@ type Props = {
 };
 
 export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, currency }: Props) {
-  const [collapse, setCollapse] = useSessionCollapse("annual-breakdown-history", () => ({ open: false }));
+  const [collapse, setCollapse] = useSessionCollapse("annual-breakdown-history", () => ({ open: true }));
   const open = collapse.open;
   // Recent by default — the full history is two clicks of scrolling away and
   // is rarely the question. `allYears` is newest-first, so the recent slice is
@@ -214,7 +214,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
         ) : null}
         <button
           type="button"
-          onClick={() => downloadBreakdownCsv(kinds, years, netByYear, currency)}
+          onClick={() => downloadBreakdownCsv(kinds, years, netByYear)}
           className="mr-auto shrink-0 cursor-pointer rounded-lg border border-sky-400 bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-sky-200 dark:border-sky-500 dark:bg-sky-900/40 dark:hover:bg-sky-900/60"
         >
           Export CSV
@@ -337,18 +337,17 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
 
 /**
  * The panel, flattened for a spreadsheet: one row per figure-bearing line,
- * with Section / Group / Line item / Detail naming where it sat in the
+ * with Section / Group / Category / Detail naming where it sat in the
  * hierarchy, then Total and one column per year.
  *
  * Values go out as plain numbers, not formatted money — a CSV whose cells
- * can't be summed is a screenshot with extra steps. The currency is named in
- * the header instead.
+ * can't be summed is a screenshot with extra steps. Headers are plain
+ * ("Total", "2026"), with no currency tag.
  */
 function downloadBreakdownCsv(
   kinds: BreakdownKind[],
   years: number[],
   netByYear: Record<number, number>,
-  currency: string,
 ) {
   const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const money = (cents: number) => (cents / 100).toFixed(2);
@@ -382,9 +381,9 @@ function downloadBreakdownCsv(
   }
 
   const header = [
-    "Section", "Group", "Line item", "Detail",
-    `Total (${currency})`,
-    ...years.map((y) => `${y} (${currency})`),
+    "Section", "Group", "Category", "Detail",
+    "Total",
+    ...years.map((y) => String(y)),
   ].map(q).join(",");
 
   const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });

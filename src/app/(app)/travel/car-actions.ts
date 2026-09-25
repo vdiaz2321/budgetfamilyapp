@@ -35,16 +35,18 @@ export type CarPayload = {
   accountId: string;
   cardLabel: string;
   holder: string;
-  cost: string;
-  costEur: string;
+  /** Planned and Spent, each in dollars and `foreignCurrency`. */
+  planned: string;
+  plannedForeign: string;
+  spent: string;
+  spentForeign: string;
+  foreignCurrency: string;
   pocketCost: string;
   pointsUsed: boolean;
   points: string;
   /** Typed in cents per point: "1.2" = 1.2¢. */
   pointsValueCents: string;
   remarks: string;
-  /** Not booked yet — the cost is an estimate. */
-  isEstimate: boolean;
 };
 
 
@@ -76,11 +78,17 @@ export async function saveTravelCar(payload: CarPayload) {
   }
   if ((pickupTime && !isTime(pickupTime)) || (returnTime && !isTime(returnTime))) return { error: "A time isn't valid." };
 
-  const cost = Math.max(0, displayToCents(payload.cost));
+  const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : null);
+  // Booked once a Spent figure or the booking date is in (isPlannedOnly in
+  // travel-form); the family car is always a real drive.
+  const isEstimate = rental && !payload.spent.trim() && !payload.spentForeign.trim() && !reservedOn;
+  // The cost columns hold what it costs now — the plan until it is booked —
+  // so every total that reads them is unchanged.
+  const cost = (isEstimate ? cents(payload.planned) : cents(payload.spent)) ?? 0;
+  const costForeign = isEstimate ? cents(payload.plannedForeign) : cents(payload.spentForeign);
   // The family car isn't paid for with points.
   const points = rental ? Math.max(0, Math.trunc(Number(payload.points.replace(/,/g, "")) || 0)) : 0;
   const pointsUsed = rental && payload.pointsUsed && points > 0;
-  const isEstimate = Boolean(payload.isEstimate);
   // Nothing leaves a card until a planned rental is booked.
   const drawPoints = pointsUsed && !isEstimate ? points : 0;
   // Left blank, what left the wallet is the cost — or nothing on points.
@@ -120,10 +128,14 @@ export async function saveTravelCar(payload: CarPayload) {
     points_used: pointsUsed,
     points_value_micros: points > 0 ? pointsValueMicros : null,
     cost_cents: cost,
-    cost_eur_cents: payload.costEur.trim() ? Math.max(0, displayToCents(payload.costEur)) : null,
+    cost_eur_cents: costForeign,
     pocket_cost_cents: pocketCost,
     is_estimate: isEstimate,
-    ...(isEstimate ? { planned_cost_cents: pocketCost } : {}),
+    foreign_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : "EUR",
+    // While a plan, its cost is the plan; once booked, the Planned figure
+    // stays beside what was paid.
+    planned_cost_cents: isEstimate ? pocketCost : cents(payload.planned),
+    planned_cost_foreign_cents: cents(payload.plannedForeign),
     remarks: clean(payload.remarks),
     updated_at: new Date().toISOString(),
   };

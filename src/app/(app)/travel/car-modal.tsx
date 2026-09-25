@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
-import { Field, PlannedPointsNote, PlannedSwitch, Section, inputClass, outsideTripNote } from "./travel-form";
+import {
+  CurrencySelect, Field, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote,
+  type PlanSpent, type PlanSpentSlot,
+} from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
@@ -54,8 +57,19 @@ export function CarModal({
   const [accountId, setAccountId] = useState(car?.accountId ?? "");
   const [cardLabel, setCardLabel] = useState(car?.cardLabel ?? "");
   const [holder, setHolder] = useState(car?.holder ?? "");
-  const [cost, setCost] = useState(car?.costCents ? centsToDisplay(car.costCents) : "");
-  const [costEur, setCostEur] = useState(car?.costEurCents != null ? centsToDisplay(car.costEurCents) : "");
+  // A rental still planned keeps its plan in the cost columns too; here it
+  // shows only under Planned.
+  const [fig, setFig] = useState<PlanSpent>(() => {
+    const show = (c: number | null | undefined) => (c ? centsToDisplay(c) : "");
+    return {
+      planned: show(car?.isEstimate ? car.costCents : car?.plannedCostCents),
+      plannedForeign: show(car?.plannedCostForeignCents),
+      spent: car?.isEstimate ? "" : show(car?.costCents),
+      spentForeign: car?.isEstimate ? "" : show(car?.costEurCents),
+    };
+  });
+  const [foreignCurrency, setForeignCurrency] = useState(car?.foreignCurrency ?? "EUR");
+  const lastSlot = useRef<PlanSpentSlot | null>(null);
   const [pointsUsed, setPointsUsed] = useState(car?.pointsUsed ?? false);
   const [points, setPoints] = useState(car?.pointsCost ? String(car.pointsCost) : "");
   const [pointsValue, setPointsValue] = useState(() => {
@@ -69,9 +83,10 @@ export function CarModal({
     return car.pocketCostCents !== expected ? centsToDisplay(car.pocketCostCents) : "";
   });
   const [remarks, setRemarks] = useState(car?.remarks ?? "");
-  const [isEstimate, setIsEstimate] = useState(car?.isEstimate ?? Boolean(embed));
-  // Typing the booking date says it is booked: the switch follows unless set by hand.
-  const [statusTouched, setStatusTouched] = useState(Boolean(car));
+  // Booked once a Spent figure or the booking date is in; a plan until then.
+  const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
+  // What the rental costs now: the plan until it is booked.
+  const cost = isEstimate ? fig.planned : fig.spent;
   const tripNote = outsideTripNote(trips, trip.tripId, [pickupOn, returnOn]);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
@@ -99,14 +114,14 @@ export function CarModal({
     kind: "rental" as const,
     company, bookingCode, reservedOn,
     pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace,
-    accountId, cardLabel, holder, cost, costEur, pocketCost, pointsUsed, points, pointsValueCents: pointsValue, remarks, isEstimate,
+    accountId, cardLabel, holder, ...fig, foreignCurrency, pocketCost, pointsUsed, points, pointsValueCents: pointsValue, remarks,
   });
 
   useEffect(() => {
     if (!embed) return;
     embed.register({
       isEmpty: () =>
-        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, accountId, cardLabel, holder, cost, costEur, pocketCost, points, remarks].some((v) => v.trim()),
+        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, accountId, cardLabel, holder, fig.planned, fig.plannedForeign, fig.spent, fig.spentForeign, pocketCost, points, remarks].some((v) => v.trim()),
       save: async () => {
         const result = await saveTravelCar(payload());
         return { error: result?.error ?? null };
@@ -152,10 +167,7 @@ export function CarModal({
             <input
               type="date"
               value={reservedOn}
-              onChange={(e) => {
-                setReservedOn(e.target.value);
-                if (e.target.value && !statusTouched) setIsEstimate(false);
-              }}
+              onChange={(e) => setReservedOn(e.target.value)}
               className={inputClass}
             />
           </Field>
@@ -199,24 +211,34 @@ export function CarModal({
           action={
             <CurrencyConverter
               blue
+              defaultFrom={foreignCurrency}
+              // Fills Planned or Spent — whichever was clicked last, else
+              // Planned while it is still a plan.
               onUse={(cents, from) => {
-                setCost(centsToDisplay(cents));
-                if (from.currency === "EUR") setCostEur(centsToDisplay(from.amountCents));
+                const planned = lastSlot.current ? lastSlot.current.startsWith("planned") : isEstimate;
+                setFig((f) => ({
+                  ...f,
+                  [planned ? "planned" : "spent"]: centsToDisplay(cents),
+                  ...(from.currency === foreignCurrency
+                    ? { [planned ? "plannedForeign" : "spentForeign"]: centsToDisplay(from.amountCents) }
+                    : {}),
+                }));
               }}
             />
           }
         >
-          {/* Booked, or still a planned price. */}
+          {/* The currency the second Planned / Spent box is in. */}
           <div className="mb-3">
-            <PlannedSwitch
-              value={isEstimate}
-              onChange={(v) => {
-                setIsEstimate(v);
-                setStatusTouched(true);
-              }}
-            />
+            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <PlanSpentFields
+            value={fig}
+            onChange={setFig}
+            currency={currency}
+            foreignCurrency={foreignCurrency}
+            onFocusSlot={(slot) => (lastSlot.current = slot)}
+          />
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
               <select value={accountId} onChange={(e) => pickCard(e.target.value)} className={inputClass}>
                 <option value="">Not linked to a card</option>
@@ -238,13 +260,7 @@ export function CarModal({
             </Field>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <Field label={`Rental cost (${currencySymbol(currency)})`}>
-              <input value={cost} onChange={(e) => setCost(e.target.value)} inputMode="decimal" className={inputClass} />
-            </Field>
-            <Field label="Rental cost (€)">
-              <input value={costEur} onChange={(e) => setCostEur(e.target.value)} inputMode="decimal" className={inputClass} />
-            </Field>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Field label={pointsUsed ? "Points used" : "Pts if used"}>
               <input type="number" min="0" step="1" value={points} onChange={(e) => setPoints(e.target.value)} className={inputClass} />
             </Field>

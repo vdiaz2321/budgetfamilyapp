@@ -15,6 +15,8 @@ export type ExpensePayload = {
   newTripName: string;
   startOn: string;
   endOn: string;
+  /** The currency the second Planned / Spent columns are in. */
+  foreignCurrency: string;
   rows: Array<{
     category: ExpenseCategory;
     planned: string;
@@ -51,7 +53,11 @@ export async function saveTripExpenses(payload: ExpensePayload) {
 
   const { error: tripError } = await supabase
     .from("travel_trips")
-    .update({ start_on: startOn, end_on: endOn })
+    .update({
+      start_on: startOn,
+      end_on: endOn,
+      ...(/^[A-Z]{3}$/.test(payload.foreignCurrency) ? { spending_currency: payload.foreignCurrency } : {}),
+    })
     .eq("id", trip.tripId)
     .eq("household_id", householdId);
   if (tripError) return fail(`Couldn't save the trip dates — ${tripError.message}`);
