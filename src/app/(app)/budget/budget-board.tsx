@@ -723,7 +723,11 @@ export function BudgetBoard({
             grabbing the page scroll once it bottoms out. */}
         <div
           data-item-panel-root
-          className="sticky top-4 max-h-[calc(100vh-2rem)] space-y-3 overflow-y-auto overscroll-contain pr-0.5"
+          // scrollbar-gutter keeps the rail's width constant: without it the
+          // inner scrollbar appears the moment a list gets long (expanding a
+          // category, switching the donut to a fuller view) and every row in
+          // the panel jumps left by the scrollbar's width.
+          className="sticky top-4 max-h-[calc(100vh-2rem)] space-y-3 overflow-y-auto overscroll-contain pr-0.5 [scrollbar-gutter:stable]"
         >
           {railContent ?? (
             <>

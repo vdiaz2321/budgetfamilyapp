@@ -3,7 +3,9 @@
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { MoneyCell } from "./annual-cell";
+import { MoneyCell, periodHeaderClass } from "./annual-cell";
+import { ClearSelectionButton } from "./clear-selection-button";
+import { YearBand } from "./category-months-table";
 import {
   KIND_COLOR,
   monthsCellKey,
@@ -26,7 +28,6 @@ type Props = {
   totals: Record<CategoryKind, number>;
   totalNet: number;
   currency: string;
-  gridCols: string;
   /** Cells currently driving the hero cards, across both tables. */
   selected: Selection;
   onToggleCell: (key: string, cell: SelectedCell) => void;
@@ -39,7 +40,6 @@ export function MonthsTable({
   totals,
   totalNet,
   currency,
-  gridCols,
   selected,
   onToggleCell,
   onClearSelection,
@@ -50,6 +50,19 @@ export function MonthsTable({
   const setOpen = (v: boolean) => setCollapse({ open: v });
   const shareOfIncome = (value: number) =>
     totals.income === 0 ? null : (value / totals.income) * 100;
+
+  // Same shape as Category by Months below: one row per kind, months across,
+  // newest first, stopping at the last month with anything logged.
+  const lastActive = rows.reduce((acc, r) => (r.hasData ? r.idx : acc), -1);
+  const monthCount = lastActive >= 0 ? lastActive + 1 : rows.length;
+  const months = rows.slice(0, monthCount).reverse();
+  // Category by Months sits 12px in from the panel edge (its p-3 wrapper), so
+  // the label column and right padding each take 12px more here — that
+  // lines the month columns up exactly with the tables below.
+  const grid = {
+    gridTemplateColumns: `calc(13rem + 12px) minmax(8rem,1fr) repeat(${monthCount},minmax(7rem,1fr))`,
+  };
+  const track = { minWidth: `calc(${14 + 8 + 7 * monthCount}rem + 24px)` };
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -68,147 +81,113 @@ export function MonthsTable({
           <path d="M6 9l6 6 6-6" />
         </svg>
         <span className="font-semibold">Months</span>
-        {selected.size > 0 ? (
-          <span className="ml-auto flex items-center gap-2">
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                onClearSelection();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onClearSelection();
-                }
-              }}
-              className="rounded-md bg-black/5 px-2 py-1 text-[12px] font-semibold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
-            >
-              Clear
-            </span>
-          </span>
-        ) : null}
+        {selected.size > 0 ? <ClearSelectionButton onClear={onClearSelection} /> : null}
       </button>
 
       {open ? (
-        <div className="border-t border-line">
-          <div className="overflow-x-auto">
-            <div className="mx-auto w-full min-w-[42rem] max-w-[108rem]">
-              {/* Header */}
-              <div className={`grid ${gridCols} items-center gap-1 border-b border-line px-4 py-2.5`}>
-                <span className="text-[13px] font-medium uppercase tracking-wide text-muted">Month</span>
-                {columns.map((c) => (
-                  <span key={c.kind} className="text-center text-[13px] font-medium uppercase tracking-wide text-muted">
-                    {c.label}
-                  </span>
-                ))}
-                <span className="text-center text-[13px] font-medium uppercase tracking-wide text-muted">Net</span>
-              </div>
+        <div className="scroll-handle overflow-x-auto border-t border-line">
+          <div style={track}>
+            {/* Header */}
+            <div className="grid items-center gap-2 border-b border-line py-2 pr-7" style={grid}>
+              <span className="sticky left-0 z-10 bg-surface pl-7 text-[15px] font-bold uppercase tracking-wide text-foreground">
+                Category
+              </span>
+              <YearBand pad="-my-2">
+                <span className="w-full text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
+                  Year total
+                </span>
+              </YearBand>
+              {months.map((m) => (
+                <span
+                  key={m.idx}
+                  className={periodHeaderClass(m.status === "current")}
+                >
+                  {m.name.slice(0, 3)}
+                </span>
+              ))}
+            </div>
 
-              <ul className="divide-y divide-line">
-                {rows.map((r) => (
-                  <li
-                    key={r.idx}
-                    className={`grid ${gridCols} items-center gap-1 px-4 py-2 ${
-                      r.status === "current" ? "bg-black/[0.04] dark:bg-white/[0.06]" : ""
-                    } ${r.status === "future" ? "text-muted" : ""}`}
-                  >
-                    <span className="text-[15px] font-medium">{r.name.slice(0, 3)}</span>
-                    {columns.map((c) => (
+            <ul className="divide-y divide-line">
+              {columns.map((c) => {
+                const percent = shareOfIncome(totals[c.kind]);
+                return (
+                  <li key={c.kind} className="grid items-center gap-2 py-2 pr-7" style={grid}>
+                    <span className="sticky left-0 z-10 bg-surface pl-7 text-[18px] font-medium">
+                      {c.label}
+                    </span>
+                    <YearBand pad="-my-2">
+                      <span className="flex w-full flex-col items-center py-1">
+                        <span className="text-[18px] font-bold tabular-nums">
+                          {formatMoney(totals[c.kind], currency)}
+                        </span>
+                        {c.kind === "income" ? null : (
+                          <span className="text-[11px] font-semibold" style={{ color: KIND_COLOR[c.kind] }}>
+                            {percent === null ? "—" : `${percent.toFixed(1)}% of income`}
+                          </span>
+                        )}
+                      </span>
+                    </YearBand>
+                    {months.map((m) => (
                       <MoneyCell
-                        key={c.kind}
-                        empty={r.values[c.kind] === 0}
+                        key={m.idx}
+                        empty={m.values[c.kind] === 0}
                         color={KIND_COLOR[c.kind]}
-                        active={selected.has(monthsCellKey(r.idx, c.kind))}
+                        active={selected.has(monthsCellKey(m.idx, c.kind))}
                         onToggle={() =>
-                          onToggleCell(monthsCellKey(r.idx, c.kind), {
+                          onToggleCell(monthsCellKey(m.idx, c.kind), {
                             kind: c.kind,
-                            amountCents: r.values[c.kind],
-                            monthIdx: r.idx,
+                            amountCents: m.values[c.kind],
+                            monthIdx: m.idx,
                             source: "months",
                           })
                         }
                       >
-                        {formatMoney(r.values[c.kind], currency)}
+                        {formatMoney(m.values[c.kind], currency)}
                       </MoneyCell>
                     ))}
-                    <MoneyCell
-                      empty={!r.hasData}
-                      color={r.net >= 0 ? "var(--positive)" : "var(--negative)"}
-                      className={r.net >= 0 ? "text-positive" : "text-negative"}
-                      active={selected.has(monthsCellKey(r.idx, "net"))}
-                      onToggle={() =>
-                        onToggleCell(monthsCellKey(r.idx, "net"), {
-                          kind: "net",
-                          amountCents: r.net,
-                          monthIdx: r.idx,
-                          source: "months",
-                        })
-                      }
-                    >
-                      {formatMoney(r.net, currency)}
-                    </MoneyCell>
                   </li>
-                ))}
-              </ul>
+                );
+              })}
+            </ul>
 
-              {/* Totals */}
-              <div className={`grid ${gridCols} items-center gap-1 border-t border-line bg-black/[0.03] px-4 py-3 dark:bg-white/[0.05]`}>
-                <span className="flex flex-col items-center text-[15px] font-bold">
-                  <span className="self-start">Total</span>
-                  {/* "% of income" is the hero cards' own wording, and it
-                      fits: the label column is capped at 7rem and the old
-                      "Total % from income" needed 160px with nowrap on it,
-                      so it painted across the Income total beside it. */}
-                  <span className="mt-1 w-full border-t border-line pt-1 text-center text-[13px] font-medium uppercase tracking-wide text-muted">
-                    % of income
-                  </span>
-                </span>
-                {columns.map((c) => {
-                  const percent = shareOfIncome(totals[c.kind]);
-                  return (
-                    <span key={c.kind} className="flex flex-col items-center text-center tabular-nums">
-                      <span className="text-[18px] font-bold">
-                        {formatMoney(totals[c.kind], currency)}
-                      </span>
-                      {c.kind === "income" ? null : (
-                        <span
-                          className="mt-1 w-full border-t border-line pt-1 text-[11px] font-semibold"
-                          style={{ color: KIND_COLOR[c.kind] }}
-                        >
-                          {percent === null ? "—" : `${percent.toFixed(1)}%`}
-                        </span>
-                      )}
-                      {c.kind === "income" ? (
-                        <span
-                          aria-hidden
-                          className="mt-1 w-full border-t border-line pt-1 text-[11px] text-transparent"
-                        >
-                          &nbsp;
-                        </span>
-                      ) : null}
-                    </span>
-                  );
-                })}
-                <span className="flex flex-col items-center text-center tabular-nums">
-                  <span
-                    className={`text-[18px] font-bold ${
-                      totalNet >= 0 ? "text-positive" : "text-negative"
-                    }`}
-                  >
+            {/* Net */}
+            <div className="grid items-center gap-2 border-t border-line py-2 pr-7" style={grid}>
+              <span className="sticky left-0 z-10 bg-surface pl-7 text-[18px] font-bold">Net</span>
+              <YearBand pad="-my-2">
+                <span
+                  className={`flex w-full flex-col items-center py-1 ${
+                    totalNet >= 0 ? "text-positive" : "text-negative"
+                  }`}
+                >
+                  <span className="text-[18px] font-bold tabular-nums">
                     {formatMoney(totalNet, currency)}
                   </span>
-                  <span
-                    className={`mt-1 w-full border-t border-line pt-1 text-[11px] font-semibold ${
-                      totalNet >= 0 ? "text-positive" : "text-negative"
-                    }`}
-                  >
-                    {shareOfIncome(totalNet) === null ? "—" : `${shareOfIncome(totalNet)!.toFixed(1)}%`}
+                  <span className="text-[11px] font-semibold">
+                    {shareOfIncome(totalNet) === null
+                      ? "—"
+                      : `${shareOfIncome(totalNet)!.toFixed(1)}% of income`}
                   </span>
                 </span>
-              </div>
+              </YearBand>
+              {months.map((m) => (
+                <MoneyCell
+                  key={m.idx}
+                  empty={!m.hasData}
+                  color={m.net >= 0 ? "var(--positive)" : "var(--negative)"}
+                  className={`font-bold ${m.net >= 0 ? "text-positive" : "text-negative"}`}
+                  active={selected.has(monthsCellKey(m.idx, "net"))}
+                  onToggle={() =>
+                    onToggleCell(monthsCellKey(m.idx, "net"), {
+                      kind: "net",
+                      amountCents: m.net,
+                      monthIdx: m.idx,
+                      source: "months",
+                    })
+                  }
+                >
+                  {formatMoney(m.net, currency)}
+                </MoneyCell>
+              ))}
             </div>
           </div>
         </div>

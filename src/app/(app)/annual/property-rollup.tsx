@@ -3,6 +3,7 @@
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { periodHeaderClass } from "./annual-cell";
 
 /** One Budget line's share of a property's year. */
 export type PropertyLine = {
@@ -29,6 +30,8 @@ export type PropertyRollup = {
 type Props = {
   properties: PropertyRollup[];
   monthLabels: string[]; // 12 short labels (Jan…Dec)
+  /** Label of the month we're in, or null when viewing another year. */
+  currentMonthLabel: string | null;
   currency: string;
 };
 
@@ -49,7 +52,7 @@ function trackMinWidth(monthCount: number) {
  * Expenses, so nothing else on this page shows them against each other — this
  * panel is the join, keyed on the property tag carried by each transaction.
  */
-export function PropertyRollupPanel({ properties, monthLabels, currency }: Props) {
+export function PropertyRollupPanel({ properties, monthLabels, currentMonthLabel, currency }: Props) {
   const [collapse, setCollapse] = useSessionCollapse("annual-properties", () => ({ open: true }));
   const open = collapse.open;
 
@@ -88,6 +91,7 @@ export function PropertyRollupPanel({ properties, monthLabels, currency }: Props
               key={p.id}
               property={p}
               monthLabels={monthLabels.slice(0, monthCount)}
+              currentMonthLabel={currentMonthLabel}
               monthCount={monthCount}
               currency={currency}
             />
@@ -101,11 +105,13 @@ export function PropertyRollupPanel({ properties, monthLabels, currency }: Props
 function PropertyCard({
   property,
   monthLabels,
+  currentMonthLabel,
   monthCount,
   currency,
 }: {
   property: PropertyRollup;
   monthLabels: string[];
+  currentMonthLabel: string | null;
   monthCount: number;
   currency: string;
 }) {
@@ -165,16 +171,16 @@ function PropertyCard({
                 className="grid items-center gap-2 border-b border-line py-2 pr-3"
                 style={gridStyle(monthCount)}
               >
-                <span className="sticky left-0 z-10 bg-surface pl-3 text-[11px] font-medium uppercase tracking-wide text-muted">
-                  Line
+                <span className="sticky left-0 z-10 bg-surface pl-3 text-[15px] font-bold uppercase tracking-wide text-foreground">
+                  Category
                 </span>
-                <span className="text-center text-[13px] font-bold uppercase tracking-wide text-foreground">
+                <span className="text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
                   Total
                 </span>
                 {monthLabels.map((m) => (
                   <span
                     key={m}
-                    className="text-center text-[13px] font-medium uppercase tracking-wide text-muted"
+                    className={periodHeaderClass(m === currentMonthLabel)}
                   >
                     {m}
                   </span>

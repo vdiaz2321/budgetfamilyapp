@@ -825,14 +825,14 @@ function PlannedForm({
       />
     </label>
   );
-  // Trips feed this plan from the Travel Log. The box holds the whole figure;
-  // saving keeps the trip part and stores only what's typed above it.
+  // Trips from the Travel Log seed this plan when the month has no typed
+  // figure yet. Once Planned is typed here it stands on its own — nothing
+  // adds the trip on top and nothing writes back to the trip.
   const tripNote = tripPlannedCents > 0 ? (
     <p className="mb-3 mt-1.5 text-[11px] leading-snug text-muted">
-      Includes <span className="font-semibold text-foreground tabular-nums">{formatMoney(tripPlannedCents, currency)}</span> from{" "}
-      {tripNames.join(", ")} (Travel Log). Extra on top:{" "}
-      <span className="font-semibold text-foreground tabular-nums">{formatMoney(Math.max(0, plannedCents - tripPlannedCents), currency)}</span>.
-      Change the trip&apos;s amounts in the Travel Log.
+      {tripNames.join(", ")} (Travel Log) plans{" "}
+      <span className="font-semibold text-foreground tabular-nums">{formatMoney(tripPlannedCents, currency)}</span> here.
+      Planned above is your own figure — change the trip&apos;s amounts in the Travel Log.
     </p>
   ) : null;
 

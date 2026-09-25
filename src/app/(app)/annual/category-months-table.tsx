@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { usePersistentCollapse } from "@/lib/use-session-collapse";
-import { MoneyCell } from "./annual-cell";
+import { MoneyCell, periodHeaderClass } from "./annual-cell";
+import { ClearSelectionButton } from "./clear-selection-button";
 import {
   KIND_COLOR,
   categoryCellKey,
@@ -45,10 +46,13 @@ export type CatMonthGroup = {
 type Props = {
   groups: CatMonthGroup[];
   monthLabels: string[]; // 12 short labels (Jan…Dec)
+  /** Label of the month we're in, or null when viewing another year. */
+  currentMonthLabel: string | null;
   currency: string;
   /** Cells currently driving the hero cards, across both tables. */
   selected: Selection;
   onToggleCell: (key: string, cell: SelectedCell) => void;
+  onClearSelection: () => void;
 };
 
 // Months run newest-first, left to right: the panel is half a screen wide, so
@@ -69,21 +73,23 @@ function gridStyle(monthCount: number) {
     // rows already overflow their panel, so the `1fr` never gets to stretch
     // — the track sits at its minimum and anything wider paints straight
     // over the gap into the next column's number.
-    gridTemplateColumns: `11rem minmax(8rem,1fr) repeat(${monthCount},minmax(7rem,1fr))`,
+    gridTemplateColumns: `13rem minmax(8rem,1fr) repeat(${monthCount},minmax(7rem,1fr))`,
   };
 }
 // Enough width for every column at its minimum; narrower than a full year
 // once the empty tail months are dropped.
 function trackMinWidth(monthCount: number) {
-  return { minWidth: `${12 + 8 + 7 * monthCount}rem` };
+  return { minWidth: `${14 + 8 + 7 * monthCount}rem` };
 }
 
 export function CategoryMonthsTable({
   groups,
   monthLabels,
+  currentMonthLabel,
   currency,
   selected,
   onToggleCell,
+  onClearSelection,
 }: Props) {
   // Open by default, and persistent: this panel is the year read line by
   // line, so it should be found as it was left rather than collapsed on
@@ -115,6 +121,7 @@ export function CategoryMonthsTable({
       >
         <Chevron open={open} />
         <span className="font-semibold">Category by Months</span>
+        {selected.size > 0 ? <ClearSelectionButton onClear={onClearSelection} /> : null}
       </button>
 
       {open ? (
@@ -126,6 +133,7 @@ export function CategoryMonthsTable({
                 group={g}
                 monthLabels={visibleMonths(monthLabels, monthCount)}
                 monthCount={monthCount}
+                currentMonthLabel={currentMonthLabel}
                 currency={currency}
                 scrollersRef={scrollersRef}
                 syncScrollX={syncScrollX}
@@ -149,6 +157,7 @@ function Group({
   group,
   monthLabels,
   monthCount,
+  currentMonthLabel,
   currency,
   scrollersRef,
   syncScrollX,
@@ -158,6 +167,7 @@ function Group({
   group: CatMonthGroup;
   monthLabels: string[];
   monthCount: number;
+  currentMonthLabel: string | null;
   currency: string;
   scrollersRef: React.RefObject<Set<HTMLDivElement>>;
   syncScrollX: (x: number) => void;
@@ -179,6 +189,33 @@ function Group({
   const anyExpandable = group.rows.some((r) => (r.details?.length ?? 0) > 0);
   const headerRef = useRef<HTMLDivElement>(null);
 
+  // What the header figure answers changes with the selection: with cells
+  // picked in this group it reports their sum, so a group can be read without
+  // scrolling up to the hero cards. Only this group's own cells count — the
+  // selection spans every group at once. Detail rows are summed alongside
+  // their parent exactly as the hero does it: whatever is clicked is added.
+  const picked = useMemo(() => {
+    if (selected.size === 0) return null;
+    let sum = 0;
+    let count = 0;
+    const add = (key: string) => {
+      const cell = selected.get(key);
+      if (cell) {
+        sum += cell.amountCents;
+        count += 1;
+      }
+    };
+    for (const r of group.rows) {
+      add(categoryCellKey(r.subId, null));
+      r.months.forEach((_, i) => add(categoryCellKey(r.subId, i)));
+      for (const d of r.details ?? []) {
+        add(categoryCellKey(`${r.subId}/${d.name}`, null));
+        d.months.forEach((_, i) => add(categoryCellKey(`${r.subId}/${d.name}`, i)));
+      }
+    }
+    return count > 0 ? { sum, count } : null;
+  }, [group, selected]);
+
   function syncHeader(scrollLeft: number) {
     if (headerRef.current) headerRef.current.scrollLeft = scrollLeft;
   }
@@ -196,9 +233,20 @@ function Group({
       >
         <Chevron open={open} small />
         <span className="text-[13px] font-bold uppercase tracking-wide">{group.label}</span>
-        <span className="ml-auto text-[18px] font-semibold tabular-nums text-muted">
-          {formatMoney(group.total, currency)}
+        <span className="ml-3 text-[13px] font-bold uppercase tracking-wide">
+          {picked ? `Selected (${picked.count}):` : "Total:"}
         </span>
+        <span
+          className="text-[13px] font-bold tabular-nums"
+          style={{ color: picked ? KIND_COLOR[group.kind] : "var(--foreground)" }}
+        >
+          {formatMoney(picked ? picked.sum : group.total, currency)}
+        </span>
+        {picked ? (
+          <span className="text-[13px] font-bold tabular-nums">
+            of {formatMoney(group.total, currency)}
+          </span>
+        ) : null}
       </button>
 
       {open ? (
@@ -211,18 +259,18 @@ function Group({
           >
             <div style={trackMinWidth(monthCount)}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle(monthCount)}>
-                <span className="sticky left-0 z-10 bg-surface pl-4 text-[11px] font-medium uppercase tracking-wide text-muted whitespace-nowrap">
-                  Annual Cat by Mos
+                <span className="sticky left-0 z-10 bg-surface pl-4 text-[15px] font-bold uppercase tracking-wide text-foreground whitespace-nowrap">
+                  Category
                 </span>
                 <YearBand pad="-my-2">
-                  <span className="w-full text-center text-[13px] font-bold uppercase tracking-wide text-foreground">
+                  <span className="w-full text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
                     Year total
                   </span>
                 </YearBand>
                 {monthLabels.map((m) => (
                   <span
                     key={m}
-                    className="text-center text-[13px] font-medium uppercase tracking-wide text-muted"
+                    className={periodHeaderClass(m === currentMonthLabel)}
                   >
                     {m}
                   </span>
@@ -328,15 +376,43 @@ function Group({
                               {d.name}
                             </span>
                             <YearBand pad="-my-1.5">
-                              <span className="w-full text-center text-[18px] font-medium tabular-nums text-muted">
+                              <MoneyCell
+                                empty={d.total === 0}
+                                color={KIND_COLOR[group.kind]}
+                                active={selected.has(categoryCellKey(`${r.subId}/${d.name}`, null))}
+                                onToggle={() =>
+                                  onToggleCell(categoryCellKey(`${r.subId}/${d.name}`, null), {
+                                    kind: group.kind,
+                                    amountCents: d.total,
+                                    monthIdx: null,
+                                    source: "category",
+                                  })
+                                }
+                              >
                                 {formatMoney(d.total, currency)}
-                              </span>
+                              </MoneyCell>
                             </YearBand>
-                            {visibleMonths(d.months, monthCount).map((v, i) => (
-                              <span key={i} className="text-center text-[18px] tabular-nums text-muted">
-                                {v !== 0 ? formatMoney(v, currency) : "—"}
-                              </span>
-                            ))}
+                            {visibleMonths(d.months, monthCount).map((v, i) => {
+                              const monthIdx = monthCount - 1 - i;
+                              return (
+                                <MoneyCell
+                                  key={monthIdx}
+                                  empty={v === 0}
+                                  color={KIND_COLOR[group.kind]}
+                                  active={selected.has(categoryCellKey(`${r.subId}/${d.name}`, monthIdx))}
+                                  onToggle={() =>
+                                    onToggleCell(categoryCellKey(`${r.subId}/${d.name}`, monthIdx), {
+                                      kind: group.kind,
+                                      amountCents: v,
+                                      monthIdx,
+                                      source: "category",
+                                    })
+                                  }
+                                >
+                                  {formatMoney(v, currency)}
+                                </MoneyCell>
+                              );
+                            })}
                           </div>
                         ))
                       : null}
@@ -376,7 +452,7 @@ function Group({
  * the month columns. `pad` cancels the row's own vertical padding so the band
  * meets the band in the row above instead of breaking into stripes.
  */
-function YearBand({ pad, children }: { pad: "-my-2" | "-my-1.5"; children: React.ReactNode }) {
+export function YearBand({ pad, children }: { pad: "-my-2" | "-my-1.5"; children: React.ReactNode }) {
   return (
     <span
       className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-black/[0.035] px-1 dark:bg-white/[0.05]`}

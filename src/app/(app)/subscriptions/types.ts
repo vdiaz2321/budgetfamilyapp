@@ -18,6 +18,9 @@ export type SubscriptionRow = {
   // sub plans every month, an annual one only in its renewal month.
   monthPlannedCents?: number;
   monthSpentCents?: number;
+  /** This subscription's own spend for the viewed year, through the viewed
+   *  month — same payee matcher as monthSpentCents. */
+  ytdSpentCents?: number;
   /** Ids of the transactions that make up `monthSpentCents`, so the row can
    *  show WHICH charge landed — not just that the total moved. */
   monthTxIds?: string[];
@@ -44,6 +47,8 @@ export type IrregularBillRow = {
   // detail only; the shared Budget "Irregular Bills" row remains the source
   // that rolls into Bills and the Annual Overview.
   monthSpentCents?: number;
+  /** This bill's spend for the viewed year, through the viewed month. */
+  ytdSpentCents?: number;
   monthAccountNames?: string[];
   /** Ids of the transactions behind `monthSpentCents` — same purpose as the
    *  subscription field above. */

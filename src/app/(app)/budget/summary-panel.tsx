@@ -33,7 +33,7 @@ export function SummaryPanel({ groups, currency }: Props) {
     const saved = sessionStorage.getItem("budget-summary-mode") as ViewMode | null;
     // Browser-only preference hydration; the initial state is SSR-safe.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (saved === "spent" || saved === "remaining") setMode(saved);
+    if (saved === "spent" || saved === "remaining" || saved === "ytd") setMode(saved);
     setHydrated(true);
   }, []);
 
@@ -44,10 +44,12 @@ export function SummaryPanel({ groups, currency }: Props) {
   // top). Each segment's size uses the current shared mode value.
   const outflow = groups.filter((g) => g.kind !== "income");
 
-  // Donut geometry — matches the reference design: thin ring with rounded
-  // caps and small gaps between segments.
-  const R = 60; // radius of the inner circle (center of stroke)
-  const STROKE = 10; // stroke width of the ring (thinner = more elegant)
+  // Donut geometry — deliberately identical to the Insights page's Total
+  // outflow donut (see Donut in insights-charts.tsx): same radius, same thick
+  // ring, butt caps and a hairline gap, so the two pages read as one chart
+  // shown twice rather than two different charts.
+  const R = 54; // radius of the inner circle (center of stroke)
+  const STROKE = 15; // stroke width of the ring
   const C = 2 * Math.PI * R;
 
   const usedKinds = new Set<CategoryKind>();
@@ -61,8 +63,12 @@ export function SummaryPanel({ groups, currency }: Props) {
     return EXTRA[extraIdx++ % EXTRA.length];
   });
 
+  // Year to date per group comes off the rows, which carry the same
+  // v_monthly_actuals figure the board's Total Yr column and the Annual
+  // Overview both read.
+  const ytdTotalOf = (g: GroupData) => g.rows.reduce((sum, r) => sum + (r.ytdSpentCents ?? 0), 0);
   const base = outflow.map((g, i) => {
-    const value = mode === "spent" ? g.spentTotal : g.plannedTotal;
+    const value = mode === "spent" ? g.spentTotal : mode === "ytd" ? ytdTotalOf(g) : g.plannedTotal;
     return {
       categoryId: g.categoryId,
       name: g.name,
@@ -75,15 +81,18 @@ export function SummaryPanel({ groups, currency }: Props) {
   });
 
   const total = base.reduce((sum, s) => sum + s.arcValue, 0);
-  const modeLabel = mode === "spent" ? "Spent" : "Planned";
+  const modeLabel = mode === "spent" ? "Spent" : mode === "ytd" ? "Total Yr" : "Planned";
+  // "Total Total Yr" — the donut's centre prefixes "Total", so the year view
+  // supplies its own wording.
+  const centerTotalLabel = mode === "ytd" ? "Year to date" : `Total ${modeLabel}`;
 
   // Precompute each arc's dash length + offset via prefix sums so the render
   // body never mutates a running accumulator (React-compiler-safe).
   const lens = base.map((s) => (total > 0 ? (s.arcValue / total) * C : 0));
-  // Breathing room between segments (YNAB-style): shave a small gap off the
-  // end of each visible arc — only when there's more than one to separate.
+  // Hairline gap between segments so neighbours never blend — the same 2
+  // units the Insights donut shaves off each arc.
   const visibleCount = lens.filter((l) => l > 0).length;
-  const GAP = visibleCount > 1 ? 6 : 0;
+  const GAP = visibleCount > 1 ? 2 : 0;
   const segments = base.map((s, i) => ({
     ...s,
     len: Math.max(0.1, lens[i] - GAP),
@@ -103,7 +112,7 @@ export function SummaryPanel({ groups, currency }: Props) {
       .map((r) => ({
         subId: r.subId,
         name: r.name,
-        value: mode === "spent" ? r.spentCents : r.plannedCents,
+        value: mode === "spent" ? r.spentCents : mode === "ytd" ? (r.ytdSpentCents ?? 0) : r.plannedCents,
         isKids: r.isKids ?? false,
       }))
       .filter((r) => r.value !== 0)
@@ -140,16 +149,32 @@ export function SummaryPanel({ groups, currency }: Props) {
     <div className="flex flex-col overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <h2 className="text-sm font-bold">Summary</h2>
-        <button
-          type="button"
-          onClick={() => setMode((m) => (m === "spent" ? "remaining" : "spent"))}
-          className="flex items-center gap-0.5 text-xs text-muted hover:text-foreground"
-        >
-          {modeLabel} by category
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        {/* Three views now, so this is a real select rather than a two-way
+            toggle: the year one answers "how much has this category taken all
+            year" without a trip to the Annual Overview. */}
+        <div className="relative flex items-center">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as ViewMode)}
+            aria-label="What the summary charts"
+            // Fixed width, sized to the longest option: an auto-width select
+            // re-measures itself on every choice, which slid the whole control
+            // left and right as the label changed length.
+            className="w-40 cursor-pointer appearance-none truncate rounded-md bg-transparent py-0.5 pl-1.5 pr-5 text-xs text-muted transition hover:bg-black/5 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 dark:hover:bg-white/10"
+          >
+            <option value="remaining">Planned by category</option>
+            <option value="spent">Spent by category</option>
+            <option value="ytd">Total Yr by category</option>
+          </select>
+          <svg
+            width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+            className="pointer-events-none absolute right-1 text-muted"
+            aria-hidden
+          >
             <path d="M6 9l6 6 6-6" />
           </svg>
-        </button>
+        </div>
       </div>
 
       {total <= 0 ? (
@@ -159,40 +184,40 @@ export function SummaryPanel({ groups, currency }: Props) {
             <br />
             {mode === "spent"
               ? "Log some transactions to see the breakdown."
-              : "Plan some categories to see the breakdown."}
+              : mode === "ytd"
+                ? "Nothing has been spent this year yet."
+                : "Plan some categories to see the breakdown."}
           </p>
         </div>
       ) : (
         <>
           {/* Donut */}
           <div className="flex justify-center px-4 pt-5">
-            <div className="relative h-[150px] w-[150px]">
-              <svg viewBox="0 0 140 140" className="h-full w-full -rotate-90">
-                <circle
-                  cx="70"
-                  cy="70"
-                  r={R}
-                  fill="none"
-                  strokeWidth={STROKE}
-                  className="stroke-line/60"
-                />
+            <div className="relative mx-auto aspect-square w-full max-w-[190px]">
+              <svg viewBox="0 0 128 128" className="h-full w-full -rotate-90">
+                <circle cx="64" cy="64" r={R} fill="none" stroke="var(--viz-grid)" strokeWidth={STROKE} />
                 {segments.map((s) => {
                   if (s.arcValue <= 0) return null;
                   const dim = active != null && active !== s.categoryId;
                   return (
                     <circle
                       key={s.categoryId}
-                      cx="70"
-                      cy="70"
+                      cx="64"
+                      cy="64"
                       r={R}
                       fill="none"
                       stroke={s.color}
-                      strokeWidth={active === s.categoryId ? STROKE + 3 : STROKE}
-                      strokeLinecap="round"
+                      strokeWidth={active === s.categoryId ? STROKE + 4 : STROKE}
                       strokeDasharray={`${s.len} ${C - s.len}`}
                       strokeDashoffset={s.arcOffset}
                       className="cursor-pointer transition-[stroke-width,opacity]"
                       style={{ opacity: dim ? 0.35 : 1 }}
+                      // A slice opens its own category in the legend below and
+                      // closes it again — the arc already looked clickable
+                      // (cursor-pointer) but only ever highlighted itself.
+                      onClick={() =>
+                        setExpanded((id) => (id === s.categoryId ? null : s.categoryId))
+                      }
                       onMouseEnter={() => setActive(s.categoryId)}
                       onMouseLeave={() => setActive(null)}
                     />
@@ -201,10 +226,10 @@ export function SummaryPanel({ groups, currency }: Props) {
               </svg>
               {/* Center label */}
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <span className="max-w-[100px] truncate text-[10px] font-bold uppercase tracking-widest text-muted">
-                  {activeSeg ? activeSeg.name : `Total ${modeLabel}`}
+                <span className="max-w-[110px] truncate text-[10px] font-medium uppercase tracking-wide text-muted">
+                  {activeSeg ? activeSeg.name : centerTotalLabel}
                 </span>
-                <span className="mt-0.5 text-sm font-extrabold tabular-nums text-foreground">
+                <span className="mt-0.5 text-lg font-bold tabular-nums text-foreground">
                   {formatMoney(activeSeg ? activeSeg.value : total, currency)}
                 </span>
               </div>
@@ -238,10 +263,13 @@ export function SummaryPanel({ groups, currency }: Props) {
                       style={{ backgroundColor: s.color }}
                     />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.name}</span>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums">
+                    <span className="w-24 shrink-0 text-right text-sm font-semibold tabular-nums">
                       {formatMoney(s.value, currency)}
                     </span>
-                    <span className="w-9 shrink-0 text-right text-xs text-muted tabular-nums">
+                    <span
+                      className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums"
+                      style={{ color: s.color }}
+                    >
                       {pct}%
                     </span>
                     <svg
@@ -258,21 +286,41 @@ export function SummaryPanel({ groups, currency }: Props) {
                     const sections = sectionedFor(s.categoryId);
                     if (sections) {
                       return (
-                        <div className="mb-1 ml-5 border-l border-line pl-3">
+                        <div className="mb-1 ml-5 border-l border-line pl-3 pr-2">
                           {sections.map((sec) => (
                             <div key={sec.label} className="mb-1">
-                              <div className="flex items-center gap-2 rounded px-1 py-0.5 bg-brand-soft/30 mt-1">
-                                <span className="min-w-0 flex-1 truncate text-[10px] font-bold uppercase tracking-wide text-brand">{sec.label}</span>
-                                <span className="shrink-0 text-[10px] font-bold tabular-nums text-brand">
+                              {/* Section header for the Kids / Mine split, in
+                                  the category's own donut colour (never the
+                                  indigo brand, which is chrome, not data) and
+                                  at the size of the rows it sums. */}
+                              <div
+                                className="mt-1 flex items-center gap-2 rounded px-1 py-0.5"
+                                style={{ backgroundColor: `color-mix(in oklab, ${s.color} 14%, transparent)` }}
+                              >
+                                <span
+                                  className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wide"
+                                  style={{ color: s.color }}
+                                >
+                                  {sec.label}
+                                </span>
+                                <span className="w-24 shrink-0 text-right text-xs font-bold tabular-nums" style={{ color: s.color }}>
                                   {formatMoney(sec.subtotal, currency)}
                                 </span>
+                                {/* Keeps the subtotal in the same column as the
+                                    item amounts below it, which are followed by
+                                    a % and the chevron's placeholder. */}
+                                <span className="w-9 shrink-0" aria-hidden />
+                                <span className="w-3 shrink-0" aria-hidden />
                               </div>
                               <ul className="divide-y divide-line">
                                 {sec.rows.map((r) => (
                                   <li key={r.subId} className="flex items-center gap-2.5 py-1">
-                                    <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
-                                    <span className="shrink-0 text-xs tabular-nums">{formatMoney(r.value, currency)}</span>
-                                    <span className="w-9 shrink-0 text-right text-xs text-muted tabular-nums">
+                                    <span className="min-w-0 flex-1 truncate text-xs text-foreground">{r.name}</span>
+                                    <span className="w-24 shrink-0 text-right text-xs font-medium tabular-nums text-foreground">{formatMoney(r.value, currency)}</span>
+                                    <span
+                                      className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums"
+                                      style={{ color: s.color }}
+                                    >
                                       {pctLabel(r.value, total)}
                                     </span>
                                     {/* Stands in for the category row's chevron so the
@@ -287,17 +335,24 @@ export function SummaryPanel({ groups, currency }: Props) {
                       );
                     }
                     return (
-                      <ul className="mb-1 ml-5 divide-y divide-line border-l border-line pl-3">
+                      <ul className="mb-1 ml-5 divide-y divide-line border-l border-line pl-3 pr-2">
                         {subRows.length === 0 ? (
                           <li className="py-1 text-xs text-muted">
-                            {mode === "spent" ? "Nothing spent here yet." : "Nothing remaining here."}
+                            {mode === "spent"
+                              ? "Nothing spent here yet."
+                              : mode === "ytd"
+                                ? "Nothing spent here this year."
+                                : "Nothing remaining here."}
                           </li>
                         ) : (
                           subRows.map((r) => (
                             <li key={r.subId} className="flex items-center gap-2.5 py-1">
-                              <span className="min-w-0 flex-1 truncate text-xs text-muted">{r.name}</span>
-                              <span className="shrink-0 text-xs tabular-nums">{formatMoney(r.value, currency)}</span>
-                              <span className="w-9 shrink-0 text-right text-xs text-muted tabular-nums">
+                              <span className="min-w-0 flex-1 truncate text-xs text-foreground">{r.name}</span>
+                              <span className="w-24 shrink-0 text-right text-xs font-medium tabular-nums text-foreground">{formatMoney(r.value, currency)}</span>
+                              <span
+                                className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums"
+                                style={{ color: s.color }}
+                              >
                                 {pctLabel(r.value, total)}
                               </span>
                               {/* Stands in for the category row's chevron so the

@@ -491,12 +491,6 @@ export default async function AnnualOverviewPage({
 
   const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
   const currency = household.currency;
-  // Tracks have a floor and a ceiling: they fill the panel Months now has to
-  // itself (see annual-panels.tsx), but the table is capped at 78rem so six
-  // figures keep reading as a row instead of drifting apart on a 2560px
-  // monitor. The 2xl step matches the larger type there.
-  const gridCols =
-    "grid-cols-[minmax(5rem,7rem)_repeat(6,minmax(9rem,1fr))]";
 
   return (
     <div className="mx-auto w-full space-y-4 max-w-[1800px]">
@@ -512,7 +506,7 @@ export default async function AnnualOverviewPage({
 
       <div className="hidden space-y-4 sm:block">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+        <div className="flex flex-wrap items-baseline gap-x-3">
           <h1 className="text-xl font-bold">Annual Overview</h1>
           <p className="text-sm text-muted">
             The whole year at a glance — actual transactions only.
@@ -537,7 +531,6 @@ export default async function AnnualOverviewPage({
         monthRows={rows}
         totals={totals}
         totalNet={totalNet}
-        gridCols={gridCols}
         groups={categoryGroups}
         monthLabels={monthLabels}
         properties={propertyRollups}

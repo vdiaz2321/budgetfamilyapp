@@ -10,6 +10,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 export function useSessionYears(key: string, initial: () => string[]) {
   const [years, setYears] = useState<string[]>(initial);
   const [hydrated, setHydrated] = useState(false);
+  // True when the value came back from this session rather than the default —
+  // callers use it to tell "the user chose this" from "nobody has touched it".
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
     try {
       const saved = window.sessionStorage.getItem(key);
@@ -17,8 +20,11 @@ export function useSessionYears(key: string, initial: () => string[]) {
       // server. Anything unreadable (an old single-year string) is ignored.
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (Array.isArray(parsed)) setYears(parsed.map(String));
+        if (Array.isArray(parsed)) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setYears(parsed.map(String));
+          setRestored(true);
+        }
       }
     } catch {
       // sessionStorage unavailable — stays on `initial`.
@@ -33,7 +39,7 @@ export function useSessionYears(key: string, initial: () => string[]) {
       // sessionStorage unavailable — the pick just won't persist.
     }
   }, [key, years, hydrated]);
-  return [years, setYears] as const;
+  return [years, setYears, restored] as const;
 }
 
 /**

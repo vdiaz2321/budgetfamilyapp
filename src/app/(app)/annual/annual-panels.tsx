@@ -21,7 +21,6 @@ type Props = {
   monthRows: MonthRow[];
   totals: Record<CategoryKind, number>;
   totalNet: number;
-  gridCols: string;
   groups: CatMonthGroup[];
   monthLabels: string[];
   properties: PropertyRollup[];
@@ -50,9 +49,11 @@ const MONTH_ABBR = [
  * feed Spending, which is how the unfiltered card is built too.
  */
 export function AnnualPanels({
-  year, outflowKinds, columns, monthRows, totals, totalNet, gridCols,
+  year, outflowKinds, columns, monthRows, totals, totalNet,
   groups, monthLabels, properties, kinds, years, netByYear, currency,
 }: Props) {
+  const currentMonthIdx = monthRows.find((r) => r.status === "current")?.idx;
+  const currentMonthLabel = currentMonthIdx === undefined ? null : monthLabels[currentMonthIdx];
   const [selected, setSelected] = useState<Selection>(() => new Map());
 
   const toggleCell = (key: string, cell: SelectedCell) => {
@@ -168,8 +169,8 @@ export function AnnualPanels({
           />
         </div>
 
-        {/* One panel per row. Side by side, Months' deliberately fixed columns
-            (see gridCols in page.tsx) left it a small island in half an empty
+        {/* One panel per row. Side by side, Months' old fixed columns left
+            it a small island in half an empty
             panel, and neither table got the width its figures wanted. Stacked,
             each one gets the whole page. */}
         <div className="min-w-0">
@@ -179,7 +180,6 @@ export function AnnualPanels({
             totals={totals}
             totalNet={totalNet}
             currency={currency}
-            gridCols={gridCols}
             selected={selected}
             onToggleCell={toggleCell}
             onClearSelection={clear}
@@ -189,9 +189,11 @@ export function AnnualPanels({
           <CategoryMonthsTable
             groups={groups}
             monthLabels={monthLabels}
+            currentMonthLabel={currentMonthLabel}
             currency={currency}
             selected={selected}
             onToggleCell={toggleCell}
+            onClearSelection={clear}
           />
         </div>
 
@@ -199,6 +201,7 @@ export function AnnualPanels({
           <PropertyRollupPanel
             properties={properties}
             monthLabels={monthLabels}
+            currentMonthLabel={currentMonthLabel}
             currency={currency}
           />
         ) : null}

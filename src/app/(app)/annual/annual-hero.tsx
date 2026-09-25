@@ -73,7 +73,7 @@ export function AnnualHero({
       case "spending":
         return (
           <Stat
-            label={`${year} Spending`}
+            label={`${year} Spent (Bills/Expenses)`}
             value={val("spending", spendingTotal)}
             currency={currency}
             tone="text-negative"

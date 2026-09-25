@@ -109,7 +109,18 @@ export function BudgetGroup({
   const hasDue = KINDS_WITH_DUE.includes(group.kind);
   const isIncome = group.kind === "income";
   const actualLabel = ACTUAL_LABEL[group.kind];
-  const headerActualLabel = isIncome ? "Rec'd" : actualLabel;
+  // The header tiles and the column strip below are the same five columns, so
+  // they use one set of labels — "Rec'd" up top over "Received" underneath read
+  // as two different columns.
+  const headerActualLabel = actualLabel;
+  // "Progress" read like a performance score. The column is simply how much of
+  // the plan has gone out (or come in), so it takes the kind's own verb:
+  // Spent % / Rec'd % / Invested % / Paid %.
+  const progressColumnLabel = `${headerActualLabel} %`;
+  // Year to date for the same money the actual column counts. "Total" is in
+  // the label because "Yr Spent" alone read as a rate rather than a running
+  // total: Total Yr Spent / Rec'd / Invested / Paid.
+  const ytdColumnLabel = `Total Yr ${headerActualLabel}`;
   const nameColumnLabel = isIncome
     ? "Category / Label"
     : group.kind === "savings"
@@ -126,7 +137,7 @@ export function BudgetGroup({
     return true;
   });
 
-  // "Left" in the desktop header doubles as a filter: clicking it narrows the
+  // The "Remaining" tile in the desktop header doubles as a filter: clicking it narrows the
   // list to the items that actually have something left (or are overspent),
   // which is the only way to find the one item behind a group's -$1.14 without
   // reading two dozen rows. Clicking again clears it. The header totals
@@ -139,6 +150,10 @@ export function BudgetGroup({
   // so their planned/spent must not bulk up the subtotal either.
   const visiblePlannedTotal = visibleRows.reduce((s, r) => s + r.plannedCents, 0);
   const visibleSpentTotal = visibleRows.reduce((s, r) => s + r.spentCents, 0);
+  // Every row in the group, not just the visible ones: a debt paid off earlier
+  // this year is hidden from the board but its payments still happened, and
+  // this column's whole job is to agree with the Annual Overview's YEAR TOTAL.
+  const groupYtdTotal = group.rows.reduce((s, r) => s + (r.ytdSpentCents ?? 0), 0);
   const remainingTotal = visiblePlannedTotal - visibleSpentTotal;
   const listedRows = leftOnly
     ? visibleRows.filter((r) => r.plannedCents - r.spentCents !== 0)
@@ -207,15 +222,20 @@ export function BudgetGroup({
           <span className={`font-semibold ${actualColorClass(group.kind, visibleSpentTotal)}`}>
             {formatMoney(visibleSpentTotal, currency)}
           </span>
+          {/* The phone has no room for a Yr column per row, but the group's
+              year total fits here beside the month's pair — without the verb,
+              which the group name already gives and which pushed the income
+              line off a 375px screen. */}
+          <span className="text-muted"> · Total Yr {formatMoney(groupYtdTotal, currency)}</span>
         </span>
       </div>
 
-      {/* Desktop header — 12-col grid aligned with rows below */}
+      {/* Desktop header — 14-col grid aligned with rows below */}
       <div
-        className="group/header hidden cursor-pointer grid-cols-12 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 @md:grid"
+        className="group/header hidden cursor-pointer grid-cols-14 items-center gap-2 bg-surface/90 px-3 py-2.5 dark:bg-brand-soft/20 @md:grid"
         onClick={onToggle}
       >
-        <div className="col-span-5 flex min-w-0 items-center gap-2.5">
+        <div className="col-span-4 flex min-w-0 items-center gap-2.5">
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); onToggle(); }}
@@ -254,51 +274,64 @@ export function BudgetGroup({
             className="opacity-0 transition-opacity group-hover/header:opacity-100 focus:opacity-100 focus-visible:opacity-100"
           />
         </div>
-        {/* Three tiles, two behaviours: Plan and the actual open the group and
-            filter the transaction log by kind (as the whole block always did);
-            Left filters the item list down to what still has a balance. */}
+        {/* Four tiles sitting in the same 12-col grid as the rows below, so
+            Plan / actual / Remaining / % line up with their columns instead of
+            floating in a nested grid of their own. Plan and the actual open
+            the group and filter the transaction log by kind; Remaining filters
+            the item list down to what still has a balance; the % is a readout,
+            not a control. */}
         {/* The amount steps down with the card, not with the window: at a
             ~520px card these tiles are 74px wide inside their padding and
-            "$21,124.75" needs 92px at text-sm, so the Plan / actual / Left
-            figures were being painted straight through their own edges on a
-            laptop. Full size returns once the card is wide enough to hold
-            them. */}
-        <div className="col-span-7 grid grid-cols-3 items-start gap-2 text-[11px] tabular-nums text-muted">
-          <button
-            type="button"
-            onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
-            disabled={!onFilter}
-            className="min-w-0 rounded-md px-1 py-1 text-center leading-tight @2xl:px-2 enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
-          >
-            <span className="block text-xs font-semibold text-muted">Plan</span>
-            <span className="block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
-          </button>
-          <button
-            type="button"
-            onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
-            disabled={!onFilter}
-            className="min-w-0 rounded-md px-1 py-1 text-center leading-tight @2xl:px-2 enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
-          >
-            <span className="block text-xs font-semibold text-muted">{headerActualLabel}</span>
-            <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${actualColorClass(group.kind, visibleSpentTotal)}`}>
-              {formatMoney(visibleSpentTotal, currency)}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={(event) => { event.stopPropagation(); toggleLeftOnly(); }}
-            aria-pressed={leftOnly}
-            className={`min-w-0 cursor-pointer rounded-md px-1 py-1 text-center leading-tight ring-1 transition @2xl:px-2 ${
-              leftOnly
-                ? "bg-black/[0.06] ring-black/15 dark:bg-white/10 dark:ring-white/20"
-                : "ring-transparent hover:bg-black/5 dark:hover:bg-white/10"
-            }`}
-          >
-            <span className="block text-xs font-semibold text-muted">Left</span>
-            <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-              {formatMoney(remainingTotal, currency)}
-            </span>
-          </button>
+            "$21,124.75" needs 92px at text-sm, so the Plan / actual /
+            Remaining figures were being painted straight through their own
+            edges on a laptop. Full size returns once the card is wide enough
+            to hold them. */}
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
+          disabled={!onFilter}
+          className="col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+        >
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">Planned</span>
+          <span className="block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm text-foreground">{formatMoney(visiblePlannedTotal, currency)}</span>
+        </button>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); onToggle(); onFilter?.(group.kind); }}
+          disabled={!onFilter}
+          className="col-span-2 min-w-0 rounded-md px-0 py-1 text-center leading-tight tabular-nums enabled:hover:bg-brand-soft enabled:cursor-pointer disabled:cursor-default"
+        >
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">{headerActualLabel}</span>
+          <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+            {formatMoney(visibleSpentTotal, currency)}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); toggleLeftOnly(); }}
+          aria-pressed={leftOnly}
+          className={`col-span-2 min-w-0 cursor-pointer rounded-md px-0 py-1 text-center leading-tight tabular-nums ring-1 transition ${
+            leftOnly
+              ? "bg-black/[0.06] ring-black/15 dark:bg-white/10 dark:ring-white/20"
+              : "ring-transparent hover:bg-black/5 dark:hover:bg-white/10"
+          }`}
+        >
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">Remaining</span>
+          <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+            {formatMoney(remainingTotal, currency)}
+          </span>
+        </button>
+        <div className="col-span-2 min-w-0 px-0 py-1 text-center leading-tight tabular-nums">
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">{progressColumnLabel}</span>
+          <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+            {progressLabel(group.kind, visibleSpentTotal, visiblePlannedTotal)}
+          </span>
+        </div>
+        <div className="col-span-2 min-w-0 px-0 py-1 text-center leading-tight tabular-nums">
+          <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">{ytdColumnLabel}</span>
+          <span className="block text-[12px] font-semibold text-foreground @xl:text-[13px] @2xl:text-sm">
+            {formatMoney(groupYtdTotal, currency)}
+          </span>
         </div>
       </div>
 
@@ -321,16 +354,17 @@ export function BudgetGroup({
             <>
               {/* Mobile column label — actual noun follows the kind (Spent/Saved/Received/Paid) */}
               <div className="flex items-center justify-end px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted @md:hidden">
-                Planned / {ACTUAL_LABEL[group.kind]}{" · "}Left
+                Planned / {ACTUAL_LABEL[group.kind]}{" · "}Remaining
               </div>
 
               {/* Column-label strip — desktop only, must line up with BudgetRow */}
-              <div className={`hidden grid-cols-12 items-center gap-2 border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1.5" : "py-2"} text-[11px] font-bold uppercase tracking-wide text-muted @md:grid`}>
+              <div className={`hidden grid-cols-14 items-center gap-2 whitespace-nowrap border-b border-line/60 bg-background/40 px-3 ${compact ? "py-1.5" : "py-2"} text-[11px] font-bold uppercase tracking-wide text-muted @md:grid`}>
                 <div className="col-span-5 pl-6 sm:col-span-4">{nameColumnLabel}</div>
-                <div className="col-span-2 text-right">Planned</div>
-                <div className="col-span-2 text-right">{ACTUAL_LABEL[group.kind]}</div>
-                <div className="col-span-2 text-right">Remaining</div>
-                <div className="col-span-2 text-center">Progress</div>
+                <div className="col-span-2 text-center">Planned</div>
+                <div className="col-span-2 text-center">{ACTUAL_LABEL[group.kind]}</div>
+                <div className="col-span-2 text-center">Remaining</div>
+                <div className="col-span-2 text-center">{progressColumnLabel}</div>
+                <div className="col-span-2 text-center">{ytdColumnLabel}</div>
               </div>
 
               {(() => {
@@ -341,15 +375,17 @@ export function BudgetGroup({
                 const subtotalRow = (label: string, rows: RowData[]) => {
                   const planned = rows.reduce((s, r) => s + r.plannedCents, 0);
                   const spent = rows.reduce((s, r) => s + r.spentCents, 0);
+                  const ytd = rows.reduce((s, r) => s + (r.ytdSpentCents ?? 0), 0);
                   const remaining = planned - spent;
                   return (
                     <>
-                      <div className="hidden grid-cols-12 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[13px] font-bold uppercase tracking-wide text-brand @md:grid dark:bg-brand-soft/20">
+                      <div className="hidden grid-cols-14 items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-sm font-bold uppercase tracking-wide text-brand @md:grid dark:bg-brand-soft/20">
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
-                        <div className="col-span-2 text-right tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
-                        <div className={`col-span-2 text-right tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
-                        <div className={`col-span-2 text-right tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
+                        <div className="col-span-2 text-center tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
+                        <div className={`col-span-2 text-center tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
+                        <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
                         <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{progressLabel(group.kind, spent, planned)}</div>
+                        <div className="col-span-2 text-center tabular-nums text-foreground">{formatMoney(ytd, currency)}</div>
                       </div>
                       <div className="flex items-center gap-2 border-t border-line/60 bg-brand-soft/30 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-brand @md:hidden dark:bg-brand-soft/20">
                         <span className="truncate">{label}</span>
@@ -424,9 +460,9 @@ export function BudgetGroup({
                 </div>
               </div>
 
-              {/* Desktop subtotal: 12-col grid matching row layout */}
+              {/* Desktop subtotal: 14-col grid matching row layout */}
               <div
-                className={`hidden cursor-pointer grid-cols-12 items-center gap-2 border-t border-line bg-background/50 px-3 hover:bg-brand-soft/30 @md:grid ${compact ? "py-2" : "py-2.5"}`}
+                className={`hidden cursor-pointer grid-cols-14 items-center gap-2 border-t border-line bg-background/50 px-3 hover:bg-brand-soft/30 @md:grid ${compact ? "py-2" : "py-2.5"}`}
                 onClick={onToggle}
               >
                 <div className="col-span-5 flex items-center gap-2 pl-6 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-4">
@@ -436,13 +472,13 @@ export function BudgetGroup({
                   </svg>
                   <span>{group.name} subtotal</span>
                 </div>
-                <div className="col-span-2 text-right text-xs font-semibold tabular-nums text-foreground">
+                <div className="col-span-2 text-center text-sm font-semibold tabular-nums text-foreground">
                   {formatMoney(visiblePlannedTotal, currency)}
                 </div>
-                <div className={`col-span-2 text-right text-xs font-semibold tabular-nums ${actualColorClass(group.kind, visibleSpentTotal)}`}>
+                <div className={`col-span-2 text-center text-sm font-semibold tabular-nums ${actualColorClass(group.kind, visibleSpentTotal)}`}>
                   {formatMoney(visibleSpentTotal, currency)}
                 </div>
-                <div className="col-span-2 flex justify-end text-right text-xs font-semibold tabular-nums">
+                <div className="col-span-2 flex justify-center text-center text-sm font-semibold tabular-nums">
                   {subtotalOverspent ? (
                     <span className="inline-flex rounded-full bg-negative/15 px-2 py-0.5 text-foreground ring-1 ring-negative/15">
                       {formatMoney(remainingTotal, currency)}
@@ -453,8 +489,11 @@ export function BudgetGroup({
                     </span>
                   )}
                 </div>
-                <div className={`col-span-2 text-center text-xs font-bold tabular-nums ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+                <div className={`col-span-2 text-center text-sm font-bold tabular-nums ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
                   {progressLabel(group.kind, visibleSpentTotal, visiblePlannedTotal)}
+                </div>
+                <div className="col-span-2 text-center text-sm font-semibold tabular-nums text-foreground">
+                  {formatMoney(groupYtdTotal, currency)}
                 </div>
               </div>
             </>

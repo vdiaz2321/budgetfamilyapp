@@ -89,20 +89,25 @@ type Props = {
   autoPlanned?: boolean;
 };
 
-function DueAccountIndicator({ dueDay, compact = false }: { dueDay: number; compact?: boolean }) {
+// Some account names run long ("USAA Classic Checking"), so the badge
+// ellipsises rather than pushing the amounts off the row. The item
+// name always wins the line: the row's flex container wraps, so a badge that
+// cannot fit beside a long item name drops to its own line instead of
+// squeezing both into ellipses.
+function DueAccountIndicator({ dueDay, accountName, compact = false }: { dueDay: number; accountName: string | null; compact?: boolean }) {
+  const due = compact ? `D${dueDay}` : `Due ${dueDay}`;
   return (
-    <span className="shrink-0 whitespace-nowrap rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
-      {compact ? `D${dueDay}` : `Due ${dueDay}`} · linked
+    <span className="flex min-w-0 max-w-full items-baseline gap-1 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+      <span className="shrink-0 whitespace-nowrap">
+        {accountName ? (compact ? `${due} ·` : `${due} · Linked:`) : `${due} · linked`}
+      </span>
+      {accountName ? <span className="min-w-0 truncate">{accountName}</span> : null}
     </span>
   );
 }
 
 export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver, compact, detailsExpanded, onSelect, onDragStart, autoPlanned }: Props) {
   const remaining = row.plannedCents - row.spentCents;
-  // Part of this plan comes from trips in the Travel Log (details in the panel).
-  const tripMark = (row.tripPlannedCents ?? 0) > 0 ? (
-    <span className="shrink-0 text-[11px] text-muted" aria-label="Includes trip plans">✈</span>
-  ) : null;
   const elapsedPct = monthElapsedPct(monthKey);
   const debtSetUp = row.debt != null && (row.debt.minCents > 0 || row.debt.apr > 0);
   const paidOff = kind === "debt" && debtSetUp && row.debt!.balanceCents <= 0;
@@ -149,7 +154,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         if (target.closest("button, input, form, select, textarea, [data-row-click-ignore]")) return;
         onSelect();
       }}
-      className={`group relative flex flex-col gap-1.5 px-3 py-2 @md:grid @md:grid-cols-12 @md:items-center @md:gap-2 ${compact ? "@md:py-1" : "@md:py-1.5"} ${baseClass}`}
+      className={`group relative flex flex-col gap-1.5 px-3 py-2 @md:grid @md:grid-cols-14 @md:items-center @md:gap-2 ${compact ? "@md:py-1" : "@md:py-1.5"} ${baseClass}`}
     >
       {/* Mobile row: the progress stripe spans Category + Planned only, so it
           stops before the Spent value instead of stretching across the row. */}
@@ -157,11 +162,10 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         <button
           type="button"
           onClick={onSelect}
-          className="flex min-w-0 items-center gap-1.5 text-left text-sm text-foreground"
+          className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left text-sm text-foreground"
         >
-          <span className="min-w-0 truncate">{row.name}</span>
-          {tripMark}
-          {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} compact /> : null}
+          <span className="min-w-0 max-w-full truncate">{row.name}</span>
+          {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} accountName={row.paymentAccountName ?? null} compact /> : null}
         </button>
 
         <div className="text-[15px] tabular-nums text-muted">
@@ -245,26 +249,25 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         <button
           type="button"
           onClick={onSelect}
-          className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
+          className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-left"
         >
-          <span className={`truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
+          <span className={`min-w-0 max-w-full truncate text-sm ${paidOff ? "text-muted line-through" : "text-foreground"}`}>
             {row.name}
           </span>
-          {tripMark}
-          {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} /> : null}
+          {showDueAccount ? <DueAccountIndicator dueDay={row.dueDay!} accountName={row.paymentAccountName ?? null} /> : null}
         </button>
 
       </div>
 
       {/* Desktop: Planned — read-only when auto-derived */}
       <div
-        className="hidden @md:col-span-2 @md:flex @md:justify-end"
+        className="hidden @md:col-span-2 @md:flex @md:justify-center"
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {autoPlanned ?? row.autoPlanned ? (
           <span
-            className="px-1 py-0.5 text-right text-xs text-muted tabular-nums"
+            className="px-1 py-0.5 text-center text-sm text-muted tabular-nums"
           >
             {formatMoney(row.plannedCents, currency)}
           </span>
@@ -284,7 +287,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden @md:col-span-2 @md:block @md:text-right @md:text-xs @md:font-semibold @md:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
+        className={`hidden @md:col-span-2 @md:block @md:text-center @md:text-sm @md:font-semibold @md:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
         title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
       >
         {formatMoney(row.spentCents, currency)}
@@ -294,7 +297,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden @md:col-span-2 @md:text-right @md:text-xs @md:font-semibold @md:tabular-nums ${overBudget ? "@md:flex @md:justify-end" : "@md:block"}`}
+        className={`hidden @md:col-span-2 @md:text-center @md:text-sm @md:font-semibold @md:tabular-nums ${overBudget ? "@md:flex @md:justify-center" : "@md:block"}`}
         title={overBudget ? `Overspent by ${formatMoney(Math.abs(remaining), currency)}` : undefined}
       >
         {overBudget ? (
@@ -312,11 +315,24 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         onClick={onSelect}
         className="hidden @md:col-span-2 @md:block @md:text-center @md:tabular-nums"
       >
-        <span className={`block text-xs font-semibold ${pctClass}`}>{displayPct}%</span>
+        <span className={`block text-sm font-semibold ${pctClass}`}>{displayPct}%</span>
+      </button>
+
+      {/* Desktop: this item's year to date — the same figure the Annual
+          Overview totals, so a row can be read against the year without
+          leaving the board. */}
+      <button
+        type="button"
+        onClick={onSelect}
+        className="hidden @md:col-span-2 @md:block @md:text-center @md:text-sm @md:tabular-nums"
+      >
+        <span className={(row.ytdSpentCents ?? 0) === 0 ? "text-muted" : "font-semibold text-foreground"}>
+          {formatMoney(row.ytdSpentCents ?? 0, currency)}
+        </span>
       </button>
 
       {detailsExpanded ? (
-        <div className="hidden @md:col-span-6 @md:block @md:pb-0.5 @md:pl-6 @md:pr-2">
+        <div className="hidden @md:col-span-8 @md:block @md:pb-0.5 @md:pl-6 @md:pr-2">
           <div
             className="relative h-1.5 w-full overflow-hidden rounded-sm bg-[#eee9df] dark:bg-white/10"
             aria-label={`Current month progress: ${displayPct}%`}
@@ -498,7 +514,7 @@ function PlannedInput({
           setFocused(false);
           if (e.currentTarget.value !== `${currencySymbol(currency)}${initial}`) formRef.current?.requestSubmit();
         }}
-        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right text-xs text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
+        className={`w-24 min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center text-sm text-foreground tabular-nums transition hover:bg-brand-soft/40 focus:bg-surface focus:text-foreground focus:outline-none focus:ring-2 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />

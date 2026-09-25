@@ -15,8 +15,10 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
  *      have no per-bill plans and keep their old budget_plans figure.
  *   2. Subscriptions — the sum of what each linked subscription plans that
  *      month (see subscriptionPlannedFor), when it comes to more than $0.
- *   3. Everything else — the month's budget_plans row plus any Travel Log trip
- *      plans, which budget_plans holds only the extra on top of.
+ *   3. Everything else — the month's budget_plans row, exactly as typed on the
+ *      Budget board. Travel Log trip plans only stand in for a month that has
+ *      no typed plan yet, so a trip can seed the figure but never adjust one
+ *      Victor has set: the Planned cell is his to own.
  */
 
 export type PlanSubscription = {
@@ -98,7 +100,8 @@ export function buildPlanResolver(inputs: PlanInputs) {
   const plannedFor = (subId: string, firstOfMonth: string) =>
     irregularTotalFor(subId, firstOfMonth) ??
     subscriptionTotalFor(subId, firstOfMonth) ??
-    (manualFor(subId, firstOfMonth) ?? 0) + tripFor(subId, firstOfMonth);
+    manualFor(subId, firstOfMonth) ??
+    tripFor(subId, firstOfMonth);
 
   return { plannedFor, subscriptionPlannedFor, subscriptionTotalFor, irregularTotalFor, manualFor, tripFor };
 }

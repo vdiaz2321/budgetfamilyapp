@@ -1402,6 +1402,16 @@ function BudgetItemPicker({
   const [search, setSearch] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set(selectedIds));
   const searchRef = useRef<HTMLInputElement>(null);
+  // Desktop opens with the cursor already in the search box, so the picker can
+  // be driven from the keyboard. Never on a phone: focusing there throws the
+  // keyboard up over half the list before anything is typed (same rule as the
+  // account picker above).
+  const focusSearchOnDesktop = () => {
+    if (window.matchMedia("(min-width: 640px)").matches) searchRef.current?.focus({ preventScroll: true });
+  };
+  useEffect(() => {
+    focusSearchOnDesktop();
+  }, []);
 
   const filtered = search
     ? options.filter((o) => o.name.toLowerCase().includes(search.toLowerCase()))
@@ -1419,7 +1429,7 @@ function BudgetItemPicker({
     // Return cursor to the search box so the user can keep typing to filter
     // and pick the next item without an extra tap.
     setSearch("");
-    searchRef.current?.focus({ preventScroll: true });
+    focusSearchOnDesktop();
   }
 
   return (
@@ -1468,15 +1478,16 @@ function BudgetItemPicker({
         </div>
       </div>
 
-      {/* Header row */}
-      <div className="flex items-center gap-3 border-b border-line/40 bg-background/60 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-        <span className="flex-1">Item</span>
-        {showPlanned && <span className={PICKER_AMOUNT_COL}>Planned</span>}
-        <span className={PICKER_AMOUNT_COL}>Remaining</span>
-      </div>
-
-      {/* Item list */}
+      {/* Item list. The header row lives INSIDE the scroller, stuck to its
+          top: outside it, the list's scrollbar made every row narrower than
+          the header and the column labels sat to the right of their own
+          figures. */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
+        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line/40 bg-surface px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+          <span className="flex-1">Item</span>
+          {showPlanned && <span className={PICKER_AMOUNT_COL}>Planned</span>}
+          <span className={PICKER_AMOUNT_COL}>Remaining</span>
+        </div>
         {filtered.length === 0 && checked.size === 0
           ? <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
           : (() => {

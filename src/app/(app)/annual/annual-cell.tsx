@@ -1,5 +1,13 @@
 "use client";
 
+/** Column header for a month or year. The current one is set bold and dark
+ *  so "now" is easy to find across every table on the page. */
+export function periodHeaderClass(current: boolean) {
+  return `text-center text-[15px] uppercase tracking-wide ${
+    current ? "font-bold text-foreground" : "font-medium text-muted"
+  }`;
+}
+
 /**
  * One money cell in an Annual table. Clicking it adds the figure to the hero
  * card filter; a cell with nothing in it has nothing to add, so it stays an

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef, type CSSProperties, type RefObject } from "react";
+import { useEffect, useState, useRef, type CSSProperties, type RefObject } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { MoneyCell } from "./annual-cell";
+import { MoneyCell, periodHeaderClass } from "./annual-cell";
 
 export type BreakdownLine = {
   label: string;
@@ -64,6 +64,8 @@ type SelectedYearCell = { year: number; kind: KindKey; amountCents: number };
 // 1,860px, and the years you actually compare against are the ones pushed
 // furthest from the Category label.
 const RECENT_YEARS = 5;
+// Bolded in the year headers, the way the other tables bold this month.
+const CURRENT_YEAR = new Date().getFullYear();
 
 /**
  * A row's Total, summed over the years currently on screen.
@@ -74,6 +76,21 @@ const RECENT_YEARS = 5;
  */
 function sumOverYears(byYear: Record<number, number>, years: number[]): number {
   return years.reduce((sum, y) => sum + (byYear[y] ?? 0), 0);
+}
+
+// The Total column, shaded and fenced off with a rule down its right edge —
+// the same treatment the Category by Months table gives its Year total, so a
+// column of sums is never mistaken for another year.
+function TotalBand({ pad, plain, children }: { pad: string; plain?: boolean; children: React.ReactNode }) {
+  return (
+    <span
+      className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line px-1 ${
+        plain ? "" : "bg-black/[0.035] dark:bg-white/[0.05]"
+      }`}
+    >
+      {children}
+    </span>
+  );
 }
 
 type Props = {
@@ -108,6 +125,21 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
     });
   };
   const clearSelection = () => setSelected(new Map());
+
+  // The panel's own title bar stays pinned while its rows scroll, with the
+  // totals strip parked directly under it — the year range and Export were
+  // gone the moment you started reading. The strip's offset is measured, not
+  // guessed, so the two never overlap.
+  const titleBarRef = useRef<HTMLDivElement>(null);
+  const [titleBarH, setTitleBarH] = useState(0);
+  useEffect(() => {
+    const el = titleBarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setTitleBarH(el.offsetHeight));
+    ro.observe(el);
+    setTitleBarH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
 
   const scrollersRef = useRef<Set<HTMLDivElement>>(new Set());
   function syncScrollX(scrollLeft: number) {
@@ -156,12 +188,12 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
       {/* The collapse control and the export sit side by side rather than
           nested — a button inside a button is invalid, and clicking Export
           must not fold the panel shut under it. */}
-      <div className="flex items-center gap-2 pr-3">
+      <div ref={titleBarRef} className="sticky top-0 z-40 flex items-center gap-2 border-b border-line bg-surface pr-3">
         <button
           type="button"
           onClick={() => setCollapse({ open: !open })}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+          className="flex min-w-0 shrink items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
         >
           <Chevron open={open} />
           <span className="font-semibold">Annual Breakdown</span>
@@ -173,7 +205,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
             type="button"
             onClick={() => setShowAllYears((v) => !v)}
             aria-pressed={showAllYears}
-            className="shrink-0 rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+            className="shrink-0 cursor-pointer rounded-lg border border-sky-400 bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-sky-200 dark:border-sky-500 dark:bg-sky-900/40 dark:hover:bg-sky-900/60"
           >
             {showAllYears
               ? `Last ${RECENT_YEARS} years`
@@ -183,7 +215,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
         <button
           type="button"
           onClick={() => downloadBreakdownCsv(kinds, years, netByYear, currency)}
-          className="shrink-0 rounded-lg bg-surface px-3 py-1.5 text-xs font-medium ring-1 ring-black/10 transition hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+          className="mr-auto shrink-0 cursor-pointer rounded-lg border border-sky-400 bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-sky-200 dark:border-sky-500 dark:bg-sky-900/40 dark:hover:bg-sky-900/60"
         >
           Export CSV
         </button>
@@ -199,8 +231,8 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
               this strip lands where the hero cards were a moment ago, and
               without a hard edge the two read as one floating thing. */}
           <div
-            className="sticky top-0 z-30 rounded-lg bg-surface ring-1 ring-black/10 shadow-[0_3px_0_0_var(--color-line),0_12px_16px_-12px_rgba(0,0,0,0.45)] dark:ring-white/15"
-            style={{ overflow: "clip" }}
+            className="sticky z-30 rounded-lg bg-surface ring-1 ring-black/10 shadow-[0_3px_0_0_var(--color-line),0_12px_16px_-12px_rgba(0,0,0,0.45)] dark:ring-white/15"
+            style={{ overflow: "clip", top: titleBarH }}
           >
             <div
               ref={(el) => { if (el) scrollersRef.current.add(el); }}
@@ -209,12 +241,12 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
             >
               <div style={{ minWidth: minW }}>
                 <div className="grid items-center gap-2 border-b border-line bg-black/[0.05] pr-4 py-2 dark:bg-white/[0.08]" style={gridStyle}>
-                  <span className="pl-4 text-[13px] font-bold uppercase tracking-wide">
+                  <span className="pl-4 text-[15px] font-bold uppercase tracking-wide text-foreground">
                     Category
                   </span>
-                  <span className="text-center text-[13px] font-bold uppercase tracking-wide text-foreground">Total</span>
+                  <TotalBand pad="-my-2" plain><span className="text-center text-[15px] font-bold uppercase tracking-wide text-foreground">Total</span></TotalBand>
                   {years.map((y) => (
-                    <span key={y} className="text-center text-[13px] font-medium uppercase tracking-wide text-muted">
+                    <span key={y} className={periodHeaderClass(y === CURRENT_YEAR)}>
                       {y}
                     </span>
                   ))}
@@ -229,13 +261,15 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
                     years={years}
                     gridStyle={gridStyle}
                     currency={currency}
+                    selected={selected}
+                    onToggleCell={toggleCell}
                   />
                 ))}
                 {/* Net (unallocated) — Income − Expenses − Savings − Investment */}
                 <div className="grid items-center gap-2 border-t border-line pr-4 py-2" style={gridStyle}>
                   <span className="pl-4 text-[15px] font-bold">Net</span>
                   {(() => { const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0); return (
-                    <span className={`text-center text-[18px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span>
+                    <TotalBand pad="-my-2"><span className={`text-center text-[18px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span></TotalBand>
                   ); })()}
                   {years.map((y) => {
                     const v = netByYear[y] ?? 0;
@@ -365,22 +399,33 @@ function downloadBreakdownCsv(
 }
 
 function SummaryRow({
-  label, kind, byYear, total, years, gridStyle, currency,
+  label, kind, byYear, total, years, gridStyle, currency, selected, onToggleCell,
 }: {
-  label: string; kind: string; byYear: Record<number, number>; total: number;
+  label: string; kind: KindKey; byYear: Record<number, number>; total: number;
   years: number[]; gridStyle: CSSProperties; currency: string;
+  selected: Map<string, SelectedYearCell>;
+  onToggleCell: (key: string, cell: SelectedYearCell) => void;
 }) {
   const totalColor = kind === "income" || kind === "savings" || kind === "investment" ? "text-positive" : kind === "kidsFunding" ? "" : "text-negative";
   return (
     <div className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
       <span className="pl-4 text-[15px] font-semibold">{label}</span>
-      <span className={`text-center text-[18px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span>
+      <TotalBand pad="-my-1.5"><span className={`text-center text-[18px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span></TotalBand>
+      {/* The summary strip's figures select too — a whole section's year is as
+          legitimate a thing to add up as one line item's. */}
       {years.map((y) => {
         const v = byYear[y] ?? 0;
+        const key = `summary|${kind}|${y}`;
         return (
-          <span key={y} className="text-center text-[18px] tabular-nums">
-            {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
-          </span>
+          <MoneyCell
+            key={y}
+            empty={v === 0}
+            color={BREAKDOWN_COLOR[kind]}
+            active={selected.has(key)}
+            onToggle={() => onToggleCell(key, { year: y, kind, amountCents: v })}
+          >
+            {formatMoney(v, currency)}
+          </MoneyCell>
         );
       })}
     </div>
@@ -407,7 +452,12 @@ function KindBlock({
     }
   }
 
-  const filteredGroups = kind.groups;
+  // Biggest first, by the Total column: the question a breakdown answers is
+  // "what takes the most", and that shouldn't need a scan of every row.
+  // Groups, their line items and a line's split all sort the same way.
+  const filteredGroups = [...kind.groups].sort(
+    (a, b) => sumOverYears(b.subtotalByYear, years) - sumOverYears(a.subtotalByYear, years),
+  );
   const effectiveOpen = open;
 
   return (
@@ -435,12 +485,12 @@ function KindBlock({
           >
             <div style={{ minWidth: minW }}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle}>
-                <span className="pl-4 text-[13px] font-medium uppercase tracking-wide text-muted">
-                  Line item
+                <span className="pl-4 text-[15px] font-bold uppercase tracking-wide text-foreground">
+                  Category
                 </span>
-                <span className="text-center text-[13px] font-bold uppercase tracking-wide text-foreground">Total</span>
+                <span className="text-center text-[15px] font-bold uppercase tracking-wide text-foreground">Total</span>
                 {years.map((y) => (
-                  <span key={y} className="text-center text-[13px] font-medium uppercase tracking-wide text-muted">
+                  <span key={y} className={periodHeaderClass(y === CURRENT_YEAR)}>
                     {y}
                   </span>
                 ))}
@@ -499,9 +549,11 @@ function Group({
           <span className="pl-4 text-sm font-bold leading-tight truncate">
             {group.label}
           </span>
-          <span className="text-center text-[18px] font-bold tabular-nums">
-            {formatMoney(sumOverYears(group.subtotalByYear, years), currency)}
-          </span>
+          <TotalBand pad="-my-1.5">
+            <span className="text-center text-[18px] font-bold tabular-nums">
+              {formatMoney(sumOverYears(group.subtotalByYear, years), currency)}
+            </span>
+          </TotalBand>
           {years.map((y) => {
             const v = group.subtotalByYear[y] ?? 0;
             return (
@@ -514,7 +566,9 @@ function Group({
       ) : null}
 
       <ul className="divide-y divide-line">
-        {group.lines.map((l) => (
+        {[...group.lines]
+          .sort((a, b) => sumOverYears(b.byYear, years) - sumOverYears(a.byYear, years))
+          .map((l) => (
           <LineRow
             key={l.label}
             line={l}
@@ -556,7 +610,7 @@ function LineRow({
           {hasDetails ? <Chevron open={expanded} small /> : null}
           <span className="truncate">{line.label}</span>
         </span>
-        <span className="text-center text-[18px] tabular-nums">{formatMoney(sumOverYears(line.byYear, years), currency)}</span>
+        <TotalBand pad="-my-1.5"><span className="text-center text-[18px] tabular-nums">{formatMoney(sumOverYears(line.byYear, years), currency)}</span></TotalBand>
         {years.map((y) => {
           const v = line.byYear[y] ?? 0;
           const key = `${rowKey}|${y}`;
@@ -577,18 +631,31 @@ function LineRow({
           );
         })}
       </li>
-      {hasDetails && expanded ? line.details!.map((d) => (
+      {hasDetails && expanded ? [...line.details!]
+        .sort((a, b) => sumOverYears(b.byYear, years) - sumOverYears(a.byYear, years))
+        .map((d) => (
         <li key={`${line.label}::${d.label}`} className="grid items-center gap-2 pr-4 py-1 bg-brand-soft/10" style={gridStyle}>
           <span className="truncate pl-12 text-[13px] leading-tight text-muted">
             └ {d.label}
           </span>
-          <span className="text-center text-[16px] font-medium tabular-nums text-muted">{formatMoney(sumOverYears(d.byYear, years), currency)}</span>
+          <TotalBand pad="-my-1"><span className="text-center text-[16px] font-medium tabular-nums text-muted">{formatMoney(sumOverYears(d.byYear, years), currency)}</span></TotalBand>
+          {/* A split line's own cells select like any other figure — a
+              subscription or irregular bill is the level you actually want to
+              add up. */}
           {years.map((y) => {
             const v = d.byYear[y] ?? 0;
+            const key = `${rowKey}::${d.label}|${y}`;
             return (
-              <span key={y} className="text-center text-[16px] tabular-nums text-muted">
-                {v !== 0 ? formatMoney(v, currency) : <span className="opacity-40">—</span>}
-              </span>
+              <MoneyCell
+                key={y}
+                empty={v === 0}
+                color={BREAKDOWN_COLOR[kindKey]}
+                active={selected.has(key)}
+                stopPropagation
+                onToggle={() => onToggleCell(key, { year: y, kind: kindKey, amountCents: v })}
+              >
+                {formatMoney(v, currency)}
+              </MoneyCell>
             );
           })}
         </li>
@@ -661,9 +728,11 @@ function SelectionRow({
           </button>
         ) : null}
       </span>
-      <span className={`text-center text-[18px] font-bold tabular-nums ${tint(total)}`}>
-        {formatMoney(total, currency)}
-      </span>
+      <TotalBand pad="-my-2">
+        <span className={`text-center text-[18px] font-bold tabular-nums ${tint(total)}`}>
+          {formatMoney(total, currency)}
+        </span>
+      </TotalBand>
       {years.map((y) => {
         const v = byYear[y] ?? 0;
         return (

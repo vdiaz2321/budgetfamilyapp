@@ -156,18 +156,27 @@ export function TravelBoard({
   // Years ticked in the log's picker; none ticked means every year.
   // Opens on this year plus any later year with a booking; every year (none
   // ticked) when neither has a stay.
-  const [year, setYear] = useSessionYears("travel-reservations-log-years", () => {
+  const [year, setYear, yearRestored] = useSessionYears("travel-reservations-log-years", () => {
     const current = today.slice(0, 4);
     const stayYears = stays.map(stayYear);
     return stayYears.some((y) => y >= current) ? thisAndFutureYears(stayYears, current) : [];
   });
+  // The charts wash the years the Hotel Log is filtered to — but only once
+  // that filter is something the user chose. The default pick (this year plus
+  // future bookings) used to arrive pre-washed, which read as "you have 2026
+  // and 2027 selected" on a page nobody had touched yet.
+  const [yearPicked, setYearPicked] = useState(false);
+  const pickYear = (ys: string[]) => {
+    setYearPicked(true);
+    setYear(ys);
+  };
   const [brand, setBrand] = useState<string>(ALL);
   const [query, setQuery] = useState("");
   // Clicking a year on either chart opens the Hotel Log full width on that
   // year's stays — the rows behind the bar. Other filters are cleared so the
   // popup lists exactly what the chart added up.
   const openLogForYear = (y: string) => {
-    setYear([y]);
+    pickYear([y]);
     setBrand(ALL);
     setQuery("");
     setExpanded(true);
@@ -475,7 +484,7 @@ export function TravelBoard({
   // The year picker sits in the log's header, beside Open full width — the
   // same place the Travel Log keeps its own.
   const yearSelect = (
-    <YearPicker years={years} value={year} onChange={setYear} label="Hotel Log year" />
+    <YearPicker years={years} value={year} onChange={pickYear} label="Hotel Log year" />
   );
 
   const reservations = (
@@ -1267,14 +1276,14 @@ export function TravelBoard({
           <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="mb-3 text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
-                <CostBars years={yearPoints} currency={currency} selected={year} onPick={openLogForYear} />
+                <CostBars years={yearPoints} currency={currency} selected={yearPicked || yearRestored ? year : undefined} onPick={openLogForYear} />
               </div>
               {/* Stretched to the bar chart's height (it carries a legend this
                   one doesn't); the line sits at the bottom so both year rows line up. */}
               <div className="flex flex-col self-stretch rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="mb-3 text-center text-sm font-bold">Total saved per year</h2>
                 <div className="flex flex-1 flex-col justify-end">
-                  <SavedLine years={yearPoints} currency={currency} selected={year} onPick={openLogForYear} />
+                  <SavedLine years={yearPoints} currency={currency} selected={yearPicked || yearRestored ? year : undefined} onPick={openLogForYear} />
                 </div>
               </div>
               <div className="space-y-3 lg:col-span-2 xl:col-span-1">

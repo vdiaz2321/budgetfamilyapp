@@ -64,6 +64,9 @@ export type RowData = {
   // Optional account used when the item is manually marked Paid from the
   // upcoming-due card. This is deliberately separate from a Savings link.
   paymentAccountId: string | null;
+  // Display name of that account, resolved server-side so the row badge can
+  // say which account without every group threading an id→name map.
+  paymentAccountName?: string | null;
   // The Travel Log spending row this item's trip-tagged purchases count in.
   travelCategory: string | null;
   plannedCents: number;
@@ -73,6 +76,9 @@ export type RowData = {
   tripPlannedCents?: number;
   tripNames?: string[];
   spentCents: number;
+  // The viewed year's actual through the viewed month — the same
+  // v_monthly_actuals sum the Annual Overview's YEAR TOTAL column shows.
+  ytdSpentCents?: number;
   // What this item actually cost last month. Drives the "Prev Mo Spent"
   // prefill; 0 when the item had no activity (the chip stays hidden).
   prevSpentCents: number;
@@ -113,7 +119,9 @@ export type MonthNav = {
   firstOfMonth: string;
 };
 
-export type ViewMode = "remaining" | "spent";
+// What the Summary donut charts: this month's plan, this month's actual, or
+// the year to date (the figure the Annual Overview totals).
+export type ViewMode = "remaining" | "spent" | "ytd";
 
 // A budget item option for the add-transaction form.
 export type SubOption = {

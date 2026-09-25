@@ -10,7 +10,6 @@ import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 import { unwrap } from "@/lib/supabase-result";
 import { getSessionContext } from "@/lib/auth-context";
-import { fetchTripPlans } from "@/lib/trip-budget-plans";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
 import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef } from "@/app/(app)/travel/booking-payments";
@@ -492,15 +491,11 @@ export async function upsertPlan(formData: FormData) {
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01
   if (!subcategoryId || !month) return;
 
-  const typedCents = moneyExpressionToCents(String(formData.get("planned") ?? "0"));
-  // The Budget shows an item's plan WITH its trips (Travel Log) added in, so
-  // the figure typed here is that total. Only the part above the trips is
-  // stored — the trips are read live, and storing them too would count them
-  // twice. Typing less than the trips alone stores $0 extra.
-  const tripCents = (await fetchTripPlans(supabase, householdId, { months: [month] }))
-    .filter((r) => r.subcategory_id === subcategoryId)
-    .reduce((sum, r) => sum + r.planned_cents, 0);
-  const plannedCents = Math.max(0, typedCents - tripCents);
+  // Stored exactly as typed. The Planned cell is the budget figure and nothing
+  // adjusts it: trip plans from the Travel Log only fill in a month that has
+  // no typed plan (see plannedFor), and editing here never writes back to a
+  // trip. Trip amounts are changed on the trip itself.
+  const plannedCents = Math.max(0, moneyExpressionToCents(String(formData.get("planned") ?? "0")));
 
   await supabase.from("budget_plans").upsert(
     {

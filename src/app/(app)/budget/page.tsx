@@ -25,6 +25,7 @@ export default async function BudgetPage({
   const month = resolveMonth(monthParam);
   const nextFirst = `${month.nextKey}-01`;
   const prevFirstOfMonth = `${month.prevKey}-01`;
+  const nextMonthStart = `${month.nextKey}-01`;
   // Irregular bills are one-offs, not subscriptions: a passport or an optician
   // visit belongs to the year it happened in and should not follow you into the
   // next one. The card lists a bill only while the VIEWED year has something to
@@ -182,14 +183,16 @@ export default async function BudgetPage({
         .order("subcategory_id")
         .range(from, to),
     ),
-    // Three columns of the viewed year's transactions — just enough to answer
-    // "did this bill get charged at all this year?" for the irregular-bills
-    // year filter. Paged because a year of rows crosses PostgREST's 1000-row
+    // The viewed year's transactions, trimmed to three columns: enough to
+    // answer "did this bill get charged at all this year?" for the
+    // irregular-bills year filter AND to total each subscription / irregular
+    // bill's year-to-date spend with the same payee matcher the month figures
+    // use. Paged because a year of rows crosses PostgREST's 1000-row
     // cap; the full-fat transaction read above stays at two months.
-    fetchAllRows<{ subcategory_id: string | null; payee_id: string | null }>((from, to) =>
+    fetchAllRows<{ subcategory_id: string | null; payee_id: string | null; amount_cents: number; occurred_on: string }>((from, to) =>
       supabase
         .from("transactions")
-        .select("subcategory_id, payee_id")
+        .select("subcategory_id, payee_id, amount_cents, occurred_on")
         .eq("household_id", household.id)
         .gte("occurred_on", yearStart)
         .lt("occurred_on", yearEnd)
@@ -246,6 +249,15 @@ export default async function BudgetPage({
     }
   }
   const spentBySub = new Map((actuals ?? []).map((a) => [a.subcategory_id, a.actual_cents]));
+  // Year to date per item, through the viewed month. Free: actualsSinceAnchor
+  // is the same v_monthly_actuals read the Annual Overview totals come from,
+  // already fetched above for the rollover walk — so the Yr column on the
+  // board and the YEAR TOTAL column on /annual can never drift apart.
+  const ytdBySub = new Map<string, number>();
+  for (const row of actualsSinceAnchor) {
+    if (row.month < yearStart || row.month > month.firstOfMonth) continue;
+    ytdBySub.set(row.subcategory_id, (ytdBySub.get(row.subcategory_id) ?? 0) + row.actual_cents);
+  }
   const goalBySub = new Map((goals ?? []).map((g) => [g.subcategory_id, g]));
   const debtBySub = new Map((debts ?? []).map((d) => [d.subcategory_id, d]));
   const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
@@ -283,6 +295,10 @@ export default async function BudgetPage({
       .split(/[^a-z0-9]+/i)
       .filter((t) => t.length >= 3)
       .map((t) => (t.endsWith("s") ? t.slice(0, -1) : t));
+  // The viewed year's transactions up to and including the viewed month — the
+  // window both year-to-date figures below are totalled over.
+  const yearTxThroughViewedMonth = (yearTxRows ?? []).filter((tx) => tx.occurred_on < nextMonthStart);
+  const irregularYtdSpentById = new Map<string, number>();
   const irregularMonthDetailById = new Map<string, { spentCents: number; accountNames: string[]; txIds: string[] }>();
   for (const bill of irregularBills ?? []) {
     const tokens = billTokens(bill.name);
@@ -298,6 +314,17 @@ export default async function BudgetPage({
         .map((tx) => tx.account_id ? accountNameById.get(tx.account_id) ?? null : null)
         .filter((name): name is string => Boolean(name)),
     )];
+    const isThisBill = (tx: { subcategory_id: string | null; payee_id: string | null }) => {
+      if (tx.subcategory_id !== bill.subcategory_id) return false;
+      const payee = (payeeById.get(tx.payee_id ?? "") ?? "").toLowerCase();
+      if (!payee) return false;
+      if (payee === bill.name.trim().toLowerCase()) return true;
+      return tokens.length > 0 && tokens.every((t) => payee.includes(t));
+    };
+    irregularYtdSpentById.set(
+      bill.id,
+      yearTxThroughViewedMonth.filter(isThisBill).reduce((sum, tx) => sum + tx.amount_cents, 0),
+    );
     irregularMonthDetailById.set(bill.id, {
       spentCents: matchingTransactions.reduce((sum, tx) => sum + tx.amount_cents, 0),
       accountNames,
@@ -325,6 +352,9 @@ export default async function BudgetPage({
   // The rows behind this month's figure, so the card can list the actual
   // charge instead of only its total.
   const subMonthTxIdsById = new Map<string, string[]>();
+  // Same matcher over the viewed year, for the card's Yr column. Cut at the
+  // viewed month so the figure means the same thing as the board's Yr column.
+  const subYtdSpentById = new Map<string, number>();
   for (const sub of subscriptions ?? []) {
     const tokens = billTokens(sub.name);
     const isThisSub = (tx: { subcategory_id: string | null; payee_id: string | null }) => {
@@ -340,6 +370,7 @@ export default async function BudgetPage({
     subMonthSpentById.set(sub.id, total(thisMonthTxs));
     subMonthTxIdsById.set(sub.id, thisMonthTxs.map((tx) => tx.id as string));
     subPrevSpentById.set(sub.id, total((prevTxRows ?? []).filter(isThisSub)));
+    subYtdSpentById.set(sub.id, total(yearTxThroughViewedMonth.filter(isThisSub)));
   }
   // Planned per bill for THIS month only (absent row = $0), and the per
   // subcategory sum the Bills group row reads.
@@ -403,11 +434,13 @@ export default async function BudgetPage({
           name: s.name,
           dueDay: s.due_day,
           paymentAccountId: (s as { payment_account_id?: string | null }).payment_account_id ?? null,
+          paymentAccountName: accountNameById.get((s as { payment_account_id?: string | null }).payment_account_id ?? "") ?? null,
           travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
           plannedCents,
           tripPlannedCents: tripPlannedFor(s.id, month.firstOfMonth),
           tripNames: tripNamesBySub.get(s.id) ?? [],
           spentCents,
+          ytdSpentCents: ytdBySub.get(s.id) ?? 0,
           prevSpentCents: prevSpentBySub.get(s.id) ?? 0,
           prevAccountId: prevTxDetailBySub.get(s.id)?.accountId ?? null,
           prevPayee: prevTxDetailBySub.get(s.id)?.payee ?? null,
@@ -560,12 +593,8 @@ export default async function BudgetPage({
     plannedCents: pickerPlannedBySub.get(s.id),
     travelCategory: (s as { travel_category?: string | null }).travel_category ?? null,
     receivesTripPlans: (s as { receives_trip_plans?: boolean }).receives_trip_plans ?? false,
-    // Only the typed part of a plan can be given back — the trip part lives in
-    // the Travel Log — and never below what is already spent against the whole.
-    trimmableCents: Math.max(0, Math.min(
-      plannedBySub.get(s.id) ?? 0,
-      (plannedBySub.get(s.id) ?? 0) + tripPlannedFor(s.id, month.firstOfMonth) - (spentBySub.get(s.id) ?? 0),
-    )),
+    // A plan can be given back down to what is already spent against it.
+    trimmableCents: Math.max(0, (pickerPlannedBySub.get(s.id) ?? 0) - (spentBySub.get(s.id) ?? 0)),
   }));
 
   // Disambiguate same-named accounts (e.g. two "Fidelity" accounts, one in
@@ -716,6 +745,7 @@ export default async function BudgetPage({
     // that month's override. The Plan cell needs to know which it is.
     chargesThisMonth: subscriptionChargesIn(s, month.firstOfMonth),
     monthSpentCents: subMonthSpentById.get(s.id) ?? 0,
+    ytdSpentCents: subYtdSpentById.get(s.id) ?? 0,
     monthTxIds: subMonthTxIdsById.get(s.id) ?? [],
     prevSpentCents: subPrevSpentById.get(s.id) ?? 0,
   }));
@@ -730,6 +760,7 @@ export default async function BudgetPage({
     notes: b.notes,
     sortOrder: (b as { sort_order?: number }).sort_order ?? 0,
     monthSpentCents: irregularMonthDetailById.get(b.id)?.spentCents ?? 0,
+    ytdSpentCents: irregularYtdSpentById.get(b.id) ?? 0,
     monthAccountNames: irregularMonthDetailById.get(b.id)?.accountNames ?? [],
     monthTxIds: irregularMonthDetailById.get(b.id)?.txIds ?? [],
   }));
