@@ -4,17 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 
-// Compact axis money: "$4.0k" past a thousand, whole dollars below it.
-function axisMoney(cents: number, currency: string): string {
-  const dollars = cents / 100;
-  if (dollars >= 1000) {
-    const k = dollars / 1000;
-    const symbol = formatMoney(0, currency).replace(/[\d.,]/g, "");
-    return `${symbol}${k >= 100 ? Math.round(k) : k.toFixed(1)}k`;
-  }
-  return formatMoney(Math.round(dollars) * 100, currency).replace(/\.00$/, "");
-}
-
 const PAYMENT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** One payment made toward a credit card. Charges ON the card are not here. */
@@ -43,17 +32,13 @@ export function CardPaymentsLedger({
   cardNames,
   currency,
   storageKey,
-  showChart = true,
 }: {
   payments: CardPayment[];
   cardNames: Record<string, string>;
   currency: string;
   storageKey: string;
-  // On by default: Accounts is the only home now, so the chart shows there.
-  showChart?: boolean;
 }) {
   const [view, setView] = useState<"month" | "year">("month");
-  const [hoverBar, setHoverBar] = useState<string | null>(null);
   // Open on a fresh login, and holds whatever it was last set to while moving
   // around the app inside one session.
   const [openState, setOpenState] = useSessionCollapse(storageKey, () => ({ open: true }));
@@ -130,41 +115,38 @@ export function CardPaymentsLedger({
     box.scrollLeft = 0;
   }, [view, year, payments]);
 
-  // Newest first, matching the table columns under it — the bar for the
-  // month just paid sits on the left edge.
-  const chartBars = columns.map((c) => ({
-    key: c.key,
-    label: c.label,
-    value: columnTotal(c.key),
-  }));
-  const chartMax = Math.max(1, ...chartBars.map((b) => b.value));
 
   const money = (cents: number) => formatMoney(cents, currency);
-  const cell = "px-2.5 py-1.5 text-right tabular-nums whitespace-nowrap";
-  // Money columns are right-aligned, so their headers are too — a centered
-  // label over a right-aligned figure reads as misaligned. Only the Card
-  // column, whose values are text, keeps a centered header.
+  // Headers AND the figures under them are centered (Victor's rule for every
+  // table) — a centered label over right-aligned money reads as misaligned.
+  // tabular-nums keeps the digits the same width, so centered values still
+  // line up well enough down a column.
+  const cell = "px-2.5 py-1.5 text-center tabular-nums whitespace-nowrap";
   const headBase = "px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted whitespace-nowrap";
-  const head = `${headBase} text-right`;
+  const head = `${headBase} text-center`;
 
   return (
     <section>
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line px-4 py-3">
-        <button
-          type="button"
-          onClick={() => setOpenState((s) => ({ ...s, open: !s.open }))}
-          aria-expanded={open}
-          className="flex min-w-0 items-center gap-2 text-left"
-        >
-          <svg
-            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+      {/* Title + month/year pickers on the left, the two total tiles centered
+          in the bar (a three-zone grid once it's wide; stacked and centered on
+          a phone). All of it stays visible when collapsed, so the totals and
+          pickers never disappear with the table. */}
+      <div className="flex flex-col gap-2 border-b border-line px-4 py-3 md:grid md:grid-cols-[1fr_auto_1fr] md:items-center md:gap-x-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <button
+            type="button"
+            onClick={() => setOpenState((s) => ({ ...s, open: !s.open }))}
+            aria-expanded={open}
+            className="flex min-w-0 items-center gap-2 text-left"
           >
-            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="min-w-0 text-sm font-bold">Credit Card Payments Made</span>
-        </button>
-        {open ? (
+            <svg
+              width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden
+              className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
+            >
+              <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="min-w-0 text-sm font-bold">Credit Card Payments Made</span>
+          </button>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-0.5 rounded-lg bg-black/5 p-0.5 dark:bg-white/10">
               {(["month", "year"] as const).map((v) => (
@@ -200,31 +182,27 @@ export function CardPaymentsLedger({
                 ))}
               </select>
             ) : null}
-            {/* The running total reads as a figure worth looking at, not a
-                caption: its own tile, label above value. */}
-            <div className="flex items-center divide-x divide-line">
-              <div className="px-3 py-1.5 text-center">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total paid</div>
-                <div className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
-                  {money(grandTotal)}
-                </div>
-              </div>
-              {/* Shown in both views — in By year it's the average month across
-                  the whole history — so the header keeps its width. */}
-              <div className="px-3 py-1.5 text-center">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Avg / month</div>
-                <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
-              </div>
+          </div>
+        </div>
+        {/* The running total reads as a figure worth looking at, not a
+            caption: its own tile, label above value. */}
+        <div className="flex items-center justify-center divide-x divide-line">
+          <div className="px-3 py-1.5 text-center">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total paid</div>
+            <div className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
+              {money(grandTotal)}
             </div>
           </div>
-        ) : (
-          <span className="whitespace-nowrap text-xs text-muted">
-            Total paid{" "}
-            <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
-              {money(grandTotal)}
-            </span>
-          </span>
-        )}
+          {/* Shown in both views — in By year it's the average month across
+              the whole history — so the header keeps its width. */}
+          <div className="px-3 py-1.5 text-center">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Avg / month</div>
+            <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
+          </div>
+        </div>
+        {/* Empty third column: balances the left group so the tiles sit at
+            the true center of the bar. */}
+        <div aria-hidden className="hidden md:block" />
       </div>
 
       {!open ? null : rows.length === 0 ? (
@@ -233,71 +211,6 @@ export function CardPaymentsLedger({
         </p>
       ) : (
         <>
-          {/* One bar per period — a single series, so no legend: the section
-              title names it. Same figures as the All cards row below, in the
-              same newest-first order. */}
-          {/* A chart of one bar says nothing the tile above it doesn't. */}
-          {showChart && chartBars.length > 1 ? (
-          <div className="border-b border-line px-4 py-3">
-            <div className="flex">
-              <div className="relative mr-2 h-28 w-11 shrink-0">
-                {[0, 0.5, 1].map((g) => (
-                  <span
-                    key={g}
-                    className="absolute right-0 -translate-y-1/2 text-[10px] tabular-nums text-muted"
-                    style={{ top: `${(1 - g) * 100}%` }}
-                  >
-                    {axisMoney(chartMax * g, currency)}
-                  </span>
-                ))}
-              </div>
-              <div className="relative min-w-0 flex-1">
-                <div className="pointer-events-none absolute inset-0 h-28">
-                  {[0, 0.5, 1].map((g) => (
-                    <span
-                      key={g}
-                      className="absolute inset-x-0 border-t"
-                      style={{ top: `${(1 - g) * 100}%`, borderColor: "var(--viz-grid)" }}
-                    />
-                  ))}
-                </div>
-                <div className="relative flex h-28 items-end gap-1">
-                  {chartBars.map((b) => (
-                    <div
-                      key={b.key}
-                      onMouseEnter={() => setHoverBar(b.key)}
-                      onMouseLeave={() => setHoverBar((h) => (h === b.key ? null : h))}
-                      className="group relative flex h-full flex-1 flex-col justify-end"
-                    >
-                      <div
-                        className="mx-auto w-[60%] max-w-[22px] rounded-t-[4px] transition-[height]"
-                        style={{
-                          height: `${(b.value / chartMax) * 100}%`,
-                          backgroundColor: "var(--viz-savings)",
-                          opacity: b.value ? 1 : 0,
-                        }}
-                      />
-                      {hoverBar === b.key ? (
-                        <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max -translate-x-1/2 rounded-lg bg-surface px-2.5 py-1.5 text-left text-xs shadow-xl ring-1 ring-black/10 dark:ring-white/15">
-                          <p className="font-semibold">{b.label}{view === "month" ? ` ${year}` : ""}</p>
-                          <p className="tabular-nums text-muted">{money(b.value)}</p>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-1.5 flex gap-1">
-                  {chartBars.map((b) => (
-                    <span key={b.key} className="flex min-w-0 flex-1 justify-center">
-                      <span className="max-w-full truncate text-[10px] text-muted">{b.label}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-          ) : null}
-
           {/* Its own scroll box: 12 month columns never fit a phone, and the
               card names stay readable via the sticky first column. That column
               carries the same surface as the cells beside it, so it reads as

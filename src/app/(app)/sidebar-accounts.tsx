@@ -32,9 +32,9 @@ type Props = {
 // a quick visual anchor when scanning ("the blue dot is always Schwab").
 const DOT_COLORS = [
   "#60a5fa", // blue-400
-  "#c084fc", // purple-400
+  "#2dd4bf", // teal-400 (was purple — retired)
   "#4ade80", // green-400
-  "#fb923c", // orange-400
+  "#a3e635", // lime-400 (was orange — retired)
   "#facc15", // yellow-400
   "#f472b6", // pink-400
   "#22d3ee", // cyan-400

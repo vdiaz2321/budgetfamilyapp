@@ -2,8 +2,8 @@
   <title>Capitall</title>
   <defs>
     <linearGradient id="capitall-gradient" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8b5cf6" />
-      <stop offset="1" stop-color="#7c3aed" />
+      <stop offset="0" stop-color="#4a74c0" />
+      <stop offset="1" stop-color="#2f5296" />
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="18" fill="url(#capitall-gradient)" />

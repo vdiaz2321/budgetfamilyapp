@@ -20,10 +20,11 @@
   --muted: #6b7280; /* gray-500 */
   --border: #e5e7eb; /* gray-200 */
 
-  /* Capitall brand — Indigo primary, Amber accent */
-  --brand: #4f46e5; /* indigo-600 */
-  --brand-strong: #4338ca; /* indigo-700 (hover) */
-  --brand-soft: #eef2ff; /* indigo-50 (tints) */
+  /* Capitall brand — muted blue primary (purple retired 2026-09-25: Victor
+     rejected it app-wide, and Tailwind blue-600 read too bright). */
+  --brand: #3b64b0; /* muted mid blue — white text ≈ 5.9:1 */
+  --brand-strong: #2f5296; /* hover */
+  --brand-soft: #edf2fa; /* pale blue tint */
   --accent: #f59e0b; /* amber-500 */
   --positive: #16a34a; /* green-600 */
   --negative: #dc2626; /* red-600 */
@@ -34,12 +35,12 @@
   /* Category identity colors — used for hero progress bars, group dots, and
      the donut. Kept saturated in light mode; softened in dark. */
   --cat-income: #16a34a;   /* green-600 */
-  --cat-savings: #6366f1;  /* indigo-500 */
+  --cat-savings: #3b64b0;  /* brand blue (was indigo) */
   --cat-bills: #f59e0b;    /* amber-500 */
   --cat-expenses: #f59e0b; /* amber-500 (bills share the same tone in the hero) */
   --cat-debt: #ef4444;     /* red-500 */
   --cat-sky: #0ea5e9;      /* sky-500 */
-  --cat-violet: #a855f7;
+  --cat-violet: #3b64b0; /* retired purple — kept as brand blue so nothing renders violet */
   --cat-pink: #ec4899;
   --cat-teal: #14b8a6;
   --cat-orange: #f97316;
@@ -76,9 +77,9 @@
   --muted: #9aa0a6;
   --border: #3c4043;
 
-  --brand: #a4aaf0;
-  --brand-strong: #8d94e6;
-  --brand-soft: #36374a; /* faint violet tint on charcoal, not a navy block */
+  --brand: #8aa9d8; /* soft steel blue — calm on charcoal, dark label on it */
+  --brand-strong: #7797cb;
+  --brand-soft: #2d3440; /* faint blue tint on charcoal, not a navy block */
   --accent: #d4a05a; /* muted amber */
   --positive: #81c995; /* Google's dark-mode green */
   --negative: #e08a8a; /* soft rose */
@@ -89,12 +90,12 @@
   /* Softer category tones for the hero cards + donut. Same hues as light
      mode but pulled toward gray so nothing screams on a dim canvas. */
   --cat-income: #81c995;
-  --cat-savings: #9498d0;
+  --cat-savings: #8aa9d8;
   --cat-bills: #d4a05a;
   --cat-expenses: #d4a05a;
   --cat-debt: #c87878;
   --cat-sky: #7ba6c2;
-  --cat-violet: #b08fd0;
+  --cat-violet: #8aa9d8;
   --cat-pink: #d88fb0;
   --cat-teal: #6dbabf;
   --cat-orange: #d69368;
@@ -115,7 +116,7 @@
   --sidebar: #18191b; /* a step darker than the canvas, no blue */
 }
 
-/* Dark mode's brand is a light lavender, so the white label every primary
+/* Dark mode's brand is a light steel blue, so the white label every primary
    button carries (`bg-brand text-white`) drops to ~2:1 contrast. Flip it to
    the canvas color there — Google's light-button-dark-text pattern — once,
    here, instead of in each of the ~60 buttons. */

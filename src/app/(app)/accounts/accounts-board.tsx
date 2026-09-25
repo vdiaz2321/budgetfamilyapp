@@ -300,6 +300,15 @@ const SubtypeOptionsContext = React.createContext<string[]>([]);
 
 /** Sections whose Type field is an account type. Debts keep DEBT_KINDS and
  *  credit cards keep the free-text bank name. */
+// Account-group tiles sit in ONE row once the card is wide — as many columns
+// as there are tiles, so four today (Property hidden) and five once a home is
+// added. Literal class names so Tailwind generates them.
+const WIDE_COLS: Record<number, string> = {
+  3: "@[60rem]:grid-cols-3",
+  4: "@[60rem]:grid-cols-4",
+  5: "@[60rem]:grid-cols-5",
+};
+
 const usesSubtypeList = (sectionKey: string) => sectionKey === "investments" || sectionKey === "kids";
 
 function SubtypeSelect({
@@ -559,6 +568,10 @@ export function AccountsBoard({
   // history's December row stands in, as it does on /networth.
   const eoyYear = new Date().getFullYear() - 1;
   const eoyMonth = `${eoyYear}-12-01`;
+  // "Current" only fits the live period; a past month drops it, and the net
+  // worth tile names the year of the month being viewed.
+  const isCurrentPeriod = periodSnapshotMonth == null;
+  const viewedYear = isCurrentPeriod ? eoyYear + 1 : Number(periodSnapshotMonth.slice(0, 4));
   const eoyNet = (() => {
     let sum = 0;
     let covered = 0;
@@ -692,20 +705,14 @@ export function AccountsBoard({
       {/* Net worth + account groups live in one card. Collapsing hides the
           group cards and keeps the Assets / Debts / Net worth tiles, the same
           way Travel & Credit Card Rewards keeps its stat row when closed. */}
-      <section className="space-y-3 rounded-xl bg-surface py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:p-4">
-      <div className="flex items-center gap-2 px-3 sm:px-0">
+      <section className="relative space-y-3 rounded-xl bg-surface py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:p-4">
+      {/* No title row — the stat labels say what this card is. The collapse
+          chevron sits in the top-right corner instead. */}
         <button
           type="button"
           onClick={() => setOverviewCollapsed((c) => ({ ...c, overview: !c.overview }))}
-          className="min-w-0 flex-1 text-left"
+          className="absolute right-1.5 top-1.5 z-10 grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
           aria-expanded={overviewOpen}
-        >
-          <span className="text-base font-bold sm:text-lg">Net Worth & Accounts</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setOverviewCollapsed((c) => ({ ...c, overview: !c.overview }))}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
           aria-label={overviewOpen ? "Collapse account groups" : "Expand account groups"}
         >
           <svg
@@ -717,17 +724,16 @@ export function AccountsBoard({
             <path d="M6 9l6 6 6-6" />
           </svg>
         </button>
-      </div>
 
       {/* Assets and Debts are Net worth's two inputs, so they read first and
           Net worth lands beside last year's close for the comparison. Two-up
           on a phone (inputs, then the two net worths); four across once the
           card is wide enough for the hero figures. */}
-      <div className="grid grid-cols-2 border-t border-line lg:grid-cols-4 lg:border-t-0">
+      <div className="grid grid-cols-2 lg:grid-cols-4">
         <div className="border-b border-r border-line lg:border-b-0">
           <SummaryStat
             variant="hero"
-            label="Assets"
+            label={isCurrentPeriod ? "Current Assets" : "Assets"}
             value={assets}
             currency={currency}
             tone="text-positive"
@@ -740,7 +746,7 @@ export function AccountsBoard({
         <div className="border-b border-line lg:border-b-0 lg:border-r">
           <SummaryStat
             variant="hero"
-            label="Debts"
+            label={isCurrentPeriod ? "Current Debts" : "Debts"}
             value={debtsTotal}
             currency={currency}
             tone="text-negative"
@@ -753,7 +759,7 @@ export function AccountsBoard({
         <div className="border-r border-line">
           <SummaryStat
             variant="hero"
-            label="Net worth"
+            label={`Net Worth: ${viewedYear}`}
             value={net}
             currency={currency}
             tone={net >= 0 ? "text-foreground" : "text-negative"}
@@ -793,7 +799,12 @@ export function AccountsBoard({
           the summary tiles above stay. */}
       {overviewOpen ? (() => {
         const items = [
-          ...assetSections.map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
+          // An asset group with no accounts yet (Property, until a home is
+          // bought) stays off the board — same rule as the debt groups below.
+          // Add account still offers it, so the tile appears with the first one.
+          ...assetSections
+            .filter((s) => accounts.some((a) => s.match(a)))
+            .map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
           ...debtSectionsToRender.map((s) => ({
             section: s,
             extras: s.key === "loans" ? visibleBudgetDebts : ([] as BudgetDebt[]),
@@ -803,7 +814,12 @@ export function AccountsBoard({
             .map((s) => ({ section: s, extras: [] as BudgetDebt[] })),
         ];
         const renderCard = ({ section, extras }: (typeof items)[number]) => (
-          <div key={section.key} className="border-t border-line">
+          <div
+            key={section.key}
+            className="@container relative overflow-hidden rounded-lg bg-black/[0.03] ring-1 ring-black/[0.06] dark:bg-white/[0.04] dark:ring-white/[0.08]"
+          >
+          {/* Edge tint in the group's dot color, so each tile reads as its own. */}
+          <span aria-hidden className={`pointer-events-none absolute inset-y-0 left-0 w-1 ${section.dot}`} />
           <AccountSection
             section={section}
             accounts={accounts.filter((a) => section.match(a))}
@@ -818,23 +834,23 @@ export function AccountsBoard({
             onToggle={() => setOpenSectionKey((k) => (k === section.key ? null : section.key))}
             isBucketsOpen={isBucketsOpen}
             onToggleBuckets={toggleBuckets}
-            headerBadge={section.kidsGroup ? "Not in net worth" : undefined}
-            assetsTotalCents={assets}
+            headerBadge={section.kidsGroup ? "Not in Net Worth" : undefined}
             onAddAccount={() => setAddOpen(true)}
             onTransfer={() => setTransferOpen(true)}
           />
           </div>
         );
         return (
-          // Assets first, then what's owed, then Kids Funding — three across
-          // on a wide card (Banking | Investments | Property, Debts | Kids
-          // Funding), two across on a narrower one, one on a phone. Credit
+          // Assets first, then what's owed, then Kids Funding — all in ONE row
+          // on a wide card (one column per tile, see WIDE_COLS), two across on
+          // a narrower one, one on a phone. At ~230px a tile drops its arrow
+          // and the Kids note so every name still fits on one line. Credit
           // Cards has no row here: statement balances aren't in net worth, so
           // the Credit Cards card below carries that note under its total.
-          // Every cell carries its own top hairline so the two in a row read
-          // as one line broken by the gutter.
-          <div className="@container">
-            <div className="grid grid-cols-1 @[40rem]:grid-cols-2 @[40rem]:gap-x-6 @[60rem]:grid-cols-3">
+          // Each group is its own tinted tile with a gap, so the breaks between
+          // groups read at a glance instead of relying on hairlines.
+          <div className="@container px-3 sm:px-0">
+            <div className={`grid grid-cols-1 gap-2 @[40rem]:grid-cols-2 @[40rem]:gap-3 ${WIDE_COLS[Math.min(items.length, 5)] ?? ""}`}>
               {items.filter((it) => !it.section.liability && !it.section.kidsGroup).map(renderCard)}
               {items.filter((it) => it.section.liability).map(renderCard)}
               {items.filter((it) => it.section.kidsGroup).map(renderCard)}
@@ -947,7 +963,7 @@ function CreditCardListSection({
           <span className="block text-sm font-bold tabular-nums text-negative sm:text-base">
             {formatMoney(totalOwed, currency)}
           </span>
-          <span className="block text-[11px] text-muted">Not in net worth</span>
+          <span className="block text-[11px] text-muted">Not in Net Worth</span>
         </span>
         </div>
         <button
@@ -1359,7 +1375,6 @@ function AccountSection({
   legacy = false,
   extraDebts = [],
   headerBadge,
-  assetsTotalCents,
   onAddAccount,
   onTransfer,
 }: {
@@ -1377,8 +1392,6 @@ function AccountSection({
   legacy?: boolean;
   extraDebts?: BudgetDebt[];
   headerBadge?: string;
-  // Total assets, for the "% of assets" line under the amount. Omitted → no line.
-  assetsTotalCents?: number;
   // The page header's two actions, repeated in the popup so a transfer or a
   // new account doesn't mean closing the section first. They open above it.
   onAddAccount?: () => void;
@@ -1425,8 +1438,8 @@ function AccountSection({
 
   // Prefer the snapshot for the picker's chosen month; fall back to live
   // balance when there's no snapshot (rare, but happens for months before
-  // the account existed). Budget-debt extras always use their live balance
-  // — historical debt snapshots aren't in scope for the picker filter.
+  // the account existed). Budget-debt extras follow the same rule, so the
+  // Debts tile matches the Debts headline for a past month.
   const balanceOf = (a: AccountData): number => {
     if (!periodSnapshotMonth) return a.balanceCents;
     return a.balancesByMonth?.[periodSnapshotMonth] ?? a.balanceCents;
@@ -1434,19 +1447,17 @@ function AccountSection({
   const accountsTotal = localAccounts
     .filter((a) => a.active)
     .reduce((sum, a) => sum + balanceOf(a), 0);
-  const extraDebtsTotal = extraDebts.reduce((sum, d) => sum + d.balanceCents, 0);
+  const extraDebtsTotal = extraDebts.reduce(
+    (sum, d) =>
+      sum + (periodSnapshotMonth ? d.balancesByMonth?.[periodSnapshotMonth] ?? d.balanceCents : d.balanceCents),
+    0,
+  );
   const total = accountsTotal + extraDebtsTotal;
 
-  // Share of total assets, shown under the amount. Under 10% keeps one
-  // decimal so a small debt reads "0.6%" instead of rounding to nothing.
-  // Zero shows nothing. Kids Funding isn't part of assets, so it says so.
-  const shareLabel = (() => {
-    if (assetsTotalCents == null || assetsTotalCents <= 0) return null;
-    if (section.kidsGroup) return "Not in net worth";
-    const pct = (Math.abs(total) / assetsTotalCents) * 100;
-    if (pct === 0) return null;
-    return `${pct < 10 ? pct.toFixed(1).replace(/\.0$/, "") : pct.toFixed(0)}% of assets`;
-  })();
+  // Kids Funding isn't part of net worth, so its tile says so beside the
+  // amount (full words on a wide tile, "Not in NW" on a narrow one). The
+  // other groups show no share line — Victor removed the "% of Assets" text.
+  const kidsNote = section.kidsGroup ? { long: "Not in Net Worth", short: "Not in NW" } : null;
 
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
@@ -1468,7 +1479,7 @@ function AccountSection({
   const { dragOverId, startDrag } = usePointerReorder("account", reorder);
 
   return (
-    <section className="bg-surface">
+    <section>
       {/* Header */}
       {/* Full-row click target — tapping anywhere on the tile (label OR
           amount) opens the section's popup. The Debt/Loan Page link stops
@@ -1488,18 +1499,17 @@ function AccountSection({
           if (open) setEditingId(null);
           onToggle();
         }}
-        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-3 py-3 transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer items-center gap-1.5 py-3 pl-3.5 pr-3 transition @[17rem]:gap-2 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
       >
-        {/* The group name never truncates — at half width "Debts" plus its
-            Debt/Loan Page link fit with 0px to spare and the name was the part
-            that gave way ("De…"). The link gives way first instead. */}
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
-          <span className="shrink-0 font-semibold leading-tight">{section.label}</span>
+        {/* On a wide tile the name never truncates — the Debt/Loan Page link
+            gives way first. On a narrow tile (link hidden) the name is what
+            gives, so "Kids Funding" + "Not in NW" still fit on one line. */}
+        <div className="flex min-w-0 flex-1 items-center gap-1 @[17rem]:gap-2">
+          <span className="min-w-0 truncate text-sm font-semibold leading-tight @[17rem]:text-base @[24rem]:shrink-0">{section.label}</span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className="shrink-0 -rotate-90 text-muted"
+            className="hidden shrink-0 -rotate-90 text-muted @[17rem]:block"
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
@@ -1508,22 +1518,30 @@ function AccountSection({
             <Link
               href="/snowball"
               onClick={(e) => e.stopPropagation()}
-              className="min-w-0 truncate rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft"
+              className="hidden min-w-0 truncate rounded px-1.5 py-0.5 text-[10px] font-semibold text-brand hover:bg-brand-soft @[24rem]:inline-block"
             >
               Debt/Loan Page →
             </Link>
           ) : null}
         </div>
+        {/* Name, share and amount all on one line — the share sits just left
+            of the amount it describes. */}
+        {kidsNote ? (
+          <>
+            <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-muted @[24rem]:inline">{kidsNote.long}</span>
+            {/* Four tiles across on a laptop leaves ~230px each — too little for
+                name + note + amount on one line, so the note steps aside there
+                (the Current Assets figure already leaves Kids Funding out). */}
+            <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-muted @[21rem]:inline @[24rem]:hidden">{kidsNote.short}</span>
+          </>
+        ) : null}
         <span
-          className={`text-right text-sm font-bold tabular-nums ${
+          className={`shrink-0 text-right text-sm font-bold tabular-nums ${
             section.liability && total > 0 ? "text-negative" : ""
           }`}
         >
           {formatMoney(total, currency)}
         </span>
-        {shareLabel ? (
-          <span className="col-span-2 text-right text-[11px] tabular-nums text-muted">{shareLabel}</span>
-        ) : null}
       </div>
 
       {open ? (
@@ -1534,14 +1552,14 @@ function AccountSection({
           headerExtra={
             sumPicks.size > 0 ? (
               <div className="flex items-center gap-1.5 whitespace-nowrap sm:gap-2">
-                <span className="text-xs text-muted">
-                  Sum<span className="hidden sm:inline"> of {sumPicks.size}</span>
+                <span className="text-xs font-bold">
+                  Total<span className="hidden sm:inline"> of {sumPicks.size}</span>:
                 </span>
                 <span className="text-base font-bold tabular-nums">{formatMoney(sumTotal, currency)}</span>
                 <button
                   type="button"
                   onClick={() => setSumPicks(new Map())}
-                  className="rounded-md px-1.5 py-1 text-xs font-medium sm:px-2 text-muted ring-1 ring-line transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+                  className="rounded-lg bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative shadow-sm ring-1 ring-negative/40 transition hover:bg-negative/20"
                 >
                   Clear
                 </button>
@@ -1556,11 +1574,11 @@ function AccountSection({
             onClick={() => setSumMode((v) => !v)}
             className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium shadow-sm ring-1 transition ${
               sumMode
-                ? "bg-foreground text-surface ring-foreground hover:bg-foreground/80"
+                ? "bg-brand/15 font-semibold text-brand ring-brand/50 hover:bg-brand/25"
                 : "bg-surface text-foreground ring-black/10 hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
             }`}
           >
-            {sumMode ? "Done adding up" : "Add up values"}
+            {sumMode ? "Done Selecting" : "Select Values to Calculate"}
           </button>
           {onTransfer ? (
             <button

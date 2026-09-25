@@ -50,8 +50,8 @@ export default async function ForgotPasswordPage({
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
       <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
         <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-800">
-          <p className="flex items-center gap-2 text-sm font-medium text-indigo-600 dark:text-indigo-400">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600 text-xs font-bold text-white">
+          <p className="flex items-center gap-2 text-sm font-medium text-brand">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand text-xs font-bold text-white">
               C
             </span>
             Capitall
@@ -84,7 +84,7 @@ export default async function ForgotPasswordPage({
                   autoComplete="email"
                   autoFocus
                   defaultValue={email}
-                  className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                  className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
                 />
               </div>
 
@@ -94,7 +94,7 @@ export default async function ForgotPasswordPage({
 
               <button
                 type="submit"
-                className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+                className="w-full rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-strong focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
               >
                 Send reset link
               </button>
@@ -104,7 +104,7 @@ export default async function ForgotPasswordPage({
           <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">
             <a
               href="/login"
-              className="font-medium text-indigo-700 underline hover:text-indigo-800 dark:text-indigo-400"
+              className="font-medium text-brand underline hover:text-brand-strong"
             >
               Back to sign in
             </a>

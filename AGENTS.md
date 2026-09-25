@@ -37,7 +37,7 @@ Victor has repeatedly rejected purple/indigo and amber-orange in the app's visua
 
 For non-flow accents (subtitle text, filter chips, hover backgrounds, ranked bars), use neutral tokens: `text-muted`, `bg-black/5 dark:bg-white/10`, or a `--viz-*` color that matches the metric.
 
-**The `--brand` indigo stays confined to app chrome** — the sidebar, the primary CTA buttons, focus rings on inputs. Everything a user reads as *data* (money values, category dots, chart marks, deltas, "% of income" text, hero-card colored numbers) uses the `--viz-*` palette.
+**The `--brand` color stays confined to app chrome** — the sidebar, the primary CTA buttons, focus rings on inputs. Since 2026-09-25 `--brand` is a muted blue (`#3b64b0` light / `#8aa9d8` dark), not indigo: Victor rejected purple app-wide, and Tailwind `blue-600` read too bright. Never hard-code `indigo-*`, `violet-*`, `purple-*`, or `blue-600` for a button — use `bg-brand` so every page follows the token. Everything a user reads as *data* (money values, category dots, chart marks, deltas, "% of income" text, hero-card colored numbers) uses the `--viz-*` palette.
 
 When picking a color for a metric card whose kind is savings/bills/expenses/debt, use the matching `--viz-*` token via inline style (`style={{ color: "var(--viz-savings)" }}`), NOT `text-brand` / `text-accent`. For income use `--positive`, for spending/debt use `--negative`. See `feedback_no_purple_no_orange_charts` memory for the full rationale.
 

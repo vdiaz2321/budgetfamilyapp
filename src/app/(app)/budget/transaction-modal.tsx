@@ -57,7 +57,7 @@ const BTN_TEXT: Record<CategoryKind, string> = {
 const TAB_ACTIVE_TEXT: Record<CategoryKind, string> = {
   income: "bg-emerald-200 text-foreground dark:bg-emerald-800/70 dark:text-foreground",
   savings: "bg-surface text-sky-600 dark:text-sky-400",
-  bills: "bg-surface text-indigo-600 dark:text-indigo-400",
+  bills: "bg-surface text-teal-600 dark:text-teal-400",
   expenses: "bg-rose-100 text-foreground dark:bg-rose-900/50 dark:text-foreground",
   debt: "bg-surface text-rose-600 dark:text-rose-400",
 };
