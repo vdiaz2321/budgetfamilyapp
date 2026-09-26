@@ -93,7 +93,7 @@ export function TransportLogPanel({
         <Figure label="Total flights" value={String(shownFlights.length)} slotClassName={LOG_FIGURE_COL} />
         <Figure label="Spent" value={formatMoneyWhole(total, currency)} className="text-negative" slotClassName={LOG_FIGURE_COL} />
         <Figure label="Total rentals" value={String(shownCars.length)} slotClassName={LOG_FIGURE_COL} />
-        <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+        <span className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
           <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
         </span>
       </div>

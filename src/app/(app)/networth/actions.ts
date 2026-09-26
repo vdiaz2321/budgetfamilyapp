@@ -315,20 +315,6 @@ export async function upsertNetworthYear(formData: FormData) {
   return { error: null };
 }
 
-export async function deleteNetworthHistory(formData: FormData) {
-  const { supabase, householdId } = await requireHousehold();
-  const month = String(formData.get("month") ?? "");
-  if (!MONTH_RE.test(month)) return;
-
-  await supabase
-    .from("networth_history")
-    .delete()
-    .eq("household_id", householdId)
-    .eq("month", month);
-
-  revalidatePath("/networth");
-}
-
 // ---- The Financial Independence assumptions. Only the things the app can't
 // measure live here; portfolio, contributions and spending come from the
 // accounts and transactions already recorded.

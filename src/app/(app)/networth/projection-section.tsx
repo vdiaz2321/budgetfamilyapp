@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { centsToDisplay, displayToCents, formatMoney } from "@/lib/money";
+import { centsToDisplay, displayToCents, formatMoneyWhole } from "@/lib/money";
 import {
   appendProjectionYears,
   fillProjectionForward,
@@ -184,7 +184,7 @@ export function ProjectionSection({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+      <div className="px-4 py-3 sm:px-6">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -203,51 +203,41 @@ export function ProjectionSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">NW Projections</span>
+          <span className="text-sm font-bold">Net Worth Plan</span>
         </button>
 
-        {/* ml-auto, not just the row's justify-between: once the figures wrap
-            onto their own line they start a fresh line and would sit hard
-            left. This keeps them against the right edge either way. */}
-        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1 sm:ml-auto sm:justify-end">
+        {/* Same treatment as the Retirement Plan cards: the pace and how far
+            ahead of plan it is answer one question, so they share a card, and
+            each card says in a line what its number is. */}
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {current ? (
             <Figure
-              label={`${thisYear} proj EOY NW`}
-              value={formatMoney(current.eoyCents, currency)}
+              label={`${thisYear} plan`}
+              value={formatMoneyWhole(current.eoyCents, currency)}
               tone="text-foreground"
-            />
-          ) : null}
-          {forecast != null ? (
-            <Figure
-              label={`${thisYear} forecast`}
-              value={formatMoney(forecast, currency)}
-              tone={forecast >= (current?.eoyCents ?? 0) ? "text-positive" : "text-negative"}
+              sub="year-end target"
             />
           ) : null}
           {gap != null ? (
             <Figure
-              label={
-                gapIsPace
-                  ? gap >= 0
-                    ? "On pace, ahead by"
-                    : "On pace, behind by"
-                  : gap >= 0
-                    ? "Ahead by"
-                    : "Behind by"
-              }
-              value={formatMoney(Math.abs(gap), currency)}
+              label={gapIsPace ? `${thisYear} at current pace` : `${thisYear} actual`}
+              value={formatMoneyWhole(gapIsPace ? forecast! : current!.actualCents!, currency)}
               tone={gap >= 0 ? "text-positive" : "text-negative"}
+              sub={`${gap >= 0 ? "ahead of" : "behind"} plan by ${formatMoneyWhole(Math.abs(gap), currency)}`}
+              subClassName={`font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}
             />
           ) : null}
           {last ? (
             <Figure
-              label={`By ${last.year}`}
-              value={formatMoney(last.eoyCents, currency)}
+              label={`Net worth in ${last.year}`}
+              value={formatMoneyWhole(last.eoyCents, currency)}
               tone=""
               style={{ color: "var(--viz-savings)" }}
+              sub={last.age != null ? `end of plan · age ${last.age}` : "end of plan"}
+              className="col-span-2 sm:col-span-1"
             />
           ) : null}
-        </span>
+        </div>
       </div>
 
       {open ? (
@@ -255,10 +245,12 @@ export function ProjectionSection({
           {/* The grid scrolls in its own box so thirty years of projection
               don't push the rest of the page down — and sticky only works
               against a bounded height, which is what gives the header row
-              somewhere to freeze. */}
+              somewhere to freeze. Boxed like the stat cards above it, so the
+              header cards and the table read as one set. */}
+          <div className="mx-4 overflow-hidden rounded-lg bg-background ring-1 ring-line sm:mx-6">
           <div className="max-h-[70vh] overflow-auto">
             <table className="w-full min-w-[720px] text-sm">
-              <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
+              <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
                 <tr className="text-[10px] uppercase tracking-wide text-muted">
                   <th className="px-3 py-2 text-center font-semibold">Year</th>
                   <th className="px-3 py-2 text-center font-semibold">Age</th>
@@ -289,11 +281,11 @@ export function ProjectionSection({
                       </td>
                       {/* Plan on top, what actually happened underneath. */}
                       <td className="px-3 py-2 text-center tabular-nums">
-                        {formatMoney(y.incomeCents, currency)}
+                        {formatMoneyWhole(y.incomeCents, currency)}
                         <Actual cents={y.actualIncomeCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums text-negative">
-                        {formatMoney(y.spendingCents, currency)}
+                        {formatMoneyWhole(y.spendingCents, currency)}
                         <Actual cents={y.actualSpendingCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
                       {/* The plan's saving for the year — income less
@@ -301,7 +293,7 @@ export function ProjectionSection({
                           investments underneath it. */}
                       <td className="px-3 py-2 text-center tabular-nums">
                         <span style={{ color: "var(--viz-savings)" }}>
-                          {formatMoney(
+                          {formatMoneyWhole(
                             y.incomeCents - y.spendingCents,
                             currency,
                           )}
@@ -329,7 +321,7 @@ export function ProjectionSection({
                               }`}
                             >
                               {banked < 0 ? "−" : "+"}
-                              {formatMoney(Math.abs(banked), currency)} gains
+                              {formatMoneyWhole(Math.abs(banked), currency)} gains
                               {measured ? " so far" : ""}
                             </span>
                           );
@@ -340,7 +332,7 @@ export function ProjectionSection({
                           <span className="text-muted">—</span>
                         ) : (
                           <>
-                            {formatMoney(y.actualCents, currency)}
+                            {formatMoneyWhole(y.actualCents, currency)}
                             {y.inProgress ? (
                               <span className="block text-[10px] font-normal text-muted">
                                 Actual so far
@@ -350,7 +342,7 @@ export function ProjectionSection({
                         )}
                       </td>
                       <td className="px-3 py-2 text-center font-semibold tabular-nums">
-                        {formatMoney(y.eoyCents, currency)}
+                        {formatMoneyWhole(y.eoyCents, currency)}
                         {/* Named under the close it moved, rather than given a
                             ninth column — the grid already scrolls sideways on
                             a phone, and a one-off is rare enough that a column
@@ -362,7 +354,7 @@ export function ProjectionSection({
                             }`}
                           >
                             {y.oneOffCents < 0 ? "−" : "+"}
-                            {formatMoney(Math.abs(y.oneOffCents), currency)} one-off
+                            {formatMoneyWhole(Math.abs(y.oneOffCents), currency)} one-off
                           </span>
                         ) : null}
                         {(() => {
@@ -373,7 +365,7 @@ export function ProjectionSection({
                                 f >= y.eoyCents ? "text-positive" : "text-negative"
                               }`}
                             >
-                              {formatMoney(f, currency)} forecast
+                              {formatMoneyWhole(f, currency)} forecast
                             </span>
                           );
                         })()}
@@ -388,7 +380,7 @@ export function ProjectionSection({
                             }`}
                           >
                             {diff >= 0 ? "+" : "−"}
-                            {formatMoney(Math.abs(diff), currency)}
+                            {formatMoneyWhole(Math.abs(diff), currency)}
                           </span>
                         )}
                       </td>
@@ -398,8 +390,9 @@ export function ProjectionSection({
               </tbody>
             </table>
           </div>
+          </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sm:px-6">
             <div className="flex flex-wrap items-center gap-2">
               {fillFrom != null && fillableYears > 0 ? (
                 <button
@@ -460,7 +453,7 @@ export function ProjectionSection({
             (rates.incomeGrowthPct !== 0 || rates.spendingGrowthPct !== 0
               ? " Because the drift applies to the years as they stand now, pressing this twice applies it twice."
               : "") +
-            ` This cannot be undone. Change the rates under NW Assumptions.`
+            ` This cannot be undone. Change the rates under Edit assumptions.`
           }
           confirmLabel="Fill forward"
           onConfirm={fillForward}
@@ -755,7 +748,7 @@ function YearModal({
             label="Proj EOY NW"
             hint={
               eoyBelowFloor
-                ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoney(floorEoyCents, currency)}.`
+                ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoneyWhole(floorEoyCents, currency)}.`
                 : "Typing here sets Est. gains to match."
             }
             hintTone={eoyBelowFloor ? "text-negative" : undefined}
@@ -810,7 +803,7 @@ function YearModal({
           <p>
             <span className="text-muted">Proj EOY NW: </span>
             <span className="font-semibold text-foreground">
-              {formatMoney(predictedEoyCents, currency)}
+              {formatMoneyWhole(predictedEoyCents, currency)}
             </span>
           </p>
           <p className="sm:text-center">
@@ -818,7 +811,7 @@ function YearModal({
               {row.inProgress ? "Actual net worth so far: " : "Actual net worth: "}
             </span>
             <span className="font-semibold text-foreground">
-              {row.actualCents == null ? "—" : formatMoney(row.actualCents, currency)}
+              {row.actualCents == null ? "—" : formatMoneyWhole(row.actualCents, currency)}
             </span>
           </p>
           <p className="sm:text-right">
@@ -832,7 +825,7 @@ function YearModal({
                 }`}
               >
                 {liveDiffCents >= 0 ? "+" : "−"}
-                {formatMoney(Math.abs(liveDiffCents), currency)}
+                {formatMoneyWhole(Math.abs(liveDiffCents), currency)}
               </span>
             )}
           </p>
@@ -848,9 +841,9 @@ function YearModal({
               {changes.map((c) => (
                 <li key={c.name}>
                   <span className="text-muted">{c.label}: </span>
-                  {formatMoney(c.from, currency)}
+                  {formatMoneyWhole(c.from, currency)}
                   <span aria-hidden className="mx-1 text-muted">→</span>
-                  <span className="font-semibold">{formatMoney(c.to ?? 0, currency)}</span>
+                  <span className="font-semibold">{formatMoneyWhole(c.to ?? 0, currency)}</span>
                 </li>
               ))}
             </ul>
@@ -862,7 +855,7 @@ function YearModal({
                 className={`font-semibold ${missCents >= 0 ? "text-positive" : "text-negative"}`}
               >
                 {missCents >= 0 ? "+" : "−"}
-                {formatMoney(Math.abs(missCents), currency)}
+                {formatMoneyWhole(Math.abs(missCents), currency)}
               </span>
               <span className="text-muted">
                 {" "}
@@ -937,7 +930,7 @@ function ProjectionEmpty({
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="px-4 py-3 sm:px-6">
-        <p className="text-sm font-bold">NW Projections</p>
+        <p className="text-sm font-bold">Net Worth Plan</p>
         <p className="mt-1 text-xs text-muted">
           Where your net worth is heading, year by year, and how each year turns
           out against the plan. Start it from what you have already recorded —
@@ -946,12 +939,12 @@ function ProjectionEmpty({
         </p>
 
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SeedTile label="Starting balance" value={formatMoney(seed.boyCents, currency)} sub="net worth today" />
-          <SeedTile label="Income / yr" value={formatMoney(seed.incomeCents, currency)} sub="last 12 months" />
-          <SeedTile label="Spending / yr" value={formatMoney(seed.spendingCents, currency)} sub="last 12 months" />
+          <SeedTile label="Starting balance" value={formatMoneyWhole(seed.boyCents, currency)} sub="net worth today" />
+          <SeedTile label="Income / yr" value={formatMoneyWhole(seed.incomeCents, currency)} sub="last 12 months" />
+          <SeedTile label="Spending / yr" value={formatMoneyWhole(seed.spendingCents, currency)} sub="last 12 months" />
           <SeedTile
             label="Saved / invested"
-            value={formatMoney(savedCents, currency)}
+            value={formatMoneyWhole(savedCents, currency)}
             sub="income − spending"
           />
         </div>
@@ -1018,7 +1011,7 @@ function Actual({
   if (!running && row.actualMonths < MIN_MONTHS_FOR_ACTUALS) return null;
   return (
     <span className="block text-[10px] font-normal text-muted">
-      {formatMoney(cents, currency)} {[noun, running ? "so far" : "actual"].filter(Boolean).join(" ")}
+      {formatMoneyWhole(cents, currency)} {[noun, running ? "so far" : "actual"].filter(Boolean).join(" ")}
     </span>
   );
 }
@@ -1042,7 +1035,7 @@ function Recorded({
         {label}
       </span>
       <span className="block font-semibold tabular-nums">
-        {cents ? formatMoney(cents, currency) : "—"}
+        {cents ? formatMoneyWhole(cents, currency) : "—"}
       </span>
       <span className="block text-[10px] text-muted">{from}</span>
     </span>
@@ -1081,23 +1074,45 @@ function Field({
   );
 }
 
+// A header stat as its own small card, the same look as the milestone cards
+// under it, so the summary and the detail read as one set rather than a line
+// of labels floating over a divider.
 function Figure({
   label,
   value,
   tone,
   style,
+  className,
+  bar,
+  sub,
+  subClassName,
 }: {
   label: string;
   value: string;
   tone: string;
   style?: React.CSSProperties;
+  className?: string;
+  /** 0–1: draws a thin progress bar under the value. */
+  bar?: number;
+  /** A short line under the value saying what it is. */
+  sub?: string;
+  subClassName?: string;
 }) {
   return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
-      <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>
+    <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
+      <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
+      <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
         {value}
-      </span>
-    </span>
+      </p>
+      {sub ? <p className={`text-[10px] leading-tight ${subClassName ?? "text-muted"}`}>{sub}</p> : null}
+      {bar != null ? (
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${Math.round(Math.min(1, Math.max(0, bar)) * 100)}%`, backgroundColor: "var(--viz-savings)" }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }

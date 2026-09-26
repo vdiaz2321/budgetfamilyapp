@@ -259,7 +259,7 @@ export function TripLogPanel({
             <span className="text-sm font-bold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
           </span>
         ) : null}
-        <span className="shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
+        <span className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
       </div>
 
       {expanded ? (

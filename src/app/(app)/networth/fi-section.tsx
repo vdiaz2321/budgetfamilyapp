@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { centsToDisplay, formatMoney } from "@/lib/money";
+import { centsToDisplay, formatMoneyWhole } from "@/lib/money";
 import { ageInYear, projectFi, type FiScheduleYear } from "@/lib/retirement";
 import { saveRetirementPlan } from "./actions";
 
@@ -149,10 +149,22 @@ export function FiSection({
   const atTarget = plan.targetRetireYear
     ? fi.years.find((y) => y.year === plan.targetRetireYear) ?? null
     : null;
+  // The year the plan first crosses its target. Crossing today has no row in
+  // fi.years (it starts next year), so today's figures stand in for it.
+  const fiRow =
+    fi.fiYear == null
+      ? null
+      : fi.years.find((y) => y.year === fi.fiYear) ?? {
+          year: fi.fiYear,
+          endCents: portfolioCents,
+          targetCents: fi.fiNumberCents,
+          spendCents: schedule.find((y) => y.year === fi.fiYear)?.spendCents ?? plan.annualSpendCents ?? measured.spendCents,
+          guaranteedCents: 0,
+        };
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 sm:px-6">
+      <div className="px-4 py-3 sm:px-6">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -171,116 +183,99 @@ export function FiSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">NW / FI Projections</span>
+          <span className="text-sm font-bold">Retirement Plan</span>
         </button>
 
-        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {/* The two "today" facts live up here rather than in the body: they
               describe where he stands now, so they'd read as competing with
               the chart's per-year readout if they sat beside it. */}
           <Figure
-            label="Portfolio today"
-            value={formatMoney(portfolioCents, currency)}
+            label="Net worth today"
+            value={formatMoneyWhole(portfolioCents, currency)}
             tone="text-foreground"
           />
+          {/* The goal and the year it's reached are one fact — the target
+              and when you hit it — so they share a card. */}
           <Figure
-            label="FI number"
-            value={formatMoney(fi.fiNumberCents, currency)}
+            label="FI goal"
+            value={formatMoneyWhole(fi.fiNumberCents, currency)}
             tone="text-foreground"
+            sub={
+              fi.fiYear
+                ? `reached ${fi.fiYear}${fiAge != null ? ` · age ${fiAge}` : ""}`
+                : "not reached on this plan"
+            }
+            subClassName={`font-semibold ${fi.fiYear ? "text-positive" : "text-negative"}`}
           />
           {/* Portfolio today ÷ FI number. */}
           <Figure
-            label="% of FI goal"
+            label="Progress to FI"
             value={`${Math.round(fi.progress * 100)}%`}
             tone=""
             style={{ color: "var(--viz-savings)" }}
+            bar={fi.progress}
           />
           {/* Portfolio today × withdrawal rate — what today's assets could pay
               out each year if he stopped working now. */}
           <Figure
-            label="Could pay"
-            value={`${formatMoney(fi.sustainableSpendCents, currency)}/yr`}
+            label="Income if you retired today"
+            value={`${formatMoneyWhole(fi.sustainableSpendCents, currency)}/yr`}
             tone="text-foreground"
+            sub={`taking out ${plan.withdrawalRatePct}% of ${formatMoneyWhole(portfolioCents, currency)} a year`}
           />
-          <Figure
-            label={fi.fiYear ? "Independent in" : "Independent"}
-            value={
-              fi.fiYear
-                ? `${fi.fiYear}${fiAge != null ? ` · age ${fiAge}` : ""}`
-                : "not on this path"
-            }
-            tone={fi.fiYear ? "text-positive" : "text-negative"}
-          />
-        </span>
+        </div>
       </div>
 
       {open ? (
-        <div className="border-t border-line px-4 py-4 sm:px-6">
-          <p className="text-xs text-muted">
-            {/* The button leads the sentence it feeds: the 5% (and the rest of
-                this line) comes from here, so that's where you change it. */}
+        <div className="px-4 pb-4 sm:px-6">
+          {/* One plain line of assumptions, then the two years that matter
+              side by side. This used to be two long sentences, and because
+              the plan spends more at retirement than at FI they quoted two
+              different targets ($2.25M and $1.125M) with nothing saying why. */}
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
             <button
               type="button"
               onClick={() => setEditing(true)}
               // Soft blue from the viz palette (not brand indigo — no purple on data).
-              className="mr-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
+              className="rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
             >
-              NW Assumptions
+              Edit assumptions
             </button>
-            at a{" "}
-            {plan.realReturnPct}% real return, this
-            {usingGrid ? " plan" : ` ${formatMoney(contributionCents, currency)} a year`}
-            {usingGrid ? " reaches FI" : " covers your spending"}
-            {fi.fiYear ? (
-              <>
-                {" "}
-                by <span className="font-semibold text-foreground">{fi.fiYear}</span> — {fi.yearsToFi}{" "}
-                {fi.yearsToFi === 1 ? "year" : "years"} from now
-                {fiAge != null ? `, at age ${fiAge}` : ""}.
-              </>
-            ) : (
-              <> nowhere inside 60 years. Raise the contributions or lower the spending.</>
-            )}{" "}
-            Every figure is in today&rsquo;s money.
+            <span>
+              {plan.realReturnPct}% growth a year after inflation · withdraw {plan.withdrawalRatePct}% a year
+              {usingGrid ? "" : ` · saving ${formatMoneyWhole(contributionCents, currency)} a year`}
+              {" "}· in today&rsquo;s dollars
+            </span>
           </p>
 
-
-          {atTarget ? (
-            <p className="mt-1 text-xs text-muted">
-              By your retirement year of{" "}
-              <span className="font-semibold text-foreground">{plan.targetRetireYear}</span> the
-              portfolio reaches{" "}
-              <span className="font-semibold text-foreground">
-                {formatMoney(atTarget.endCents, currency)}
-              </span>
-              , which supports{" "}
-              <span className="font-semibold text-foreground">
-                {formatMoney(Math.round((atTarget.endCents * plan.withdrawalRatePct) / 100), currency)}
-              </span>{" "}
-              a year
-              {atTarget.guaranteedCents > 0 ? (
-                <>
-                  {" "}
-                  on top of {formatMoney(atTarget.guaranteedCents, currency)} of guaranteed income
-                </>
-              ) : null}{" "}
-              —{" "}
-              {/* Measured against what THAT year needs, not against the FI
-                  number. fi.fiNumberCents is the target at the year the plan
-                  crosses — 2041, sized for $45k of spending — so comparing a
-                  2036 portfolio with it called a $1,233,000 gap "$108,025.23
-                  short" while 2036 actually plans to spend $90,000. Every row
-                  carries its own targetCents; this is the one that applies. */}
-              {atTarget.endCents >= atTarget.targetCents ? (
-                <span className="font-semibold text-positive">enough</span>
-              ) : (
-                <span className="font-semibold text-negative">
-                  {formatMoney(atTarget.targetCents - atTarget.endCents, currency)} short
-                </span>
-              )}{" "}
-              of the {formatMoney(atTarget.targetCents, currency)} that year needs.
-            </p>
-          ) : null}
+          <div className={`mt-3 grid gap-3 ${atTarget && atTarget.year !== fi.fiYear ? "sm:grid-cols-2" : ""}`}>
+            {atTarget && atTarget.year !== fi.fiYear ? (
+              <Milestone
+                title={`Retire ${atTarget.year}${plan.birthYear ? ` · age ${atTarget.year - plan.birthYear}` : ""}`}
+                haveCents={atTarget.endCents}
+                needCents={atTarget.targetCents}
+                spendCents={atTarget.spendCents}
+                guaranteedCents={atTarget.guaranteedCents}
+                currency={currency}
+              />
+            ) : null}
+            {fiRow ? (
+              <Milestone
+                title={`Financially free ${fiRow.year}${fiAge != null ? ` · age ${fiAge}` : ""}`}
+                haveCents={fiRow.endCents}
+                needCents={fiRow.targetCents}
+                spendCents={fiRow.spendCents}
+                guaranteedCents={fiRow.guaranteedCents}
+                currency={currency}
+              />
+            ) : (
+              <p className="rounded-lg bg-background px-3 py-2 text-xs ring-1 ring-line">
+                <span className="font-semibold text-negative">Not reached in 60 years.</span>{" "}
+                Save more or spend less in Edit assumptions.
+              </p>
+            )}
+          </div>
 
           <FiChart
             fi={fi}
@@ -472,7 +467,7 @@ function FiChart({
                 key={y.year}
                 type="button"
                 onClick={() => setPickedYear(y.year)}
-                aria-label={`${y.year}: ${formatMoney(y.endCents, currency)}`}
+                aria-label={`${y.year}: ${formatMoneyWhole(y.endCents, currency)}`}
                 aria-pressed={i === selectedIndex}
                 className="group flex h-full flex-1 cursor-pointer items-end rounded-t-[2px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               >
@@ -502,10 +497,12 @@ function FiChart({
                   fiIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
-                FI {fiRow.year}
+                Financially free {fiRow.year}
                 {/* The projected portfolio that year, not the FI number —
                     named so it doesn't read as a second goal figure. */}
-                {birthYear ? ` · age ${fiRow.year - birthYear}` : ""} · portfolio {axisMoney(fiRow.endCents)}
+                {birthYear ? ` · age ${fiRow.year - birthYear}` : ""}
+                {/* Dropped on a phone: the longer label ran into the card edge. */}
+                <span className="hidden sm:inline"> · net worth {axisMoney(fiRow.endCents)}</span>
               </span>
             </span>
           ) : null}
@@ -564,28 +561,31 @@ function FiChart({
           come from the NW Projections grid — the same figures that table
           shows, so this answers the question without the scroll. */}
       {selected ? (
-        <div className="mt-2 rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+        <div className="mt-2 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
+          <p className="text-xs font-bold">
             {selected.year}
             {birthYear ? ` · age ${selected.year - birthYear}` : ""}
-            {selected.independent ? " · past the FI number" : ""}
+            {selected.independent ? " · financially free" : ""}
           </p>
-          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-5">
-            <Readout label="Proj Income" value={selectedPlan ? formatMoney(selectedPlan.incomeCents, currency) : "—"} />
-            <Readout label="Proj Spending" value={selectedPlan ? formatMoney(selectedPlan.spendingCents, currency) : "—"} />
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+            <Readout label="Income" value={selectedPlan ? formatMoneyWhole(selectedPlan.incomeCents, currency) : "—"} />
+            <Readout label="Spending" value={selectedPlan ? formatMoneyWhole(selectedPlan.spendingCents, currency) : "—"} />
             <Readout
-              label="Proj Saved"
+              label="Saved"
               value={
                 selectedPlan
-                  ? formatMoney(selectedPlan.incomeCents - selectedPlan.spendingCents, currency)
+                  ? formatMoneyWhole(selectedPlan.incomeCents - selectedPlan.spendingCents, currency)
                   : "—"
               }
             />
+            {/* One net worth per year: the plan's year-end figure. The chart's
+                own growth-model balance sat beside it a few hundred dollars
+                off and read as a second answer; it only fills in for years
+                past the end of the plan. */}
             <Readout
-              label="Proj EOY NW"
-              value={selectedPlan ? formatMoney(selectedPlan.eoyCents, currency) : "—"}
+              label="Net worth"
+              value={formatMoneyWhole(selectedPlan ? selectedPlan.eoyCents : selected.endCents, currency)}
             />
-            <Readout label="Proj Portfolio" value={formatMoney(selected.endCents, currency)} />
           </div>
         </div>
       ) : null}
@@ -598,26 +598,74 @@ function FiChart({
             className="inline-block h-2 w-2.5 rounded-[1px]"
             style={{ backgroundColor: "var(--viz-soft)" }}
           />
-          Portfolio at year end
+          Net worth at year end
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block h-2 w-2.5 rounded-[1px]"
             style={{ backgroundColor: "var(--positive)" }}
           />
-          Reach FI
+          Financially free
         </span>
-        <span className="text-muted">Press a bar for that year&rsquo;s figures.</span>
+        <span className="text-muted">Tap a bar to see that year.</span>
       </div>
     </div>
   );
 }
 
+// One milestone year: what the portfolio is expected to hold, what that year's spending
+// needs, and the gap or "enough".
+function Milestone({
+  title,
+  haveCents,
+  needCents,
+  spendCents,
+  guaranteedCents,
+  currency,
+}: {
+  title: string;
+  haveCents: number;
+  needCents: number;
+  spendCents: number;
+  guaranteedCents: number;
+  currency: string;
+}) {
+  const gap = needCents - haveCents;
+  const label = "text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted";
+  const value = "mt-0.5 truncate text-xs font-bold tabular-nums sm:text-base";
+  return (
+    <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
+      <p className="text-xs font-bold">{title}</p>
+      <div className="mt-2 grid grid-cols-3 gap-1 sm:gap-2">
+        <div className="min-w-0">
+          <p className={label}>Expected</p>
+          <p className={value}>{formatMoneyWhole(haveCents, currency)}</p>
+        </div>
+        <div className="min-w-0">
+          <p className={label}>Needed</p>
+          <p className={value}>{formatMoneyWhole(needCents, currency)}</p>
+        </div>
+        <div className="min-w-0">
+          <p className={label}>{gap > 0 ? "Shortfall" : "Status"}</p>
+          <p className={`${value} ${gap > 0 ? "text-negative" : "text-positive"}`}>
+            {gap > 0 ? formatMoneyWhole(gap, currency) : "On track"}
+          </p>
+        </div>
+      </div>
+      <p className="mt-1.5 text-[11px] text-muted">
+        to spend {formatMoneyWhole(spendCents, currency)} a year
+        {guaranteedCents > 0 ? `, ${formatMoneyWhole(guaranteedCents, currency)} of it from guaranteed income` : ""}
+      </p>
+    </div>
+  );
+}
+
+// Same label/number styling as the milestone and header cards.
 function Readout({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 text-center">
-      <p className="text-[10px] text-muted">{label}</p>
-      <p className="truncate text-xs font-semibold tabular-nums">{value}</p>
+      <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
+      <p className="mt-0.5 truncate text-xs font-bold tabular-nums sm:text-base">{value}</p>
     </div>
   );
 }
@@ -652,13 +700,13 @@ function PlanModal({
   // where it comes from.
   const blankHint = (column: string) =>
     gridThisYear
-      ? `Value is from ${column} column in NW Projections section`
+      ? `Value is from ${column} column in Net Worth Plan section`
       : "Value is from your last 12 months of Budget actuals";
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <ModalShell title="NW Assumptions" onClose={onClose} className="sm:max-w-2xl">
+    <ModalShell title="Retirement assumptions" onClose={onClose} className="sm:max-w-2xl">
       <form
         action={(formData) =>
           start(async () => {
@@ -817,24 +865,46 @@ function Field({ label, hint, children }: { label: string; hint?: React.ReactNod
   );
 }
 
+// A header stat as its own small card, the same look as the milestone cards
+// under it, so the summary and the detail read as one set rather than a line
+// of labels floating over a divider.
 function Figure({
   label,
   value,
   tone,
   style,
+  className,
+  bar,
+  sub,
+  subClassName,
 }: {
   label: string;
   value: string;
   tone: string;
   style?: React.CSSProperties;
+  className?: string;
+  /** 0–1: draws a thin progress bar under the value. */
+  bar?: number;
+  /** A short "how it's worked out" line under the value. */
+  sub?: string;
+  subClassName?: string;
 }) {
   return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
-      <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>
+    <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
+      <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
+      <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
         {value}
-      </span>
-    </span>
+      </p>
+      {sub ? <p className={`text-[10px] leading-tight ${subClassName ?? "text-muted"}`}>{sub}</p> : null}
+      {bar != null ? (
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${Math.round(Math.min(1, Math.max(0, bar)) * 100)}%`, backgroundColor: "var(--viz-savings)" }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

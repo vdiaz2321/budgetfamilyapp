@@ -1541,8 +1541,8 @@ function Panel({
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">{meta}</span>
         ) : null}
       </button>
-      {/* Flush against the metas, not flung to the far edge — see the header
-          buttons above. Same py-3 as the button beside it: the control is
+      {/* Pinned to the far right edge, so the year pickers of the stacked
+          logs line up in one column. Same py-3 as the button beside it: the control is
           taller than a line of text, and without the padding this header sits
           ~5px shorter than the sibling cards in the 3-up row. Only from xl,
           where that row exists — stacked, it would just be dead space. A
@@ -1551,7 +1551,7 @@ function Panel({
       {control ? (
         <div
           onClick={(e) => e.stopPropagation()}
-          className={`shrink-0 cursor-auto ${onExpand ? "" : "ml-auto pl-3 pr-4 sm:pr-5 xl:py-3"}`}
+          className={`ml-auto shrink-0 cursor-auto ${onExpand ? "" : "pl-3 pr-4 sm:pr-5 xl:py-3"}`}
         >
           {control}
         </div>
@@ -1564,8 +1564,10 @@ function Panel({
 
 /** Column widths shared by the three stacked log headers (Travel Combined,
  *  Hotel, Flights & Rentals) so their titles, figures and year pickers line
- *  up down the page. */
-export const LOG_TITLE_COL = "sm:w-48";
+ *  up down the page — and with the rewards rows above, whose title slot is
+ *  15.5rem (this row's wider gap-x-3 eats the other 0.25rem), so every
+ *  header's first figure starts in one column. */
+export const LOG_TITLE_COL = "sm:w-[15.25rem]";
 export const LOG_FIGURE_COL = "sm:min-w-[9.5rem]";
 
 /** The two diagonal arrows: this header opens a full-width popup. */

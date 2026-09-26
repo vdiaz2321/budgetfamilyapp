@@ -72,7 +72,7 @@ export function TrendChart({
             className="h-2.5 w-2.5 rounded-sm"
             style={{ backgroundColor: "var(--viz-spending)" }}
           />
-          Spending
+          Bills &amp; Expenses
         </span>
       </div>
 
@@ -144,7 +144,7 @@ export function TrendChart({
                   <div className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 w-max min-w-[10rem] -translate-x-1/2 rounded-lg bg-surface px-3 py-2 text-left text-xs text-foreground shadow-xl ring-1 ring-black/10 dark:ring-white/15">
                     <p className="font-semibold">{b.label}</p>
                     <TooltipRow color="var(--viz-income)" label="Income" amount={b.income} currency={currency} />
-                    <TooltipRow color="var(--viz-spending)" label="Spending" amount={b.spending} currency={currency} />
+                    <TooltipRow color="var(--viz-spending)" label="Bills & Expenses" amount={b.spending} currency={currency} />
                     <TooltipRow color="var(--viz-savings)" label="Savings" amount={b.savings} currency={currency} />
                     <TooltipRow color="var(--viz-debt)" label="Debt paid" amount={b.debt} currency={currency} />
                     <div className="mt-1 flex items-center justify-between gap-4 border-t border-line pt-1 font-semibold">

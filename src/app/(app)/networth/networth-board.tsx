@@ -2,17 +2,16 @@
 
 import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { ModalShell } from "@/components/modal-shell";
 import {
   centsToDisplay,
   centsToGroupedDisplay,
   currencySymbol,
   displayToCents,
   formatMoney,
+  formatMoneyWhole,
 } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import {
-  deleteNetworthHistory,
   setAccountSnapshot,
   setBucketSnapshot,
   setDebtSnapshot,
@@ -289,23 +288,28 @@ export function NetworthBoard({
       ) : null}
       </div>
 
-      {/* Transposed summary — the sheet's top block (Total Assets → NW w/out Invest) */}
+      {/* The sheet's top block and its YearlyNetWorth tab. Two cards, one
+          year: either picker moves both. */}
       {points.length > 0 ? (
-        <SummaryBlock
-          points={points}
-          currency={currency}
-          years={years}
-          year={year}
-          onYearChange={setYear}
-        />
+        <>
+          <NetWorthOverTime
+            points={points}
+            currency={currency}
+            years={years}
+            year={year}
+            onYearChange={setYear}
+          />
+          <MonthlyTraction
+            points={points}
+            currency={currency}
+            years={years}
+            year={year}
+            onYearChange={setYear}
+          />
+        </>
       ) : null}
 
-      {/* Monthly Net Worth analytics — the sheet's YearlyNetWorth tab */}
-      {points.length > 0 ? (
-        <MonthlyAnalytics points={points} currency={currency} year={year} />
-      ) : null}
-
-      {/* Year by year */}
+      {/* Total Net Worth by Year */}
       {points.length > 0 ? <YearTable points={points} currency={currency} /> : null}
     </div>
   );
@@ -353,9 +357,18 @@ function ChartSection({
   showPlan: boolean;
   onTogglePlan: () => void;
 }) {
+  // Header cards over the whole history the chart draws: where it stands,
+  // where it started, its peak, and the last twelve months.
+  const latest = points.at(-1) ?? null;
+  const first = points[0] ?? null;
+  const peak = points.reduce<MonthPoint | null>((b, p) => (b == null || p.net > b.net ? p : b), null);
+  const yearAgo = points.length > 12 ? points[points.length - 13] : null;
+  const lastYear = latest && yearAgo ? latest.net - yearAgo.net : null;
+  const signed = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
+
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-wrap items-center justify-between border-b border-line">
+      <div className="flex flex-wrap items-center justify-between">
         <button
           type="button"
           onClick={() => onToggle(!open)}
@@ -428,16 +441,38 @@ function ChartSection({
           </div>
         ) : null}
       </div>
+      {latest && first ? (
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4">
+          <StatCard label="Net worth now" value={formatMoneyWhole(latest.net, currency)} sub={monthLabel(latest.month)} />
+          <StatCard label="Started at" value={formatMoneyWhole(first.net, currency)} sub={monthLabel(first.month)} />
+          <StatCard
+            label="All-time high"
+            value={peak ? formatMoneyWhole(peak.net, currency) : "—"}
+            sub={peak ? (peak.month === latest.month ? `${monthLabel(peak.month)} · this month` : monthLabel(peak.month)) : undefined}
+            subClass={peak?.month === latest.month ? "font-semibold text-positive" : "text-muted"}
+          />
+          <StatCard
+            label="Last 12 months"
+            value={lastYear == null ? "—" : signed(lastYear)}
+            valueClass={lastYear == null || lastYear === 0 ? "" : lastYear > 0 ? "text-positive" : "text-negative"}
+            sub={yearAgo ? `since ${monthLabel(yearAgo.month)}` : undefined}
+          />
+        </div>
+      ) : null}
       {open ? (
         points.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
             No history yet — it starts accruing as soon as you enter account balances.
             Each month freezes automatically; check back as months pass.
           </p>
-        ) : selectedRows.length > 0 ? (
-          <AccountChart rows={selectedRows} months={gridMonths} currency={currency} colors={CHART_COLORS} />
         ) : (
-          <NetworthChart points={points} currency={currency} plan={showPlan ? plan : []} />
+          <div className="mx-4 mb-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
+            {selectedRows.length > 0 ? (
+              <AccountChart rows={selectedRows} months={gridMonths} currency={currency} colors={CHART_COLORS} />
+            ) : (
+              <NetworthChart points={points} currency={currency} plan={showPlan ? plan : []} />
+            )}
+          </div>
         )
       ) : null}
     </section>
@@ -620,11 +655,11 @@ function NetworthChart({
           />
         ) : null}
 
-        <circle cx={x(lastIdx)} cy={y(points[lastIdx].net)} r="6" fill="var(--surface)" />
+        <circle cx={x(lastIdx)} cy={y(points[lastIdx].net)} r="6" fill="var(--background)" />
         <circle cx={x(lastIdx)} cy={y(points[lastIdx].net)} r="4" fill="var(--viz-income)" />
         {hover != null && hover !== lastIdx ? (
           <>
-            <circle cx={x(hover)} cy={y(points[hover].net)} r="6" fill="var(--surface)" />
+            <circle cx={x(hover)} cy={y(points[hover].net)} r="6" fill="var(--background)" />
             <circle cx={x(hover)} cy={y(points[hover].net)} r="4" fill="var(--viz-income)" />
           </>
         ) : null}
@@ -770,13 +805,13 @@ function AccountChart({ rows, months, currency, colors }: { rows: GridRow[]; mon
               <path d={path.trim()} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
               {lastNonNull != null && lastVal != null ? (
                 <>
-                  <circle cx={xForIdx(lastNonNull)} cy={y(lastVal)} r="6" fill="var(--surface)" />
+                  <circle cx={xForIdx(lastNonNull)} cy={y(lastVal)} r="6" fill="var(--background)" />
                   <circle cx={xForIdx(lastNonNull)} cy={y(lastVal)} r="4" fill={color} />
                 </>
               ) : null}
               {hover != null && hover !== lastNonNull && pts[hover] != null ? (
                 <>
-                  <circle cx={xForIdx(hover)} cy={y(pts[hover]!)} r="6" fill="var(--surface)" />
+                  <circle cx={xForIdx(hover)} cy={y(pts[hover]!)} r="6" fill="var(--background)" />
                   <circle cx={xForIdx(hover)} cy={y(pts[hover]!)} r="4" fill={color} />
                 </>
               ) : null}
@@ -877,6 +912,10 @@ function EditableBalanceCell({
   // that needs filling in. displayToCents strips the symbol on the way back.
   const initial =
     balanceCents == null ? "" : `${currencySymbol(currency)}${centsToGroupedDisplay(balanceCents)}`;
+  // At rest the cell reads in whole dollars like the rest of the grid; focus
+  // swaps the exact figure back in, so an edit starts from the real balance
+  // and a cell that is only tabbed through never re-saves a rounded one.
+  const shown = balanceCents == null ? "" : formatMoneyWhole(balanceCents, currency);
   // The last value actually sent. Enter submits and then blurs, and the blur
   // would otherwise submit the identical value a second time — `initial` is
   // still the pre-save string until the server revalidates.
@@ -887,15 +926,21 @@ function EditableBalanceCell({
     // Never write a snapshot for a cell that was empty and stayed empty —
     // otherwise tabbing across a row backfills it with zeros.
     if (value === "" && balanceCents == null) return;
+    const restore = () => {
+      if (inputRef.current) inputRef.current.value = shown;
+    };
     // Text with no digit in it parses to 0 and would save as $0 — a typo like
     // "125O" (letter O) or a stray keystroke silently wipes a real balance,
     // on the one page whose whole job is typing balances. Put the cell back
     // and write nothing.
     if (value !== "" && !/\d/.test(value)) {
-      if (inputRef.current) inputRef.current.value = initial;
+      restore();
       return;
     }
-    if (raw === (lastSent.current ?? initial)) return;
+    if (raw === (lastSent.current ?? initial) || (lastSent.current == null && raw === shown)) {
+      restore();
+      return;
+    }
     lastSent.current = raw;
     formRef.current?.requestSubmit();
   };
@@ -928,7 +973,7 @@ function EditableBalanceCell({
         name="balance"
         type="text"
         inputMode="decimal"
-        defaultValue={initial}
+        defaultValue={shown}
         placeholder="—"
         // Every cell shares the name "balance", so the browser offers the
         // history of every other cell the moment one is focused.
@@ -936,7 +981,10 @@ function EditableBalanceCell({
         data-lpignore="true"
         data-1p-ignore
         aria-label={`Balance for ${monthLabel(month)}`}
-        onFocus={(e) => e.currentTarget.select()}
+        onFocus={(e) => {
+          if (lastSent.current == null && e.currentTarget.value === shown) e.currentTarget.value = initial;
+          e.currentTarget.select();
+        }}
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
           // Submit directly rather than leaning on blur(): the blur fired from
@@ -1182,6 +1230,41 @@ function BalanceGrid({
     return any ? sum : null;
   };
 
+  // Net worth for one on-screen month: every counted section, liabilities
+  // subtracted, Kids Funding left out — the grid's Total Net Worth row.
+  const netAt = (i: number): number | null => {
+    let sum = 0;
+    let any = false;
+    for (const g of sections) {
+      if (g.section === "Kids Funding") continue;
+      const t = sectionTotalCounted(g, i);
+      if (t == null) continue;
+      const isLiab = g.rows[0]?.liability ?? false;
+      sum += isLiab ? -t : t;
+      any = true;
+    }
+    return any ? sum : null;
+  };
+
+  // Header cards: each section's total for the newest month on screen, and
+  // how it moved from the month before. Kids Funding stays out, as it does
+  // from every total.
+  const shortMonth = (m: string) => monthLabel(m).split(" ")[0];
+  const headerCards =
+    months.length === 0
+      ? []
+      : [
+          ...sections
+            .filter((g) => g.section !== "Kids Funding")
+            .map((g) => ({
+              label: g.section,
+              now: sectionTotal(g, 0),
+              before: months.length > 1 ? sectionTotal(g, 1) : null,
+              liability: g.rows[0]?.liability ?? false,
+            })),
+          { label: "Total net worth", now: netAt(0), before: months.length > 1 ? netAt(1) : null, liability: false },
+        ];
+
   const readCell = (r: GridRow, i: number) => {
     const v = r.balances[i];
     // Accounts without buckets, bucket rows and debt rows each write their own
@@ -1209,7 +1292,7 @@ function BalanceGrid({
     if (v == null) return <span className="text-muted">—</span>;
     return (
       <span className={(r.liability && v > 0) || v < 0 ? "text-negative" : ""}>
-        {formatMoney(v, currency)}
+        {formatMoneyWhole(v, currency)}
       </span>
     );
   };
@@ -1221,7 +1304,7 @@ function BalanceGrid({
   // under it, so it can't just inherit the row's bg; it has to repeat it.
   // A bucket row gets a subtle indent tint; no alternating zebra otherwise —
   // it read as a distracting green wash (see feedback: "looks horrible").
-  const zebraBg = (r: GridRow) => (r.indent ? "bg-background/30" : "");
+  const zebraBg = (r: GridRow) => (r.indent ? "bg-surface" : "");
 
   const stickyCls = "sticky left-0 z-10 pr-2 sm:pr-3";
 
@@ -1273,7 +1356,7 @@ function BalanceGrid({
 
   return (
     <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <button
           type="button"
           onClick={toggleGrid}
@@ -1294,10 +1377,35 @@ function BalanceGrid({
           <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
         ) : null}
       </div>
+      {headerCards.length > 0 ? (
+        <div className={`grid grid-cols-2 gap-2 px-4 pb-3 ${headerCards.length >= 5 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
+          {headerCards.map((c) => {
+            const delta = c.now != null && c.before != null ? c.now - c.before : null;
+            // Up is good for what you own, down is good for what you owe.
+            const good = delta == null || delta === 0 ? null : c.liability ? delta < 0 : delta > 0;
+            return (
+              <StatCard
+                key={c.label}
+                label={c.label}
+                value={c.now == null ? "—" : formatMoneyWhole(c.now, currency)}
+                valueClass={c.liability ? "text-negative" : ""}
+                sub={`${shortMonth(months[0])}${
+                  delta != null && months[1]
+                    ? ` · ${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(months[1])}`
+                    : ""
+                }`}
+                subClass={good == null ? "text-muted" : good ? "font-semibold text-positive" : "font-semibold text-negative"}
+              />
+            );
+          })}
+        </div>
+      ) : null}
       {gridOpen ? <>
       {reorderError ? (
-        <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
+        <p className="px-4 pb-2 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
+      {/* Boxed like the Net Worth Plan table and the stat cards on this page. */}
+      <div className="mx-4 mb-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
       <div ref={scrollBoxRef} className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
         <table
           className={`table-fixed border-collapse text-xs sm:text-sm ${
@@ -1325,15 +1433,15 @@ function BalanceGrid({
             )}
           </colgroup>
           <thead
-            className="sticky z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]"
+            className="sticky z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]"
             style={{ top: "var(--grid-sticky-top, 0px)" }}
           >
             <tr className="border-b border-line">
-              <th className={`${stickyCls} bg-surface px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-[11px]`}>
+              <th className={`${stickyCls} bg-background px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-[11px]`}>
                 Account
               </th>
               {months.map((m) => (
-                <th key={m} className={`${wideLayout ? "" : "w-28 sm:w-36"} bg-surface whitespace-nowrap px-2 py-2 text-center text-[10px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-[11px]`}>
+                <th key={m} className={`${wideLayout ? "" : "w-28 sm:w-36"} bg-background whitespace-nowrap px-2 py-2 text-center text-[10px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-[11px]`}>
                   {monthLabel(m)}
                 </th>
               ))}
@@ -1344,22 +1452,10 @@ function BalanceGrid({
               // Total Net Worth per month = sum of every section EXCEPT Kids Funding,
               // with liability sections subtracted. Rendered once, right before the
               // "Not counted" divider (or at the end if there's no Kids Funding).
-              const netTotals = months.map((_, i) => {
-                let sum = 0;
-                let any = false;
-                for (const g of sections) {
-                  if (g.section === "Kids Funding") continue;
-                  const t = sectionTotalCounted(g, i);
-                  if (t == null) continue;
-                  const isLiab = g.rows[0]?.liability ?? false;
-                  sum += isLiab ? -t : t;
-                  any = true;
-                }
-                return any ? sum : null;
-              });
+              const netTotals = months.map((_, i) => netAt(i));
               const totalRow = (
                 <tr className="border-y-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
-                  <td className="sticky left-0 z-10 bg-surface px-3 py-2 pr-2 sm:px-4 sm:pr-3">
+                  <td className="sticky left-0 z-10 bg-background px-3 py-2 pr-2 sm:px-4 sm:pr-3">
                     <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground sm:text-sm sm:tracking-wider">
                       Total Net Worth
                     </span>
@@ -1371,7 +1467,7 @@ function BalanceGrid({
                         {v == null ? (
                           <span className="text-muted">—</span>
                         ) : (
-                          <span className={v < 0 ? "text-negative" : ""}>{formatMoney(v, currency)}</span>
+                          <span className={v < 0 ? "text-negative" : ""}>{formatMoneyWhole(v, currency)}</span>
                         )}
                       </td>
                     );
@@ -1392,7 +1488,7 @@ function BalanceGrid({
                           <>
                             {totalRow}
                             <tr>
-                              <td colSpan={months.length + 1} className="bg-background px-4 py-2">
+                              <td colSpan={months.length + 1} className="bg-surface px-4 py-2">
                                 <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                                   Not counted in net worth
                                 </span>
@@ -1401,7 +1497,7 @@ function BalanceGrid({
                           </>
                         ) : null}
                   <tr className="border-b border-line bg-brand-soft/50 dark:bg-brand-soft/15">
-                    <td className="sticky left-0 z-10 overflow-hidden bg-surface p-0 pr-2 sm:pr-3">
+                    <td className="sticky left-0 z-10 overflow-hidden bg-background p-0 pr-2 sm:pr-3">
                       <button
                         type="button"
                         onClick={() => toggle(g.section)}
@@ -1433,7 +1529,7 @@ function BalanceGrid({
                             <span className="text-muted">—</span>
                           ) : (
                             <span className={(isLiabilitySection && total > 0) || total < 0 ? "text-negative" : ""}>
-                              {formatMoney(total, currency)}
+                              {formatMoneyWhole(total, currency)}
                             </span>
                           )}
                         </td>
@@ -1459,7 +1555,7 @@ function BalanceGrid({
                               }`}
                             >
                               <td
-                                className={`${stickyCls} ${r.indent ? "bg-background" : "bg-surface"} whitespace-nowrap ${
+                                className={`${stickyCls} ${r.indent ? "bg-surface" : "bg-background"} whitespace-nowrap ${
                                   r.hasChildren
                                     ? "p-0"
                                     : r.indent
@@ -1555,6 +1651,7 @@ function BalanceGrid({
           </tbody>
         </table>
       </div>
+      </div>
       </> : null}
     </section>
   );
@@ -1624,22 +1721,15 @@ function YearPicker({
 // The sheet's top block, transposed: metrics as rows, the year's months as
 // columns (Jan → Dec), plus a Growth column (year's latest − its January).
 // Everything derived from `points`. Negatives in light-red font only.
-function SummaryBlock({
+function SummaryTable({
   points,
   currency,
-  years,
   year,
-  onYearChange,
 }: {
   points: MonthPoint[];
   currency: string;
-  years: string[];
   year: string;
-  onYearChange: (y: string) => void;
 }) {
-  const [summaryState, setSummaryState] = useSessionCollapse("networth-summary-block", () => ({ v: false }));
-  const collapsed = !!summaryState.v;
-  const setCollapsed = (fn: (v: boolean) => boolean) => setSummaryState((s) => ({ v: fn(!!s.v) }));
   const idxByMonth = new Map(points.map((p, i) => [p.month, i]));
   const cols = points.filter((p) => year === "all" || p.month.slice(0, 4) === year);
   const displayCols = [...cols].reverse();
@@ -1656,9 +1746,10 @@ function SummaryBlock({
     growth?: boolean; // show a Growth column value (last − first)
     cell: (p: MonthPoint) => number | null;
   };
+  // Only the rows the monthly table below doesn't already carry as columns:
+  // Total Assets, Total Liabilities and NW w/out Invest were repeats of its
+  // Total NW w/out Debt, Debt Incurred and NW w/out Invest columns.
   const rows: Row[] = [
-    { label: "Total Assets", growth: true, cell: (p) => p.assets },
-    { label: "Total Liabilities", cell: (p) => p.liabilities },
     { label: "Total Net Worth", bold: true, redNeg: true, growth: true, cell: (p) => p.net },
     {
       label: "Change (+/-)",
@@ -1677,7 +1768,6 @@ function SummaryBlock({
         return pn ? (p.net - pn) / pn : null;
       },
     },
-    { label: "NW w/out Invest", growth: true, cell: (p) => p.nwWithoutInvest },
   ];
 
   const growthOf = (r: Row): number | null => {
@@ -1691,32 +1781,15 @@ function SummaryBlock({
   // "0.22%" next to "−$806.29", which looks like growth at a glance.
   const signedPct = (p: number) => `${p < 0 ? "−" : ""}${(Math.abs(p) * 100).toFixed(2)}%`;
   const fmt = (r: Row, v: number | null) =>
-    v == null ? "—" : r.pct ? signedPct(v) : formatMoney(v, currency);
+    v == null ? "—" : r.pct ? signedPct(v) : formatMoneyWhole(v, currency);
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="flex items-center gap-2 text-left"
-        >
-          <svg
-            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
-            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
-          >
-            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <h2 className="text-sm font-semibold sm:text-base">Net Worth Over Time</h2>
-        </button>
-        <YearPicker years={years} year={year} onYearChange={onYearChange} />
-      </div>
-      {!collapsed && <div className="border-t border-line overflow-x-auto">
+      <div className="mx-4 mb-4 overflow-x-auto rounded-lg bg-background ring-1 ring-line">
         <table className="w-full border-collapse whitespace-nowrap text-[11px] sm:text-xs">
           <thead>
             <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
-              <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-left" />
-              <th className="border-r border-line bg-surface px-3 py-2 text-center">Growth</th>
+              <th className="sticky left-0 z-10 bg-background px-3 py-2 text-left" />
+              <th className="border-r border-line bg-background px-3 py-2 text-center">Growth</th>
               {displayCols.map((p) => (
                 <th key={p.month} className="px-3 py-2 text-center">
                   {monthLabel(p.month)}
@@ -1730,14 +1803,14 @@ function SummaryBlock({
               return (
                 <tr key={r.label} className="border-b border-line last:border-0">
                   <td
-                    className={`sticky left-0 z-10 bg-surface px-3 py-1.5 text-left ${
+                    className={`sticky left-0 z-10 bg-background px-3 py-1.5 text-left ${
                       r.bold ? "font-bold" : "font-medium"
                     }`}
                   >
                     {r.label}
                   </td>
-                  <td className={`border-r border-line bg-surface px-3 py-1.5 text-right tabular-nums ${r.bold ? "font-semibold" : ""} ${negCls(g)}`}>
-                    {r.growth ? (g == null ? "—" : formatMoney(g, currency)) : ""}
+                  <td className={`border-r border-line bg-background px-3 py-1.5 text-right tabular-nums ${r.bold ? "font-semibold" : ""} ${negCls(g)}`}>
+                    {r.growth ? (g == null ? "—" : formatMoneyWhole(g, currency)) : ""}
                   </td>
                   {displayCols.map((p) => {
                     const v = r.cell(p);
@@ -1757,14 +1830,13 @@ function SummaryBlock({
             })}
           </tbody>
         </table>
-      </div>}
-    </section>
+      </div>
   );
 }
 
 // The sheet's YearlyNetWorth tab: each headline figure per month. Compact by
 // default (values only); "Show changes" reveals the dollar change (Δ) and the
-// year-to-date % (vs. the prior December). Shares the year with SummaryBlock.
+// year-to-date % (vs. the prior December). Shares the year with SummaryTable.
 type Metric = { key: "savings" | "nwWithoutInvest" | "stocks" | "assets"; label: string };
 const METRICS: Metric[] = [
   { key: "nwWithoutInvest", label: "NW w/out Invest" },
@@ -1784,7 +1856,7 @@ type MonthlyRow = {
 
 function downloadMonthlyNetWorthCsv(rows: MonthlyRow[], currency: string) {
   const money = (n: number | null | undefined) =>
-    n == null ? "" : `"${formatMoney(n, currency).replace(/"/g, '""')}"`;
+    n == null ? "" : `"${formatMoneyWhole(n, currency).replace(/"/g, '""')}"`;
   const pct = (p: number | null) => (p == null ? "" : `${(p * 100).toFixed(2)}%`);
   const header = [
     "Date",
@@ -1814,33 +1886,7 @@ function downloadMonthlyNetWorthCsv(rows: MonthlyRow[], currency: string) {
   URL.revokeObjectURL(url);
 }
 
-function MonthlyAnalytics({
-  points,
-  currency,
-  year: sharedYear,
-}: {
-  points: MonthPoint[];
-  currency: string;
-  year: string;
-}) {
-  const [showChanges, setShowChanges] = useState(false);
-  // Starts expanded on a fresh login; sessionStorage carries whatever the user
-  // last set while they're still moving around the app.
-  const [monthlyState, setMonthlyState] = useSessionCollapse("networth-monthly-analytics", () => ({ v: false }));
-  const collapsed = !!monthlyState.v;
-  const setCollapsed = (fn: (v: boolean) => boolean) => setMonthlyState((s) => ({ v: fn(!!s.v) }));
-
-  // Section has its own year filter so it can show a different range than
-  // "Net worth by month" above it. Defaults to "All" — you scroll through
-  // every month by default and only narrow by year when you choose.
-  const availableYears = [...new Set(points.map((p) => p.month.slice(0, 4)))].sort((a, b) =>
-    b.localeCompare(a),
-  );
-  const [year, setYear] = useState<string>(availableYears[0] ?? "all");
-  void sharedYear;
-
-  // Whole-dollar formatting (no cents) so this table matches Year by Year.
-  const fmt0 = (cents: number) => formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "");
+function monthlyRows(points: MonthPoint[], year: string): MonthlyRow[] {
   const byMonth = new Map(points.map((p) => [p.month, p]));
   const val = (p: MonthPoint | undefined, k: Metric["key"]) => (p ? p[k] : null);
 
@@ -1868,52 +1914,232 @@ function MonthlyAnalytics({
     };
   });
 
-  const shown = rowsAll
-    .filter((r) => year === "all" || r.month.slice(0, 4) === year)
-    .reverse();
+  return rowsAll.filter((r) => year === "all" || r.month.slice(0, 4) === year).reverse();
+}
+
+// The small stat card used across this page's section headers.
+function StatCard({
+  label,
+  value,
+  valueClass = "",
+  sub,
+  subClass = "text-muted",
+  className = "",
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+  sub?: string;
+  subClass?: string;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className}`}>
+      <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
+      <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${valueClass}`}>{value}</p>
+      {sub ? <p className={`text-[10px] leading-tight ${subClass}`}>{sub}</p> : null}
+    </div>
+  );
+}
+
+function CardToggle({ title, collapsed, onToggle }: { title: string; collapsed: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" onClick={onToggle} className="flex items-center gap-2 text-left">
+      <svg
+        width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
+        className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
+      >
+        <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+      <h2 className="whitespace-nowrap text-sm font-semibold sm:text-base">{title}</h2>
+    </button>
+  );
+}
+
+// Net Worth Over Time and Net Worth Monthly Traction show the same months two
+// ways — across, then down — so they stay separate cards; a single card
+// stacked two sets of month headers. They share one year instead: moving
+// either picker moves both.
+function NetWorthOverTime({
+  points,
+  currency,
+  years,
+  year,
+  onYearChange,
+}: {
+  points: MonthPoint[];
+  currency: string;
+  years: string[];
+  year: string;
+  onYearChange: (y: string) => void;
+}) {
+  const [state, setState] = useSessionCollapse("networth-summary-block", () => ({ v: false }));
+  const collapsed = !!state.v;
+
+  // The year at a glance: where it ended up, how much it grew, the usual
+  // month, and the best one. Month-over-month changes reach back one month
+  // before the year so January has a change too, as in the table below.
+  const idxByMonth = new Map(points.map((p, i) => [p.month, i]));
+  const cols = points.filter((p) => year === "all" || p.month.slice(0, 4) === year);
+  const latest = cols.at(-1) ?? null;
+  const first = cols[0] ?? null;
+  const growth = latest && first && cols.length > 1 ? latest.net - first.net : null;
+  const changes = cols
+    .map((p) => {
+      const i = idxByMonth.get(p.month);
+      return i != null && i > 0 ? { month: p.month, change: p.net - points[i - 1].net } : null;
+    })
+    .filter((c): c is { month: string; change: number } => c != null);
+  const best = changes.reduce<{ month: string; change: number } | null>(
+    (b, c) => (b == null || c.change > b.change ? c : b),
+    null,
+  );
+  // Growth spread over the months it covers, so the two cards agree.
+  const spanMonths = cols.length - 1;
+  const avg = growth != null && spanMonths > 0 ? Math.round(growth / spanMonths) : null;
+  const signed = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
+  const tone = (v: number | null) => (v == null || v === 0 ? "" : v > 0 ? "text-positive" : "text-negative");
+
+  return (
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <CardToggle title="Net Worth Over Time" collapsed={collapsed} onToggle={() => setState((s) => ({ v: !s.v }))} />
+        <YearPicker years={years} year={year} onYearChange={onYearChange} />
+      </div>
+      {latest ? (
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4">
+          <StatCard label="Net worth" value={formatMoneyWhole(latest.net, currency)} sub={monthLabel(latest.month)} />
+          <StatCard
+            label={year === "all" ? "Growth, all years" : `Growth in ${year}`}
+            value={growth == null ? "—" : signed(growth)}
+            valueClass={tone(growth)}
+            sub={first && cols.length > 1 ? `since ${monthLabel(first.month)}` : undefined}
+          />
+          <StatCard
+            label="Average month"
+            value={avg == null ? "—" : signed(avg)}
+            valueClass={tone(avg)}
+            sub={spanMonths > 0 ? `over ${spanMonths} ${spanMonths === 1 ? "month" : "months"}` : undefined}
+          />
+          <StatCard
+            label="Best month"
+            value={best == null ? "—" : signed(best.change)}
+            valueClass={tone(best?.change ?? null)}
+            sub={best ? monthLabel(best.month) : undefined}
+          />
+        </div>
+      ) : null}
+      {!collapsed && <SummaryTable points={points} currency={currency} year={year} />}
+    </section>
+  );
+}
+
+function MonthlyTraction({
+  points,
+  currency,
+  years,
+  year,
+  onYearChange,
+}: {
+  points: MonthPoint[];
+  currency: string;
+  years: string[];
+  year: string;
+  onYearChange: (y: string) => void;
+}) {
+  const [showChanges, setShowChanges] = useState(false);
+  const [state, setState] = useSessionCollapse("networth-monthly-traction", () => ({ v: false }));
+  const collapsed = !!state.v;
+  const shown = monthlyRows(points, year);
+
+  // The current month — the newest on record, whatever year is picked below
+  // — one card per column group, each with its move from the month before.
+  const [now, prev] = monthlyRows(points, "all");
+  const shortMonth = (m: string) => monthLabel(m).split(" ")[0];
+  const moveSub = (delta: number | null, liability = false) => {
+    if (!now) return { sub: undefined, subClass: undefined };
+    if (delta == null || !prev) return { sub: shortMonth(now.month), subClass: "text-muted" };
+    const good = delta === 0 ? null : liability ? delta < 0 : delta > 0;
+    return {
+      sub: `${shortMonth(now.month)} · ${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(prev.month)}`,
+      subClass: good == null ? "text-muted" : good ? "font-semibold text-positive" : "font-semibold text-negative",
+    };
+  };
+
+  return (
+    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      {/* Wraps on mobile: the year picker + Show Details would otherwise
+          squeeze the title into three lines. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5">
+        <CardToggle title="Net Worth Monthly Traction" collapsed={collapsed} onToggle={() => setState((s) => ({ v: !s.v }))} />
+        <div className="flex items-center gap-2">
+          <YearPicker years={years} year={year} onYearChange={onYearChange} />
+          {!collapsed && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowChanges((v) => !v)}
+                className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
+              >
+                {showChanges ? "Hide Details" : "Show Details"}
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadMonthlyNetWorthCsv(shown, currency)}
+                className="hidden rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft sm:block dark:ring-white/15"
+              >
+                Download CSV
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {now ? (
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-5">
+          {METRICS.map((m, i) => (
+            <StatCard
+              key={m.key}
+              label={m.label}
+              value={formatMoneyWhole(now.cells[i].value, currency)}
+              {...moveSub(now.cells[i].delta)}
+            />
+          ))}
+          <StatCard
+            label="Debt incurred"
+            value={formatMoneyWhole(now.debt, currency)}
+            valueClass={now.debt > 0 ? "text-negative" : ""}
+            {...moveSub(prev ? now.debt - prev.debt : null, true)}
+          />
+          <StatCard
+            label="Actual NW"
+            value={formatMoneyWhole(now.actualNet, currency)}
+            className="col-span-2 sm:col-span-1"
+            {...moveSub(prev ? now.actualNet - prev.actualNet : null)}
+          />
+        </div>
+      ) : null}
+      {!collapsed && <MonthlyTable shown={shown} currency={currency} showChanges={showChanges} />}
+    </section>
+  );
+}
+
+function MonthlyTable({
+  shown,
+  currency,
+  showChanges,
+}: {
+  shown: MonthlyRow[];
+  currency: string;
+  showChanges: boolean;
+}) {
+  // Whole-dollar formatting (no cents) so this table matches Year by Year.
+  const fmt0 = (cents: number) => formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "");
 
   // Columns per metric: 2 (Current / M2M Diff) when compact, 4 (+ Monthly Diff / YTD) when expanded.
   const span = showChanges ? 4 : 2;
 
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* Wraps on mobile: expanded by default now, the year picker + Show
-          Details would otherwise squeeze the title into three lines. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2.5">
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className="flex items-center gap-2 text-left"
-        >
-          <svg
-            width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"
-            className={`shrink-0 text-muted transition-transform ${collapsed ? "-rotate-90" : ""}`}
-          >
-            <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <h2 className="whitespace-nowrap text-sm font-semibold sm:text-base">Monthly Net Worth</h2>
-        </button>
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <YearPicker years={availableYears} year={year} onYearChange={setYear} />
-            <button
-              type="button"
-              onClick={() => setShowChanges((v) => !v)}
-              className="rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft dark:ring-white/15"
-            >
-              {showChanges ? "Hide Details" : "Show Details"}
-            </button>
-            <button
-              type="button"
-              onClick={() => downloadMonthlyNetWorthCsv(shown, currency)}
-              className="hidden rounded-lg bg-surface px-3 py-1.5 text-xs font-medium text-brand ring-1 ring-black/10 transition hover:bg-brand-soft sm:block dark:ring-white/15"
-            >
-              Download CSV
-            </button>
-          </div>
-        )}
-      </div>
-      {!collapsed && <div className="border-t border-line max-h-[520px] overflow-auto">
+      <div className="mx-4 mb-4 max-h-[520px] overflow-auto rounded-lg bg-background ring-1 ring-line">
         <table
           className={`border-collapse whitespace-nowrap text-[11px] sm:text-xs ${!showChanges ? "w-full table-fixed" : ""}`}
           style={!showChanges ? { minWidth: NW_TABLE_MIN_WIDTH } : undefined}
@@ -1925,7 +2151,7 @@ function MonthlyAnalytics({
               ))}
             </colgroup>
           ) : null}
-          <thead className="sticky top-0 z-20 bg-surface shadow-[0_1px_0_0_var(--color-line)]">
+          <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
             {/* Grouped metric names, centered over their columns */}
             <tr className="text-[10px] font-semibold uppercase tracking-wide text-muted">
               <th className="sticky left-0 z-30 bg-brand-soft px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
@@ -1997,8 +2223,7 @@ function MonthlyAnalytics({
             ))}
           </tbody>
         </table>
-      </div>}
-    </section>
+      </div>
   );
 }
 
@@ -2055,6 +2280,23 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
     return prev ? get(r.p) - get(prev.p) : null;
   };
 
+  // Header cards, from the same year rows the table shows: where net worth
+  // stands, how far it has come since the first year, the usual year and the
+  // best one.
+  const latestRow = rowsDesc[0] ?? null;
+  const firstRow = rows[0] ?? null;
+  const netDiffs = rows
+    .map((r) => ({ r, d: y2y(r, (p) => p.net) }))
+    .filter((x): x is { r: Row; d: number } => x.d != null);
+  const bestYear = netDiffs.reduce<{ r: Row; d: number } | null>((b, x) => (b == null || x.d > b.d ? x : b), null);
+  const spanYears = latestRow && firstRow ? latestRow.year - firstRow.year : 0;
+  const sinceFirst = latestRow && firstRow && spanYears > 0 ? latestRow.p.net - firstRow.p.net : null;
+  const perYear = sinceFirst != null ? Math.round(sinceFirst / spanYears) : null;
+  const latestDiff = latestRow ? y2y(latestRow, (p) => p.net) : null;
+  const prevRow = latestRow ? rowByYear.get(latestRow.year - 1) : undefined;
+  const signed = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
+  const tone = (v: number | null) => (v == null || v === 0 ? "" : v > 0 ? "text-positive" : "text-negative");
+
   // Column groups: label | value | y2y  (Actual NW group has an extra Debt column)
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -2070,11 +2312,49 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="text-sm font-semibold sm:text-base">Year by year</h2>
+          <h2 className="text-sm font-semibold sm:text-base">Total Net Worth by Year</h2>
         </button>
       </div>
+      {latestRow ? (
+        <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4">
+          <StatCard
+            label="Net worth now"
+            value={formatMoneyWhole(latestRow.p.net, currency)}
+            sub={latestDiff != null && prevRow ? `${signed(latestDiff)} vs ${prevRow.label}` : monthLabel(latestRow.p.month)}
+            subClass={latestDiff == null ? "text-muted" : `font-semibold ${tone(latestDiff)}`}
+          />
+          <StatCard
+            label={firstRow ? `Growth since ${firstRow.year}` : "Growth"}
+            value={sinceFirst == null ? "—" : signed(sinceFirst)}
+            valueClass={tone(sinceFirst)}
+            sub={firstRow ? `from ${formatMoneyWhole(firstRow.p.net, currency)}` : undefined}
+          />
+          <StatCard
+            label="Average year"
+            value={perYear == null ? "—" : signed(perYear)}
+            valueClass={tone(perYear)}
+            sub={spanYears > 0 ? `over ${spanYears} ${spanYears === 1 ? "year" : "years"}` : undefined}
+          />
+          <StatCard
+            label="Best year"
+            value={bestYear == null ? "—" : signed(bestYear.d)}
+            valueClass={tone(bestYear?.d ?? null)}
+            sub={bestYear ? String(bestYear.r.year) : undefined}
+          />
+        </div>
+      ) : null}
+      {/* Opens here, above the table, rather than as a popup: a popup sat on
+          top of the very rows you are comparing against while editing. */}
+      {!collapsed && editingMonth ? (
+        <HistoryMonthEditor
+          key={editingMonth.month}
+          point={editingMonth}
+          currency={currency}
+          onClose={() => setEditingMonth(null)}
+        />
+      ) : null}
       {!collapsed && (
-        <div className="border-t border-line overflow-x-auto">
+        <div className="mx-4 mb-4 overflow-x-auto rounded-lg bg-background ring-1 ring-line">
           <table
             className="w-full border-collapse whitespace-nowrap text-[11px] table-fixed sm:text-xs"
             style={{ minWidth: NW_TABLE_MIN_WIDTH }}
@@ -2159,25 +2439,19 @@ function YearTable({ points, currency }: { points: MonthPoint[]; currency: strin
         </div>
       )}
 
-      {editingMonth ? (
-        <HistoryMonthModal
-          point={editingMonth}
-          currency={currency}
-          onClose={() => setEditingMonth(null)}
-        />
-      ) : null}
     </section>
   );
 }
 
-// Corrects — or removes — one month of imported history.
+// Corrects one month of imported history. Add or edit only — there is no
+// remove: a wrong month is fixed by typing the right figures over it.
 //
-// setNetworthHistory and deleteNetworthHistory have existed since the importer
-// was written and were called from nowhere, so a wrong figure in 2018–2025 was
+// setNetworthHistory has existed since the importer was written and was
+// called from nowhere, so a wrong figure in 2018–2025 was
 // permanent as far as the app was concerned. The four boxes are the same four
 // section totals the importer writes, and net is shown as you type so the
 // number you are aiming at is the one on screen.
-function HistoryMonthModal({
+function HistoryMonthEditor({
   point,
   currency,
   onClose,
@@ -2189,21 +2463,41 @@ function HistoryMonthModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [savings, setSavings] = useState(centsToDisplay(point.savings));
-  const [bank, setBank] = useState(centsToDisplay(point.bank));
-  const [stocks, setStocks] = useState(centsToDisplay(point.stocks));
-  const [debt, setDebt] = useState(centsToDisplay(point.debt));
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Brought to the top of the screen, so the table's rows sit right under it
+  // — pressing a year low in the table would otherwise open it off-screen.
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  // Whole-dollar amounts drop their ".00" like the table; real cents stay, so
+  // saving an untouched field never rounds a balance.
+  const show = (cents: number) => centsToDisplay(cents).replace(/\.00$/, "");
+  // One box per Year by year column rather than the stored savings/bank
+  // pair, which the table never shows apart. The stored savings figure rides
+  // along untouched and bank absorbs any edit — the same rule as "Add past
+  // year" — so a month that does carry a split keeps it.
+  const [nwWithoutInvest, setNwWithoutInvest] = useState(show(point.savings + point.bank));
+  const [stocks, setStocks] = useState(show(point.stocks));
+  const [debt, setDebt] = useState(show(point.debt));
 
-  const netCents =
-    displayToCents(savings) + displayToCents(bank) + displayToCents(stocks) - displayToCents(debt);
+  const assetsCents = displayToCents(nwWithoutInvest) + displayToCents(stocks);
+  const netCents = assetsCents - displayToCents(debt);
+  const bankCents = displayToCents(nwWithoutInvest) - point.savings;
 
   const field =
     "w-full rounded-md bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
   const label = "mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted";
 
   return (
-    <ModalShell title={`${monthLabel(point.month)} — recorded totals`} onClose={onClose} className="sm:max-w-lg" mobileAlign="top">
+    <div ref={panelRef} className="mx-4 mb-3 scroll-mt-4 rounded-lg bg-background ring-1 ring-line">
+      <h3 className="truncate px-4 pt-3 text-sm font-bold sm:px-5">{monthLabel(point.month)} — recorded totals</h3>
       <form
         action={(fd) =>
           start(async () => {
@@ -2215,48 +2509,48 @@ function HistoryMonthModal({
             }
           })
         }
-        className="px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
+        className="px-4 pb-4 pt-2 sm:px-5 sm:max-w-2xl"
       >
         <input type="hidden" name="month" value={point.month} />
-        <div className="grid grid-cols-2 gap-3">
+        <input type="hidden" name="savings" value={centsToDisplay(point.savings)} />
+        <input type="hidden" name="bank" value={centsToDisplay(bankCents)} />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label>
-            <span className={label}>Savings</span>
-            <input name="savings" inputMode="decimal" value={savings} onChange={(e) => setSavings(e.target.value)} className={field} />
-          </label>
-          <label>
-            <span className={label}>Bank</span>
-            <input name="bank" inputMode="decimal" value={bank} onChange={(e) => setBank(e.target.value)} className={field} />
+            <span className={label}>NW w/out Invest</span>
+            <input inputMode="decimal" value={nwWithoutInvest} onChange={(e) => setNwWithoutInvest(e.target.value)} className={field} />
           </label>
           <label>
             <span className={label}>Stocks</span>
             <input name="stocks" inputMode="decimal" value={stocks} onChange={(e) => setStocks(e.target.value)} className={field} />
           </label>
           <label>
-            <span className={label}>Debt</span>
+            <span className={label}>Debt Incurred</span>
             <input name="debt" inputMode="decimal" value={debt} onChange={(e) => setDebt(e.target.value)} className={field} />
           </label>
         </div>
 
-        <p className="mt-3 text-xs">
-          <span className="text-muted">Net worth for this month: </span>
-          <span className={`font-semibold tabular-nums ${negCls(netCents)}`}>
-            {formatMoney(netCents, currency)}
-          </span>
-        </p>
+        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+          <p>
+            <span className={label}>Total NW w/out Debt</span>
+            <span className={`font-semibold tabular-nums ${negCls(assetsCents)}`}>{formatMoneyWhole(assetsCents, currency)}</span>
+          </p>
+          <p>
+            <span className={label}>Actual NW</span>
+            <span className={`font-bold tabular-nums ${negCls(netCents)}`}>{formatMoneyWhole(netCents, currency)}</span>
+          </p>
+        </div>
         <p className="mt-1 text-[11px] text-muted">
           These are the totals the importer recorded, for months that predate
-          per-account tracking. Removing the month drops it from the chart and
-          both tables entirely.
+          per-account tracking.
         </p>
 
-        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-3">
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <button
             type="button"
-            disabled={pending}
-            onClick={() => setConfirmDelete(true)}
-            className="mr-auto rounded-md px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/40 transition hover:bg-negative/10 disabled:opacity-60"
+            onClick={onClose}
+            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
           >
-            Remove month
+            Close
           </button>
           <button
             type="submit"
@@ -2269,44 +2563,7 @@ function HistoryMonthModal({
         {error ? <p className="mt-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
 
-      {confirmDelete ? (
-        <ModalShell title={`Remove ${monthLabel(point.month)}?`} onClose={() => setConfirmDelete(false)} className="sm:max-w-md">
-          <div className="px-5 pt-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:pb-4">
-            <p className="text-sm text-muted">
-              This deletes the recorded totals for {monthLabel(point.month)}. The
-              month disappears from the chart, Net Worth Over Time and Year by
-              year. It can&rsquo;t be undone, but you can add the year back with
-              &ldquo;Add past year&rdquo;.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(false)}
-                className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => {
-                  const fd = new FormData();
-                  fd.set("month", point.month);
-                  start(async () => {
-                    await deleteNetworthHistory(fd);
-                    router.refresh();
-                    onClose();
-                  });
-                }}
-                className="rounded-md bg-negative px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
-              >
-                {pending ? "Removing…" : "Remove month"}
-              </button>
-            </div>
-          </div>
-        </ModalShell>
-      ) : null}
-    </ModalShell>
+    </div>
   );
 }
 

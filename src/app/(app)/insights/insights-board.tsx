@@ -119,7 +119,7 @@ export function InsightsBoard({ raw }: { raw: InsightsRaw }) {
       {/* Hero stats — the selected period */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Income" {...income} color="var(--positive)" deltaGoodWhen="up" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
-        <StatCard label="Spending" {...spending} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
+        <StatCard label="Bills & Expenses" {...spending} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
         <StatCard label="Savings" {...savings} color="var(--viz-savings)" deltaGoodWhen="up" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
         <StatCard label="Debt paid" {...debt} color="var(--negative)" deltaGoodWhen="down" currency={data.currency} priorLabel={data.priorLabel} note={combinedNote} />
       </div>
