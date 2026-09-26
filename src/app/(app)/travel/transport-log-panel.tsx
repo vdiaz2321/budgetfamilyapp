@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoneyWhole } from "@/lib/money";
-import { ExpandIcon } from "./travel-board";
+import { ExpandIcon, LOG_FIGURE_COL, LOG_TITLE_COL } from "./travel-board";
 import { CarsList } from "./cars-panel";
 import { FlightsList } from "./flights-panel";
 import { SearchBox } from "./search-box";
@@ -78,19 +78,21 @@ export function TransportLogPanel({
           header; the year picker stops the click. */}
       <div
         onClick={() => setExpanded(true)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] sm:flex-nowrap dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
       >
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-          className="flex min-w-0 items-center gap-2 text-left"
+          className={`flex min-w-0 items-center gap-2 text-left ${LOG_TITLE_COL}`}
         >
           <ExpandIcon />
           <span className="text-sm font-bold sm:truncate">Flights &amp; Rentals Log</span>
         </button>
-        {/* One figure and the year it covers; the counts and the search open
-            with the list. */}
-        <Figure label="Spent" value={formatMoneyWhole(total, currency)} className="text-negative" />
+        {/* The open log's figures and the year they cover; only the search
+            stays inside. Spent sits second, the same column as the other logs. */}
+        <Figure label="Total flights" value={String(shownFlights.length)} slotClassName={LOG_FIGURE_COL} />
+        <Figure label="Spent" value={formatMoneyWhole(total, currency)} className="text-negative" slotClassName={LOG_FIGURE_COL} />
+        <Figure label="Total rentals" value={String(shownCars.length)} slotClassName={LOG_FIGURE_COL} />
         <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
           <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
         </span>
@@ -104,8 +106,8 @@ export function TransportLogPanel({
           headerExtra={
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <Figure label="Total flights" value={String(shownFlights.length)} />
-              <Figure label="Total rentals" value={String(shownCars.length)} />
               <Figure label="Spent" value={formatMoneyWhole(total, currency)} className="text-negative" />
+              <Figure label="Total rentals" value={String(shownCars.length)} />
               <SearchBox value={query} onChange={setQuery} placeholder="Search airline, airport…" label="Search flights and rentals" className="w-44" />
               <YearPicker years={years} value={year} onChange={setYear} label="Flights & Rentals Log year" />
             </span>
@@ -142,9 +144,9 @@ function GroupHeading({ title, divided }: { title: string; divided?: boolean }) 
   );
 }
 
-function Figure({ label, value, className }: { label: string; value: string; className?: string }) {
+function Figure({ label, value, className, slotClassName }: { label: string; value: string; className?: string; slotClassName?: string }) {
   return (
-    <span className="flex shrink-0 items-baseline gap-1.5">
+    <span className={`flex shrink-0 items-baseline gap-1.5 ${slotClassName ?? ""}`}>
       <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
       <span className={`text-sm font-bold tabular-nums ${className ?? ""}`}>{value}</span>
     </span>

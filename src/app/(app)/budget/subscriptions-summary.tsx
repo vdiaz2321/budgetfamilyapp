@@ -68,6 +68,8 @@ export function SubscriptionsSummaryCard({
   accountNameById,
   onEditTransaction,
   onAddTransaction,
+  editRequestId = null,
+  onEditRequestHandled,
 }: {
   currency: string;
   subscriptions: SubscriptionRow[];
@@ -91,8 +93,20 @@ export function SubscriptionsSummaryCard({
   accountNameById?: Map<string, string>;
   onEditTransaction?: (tx: TxData) => void;
   onAddTransaction?: (prefill?: TxPrefill) => void;
+  /** Opens this subscription's editor from outside the card — the Due this
+   *  week list uses it so clicking a subscription there edits it in place. */
+  editRequestId?: string | null;
+  onEditRequestHandled?: () => void;
 }) {
   const [editorTarget, setEditorTarget] = useState<string | "new" | null>(null);
+  useEffect(() => {
+    if (!editRequestId) return;
+    const open = window.setTimeout(() => {
+      setEditorTarget(editRequestId);
+      onEditRequestHandled?.();
+    }, 0);
+    return () => window.clearTimeout(open);
+  }, [editRequestId, onEditRequestHandled]);
   // "By due" sorts the list as a calendar — cycle first so the every-month
   // charges group together, then the due date inside each cycle. "Manual" hands
   // it back to the saved sort_order and puts the drag handles back. The two

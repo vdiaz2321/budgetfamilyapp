@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
@@ -221,6 +221,14 @@ export function BudgetBoard({
   // works with or without a selected budget row.
   const [showAddModal, setShowAddModal] = useState(false);
   const [duePayment, setDuePayment] = useState<DueItem | null>(null);
+  // Clicking a Due this week row opens that item's own editor: a budget row
+  // opens the item panel, a subscription opens the subscription card's editor.
+  const [subEditRequest, setSubEditRequest] = useState<string | null>(null);
+  const clearSubEditRequest = useCallback(() => setSubEditRequest(null), []);
+  const handleOpenDue = (item: DueItem) => {
+    if (item.source === "subscription") setSubEditRequest(item.id);
+    else setSelected({ subId: item.subId, kind: item.kind });
+  };
   // The add-transaction popup below; the rail's inline form doesn't lock.
   useScrollLock(showAddModal || !!quickAdd || !!duePayment);
   // The payee autocomplete list is ~28KB — a sixth of this page's payload —
@@ -268,7 +276,7 @@ export function BudgetBoard({
     start.setHours(0, 0, 0, 0);
     const startOfMonth = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth(), 1);
     // Show items from start of month (not just today) so overdue unpaid items
-    // stay visible until Pay/Edit is clicked, not just until the date passes.
+    // stay visible until Pay is clicked, not just until the date passes.
     const end = isCurrentMonth
       ? (() => { const e = new Date(start); e.setDate(e.getDate() + 5); return e; })()
       : new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() + 1, 0);
@@ -580,7 +588,7 @@ export function BudgetBoard({
           </div>
 
           {showDue && dueThisWeek.length > 0 && (
-            <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} />
+            <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} onOpen={handleOpenDue} />
           )}
 
           {/* Groups */}
@@ -623,6 +631,8 @@ export function BudgetBoard({
                 accountNameById={accountNameById}
                 onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
                 onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
+                editRequestId={subEditRequest}
+                onEditRequestHandled={clearSubEditRequest}
               />
             ) : null}
 
@@ -675,6 +685,8 @@ export function BudgetBoard({
                   accountNameById={accountNameById}
                   onEditTransaction={(tx) => { loadPayees(); setQuickAdd(tx); }}
                   onAddTransaction={(prefill) => { loadPayees(); setQuickAddPrefill(prefill); setQuickAdd(true); }}
+                  editRequestId={subEditRequest}
+                  onEditRequestHandled={clearSubEditRequest}
                 />
 
                 <IrregularBillsSummaryCard
@@ -1333,10 +1345,12 @@ function DueItemsList({
   dueItems,
   currency,
   onPayDue,
+  onOpen,
 }: {
   dueItems: DueItem[];
   currency: string;
   onPayDue?: (item: DueItem, amountOverride?: number) => void;
+  onOpen?: (item: DueItem) => void;
 }) {
   return (
     <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
@@ -1347,42 +1361,67 @@ function DueItemsList({
         const isOverdue = dueTarget < todayMidnight;
         return (
           <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            {/* The name side opens the item's editor (due date, amount); the
+                Pay button on the right still logs the payment. */}
+            <button
+              type="button"
+              onClick={() => onOpen?.(item)}
+              disabled={!onOpen}
+              className="-my-1.5 -ml-2 min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            >
+              <div className="flex min-w-0 items-baseline gap-x-2">
                 <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>{dueItemDateLabel(item.dueDate)}</span>
-                <span className="truncate text-sm font-semibold">{item.name}</span>
+                <span className="truncate text-sm font-semibold sm:shrink-0 sm:max-w-[60%]">{item.name}</span>
+                {/* Hidden on phones, where it squeezed the name to a few
+                    letters — the red date and red Pay already say overdue. */}
                 {isOverdue && (
-                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-negative">
+                  <span className="hidden shrink-0 text-[10px] font-bold uppercase tracking-wide text-negative sm:inline">
                     Overdue
                   </span>
                 )}
+                {/* Desktop keeps the whole row on one line; phones keep the
+                    account on its own line below (there's no room). */}
+                <span className="hidden min-w-0 truncate text-sm font-semibold sm:inline">
+                  {item.accountName ? (
+                    <>
+                      <span className="font-bold text-muted">Account: </span>
+                      {item.accountName}
+                    </>
+                  ) : (
+                    <span className="text-muted">No account linked</span>
+                  )}
+                </span>
               </div>
-              <p className="mt-0.5 truncate text-[11px] text-muted">
+              <p className="mt-0.5 truncate text-[11px] text-muted sm:hidden">
                 {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
               </p>
-            </div>
-            <div className="shrink-0 text-right">
+            </button>
+            {/* Amount, Prev Mo and Pay sit on one line beside the name. */}
+            <div className="flex shrink-0 items-center justify-end gap-2 sm:gap-4">
               {/* A zero here is a subscription whose price isn't on file (it
                   varies, or was never entered) — those are kept in the list on
                   purpose. "$0.00" read as "nothing owed", which is the opposite
                   of what it means. Budget items never reach zero here: they're
                   dropped from the list once nothing is left to pay. */}
               {item.amountCents > 0 ? (
-                <p className="text-sm font-semibold tabular-nums">{formatMoney(item.amountCents, currency)}</p>
+                <p className="text-sm font-semibold tabular-nums">
+                  <span className="hidden font-bold text-muted sm:inline">Amount Owed: </span>
+                  {formatMoney(item.amountCents, currency)}
+                </p>
               ) : (
                 <p className="text-[11px] font-semibold text-muted">Amount not set</p>
               )}
               {onPayDue && (
-                <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
+                <>
                   {/* Only when last month actually had a charge to copy, and
                       only when it differs from the planned amount — otherwise
                       the chip is a second button that does exactly what
-                      Pay / Edit already does. */}
+                      Pay already does. */}
                   {item.prevSpentCents && item.prevSpentCents > 0 && item.prevSpentCents !== item.amountCents ? (
                     <button
                       type="button"
                       onClick={() => onPayDue(item, item.prevSpentCents)}
-                      className="rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/[0.08] dark:hover:bg-white/15"
+                      className="whitespace-nowrap rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/[0.08] dark:hover:bg-white/15"
                     >
                       <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
                     </button>
@@ -1390,11 +1429,11 @@ function DueItemsList({
                   <button
                     type="button"
                     onClick={() => onPayDue(item)}
-                    className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${isOverdue ? "bg-negative/15 text-negative hover:bg-negative/25" : "bg-brand-soft text-brand hover:bg-brand/20"}`}
+                    className="rounded-md bg-negative/15 px-2 py-1 text-[11px] font-semibold text-negative transition hover:bg-negative/25"
                   >
-                    Pay / Edit
+                    Pay
                   </button>
-                </div>
+                </>
               )}
             </div>
           </li>

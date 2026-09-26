@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExpandIcon } from "./travel-board";
+import { ExpandIcon, LOG_FIGURE_COL, LOG_TITLE_COL } from "./travel-board";
 import { SearchBox } from "./search-box";
 import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
@@ -232,23 +232,33 @@ export function TripLogPanel({
           button stays so the card is still reachable by keyboard. */}
       <div
         onClick={() => setExpanded(true)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] sm:flex-nowrap dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
       >
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-          className="flex min-w-0 items-center gap-2 text-left"
+          className={`flex min-w-0 items-center gap-2 text-left ${LOG_TITLE_COL}`}
         >
           <ExpandIcon />
           <span className="text-sm font-bold sm:truncate">Travel Combined Log</span>
         </button>
-        {/* Collapsed the card carries the one figure and the year it covers.
-            The trip count and the search belong to the table, which only ever
-            opens full width. */}
-        <span className="flex shrink-0 items-baseline gap-1.5">
+        {/* Collapsed, the card carries the same figures as the open log's
+            header — trips, spent, planned — and the year they cover. Only the
+            search stays inside, since it filters the table. */}
+        <span className={`flex shrink-0 items-baseline gap-1.5 ${LOG_FIGURE_COL}`}>
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
+          <span className="text-sm font-bold tabular-nums">{shown.length}</span>
+        </span>
+        <span className={`flex shrink-0 items-baseline gap-1.5 ${LOG_FIGURE_COL}`}>
           <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
           <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
         </span>
+        {totalPlanned > 0 ? (
+          <span className={`flex shrink-0 items-baseline gap-1.5 ${LOG_FIGURE_COL}`}>
+            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Planned:</span>
+            <span className="text-sm font-bold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
+          </span>
+        ) : null}
         <span className="shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
       </div>
 

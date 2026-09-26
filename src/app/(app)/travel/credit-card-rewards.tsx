@@ -557,12 +557,13 @@ function CreditCardSection({
           setUnusedGroup((prev) => (prev === cat ? null : cat));
           if (!active) setGroupOpen((state) => ({ ...state, [cat]: true }));
         }}
-        className={`shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+        className={`ml-auto shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
           active
             ? "border-transparent text-white"
-            // Filled at rest, not outlined: on a white card an outlined chip
-            // read as a label rather than a control.
-            : "border-sky-400 bg-sky-100 text-foreground hover:bg-sky-200 dark:border-sky-500 dark:bg-sky-900/40 dark:hover:bg-sky-900/60"
+            // A pale cool-blue wash at rest marks it as a filter control; the
+            // stronger sky-100 fill it had read as a filter already switched
+            // on. On is the solid blue above.
+            : "border-sky-200 bg-sky-50 text-foreground hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:hover:bg-sky-900/40"
         }`}
         style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
       >
@@ -636,6 +637,15 @@ function CreditCardSection({
     // them — the missing denominator behind every value on this board.
     const unvaluedCards = rewardCards.filter((a) => unvaluedPointsOn(a) > 0);
     const unvaluedPoints = unvaluedCards.reduce((sum, a) => sum + unvaluedPointsOn(a), 0);
+    // The points alone, per category — what the Travel / Hotel Pts Value tiles
+    // show, so the two shares add up to Total Pts Value instead of past it.
+    const ptsValueForCategory = (cat: "travel" | "hotel") =>
+      inCategory(cat).reduce((sum, a) => sum + pointsValueCents(a.cardDetails), 0);
+    const creditsForCategory = (cat: "travel" | "hotel") =>
+      inCategory(cat).reduce((sum, a) => sum + liveCreditCents(a.cardDetails), 0);
+    // Free-night certificates carry no dollar figure, so they're counted.
+    const nightsForCategory = (cat: "travel" | "hotel") =>
+      inCategory(cat).filter((a) => !a.dateClosed && hasUnbookedNight(a)).length;
     // A used or expired benefit is not redeemable value; only a live one is.
     const redeemableForCategory = (cat: "travel" | "hotel") =>
       inCategory(cat).reduce(
@@ -666,6 +676,12 @@ function CreditCardSection({
       unvaluedPoints,
       travelRedeemable: redeemableForCategory("travel"),
       hotelRedeemable: redeemableForCategory("hotel"),
+      travelPtsValue: ptsValueForCategory("travel"),
+      hotelPtsValue: ptsValueForCategory("hotel"),
+      travelCredits: creditsForCategory("travel"),
+      hotelCredits: creditsForCategory("hotel"),
+      travelNights: nightsForCategory("travel"),
+      hotelNights: nightsForCategory("hotel"),
       totalLimitCents,
       utilisationPct: totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null,
       expiringSoon: open.filter(expiringSoon).length,
@@ -679,8 +695,19 @@ function CreditCardSection({
   const {
     openCards, feesPaid, feesAll, totalOwed, totalPoints, travelPoints, hotelPoints,
     totalCardValueCents, unvaluedCards, unvaluedPoints,
-    travelRedeemable, hotelRedeemable, totalLimitCents, utilisationPct,
+    travelPtsValue, hotelPtsValue, travelCredits, hotelCredits, travelNights, hotelNights,
+    totalLimitCents, utilisationPct,
   } = stats;
+  // "60% of All Cards" — the category's points as a share of Total Pts Value.
+  // Free-night credits aren't points, so they're named separately rather than
+  // folded in (folding them in pushed Travel + Hotel past 100%).
+  const categorySub = (ptsCents: number, creditCents: number, nights: number) => {
+    const parts: string[] = [];
+    if (totalCardValueCents > 0) parts.push(`${Math.round((ptsCents / totalCardValueCents) * 100)}% of All Cards`);
+    if (creditCents > 0) parts.push(`+${formatMoneyWhole(creditCents, currency)} credits`);
+    if (nights > 0) parts.push(`+${nights} free night${nights === 1 ? "" : "s"}`);
+    return parts.length ? parts.join(" · ") : undefined;
+  };
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
@@ -796,8 +823,9 @@ function CreditCardSection({
               ) : null}
               {allStats.travelRedeemable > 0 ? (
                 <StatTile
-                  label="Travel Value Redeemable"
-                  value={formatMoneyWhole(travelRedeemable, currency)}
+                  label="Travel Pts Value"
+                  value={formatMoneyWhole(travelPtsValue, currency)}
+                  sub={categorySub(travelPtsValue, travelCredits, travelNights)}
                   tone="sky"
                   onClick={() => setShowOnlyTravelRedeem((v) => !v)}
                   active={showOnlyTravelRedeem}
@@ -805,8 +833,9 @@ function CreditCardSection({
               ) : null}
               {allStats.hotelRedeemable > 0 ? (
                 <StatTile
-                  label="Hotel Value Redeemable"
-                  value={formatMoneyWhole(hotelRedeemable, currency)}
+                  label="Hotel Pts Value"
+                  value={formatMoneyWhole(hotelPtsValue, currency)}
+                  sub={categorySub(hotelPtsValue, hotelCredits, hotelNights)}
                   tone="teal"
                   onClick={() => setShowOnlyHotelRedeem((v) => !v)}
                   active={showOnlyHotelRedeem}
@@ -943,7 +972,7 @@ function CreditCardSection({
                       className={`rounded-md border px-1.5 py-0.5 transition ${
                         active
                           ? "border-transparent text-white"
-                          : "border-black/20 bg-background hover:bg-slate-100 dark:border-white/25 dark:hover:bg-neutral-800"
+                          : "border-sky-200 bg-sky-50 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:hover:bg-sky-900/40"
                       }`}
                       style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
                     >
@@ -1138,7 +1167,7 @@ function CreditCardSection({
                     <button
                       type="button"
                       aria-expanded={travelOpen}
-                      className="flex items-center gap-2 text-left sm:min-w-48"
+                      className="flex items-center gap-2 text-left sm:min-w-[15.5rem]"
                     >
                     <GroupChevron open={travelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
@@ -1172,7 +1201,7 @@ function CreditCardSection({
                     <button
                       type="button"
                       aria-expanded={hotelOpen}
-                      className="flex items-center gap-2 text-left sm:min-w-48"
+                      className="flex items-center gap-2 text-left sm:min-w-[15.5rem]"
                     >
                     <GroupChevron open={hotelOpen} />
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
@@ -1488,12 +1517,12 @@ function PointsByCard({
         type="button"
         onClick={() => setOpenState((s) => ({ ...s, open: s.open !== true }))}
         aria-expanded={open}
-        // Same columns as the Travel / Hotel Rewards rows above: a 12rem
+        // Same columns as the Travel / Hotel Rewards rows above: a 15.5rem
         // title slot, then "Total pts used" across their Owed + Pts slots so
         // "Total cash saved" lands under Value.
         className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-left transition hover:bg-background/40"
       >
-        <span className="flex items-center gap-2 sm:min-w-48">
+        <span className="flex items-center gap-2 sm:min-w-[15.5rem]">
         <svg
           width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
@@ -1502,9 +1531,7 @@ function PointsByCard({
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-        {/* Holds the place of the rows icon above, so the title lines up. */}
-        <span aria-hidden className="h-8 w-8 shrink-0" />
-        <span className="shrink-0 whitespace-nowrap text-sm font-bold sm:text-base">Points by card</span>
+        <span className="shrink-0 whitespace-nowrap text-sm font-bold sm:text-base">Points/Value Historical Data</span>
         </span>
         {total.redeemed.points > 0 ? (
           <>
@@ -2006,7 +2033,7 @@ function CreditCardPanel({
   // every night-credit card read as a missing value rather than "not yet".
   // It still holds its grid slot so the columns stay in register.
   // The cents-per-point typed in Edit — the same figure, under the same
-  // name, as the Value per pt column in Points by card.
+  // name, as the Value per pt column in Points/Value Historical Data.
   const valuePerPt = statedCentsPerPoint(d?.pointsValueMicros);
   const hasMetrics = Boolean(
     valuePerPt != null || (d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightCategoryMax

@@ -1221,11 +1221,12 @@ export function TravelBoard({
                plain card list and the Pay Card flow. */}
           <CreditCardSections />
 
-          {/* ---- The three logs side by side. Each is a table far wider than a
-               third of this column, so none of them unfolds here any more —
-               the header opens its own full-width popup. Side by side they are
-               a row of doorways, not three stacked lids. */}
-          <div className="grid items-start gap-3 xl:grid-cols-3">
+          {/* ---- The three logs, stacked at every width. Each header opens its
+               own full-width popup. Stacked, their headers carry the open log's
+               figures in shared columns (LOG_TITLE_COL / LOG_FIGURE_COL) that
+               line up down the page; three across, a third of the column could
+               not hold them and each header wrapped to a different height. */}
+          <div className="grid items-start gap-3">
           {trips.length > 0 ? (
             <TripLogPanel
               summaries={tripSummaries}
@@ -1247,10 +1248,19 @@ export function TravelBoard({
                make the inline view work. */}
           <Panel
             title="Hotel Log"
-            /* Collapsed it says one thing: what this log came to, for the year
-               picked beside it. The counts and the search belong to the table,
-               and the table only ever opens full width now. */
-            meta={<Figure label="Spent" value={formatMoneyWhole(shownTotals.pocket, currency)} tone="text-negative" />}
+            /* Collapsed it carries the open log's figures — only the search
+               stays inside, since it filters the table. */
+            titleClassName={LOG_TITLE_COL}
+            meta={
+              <HeaderTotals
+                countLabel="Total hotels"
+                count={filtered.length}
+                spent={shownTotals.pocket}
+                saved={shownTotals.saved}
+                currency={currency}
+                figureClassName={LOG_FIGURE_COL}
+              />
+            }
             control={yearSelect}
             open={openList}
             onToggle={() => setOpenList((v) => !v)}
@@ -1471,9 +1481,12 @@ function Panel({
   open,
   onToggle,
   onExpand,
+  titleClassName,
   children,
 }: {
   title: string;
+  /** Fixed title width, so stacked headers' figures line up. */
+  titleClassName?: string;
   meta?: React.ReactNode;
   /** A control that belongs on the header line. It sits beside the collapse
       button rather than inside it — a select nested in a button can't be
@@ -1495,7 +1508,7 @@ function Panel({
           between. The control stops the click so its own menu still works. */}
       <div
         onClick={onExpand ?? onToggle}
-        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${inlineOpen ? "border-b border-line" : ""} ${onExpand ? "gap-y-2 px-4 py-3 sm:px-5" : ""}`}
+        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${inlineOpen ? "border-b border-line" : ""} ${onExpand ? "gap-y-2 px-4 py-3" : ""}`}
       >
       <button
         type="button"
@@ -1503,9 +1516,9 @@ function Panel({
            twice and land back where it started. */
         onClick={(e) => { e.stopPropagation(); (onExpand ?? onToggle)(); }}
         aria-expanded={onExpand ? undefined : open}
-        className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-left ${onExpand ? "" : "flex-1 px-4 py-3 sm:px-5"} ${control ? "pr-2" : ""}`}
+        className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-left ${onExpand ? "" : "flex-1 px-4 py-3 sm:px-5"} ${control ? (onExpand ? "pr-3" : "pr-2") : ""}`}
       >
-        <span className="flex min-w-0 items-center gap-2">
+        <span className={`flex min-w-0 items-center gap-2 ${titleClassName ?? ""}`}>
           {onExpand ? (
             <ExpandIcon />
           ) : (
@@ -1548,6 +1561,12 @@ function Panel({
     </section>
   );
 }
+
+/** Column widths shared by the three stacked log headers (Travel Combined,
+ *  Hotel, Flights & Rentals) so their titles, figures and year pickers line
+ *  up down the page. */
+export const LOG_TITLE_COL = "sm:w-48";
+export const LOG_FIGURE_COL = "sm:min-w-[9.5rem]";
 
 /** The two diagonal arrows: this header opens a full-width popup. */
 export function ExpandIcon() {
@@ -1601,18 +1620,20 @@ function HeaderTotals({
   spent,
   saved,
   currency,
+  figureClassName,
 }: {
   countLabel: string;
   count: number;
   spent: number;
   saved: number;
   currency: string;
+  figureClassName?: string;
 }) {
   return (
     <>
-      <Figure label={countLabel} value={String(count)} tone="" />
-      <Figure label="Total spent" value={formatMoneyWhole(spent, currency)} tone="text-negative" />
-      <Figure label="Total saved" value={formatMoneyWhole(saved, currency)} tone="text-positive" />
+      <Figure label={countLabel} value={String(count)} tone="" className={figureClassName} />
+      <Figure label="Total spent" value={formatMoneyWhole(spent, currency)} tone="text-negative" className={figureClassName} />
+      <Figure label="Total saved" value={formatMoneyWhole(saved, currency)} tone="text-positive" className={figureClassName} />
     </>
   );
 }
@@ -1622,14 +1643,16 @@ export function Figure({
   value,
   tone,
   style,
+  className,
 }: {
   label: string;
   value: string;
   tone: string;
   style?: React.CSSProperties;
+  className?: string;
 }) {
   return (
-    <span className="flex shrink-0 items-baseline gap-1.5">
+    <span className={`flex shrink-0 items-baseline gap-1.5 ${className ?? ""}`}>
       <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
       <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>{value}</span>
     </span>
