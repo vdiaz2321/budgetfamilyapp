@@ -6,7 +6,9 @@ export const PROPERTY_KIND = "property";
 /**
  * Is a mortgage kept out of Net Worth?
  *
- * Always, now. A mortgage balance never reduces net worth — Victor's call
+ * Unless it is linked to a Property account (debts.property_account_id) —
+ * then it counts, since the property's value does (Victor, 2026-09-27).
+ * Otherwise: a mortgage balance never reduces net worth — Victor's call
  * (2026-09-12): the loan total is not what he wants measured, the monthly
  * payment is. The payment already lands where it belongs: it is budgeted like
  * any other bill, so it counts as spending on the Budget, the Annual pages and
@@ -25,7 +27,15 @@ export const PROPERTY_KIND = "property";
  * while the mortgage behind it does not, and net worth is then overstated by
  * the loan — see hasPropertyAsset below.
  */
-export function isDebtExcludedFromNetWorth(debtKind: string | null | undefined): boolean {
+export function isDebtExcludedFromNetWorth(
+  debtKind: string | null | undefined,
+  /** The Property account the loan is for, when it is linked to one. */
+  propertyAccountId?: string | null,
+): boolean {
+  // A mortgage linked to its property counts (Victor, 2026-09-27): the
+  // property carries the value, so the loan has to come off it or net worth is
+  // overstated by the loan. Unlinked, it stays out as before.
+  if (propertyAccountId) return false;
   return debtKind != null && NET_WORTH_EXCLUDED_DEBT_KINDS.has(debtKind);
 }
 

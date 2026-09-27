@@ -248,6 +248,8 @@ export function NetworthBoard({
           incomeGrowthPct: fiPlan.incomeGrowthPct,
           spendingGrowthPct: fiPlan.spendingGrowthPct,
         }}
+        militaryRetireYear={fiPlan.targetRetireYear}
+        defaultTaxPct={fiPlan.retirementTaxPct}
       />
 
       {/* The chart used to pin to the top of the viewport while you scrolled

@@ -88,7 +88,7 @@ export function ProfileMenu({ userEmail, displayName, avatarUrl, compact = false
           <>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-medium text-white">{shownName}</span>
-              <span className="block truncate text-[11px] text-slate-500">{userEmail}</span>
+              <span className="block truncate text-[11px] text-slate-400">{userEmail}</span>
             </span>
             <svg
               width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"

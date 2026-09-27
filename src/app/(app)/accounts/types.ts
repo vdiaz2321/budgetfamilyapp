@@ -152,6 +152,9 @@ export type BudgetDebt = {
   balancesByMonth?: Record<string, number>;
   debtKind: string | null;
   accountId: string | null;
+  /** The Property account this loan is for. Linked, it counts against net
+   *  worth (the property's value does); unlinked, a mortgage stays out. */
+  propertyAccountId: string | null;
 };
 
 // The plan's account types, mapped onto the account_kind enum. debt_loan is

@@ -40,6 +40,9 @@ export function isLiabilityKind(kind: string): boolean {
  * budgeted spending. They stay visible on Accounts and Debt/Loans for payoff
  * tracking. See lib/net-worth.ts for the full rule.
  */
-export function debtCountsInNetWorth(debtKind: string | null | undefined): boolean {
-  return !isDebtExcludedFromNetWorth(debtKind);
+export function debtCountsInNetWorth(
+  debtKind: string | null | undefined,
+  propertyAccountId?: string | null,
+): boolean {
+  return !isDebtExcludedFromNetWorth(debtKind, propertyAccountId);
 }

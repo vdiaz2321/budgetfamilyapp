@@ -16,8 +16,19 @@ export type ProjectionYear = {
   year: number;
   age: number | null;
   boyCents: number;
+  /** Total take-home: pay (before military retirement) + income lines after tax. */
   incomeCents: number;
+  /** The take-home pay typed for the year. Not used from the military
+   *  retirement year on — retirement income comes from the income lines. */
+  workIncomeCents: number;
+  /** Tax on retirement income this year; null = the plan's default. */
+  taxPct: number | null;
+  /** Total spending: the typed spending + healthcare from the plan. */
   spendingCents: number;
+  /** The spending typed for the year. */
+  baseSpendingCents: number;
+  /** Debt payments no longer needed that year (debts paid off). */
+  debtFreedCents: number;
   growthCents: number;
   /** Signed one-time effect on that year's close — a house, a car, a windfall. */
   oneOffCents: number;
@@ -77,12 +88,16 @@ export function ProjectionSection({
   thisYear,
   seed,
   rates,
+  militaryRetireYear,
+  defaultTaxPct,
 }: {
   years: ProjectionYear[];
   currency: string;
   thisYear: number;
   seed: ProjectionSeed;
   rates: ProjectionRates;
+  militaryRetireYear: number | null;
+  defaultTaxPct: number;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: false }));
@@ -251,7 +266,7 @@ export function ProjectionSection({
           <div className="max-h-[70vh] overflow-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
-                <tr className="text-[10px] uppercase tracking-wide text-muted">
+                <tr className="text-[11px] uppercase tracking-wide text-foreground/75">
                   <th className="px-3 py-2 text-center font-semibold">Year</th>
                   <th className="px-3 py-2 text-center font-semibold">Age</th>
                   <th className="px-3 py-2 text-center font-semibold">Income</th>
@@ -282,17 +297,43 @@ export function ProjectionSection({
                       {/* Plan on top, what actually happened underneath. */}
                       <td className="px-3 py-2 text-center tabular-nums">
                         {formatMoneyWhole(y.incomeCents, currency)}
+                        {/* Where the year's income comes from once the income
+                            lines are paying, and the tax taken off them. */}
+                        {militaryRetireYear != null && y.year >= militaryRetireYear ? (
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                            after {y.taxPct ?? defaultTaxPct}% tax
+                          </span>
+                        ) : y.incomeCents !== y.workIncomeCents && y.year >= thisYear ? (
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                            incl. {formatMoneyWhole(y.incomeCents - y.workIncomeCents, currency)} other
+                          </span>
+                        ) : null}
                         <Actual cents={y.actualIncomeCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums text-negative">
                         {formatMoneyWhole(y.spendingCents, currency)}
+                        {y.spendingCents - y.baseSpendingCents + y.debtFreedCents > 0 ? (
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                            incl. {formatMoneyWhole(y.spendingCents - y.baseSpendingCents + y.debtFreedCents, currency)} health
+                          </span>
+                        ) : null}
+                        {y.debtFreedCents > 0 ? (
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-positive">
+                            −{formatMoneyWhole(y.debtFreedCents, currency)} debt paid off
+                          </span>
+                        ) : null}
                         <Actual cents={y.actualSpendingCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
                       {/* The plan's saving for the year — income less
                           spending — with what actually reached savings and
                           investments underneath it. */}
                       <td className="px-3 py-2 text-center tabular-nums">
-                        <span style={{ color: "var(--viz-savings)" }}>
+                        {/* Negative in retirement: the year's spending is coming
+                            out of savings, so it reads as a draw, in red. */}
+                        <span
+                          className={y.incomeCents - y.spendingCents < 0 ? "text-negative" : undefined}
+                          style={y.incomeCents - y.spendingCents < 0 ? undefined : { color: "var(--viz-savings)" }}
+                        >
                           {formatMoneyWhole(
                             y.incomeCents - y.spendingCents,
                             currency,
@@ -316,7 +357,7 @@ export function ProjectionSection({
                           const measured = y.actualGainsCents == null;
                           return (
                             <span
-                              className={`block text-[10px] font-normal ${
+                              className={`block text-[11px] font-normal ${
                                 banked < 0 ? "text-negative" : "text-positive"
                               }`}
                             >
@@ -334,7 +375,7 @@ export function ProjectionSection({
                           <>
                             {formatMoneyWhole(y.actualCents, currency)}
                             {y.inProgress ? (
-                              <span className="block text-[10px] font-normal text-muted">
+                              <span className="block text-[11px] font-normal text-foreground/75">
                                 Actual so far
                               </span>
                             ) : null}
@@ -349,7 +390,7 @@ export function ProjectionSection({
                             of blanks would cost more than it tells. */}
                         {y.oneOffCents !== 0 ? (
                           <span
-                            className={`block text-[10px] font-normal ${
+                            className={`block text-[11px] font-normal ${
                               y.oneOffCents < 0 ? "text-negative" : "text-positive"
                             }`}
                           >
@@ -361,7 +402,7 @@ export function ProjectionSection({
                           const f = forecastFor(y);
                           return f == null ? null : (
                             <span
-                              className={`block text-[10px] font-normal ${
+                              className={`block text-[11px] font-normal ${
                                 f >= y.eoyCents ? "text-positive" : "text-negative"
                               }`}
                             >
@@ -466,6 +507,9 @@ export function ProjectionSection({
           row={editing}
           isFirst={editing.year === years[0]?.year}
           currency={currency}
+          thisYear={thisYear}
+          militaryRetireYear={militaryRetireYear}
+          defaultTaxPct={defaultTaxPct}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -521,13 +565,26 @@ function YearModal({
   row,
   isFirst,
   currency,
+  thisYear,
+  militaryRetireYear,
+  defaultTaxPct,
   onClose,
 }: {
   row: ProjectionYear;
   isFirst: boolean;
   currency: string;
+  thisYear: number;
+  militaryRetireYear: number | null;
+  defaultTaxPct: number;
   onClose: () => void;
 }) {
+  // From the military retirement year on, income is the income lines (after
+  // tax) and the typed pay isn't used. Future gains are the real return on the
+  // opening balance, figured when the plan saves, so they aren't typed.
+  const retired = militaryRetireYear != null && row.year >= militaryRetireYear;
+  const futureYear = row.year > thisYear;
+  const linesCents = row.incomeCents - (retired ? 0 : row.workIncomeCents);
+  const [taxPct, setTaxPct] = useState(row.taxPct == null ? "" : String(row.taxPct));
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -578,14 +635,18 @@ function YearModal({
   // is the difference between them and is shown, not typed. It used to be
   // typeable and back-solved onto spending, which meant the same number could
   // be reached two ways and neither box said which one it was.
-  const [income, setIncome] = useState(centsToDisplay(row.incomeCents));
-  const [spending, setSpending] = useState(centsToDisplay(row.spendingCents));
+  const [income, setIncome] = useState(centsToDisplay(row.workIncomeCents));
+  // The box edits the typed spending; healthcare from the plan rides on top.
+  // Healthcare adds and paid-off debt subtracts; both come from the plan.
+  const healthCents = row.spendingCents - row.baseSpendingCents + row.debtFreedCents;
+  const planAdjustCents = healthCents - row.debtFreedCents;
+  const [spending, setSpending] = useState(centsToDisplay(row.baseSpendingCents));
   const [gains, setGains] = useState(centsToDisplay(row.growthCents));
   const [oneOff, setOneOff] = useState(
     row.oneOffCents ? centsToDisplay(row.oneOffCents) : "",
   );
-  const incomeCents = displayToCents(income);
-  const spendingCents = displayToCents(spending);
+  const incomeCents = (retired ? 0 : displayToCents(income)) + linesCents;
+  const spendingCents = displayToCents(spending) + planAdjustCents;
   const savedCents = incomeCents - spendingCents;
   // What Save would land this year on, from what is typed right now — the same
   // equation the server re-chains with. It read the STORED closing balance
@@ -675,19 +736,41 @@ function YearModal({
           />
         </Field>
 
-        <Field label="Income">
-          <input
-            name="income"
-            inputMode="decimal"
-            value={income}
-            onChange={(e) => {
-              setIncome(e.target.value);
-              setEoyDraft(null);
-            }}
-            className={inputClass}
-          />
-        </Field>
-        <Field label="Spending">
+        {retired ? (
+          <Field label="Retirement income" hint="Retired pay and other income lines, after tax. Change them in Edit assumptions.">
+            <input type="hidden" name="income" value={income} />
+            <input value={centsToDisplay(row.incomeCents)} readOnly disabled className={`${inputClass} opacity-60`} />
+          </Field>
+        ) : (
+          <Field
+            label="Take-home pay"
+            hint={linesCents > 0 ? `Plus ${formatMoneyWhole(linesCents, currency)} from your other income lines.` : undefined}
+          >
+            <input
+              name="income"
+              inputMode="decimal"
+              value={income}
+              onChange={(e) => {
+                setIncome(e.target.value);
+                setEoyDraft(null);
+              }}
+              className={inputClass}
+            />
+          </Field>
+        )}
+        <Field
+          label="Spending"
+          hint={
+            healthCents > 0 || row.debtFreedCents > 0
+              ? [
+                  healthCents > 0 ? `Plus ${formatMoneyWhole(healthCents, currency)} healthcare from Edit assumptions.` : "",
+                  row.debtFreedCents > 0
+                    ? `Minus ${formatMoneyWhole(row.debtFreedCents, currency)} of debt payments no longer needed (paid off).`
+                    : "",
+                ].filter(Boolean).join(" ")
+              : undefined
+          }
+        >
           <input
             name="spending"
             inputMode="decimal"
@@ -696,6 +779,19 @@ function YearModal({
               setSpending(e.target.value);
               setEoyDraft(null);
             }}
+            className={inputClass}
+          />
+        </Field>
+        <Field
+          label="Tax on retirement income (%)"
+          hint={`Default is ${defaultTaxPct}%. A new rate here applies to this year and every year after. VA is never taxed.`}
+        >
+          <input
+            name="taxPct"
+            inputMode="decimal"
+            value={taxPct}
+            onChange={(e) => setTaxPct(e.target.value)}
+            placeholder={String(defaultTaxPct)}
             className={inputClass}
           />
         </Field>
@@ -711,16 +807,17 @@ function YearModal({
               className={`${inputClass} opacity-60`}
             />
           </Field>
-          <Field label="Est. gains">
+          <Field label="Est. gains" hint={futureYear ? "Real return on the opening balance." : undefined}>
             <input
               name="growth"
               inputMode="decimal"
               value={gains}
+              readOnly={futureYear}
               onChange={(e) => {
                 setGains(e.target.value);
                 setEoyDraft(null);
               }}
-              className={inputClass}
+              className={`${inputClass} ${futureYear ? "opacity-60" : ""}`}
             />
           </Field>
           {/* Signed, and one number rather than a purchase model: the app does
@@ -747,18 +844,21 @@ function YearModal({
           <Field
             label="Proj EOY NW"
             hint={
-              eoyBelowFloor
-                ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoneyWhole(floorEoyCents, currency)}.`
-                : "Typing here sets Est. gains to match."
+              futureYear
+                ? "Opening balance + saved + gains."
+                : eoyBelowFloor
+                  ? `Gains can't be negative — the lowest ${row.year} can close on with this income and spending is ${formatMoneyWhole(floorEoyCents, currency)}.`
+                  : "Typing here sets Est. gains to match."
             }
             hintTone={eoyBelowFloor ? "text-negative" : undefined}
           >
             <input
               inputMode="decimal"
               value={eoyDraft ?? centsToDisplay(predictedEoyCents)}
+              readOnly={futureYear}
               onChange={(e) => editEoy(e.target.value)}
               onBlur={() => setEoyDraft(null)}
-              className={inputClass}
+              className={`${inputClass} ${futureYear ? "opacity-60" : ""}`}
             />
           </Field>
         </div>
@@ -767,7 +867,7 @@ function YearModal({
             copy in at year end, shown where they are needed rather than on
             another page. */}
         <div className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 dark:bg-white/10">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
             {row.year}: {row.inProgress ? "so far" : "actual"} from other pages
           </p>
           <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
@@ -862,7 +962,7 @@ function YearModal({
                 {missCents >= 0 ? "better than planned" : "short of plan"}
               </span>
             </p>
-            <p className="mt-1 text-[11px] text-muted">
+            <p className="mt-1 text-xs text-foreground/80">
               Nothing is saved until you press Save year. What actually happened
               in {row.year} stays in {row.year} — later years keep their own
               income and spending and only their balances re-chain.
@@ -950,7 +1050,7 @@ function ProjectionEmpty({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-          <p className="text-[11px] text-muted">
+          <p className="text-xs text-foreground/80">
             Measured from {seed.fromMonth} to {seed.toMonth}. Creates {thisYear}–
             {thisYear + 24}.
           </p>
@@ -983,9 +1083,9 @@ function ProjectionEmpty({
 function SeedTile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
     <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/75">{label}</p>
       <p className="text-sm font-bold tabular-nums">{value}</p>
-      <p className="text-[10px] text-muted">{sub}</p>
+      <p className="text-[11px] text-foreground/75">{sub}</p>
     </div>
   );
 }
@@ -1010,7 +1110,7 @@ function Actual({
   const running = row.year === thisYear;
   if (!running && row.actualMonths < MIN_MONTHS_FOR_ACTUALS) return null;
   return (
-    <span className="block text-[10px] font-normal text-muted">
+    <span className="block text-[11px] font-normal text-foreground/75">
       {formatMoneyWhole(cents, currency)} {[noun, running ? "so far" : "actual"].filter(Boolean).join(" ")}
     </span>
   );
@@ -1031,13 +1131,13 @@ function Recorded({
 }) {
   return (
     <span className="block">
-      <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">
+      <span className="block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
         {label}
       </span>
       <span className="block font-semibold tabular-nums">
         {cents ? formatMoneyWhole(cents, currency) : "—"}
       </span>
-      <span className="block text-[10px] text-muted">{from}</span>
+      <span className="block text-[11px] text-foreground/75">{from}</span>
     </span>
   );
 }
@@ -1063,12 +1163,12 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
+      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
         {label}
       </span>
       {children}
       {hint ? (
-        <span className={`mt-0.5 block text-[10px] ${hintTone ?? "text-muted"}`}>{hint}</span>
+        <span className={`mt-0.5 block text-xs ${hintTone ?? "text-foreground/80"}`}>{hint}</span>
       ) : null}
     </label>
   );
@@ -1100,11 +1200,11 @@ function Figure({
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
-      <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
+      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75">{label}</p>
       <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
         {value}
       </p>
-      {sub ? <p className={`text-[10px] leading-tight ${subClassName ?? "text-muted"}`}>{sub}</p> : null}
+      {sub ? <p className={`text-[11px] leading-tight ${subClassName ?? "text-foreground/75"}`}>{sub}</p> : null}
       {bar != null ? (
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
           <div

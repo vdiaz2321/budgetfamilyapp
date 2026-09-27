@@ -17,7 +17,9 @@
   --background: #faf8f4; /* subtle warm off-white app canvas */
   --surface: #ffffff; /* cards */
   --foreground: #111827; /* gray-900 */
-  --muted: #6b7280; /* gray-500 */
+  /* gray-600, not gray-500: secondary text was too faint to read on a phone
+     (Victor, 2026-09-27). ~7:1 on the canvas. */
+  --muted: #4b5563;
   --border: #e5e7eb; /* gray-200 */
 
   /* Capitall brand — muted blue primary (purple retired 2026-09-25: Victor
@@ -26,7 +28,9 @@
   --brand-strong: #2f5296; /* hover */
   --brand-soft: #edf2fa; /* pale blue tint */
   --accent: #f59e0b; /* amber-500 */
-  --positive: #16a34a; /* green-600 */
+  /* Calm deep green, not neon green-600 (#16a34a): Victor found it "too
+     bright", and as small text it read ~3:1. This is ~4.9:1. */
+  --positive: #357a50;
   --negative: #dc2626; /* red-600 */
   --warning: #d97706; /* amber-600 */
   --chart-1: #2563eb; /* blue-600 — Savings accent */
@@ -34,7 +38,7 @@
 
   /* Category identity colors — used for hero progress bars, group dots, and
      the donut. Kept saturated in light mode; softened in dark. */
-  --cat-income: #16a34a;   /* green-600 */
+  --cat-income: #357a50;   /* same calm green as --positive */
   --cat-savings: #3b64b0;  /* brand blue (was indigo) */
   --cat-bills: #f59e0b;    /* amber-500 */
   --cat-expenses: #f59e0b; /* amber-500 (bills share the same tone in the hero) */
@@ -54,6 +58,7 @@
   --viz-income: #1e3a8a;   /* blue-900 — deep navy */
   --viz-spending: #fca5b5; /* soft cool red (rose-300) */
   --viz-soft: #93c5fd;     /* blue-300 — light blue (FI + travel bars) */
+  --viz-positive-soft: #9fd0ac; /* soft sage — big green fills (FI "free" bars), as light as --viz-soft */
   --viz-savings: #1d4ed8;  /* blue-700 (dark) */
   --viz-bills: #0d9488;    /* teal-600 */
   --viz-expenses: #38bdf8; /* sky-400 (light) */
@@ -74,7 +79,7 @@
   --background: #202124;
   --surface: #292a2d;
   --foreground: #e8eaed;
-  --muted: #9aa0a6;
+  --muted: #bdc1c6; /* lighter than #9aa0a6 for the same reason */
   --border: #3c4043;
 
   --brand: #8aa9d8; /* soft steel blue — calm on charcoal, dark label on it */
@@ -106,10 +111,11 @@
   --viz-income: #a8c4ff;
   --viz-spending: #b85f74;
   --viz-soft: #4f6ec4;
-  --viz-savings: #6d8fe0;
+  --viz-positive-soft: #4f8a62;
+  --viz-savings: #7f9de6; /* lifted from #6d8fe0: its % text read ~4:1 on dark cards */
   --viz-bills: #4fb8ab;
   --viz-expenses: #8ed3f5;
-  --viz-debt: #d76b83;
+  --viz-debt: #e07c92; /* lifted from #d76b83 for the same reason */
   --viz-grid: #3c4043;
   --viz-sel: #33353a;
 
@@ -122,6 +128,37 @@
    here, instead of in each of the ~60 buttons. */
 :root[data-theme="dark"] :is(.bg-brand, .bg-brand-strong).text-white {
   color: var(--background);
+}
+
+/* One calm green for the whole app (Victor, 2026-09-27: the stock greens were
+   "too freakin bright"). Tailwind's green-* and emerald-* scales are redefined
+   here so every badge, button and note that names them follows at once. The
+   700 step IS --positive (#357a50); 300 is the chart's soft sage. Teal is left
+   alone — it is its own color (Bills). */
+@theme {
+  --color-green-50: #f1f7f2;
+  --color-green-100: #e1efe4;
+  --color-green-200: #c4dfcb;
+  --color-green-300: #9fd0ac;
+  --color-green-400: #74b386;
+  --color-green-500: #529769;
+  --color-green-600: #43875b;
+  --color-green-700: #357a50;
+  --color-green-800: #2b6241;
+  --color-green-900: #224e34;
+  --color-green-950: #132c1e;
+
+  --color-emerald-50: #f1f7f2;
+  --color-emerald-100: #e1efe4;
+  --color-emerald-200: #c4dfcb;
+  --color-emerald-300: #9fd0ac;
+  --color-emerald-400: #74b386;
+  --color-emerald-500: #529769;
+  --color-emerald-600: #43875b;
+  --color-emerald-700: #357a50;
+  --color-emerald-800: #2b6241;
+  --color-emerald-900: #224e34;
+  --color-emerald-950: #132c1e;
 }
 
 @theme inline {
@@ -198,4 +235,18 @@ input[type="number"] {
 .scroll-handle::-webkit-scrollbar-thumb:hover {
   background: var(--foreground);
   background-clip: content-box;
+}
+
+/* The two smallest arbitrary sizes read as squint-text on a phone (Victor,
+   2026-09-27: "the font is tiny"). One step up app-wide, here rather than in
+   ~250 class names, so it stays one reversible decision. Only the tiniest move;
+   anything already 12px+ keeps its size, so notes stay smaller than the
+   figures they explain. */
+@layer utilities {
+  .text-\[10px\] {
+    font-size: 11px;
+  }
+  .text-\[11px\] {
+    font-size: 12px;
+  }
 }

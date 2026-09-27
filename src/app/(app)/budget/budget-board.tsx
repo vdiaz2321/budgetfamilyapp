@@ -1148,10 +1148,12 @@ function MatchSpentButton({
   candidates,
   monthKey,
   currency,
+  leftCents,
 }: {
   candidates: MatchCandidate[];
   monthKey: string;
   currency: string;
+  leftCents: number;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1180,6 +1182,7 @@ function MatchSpentButton({
       return next;
     });
   const netChange = picked.reduce((sum, c) => sum + (c.spentCents - c.plannedCents), 0);
+  const newLeft = leftCents - netChange;
 
   if (snapshot) {
     return (
@@ -1204,7 +1207,7 @@ function MatchSpentButton({
   // Mobile: the name gets its own line and the three figures sit under it —
   // four columns side by side left the name a few characters wide at 375px.
   const rowGrid =
-    "grid grid-cols-[1rem_repeat(4,minmax(0,1fr))] items-center gap-x-1 sm:grid-cols-[1rem_minmax(0,1fr)_5.5rem_5.5rem_5.5rem_5rem] sm:gap-x-2";
+    "grid grid-cols-[1rem_repeat(3,minmax(0,1fr))] items-center gap-x-1 sm:grid-cols-[1rem_minmax(0,1fr)_5.5rem_5.5rem_5rem] sm:gap-x-2";
   const checkbox = "size-4 cursor-pointer accent-[color:var(--brand)]";
 
   return (
@@ -1231,7 +1234,6 @@ function MatchSpentButton({
                 />
                 <span className="hidden text-left sm:block">Item</span>
                 <span>Planned</span>
-                <span>New plan</span>
                 <span>Spent</span>
                 <span>Diff</span>
               </label>
@@ -1247,9 +1249,8 @@ function MatchSpentButton({
                       onChange={() => toggle(c.subId)}
                       className={`${checkbox} row-span-2 sm:row-span-1`}
                     />
-                    <span className={`col-span-4 min-w-0 truncate sm:col-span-1 ${on ? "" : "text-muted"}`}>{c.name}</span>
+                    <span className={`col-span-3 min-w-0 truncate sm:col-span-1 ${on ? "" : "text-muted"}`}>{c.name}</span>
                     <span className={`text-center tabular-nums text-muted ${on ? "line-through" : ""}`}>{formatMoney(c.plannedCents, currency)}</span>
-                    <span className="text-center font-semibold tabular-nums">{formatMoney(on ? c.spentCents : c.plannedCents, currency)}</span>
                     <span className="text-center tabular-nums text-negative">{formatMoney(c.spentCents, currency)}</span>
                     <span className={`text-center font-semibold tabular-nums ${!on ? "text-muted" : diff <= 0 ? "text-positive" : "text-negative"}`}>
                       {diff > 0 ? "−" : diff < 0 ? "+" : ""}{formatMoney(Math.abs(diff), currency)}
@@ -1258,12 +1259,23 @@ function MatchSpentButton({
                 );
               })}
             </div>
-            <p className="text-sm">
-              {netChange <= 0 ? "Total Amount Return to Planned Budget:" : "Total Amount Over Planned:"}{" "}
-              <span className={`font-semibold tabular-nums ${netChange <= 0 ? "text-positive" : "text-negative"}`}>
-                {netChange > 0 ? "−" : netChange < 0 ? "+" : ""}{formatMoney(Math.abs(netChange), currency)}
-              </span>
-            </p>
+            {/* Lowering a plan by X hands X back to Income left to budget. */}
+            <div className="space-y-1 text-sm">
+              <p className="flex justify-between gap-3">
+                <span>Income left to budget now</span>
+                <span className={`tabular-nums ${leftCents < 0 ? "text-negative" : ""}`}>{formatMoney(leftCents, currency)}</span>
+              </p>
+              <p className="flex justify-between gap-3">
+                <span>Total amount returned or deducted</span>
+                <span className={`font-semibold tabular-nums ${netChange <= 0 ? "text-positive" : "text-negative"}`}>
+                  {netChange > 0 ? "−" : "+"}{formatMoney(Math.abs(netChange), currency)}
+                </span>
+              </p>
+              <p className="flex justify-between gap-3 border-t border-line pt-1 font-semibold">
+                <span>New income left to budget</span>
+                <span className={`tabular-nums ${newLeft < 0 ? "text-negative" : ""}`}>{formatMoney(newLeft, currency)}</span>
+              </p>
+            </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
               <button
@@ -1492,7 +1504,7 @@ function SummaryHeroCard({
                   options={heroSubOptions}
                 />
               ) : null}
-              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} />
+              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} leftCents={displayLeft} />
             </div>
             {rolloverCents > 0 && (
               // <div> (not <p>) because UndoRolloverButton renders a <form>,

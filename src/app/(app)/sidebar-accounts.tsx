@@ -33,8 +33,8 @@ type Props = {
 const DOT_COLORS = [
   "#60a5fa", // blue-400
   "#2dd4bf", // teal-400 (was purple — retired)
-  "#4ade80", // green-400
-  "#a3e635", // lime-400 (was orange — retired)
+  "#74b386", // calm green (was neon green-400)
+  "#b9c77a", // soft olive (was neon lime-400; orange retired before that)
   "#facc15", // yellow-400
   "#f472b6", // pink-400
   "#22d3ee", // cyan-400

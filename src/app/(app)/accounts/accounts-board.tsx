@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
@@ -454,6 +455,10 @@ export function AccountsBoard({
   })();
   // Build a map so we can tell which debts are already shown as debt_loan account rows.
   const accountKindById = new Map(active.map((a) => [a.id, a.kind]));
+  // Which property each loan account is for (the link lives on its debt row).
+  const loanPropertyOf = new Map(
+    budgetDebts.filter((d) => d.accountId).map((d) => [d.accountId as string, d.propertyAccountId]),
+  );
   const isDebtLoanLinked = (d: BudgetDebt) =>
     !!d.accountId && accountKindById.get(d.accountId) === "debt_loan";
 
@@ -471,7 +476,7 @@ export function AccountsBoard({
     .filter((a) => a.kind === "debt_loan")
     .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
   const countedDirectDebtTotal = active
-    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype))
+    .filter((a) => a.kind === "debt_loan" && !isDebtExcludedFromNetWorth(a.subtype, loanPropertyOf.get(a.id)))
     .reduce((sum, a) => sum + Math.abs(balanceOf(a)), 0);
 
   // Budget debts only count rows NOT already represented as a debt_loan account
@@ -481,7 +486,7 @@ export function AccountsBoard({
     0,
   );
   const countedBudgetDebtTotal = budgetDebts.reduce(
-    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind) ? sum : sum + debtBalanceOf(d)),
+    (sum, d) => (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, d.propertyAccountId) ? sum : sum + debtBalanceOf(d)),
     0,
   );
   // Rewards cards are tracked separately from the Debt section. Their
@@ -519,7 +524,7 @@ export function AccountsBoard({
     let sum = 0;
     let covered = 0;
     for (const a of debtLoanAccounts) {
-      if (isDebtExcludedFromNetWorth(a.subtype)) continue;
+      if (isDebtExcludedFromNetWorth(a.subtype, loanPropertyOf.get(a.id))) continue;
       const p = priorBalanceOf(a);
       if (p == null) continue;
       sum += Math.abs(p);
@@ -543,7 +548,7 @@ export function AccountsBoard({
     let sum = 0;
     let covered = 0;
     for (const d of budgetDebts) {
-      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
+      if (isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, d.propertyAccountId)) continue;
       const p = priorDebtBalanceOf(d);
       if (p == null) continue;
       sum += p;
@@ -583,13 +588,13 @@ export function AccountsBoard({
     }
     for (const a of debtLoanAccounts) {
       const b = a.balancesByMonth?.[eoyMonth];
-      if (b == null || isDebtExcludedFromNetWorth(a.subtype)) continue;
+      if (b == null || isDebtExcludedFromNetWorth(a.subtype, loanPropertyOf.get(a.id))) continue;
       sum -= Math.abs(b);
       covered += 1;
     }
     for (const d of budgetDebts) {
       const b = d.balancesByMonth?.[eoyMonth];
-      if (b == null || isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind)) continue;
+      if (b == null || isDebtLoanLinked(d) || isDebtExcludedFromNetWorth(d.debtKind, d.propertyAccountId)) continue;
       sum -= b;
       covered += 1;
     }
@@ -661,6 +666,18 @@ export function AccountsBoard({
 
   return (
     <SubtypeOptionsContext.Provider value={knownSubtypes}>
+    <PropertyLinkContext.Provider
+      value={{
+        properties: accounts
+          .filter((a) => a.kind === "property" && !a.isKidsAccount)
+          .map((a) => ({ id: a.id, name: a.name })),
+        propertyOfLoan: loanPropertyOf,
+        loanOnProperty: budgetDebts.reduce((m, d) => {
+          if (d.propertyAccountId) m.set(d.propertyAccountId, (m.get(d.propertyAccountId) ?? 0) + d.balanceCents);
+          return m;
+        }, new Map<string, number>()),
+      }}
+    >
     <div className="mx-auto w-full max-w-[110rem] space-y-4">
       {/* Title + period picker in one row, right-aligned like Insights.
           Subtitle removed at Victor's request. */}
@@ -899,7 +916,34 @@ export function AccountsBoard({
         />
       ) : null}
       </div>
+    </PropertyLinkContext.Provider>
     </SubtypeOptionsContext.Provider>
+  );
+}
+
+// A mortgage picks the Property account it is for. Linked, its balance counts
+// against net worth (the property's value does); unlinked, it stays out.
+const PropertyLinkContext = React.createContext<{
+  properties: { id: string; name: string }[];
+  propertyOfLoan: Map<string, string | null>;
+  /** Balance owed on the mortgages linked to each property. */
+  loanOnProperty: Map<string, number>;
+}>({ properties: [], propertyOfLoan: new Map(), loanOnProperty: new Map() });
+
+function PropertyLinkSelect({ value, className }: { value: string | null; className?: string }) {
+  const { properties } = React.useContext(PropertyLinkContext);
+  return (
+    <select
+      name="propertyAccountId"
+      defaultValue={value ?? ""}
+      aria-label="For property"
+      className={className ?? "rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"}
+    >
+      <option value="">Not linked to a property</option>
+      {properties.map((p) => (
+        <option key={p.id} value={p.id}>For {p.name}</option>
+      ))}
+    </select>
   );
 }
 
@@ -1951,6 +1995,7 @@ function AccountRow({
               />
       ) : null}
 
+      {account.kind === "property" ? <PropertyEquityLine account={account} currency={currency} /> : null}
       {editing ? <EditAccountForm account={account} section={section} onDone={onToggleEdit} /> : null}
     </li>
   );
@@ -2593,6 +2638,15 @@ function BalanceInput({
 
 function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?: string | null) => void }) {
   const [pending, start] = useTransition();
+  const router = useRouter();
+  // The form closes in the same transition as the refresh, so it stays on
+  // "Adding…" until the new totals are on screen — closing on the action's
+  // return left the old totals showing for about a second.
+  const finish = (id: string | null) =>
+    start(() => {
+      router.refresh();
+      onDone(id);
+    });
   const [error, setError] = useState<string | null>(null);
   const [debtSubtype, setDebtSubtype] = useState("");
   const [cardTab, setCardTab] = useState<"key" | "basics" | "debt">("key");
@@ -2609,7 +2663,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             start(async () => {
               const result = await addCreditCardWithDetails(fd);
               if (result?.error) setError(result.error);
-              else onDone(result?.id ?? null);
+              else finish(result?.id ?? null);
             })
           }
           className="flex flex-col gap-3"
@@ -2734,7 +2788,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
           start(async () => {
             const result = await addAccount(fd);
             if (result?.error) setError(result.error);
-            else onDone(result?.id ?? null);
+            else finish(result?.id ?? null);
           })
         }
         className="grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -2862,6 +2916,16 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             )}
             {debtSubtype === "real_estate_loan" && (
               <>
+                <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  For property
+                  <PropertyLinkSelect
+                    value={null}
+                    className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  />
+                  <span className="mt-1 block normal-case tracking-normal text-[11px] font-normal">
+                    Linked: counts against net worth, and the property shows its equity. Add the property under Property first.
+                  </span>
+                </label>
                 <LabeledInput label="Original term (months)" name="termMonths" type="number" min="1" step="1" placeholder="360 for a 30-year mortgage" />
                 <LabeledInput label="Escrow / month" name="escrow" type="number" min="0" step="0.01" placeholder="Taxes + insurance, not payoff debt" />
               </>
@@ -2961,6 +3025,26 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Value − the mortgage linked to it: what the property adds to net worth.
+// Its own line under the row — as a pill beside the name it pushed the name
+// out of the narrow name column.
+function PropertyEquityLine({ account, currency }: { account: AccountData; currency: string }) {
+  const { loanOnProperty } = React.useContext(PropertyLinkContext);
+  const loan = loanOnProperty.get(account.id);
+  if (!loan) return null;
+  return (
+    <p className="-mt-1 px-4 pb-1.5 pl-12 text-xs text-foreground/80">
+      Equity <span className="font-semibold text-foreground">{formatMoney(account.balanceCents - loan, currency)}</span>
+      {" "}· value − {formatMoney(loan, currency)} mortgage
+    </p>
+  );
+}
+
+function EditPropertyLink({ accountId }: { accountId: string }) {
+  const { propertyOfLoan } = React.useContext(PropertyLinkContext);
+  return <PropertyLinkSelect value={propertyOfLoan.get(accountId) ?? null} />;
+}
+
 function EditAccountForm({
   account,
   section,
@@ -2973,6 +3057,7 @@ function EditAccountForm({
   const [savePending, startSave] = useTransition();
   const [delPending, startDel] = useTransition();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const router = useRouter();
 
   return (
     <div className="space-y-2 border-t border-line bg-background/60 px-4 py-3">
@@ -2980,7 +3065,11 @@ function EditAccountForm({
         action={(fd) =>
           startSave(async () => {
             await updateAccount(fd);
-            onDone();
+            // Close with the refresh, not before it (same as adding).
+            startSave(() => {
+              router.refresh();
+              onDone();
+            });
           })
         }
         className="flex flex-col gap-2"
@@ -3045,6 +3134,9 @@ function EditAccountForm({
               />
               <RetirementKindSelect name="retirementKind" value={account.retirementKind} />
             </>
+          ) : null}
+          {account.kind === "debt_loan" && account.subtype === "real_estate_loan" ? (
+            <EditPropertyLink accountId={account.id} />
           ) : null}
           {section.key === "banking" ? (
             <select

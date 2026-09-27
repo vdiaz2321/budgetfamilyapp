@@ -41,7 +41,7 @@ export default async function AppLayout({
         .eq("household_id", profile.household_id),
       supabase
         .from("debts")
-        .select("subcategory_id, current_balance_cents, debt_kind")
+        .select("subcategory_id, current_balance_cents, debt_kind, property_account_id")
         .eq("household_id", profile.household_id),
       supabase.from("subcategories").select("id, name").eq("household_id", profile.household_id),
       supabase
@@ -114,6 +114,7 @@ export default async function AppLayout({
       name: subName.get(d.subcategory_id) ?? "Debt",
       balanceCents: d.current_balance_cents ?? 0,
       kind: (d.debt_kind as string | null) ?? null,
+      propertyAccountId: (d.property_account_id as string | null) ?? null,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -144,7 +145,7 @@ export default async function AppLayout({
   const debtTotal = (items: typeof debtItems) => items.reduce((s, d) => s + d.balanceCents, 0);
   const netWorthDebtTotal = (items: typeof debtItems) =>
     items.reduce(
-      (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.kind) ? 0 : debt.balanceCents),
+      (sum, debt) => sum + (isDebtExcludedFromNetWorth(debt.kind, debt.propertyAccountId) ? 0 : debt.balanceCents),
       0,
     );
 

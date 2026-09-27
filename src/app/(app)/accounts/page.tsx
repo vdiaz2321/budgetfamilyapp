@@ -56,7 +56,7 @@ export default async function AccountsPage() {
       .order("name"),
     supabase
       .from("debts")
-      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled, promo_apr_ends_on")
+      .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, debt_kind, tracking_enabled, promo_apr_ends_on, property_account_id")
       .eq("household_id", household.id),
     supabase
       .from("subcategories")
@@ -213,6 +213,7 @@ export default async function AccountsPage() {
     balancesByMonth: debtBalancesBySub.get(d.subcategory_id) ?? {},
     debtKind: d.debt_kind ?? null,
     accountId: d.account_id ?? null,
+    propertyAccountId: d.property_account_id ?? null,
   }));
 
   const cardDetailsByAccount = new Map<string, CardDetails>();

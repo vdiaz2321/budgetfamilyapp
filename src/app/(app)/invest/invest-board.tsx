@@ -983,13 +983,15 @@ function PerformanceChart({
   };
 
   return (
-    <section className="overflow-visible rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-start justify-between gap-2 rounded-t-2xl bg-brand-soft/35 px-4 py-3 ring-1 ring-brand/10">
+    <section className="min-w-0 overflow-visible rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      {/* Wraps on a phone: the mode buttons drop under the title instead of
+          pushing the card past the screen edge. */}
+      <div className="flex flex-wrap items-start justify-between gap-2 rounded-t-2xl bg-brand-soft/35 px-4 py-3 ring-1 ring-brand/10">
         <button
           type="button"
           onClick={() => setChartOpen(!chartOpen)}
           aria-expanded={chartOpen}
-          className="flex items-center gap-2 text-left"
+          className="flex min-w-0 items-center gap-2 text-left"
         >
           <svg
             width="13" height="13" viewBox="0 0 24 24" fill="none"

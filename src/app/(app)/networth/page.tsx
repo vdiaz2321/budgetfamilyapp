@@ -1,3 +1,4 @@
+import { toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -47,6 +48,8 @@ export default async function NetworthPage() {
     { data: projectionRowsInitial, error: projectionError },
     { data: gainRows, error: gainError },
     { data: liveContribRows, error: liveContribError },
+    { data: incomeLineRows, error: incomeLineError },
+    { data: rentalRows, error: rentalError },
   ] = await Promise.all([
     // Every snapshot ever taken — this page IS the history view, so none of
     // these can be date-bounded. They grow by one row per account/bucket/debt
@@ -110,12 +113,12 @@ export default async function NetworthPage() {
     // it separately was a second serial trip to Supabase for nothing.
     supabase
       .from("debts")
-      .select("subcategory_id, debt_kind")
+      .select("subcategory_id, debt_kind, property_account_id, current_balance_cents, paid_off_at")
       .eq("household_id", household.id),
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, personal_inflation_pct, income_growth_pct, guaranteed_income_cents, guaranteed_income_start_year")
+      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, personal_inflation_pct, income_growth_pct, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, sbp_enabled, sbp_pct, retirement_tax_pct, longevity_age, healthcare_annual_cents, healthcare_start_age, healthcare_growth_pct")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -136,7 +139,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, eoy_cents, tax_pct")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -153,16 +156,35 @@ export default async function NetworthPage() {
       .from("v_investment_contributions")
       .select("account_id, bucket_id, year, net_contribution_cents")
       .eq("household_id", household.id),
+    // Retirement income that switches on and off by year (VA, SS, a job…).
+    supabase
+      .from("retirement_income_lines")
+      .select("id, name, kind, monthly_cents, start_year, end_year, taxable")
+      .eq("household_id", household.id)
+      .order("sort_order")
+      .order("created_at"),
+    supabase
+      .from("rental_properties")
+      .select("id, name, property_account_id, loan_account_id, purchase_year, value_cents, down_payment_pct, closing_cost_pct, loan_balance_cents, loan_rate_pct, loan_years, monthly_rent_cents, monthly_costs_cents, appreciation_pct")
+      .eq("household_id", household.id)
+      .order("sort_order")
+      .order("created_at"),
   ]);
-  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError });
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError });
 
   // Once a property carries the home's value, the mortgage against it counts
   // as the liability it is — before that it stays out (lib/net-worth.ts).
   const excludedDebtIds = new Set(
     (debtRows ?? [])
-      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind))
+      .filter((debt) => isDebtExcludedFromNetWorth(debt.debt_kind, debt.property_account_id))
       .map((debt) => debt.subcategory_id),
   );
+  // Mortgage owed on each Property account (linked on Accounts).
+  const loanByProperty = new Map<string, number>();
+  for (const d of debtRows ?? []) {
+    if (!d.property_account_id || d.paid_off_at) continue;
+    loanByProperty.set(d.property_account_id, (loanByProperty.get(d.property_account_id) ?? 0) + (d.current_balance_cents ?? 0));
+  }
   const accountKindById = new Map((accountRows ?? []).map((a) => [a.id, a.kind as string]));
   const bankGroupById = new Map(
     (accountRows ?? []).map((a) => [a.id, (a as { bank_group?: string | null }).bank_group ?? null]),
@@ -508,7 +530,17 @@ export default async function NetworthPage() {
   // The same liabilities Net Worth counts, taken from the latest point so the
   // two can't drift: a mortgage stays out while no property is tracked,
   // exactly as it does in the totals above.
-  fiAssetsCents -= points.at(-1)?.debt ?? 0;
+  // A mortgage linked to a property nets against that property, and the
+  // property isn't investable money, so both stay out of the portfolio —
+  // subtracting the loan alone would sink the plan by the whole balance.
+  const activePropertyIds = new Set(
+    (balanceRows ?? []).filter((a) => a.kind === PROPERTY_KIND && a.active !== false && !a.is_kids_account).map((a) => a.id),
+  );
+  let linkedMortgageCents = 0;
+  for (const [propertyId, loan] of loanByProperty) {
+    if (activePropertyIds.has(propertyId)) linkedMortgageCents += loan;
+  }
+  fiAssetsCents -= (points.at(-1)?.debt ?? 0) - linkedMortgageCents;
 
   // ---- NW Projections.
   //
@@ -654,7 +686,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, eoy_cents, tax_pct")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -666,7 +698,11 @@ export default async function NetworthPage() {
     age: r.age ?? null,
     boyCents: r.boy_cents ?? 0,
     incomeCents: r.income_cents ?? 0,
+    workIncomeCents: r.work_income_cents ?? r.income_cents ?? 0,
+    taxPct: r.tax_pct == null ? null : Number(r.tax_pct),
     spendingCents: r.spending_cents ?? 0,
+    baseSpendingCents: r.base_spending_cents ?? r.spending_cents ?? 0,
+    debtFreedCents: r.debt_freed_cents ?? 0,
     growthCents: r.growth_cents ?? 0,
     oneOffCents: r.one_off_cents ?? 0,
     eoyCents: r.eoy_cents ?? 0,
@@ -710,6 +746,42 @@ export default async function NetworthPage() {
         // fund, so the FI number stops pretending it does.
         guaranteedIncomeCents: planRow?.guaranteed_income_cents ?? null,
         guaranteedIncomeStartYear: planRow?.guaranteed_income_start_year ?? null,
+        serviceStartYear: planRow?.service_start_year ?? null,
+        high3MonthlyCents: planRow?.high3_monthly_cents ?? null,
+        inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
+        sbpEnabled: !!planRow?.sbp_enabled,
+        sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
+        retirementTaxPct: planRow?.retirement_tax_pct == null ? 12 : Number(planRow.retirement_tax_pct),
+        longevityAge: planRow?.longevity_age ?? 90,
+        healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
+        healthcareStartAge: planRow?.healthcare_start_age ?? 65,
+        healthcareGrowthPct: planRow?.healthcare_growth_pct == null ? 1.5 : Number(planRow.healthcare_growth_pct),
+        rentalRows: (rentalRows ?? []) as RentalRow[],
+        rentals: ((rentalRows ?? []) as RentalRow[]).map((r) =>
+          toRentalProperty(
+            r,
+            new Map((balanceRows ?? []).map((a) => [a.id, a.current_balance_cents ?? 0])),
+            loanByProperty,
+          ),
+        ),
+        // What a rental can link to on the Accounts page.
+        propertyAccounts: (accountRows ?? [])
+          .filter((a) => a.kind === "property" && !a.is_kids_account)
+          .map((a) => ({
+            id: a.id,
+            name: a.name,
+            valueCents: (balanceRows ?? []).find((b) => b.id === a.id)?.current_balance_cents ?? 0,
+            loanCents: loanByProperty.get(a.id) ?? null,
+          })),
+        incomeLines: (incomeLineRows ?? []).map((l) => ({
+          id: l.id,
+          name: l.name,
+          kind: l.kind,
+          monthlyCents: l.monthly_cents,
+          startYear: l.start_year,
+          endYear: l.end_year,
+          taxable: l.taxable,
+        })),
       }}
       fiMeasured={{
         assetsCents: fiAssetsCents,

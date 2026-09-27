@@ -119,7 +119,7 @@ export default function SidebarNav({
             )}
             <NavPending className={collapsed ? "" : "ml-auto"} />
             {collapsed || !badge ? null : n.href === "/snowball" ? (
-              <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-400 text-[11px] font-bold text-white">
+              <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-600 text-[11px] font-bold text-white">
                 {badge}
               </span>
             ) : (

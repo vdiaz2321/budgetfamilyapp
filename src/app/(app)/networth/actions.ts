@@ -7,6 +7,18 @@ import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
+import { currentMonthFirst as monthStart } from "@/lib/snapshots";
+import {
+  debtFreedByYear,
+  estimatePension,
+  healthcareForYear,
+  incomeForYear,
+  rentalsForYear,
+  toRentalProperty,
+  type IncomeLine,
+  type IncomeLineKind,
+  type RentalRow,
+} from "@/lib/retirement";
 
 const MONTH_RE = /^\d{4}-\d{2}-01$/;
 
@@ -331,23 +343,28 @@ export async function saveRetirementPlan(formData: FormData) {
     const raw = String(formData.get(key) ?? "").trim();
     return raw ? Math.max(0, displayToCents(raw)) : null;
   };
+  const year = (n: number | null) => n == null || (n > 1900 && n < 2200);
 
   const birthYear = num("birthYear");
   const targetYear = num("targetRetireYear");
+  const serviceStart = num("serviceStartYear");
   const realReturn = num("realReturnPct");
   const withdrawal = num("withdrawalRatePct");
-  // The two drift rates the projection grid fills forward with. They have
-  // lived in the table since the grid was built but nothing ever wrote them,
-  // so every fill-forward ran on the column defaults.
+  const inflation = num("inflationPct");
+  const sbpPct = num("sbpPct");
+  const taxPct = num("retirementTaxPct");
+  const longevity = num("longevityAge");
+  const healthStartAge = num("healthcareStartAge");
+  const healthGrowth = num("healthcareGrowthPct");
+  // The two drift rates the projection grid fills forward with.
   const personalInflation = num("personalInflationPct");
   const incomeGrowth = num("incomeGrowthPct");
-  const guaranteedStartYear = num("guaranteedIncomeStartYear");
 
-  if (birthYear != null && (birthYear < 1900 || birthYear > 2200)) {
-    return { error: "Enter a four-digit birth year." };
-  }
-  if (targetYear != null && (targetYear < 1900 || targetYear > 2200)) {
-    return { error: "Enter a four-digit target year." };
+  if (!year(birthYear)) return { error: "Enter a four-digit birth year." };
+  if (!year(targetYear)) return { error: "Enter a four-digit military retirement year." };
+  if (!year(serviceStart)) return { error: "Enter a four-digit year for when service started." };
+  if (serviceStart != null && targetYear != null && serviceStart > targetYear) {
+    return { error: "Service has to start before the military retirement year." };
   }
   if (realReturn != null && (realReturn < -20 || realReturn > 20)) {
     return { error: "A real return outside -20%…20% isn't a plan, it's a bet." };
@@ -355,14 +372,166 @@ export async function saveRetirementPlan(formData: FormData) {
   if (withdrawal != null && (withdrawal <= 0 || withdrawal > 20)) {
     return { error: "Withdrawal rate has to be between 0% and 20%." };
   }
+  if (inflation != null && (inflation < 0 || inflation > 20)) {
+    return { error: "Inflation has to be between 0% and 20%." };
+  }
+  if (sbpPct != null && (sbpPct < 0 || sbpPct > 20)) {
+    return { error: "SBP rate has to be between 0% and 20%." };
+  }
+  if (taxPct != null && (taxPct < 0 || taxPct > 60)) {
+    return { error: "Tax rate has to be between 0% and 60%." };
+  }
+  if (longevity != null && (longevity < 50 || longevity > 120)) {
+    return { error: "Plan until age has to be between 50 and 120." };
+  }
   if (personalInflation != null && (personalInflation < -20 || personalInflation > 20)) {
     return { error: "Spending growth has to be between -20% and 20%." };
   }
   if (incomeGrowth != null && (incomeGrowth < -20 || incomeGrowth > 20)) {
     return { error: "Income growth has to be between -20% and 20%." };
   }
-  if (guaranteedStartYear != null && (guaranteedStartYear < 1900 || guaranteedStartYear > 2200)) {
-    return { error: "Enter a four-digit year for when the guaranteed income starts." };
+  if (healthStartAge != null && (healthStartAge < 18 || healthStartAge > 120)) {
+    return { error: "Healthcare start age has to be between 18 and 120." };
+  }
+  if (healthGrowth != null && (healthGrowth < 0 || healthGrowth > 20)) {
+    return { error: "Healthcare growth has to be between 0% and 20%." };
+  }
+
+  // The income lines ride along as JSON so the whole popup saves at once.
+  type LineIn = {
+    id?: string | null;
+    name?: string;
+    kind?: string;
+    monthly?: string;
+    startYear?: string;
+    endYear?: string;
+    taxable?: boolean;
+  };
+  let linesIn: LineIn[] = [];
+  try {
+    linesIn = JSON.parse(String(formData.get("incomeLines") ?? "[]"));
+    if (!Array.isArray(linesIn)) linesIn = [];
+  } catch {
+    return { error: "Couldn't read the income lines." };
+  }
+  const lineYear = (raw: string | undefined): number | null | "bad" => {
+    const t = String(raw ?? "").trim();
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isInteger(n) && n > 1900 && n < 2200 ? n : "bad";
+  };
+  const lines: Array<{
+    id: string | null;
+    name: string;
+    kind: IncomeLineKind;
+    monthly_cents: number;
+    start_year: number | null;
+    end_year: number | null;
+    taxable: boolean;
+    sort_order: number;
+  }> = [];
+  for (const [i, l] of linesIn.entries()) {
+    const name = String(l.name ?? "").trim();
+    const kind = String(l.kind ?? "") as IncomeLineKind;
+    const label = name || `Income line ${i + 1}`;
+    if (!name) return { error: `${label}: give it a name.` };
+    if (!LINE_KINDS.includes(kind)) return { error: `${label}: pick a type.` };
+    if (!String(l.monthly ?? "").trim()) return { error: `${label}: enter the monthly amount.` };
+    const start = lineYear(l.startYear);
+    const end = lineYear(l.endYear);
+    if (start === "bad") return { error: `${label}: first year has to be a four-digit year.` };
+    if (end === "bad") return { error: `${label}: last year has to be a four-digit year.` };
+    if (start != null && end != null && end < start) {
+      return { error: `${label}: last year can't be before the first year.` };
+    }
+    lines.push({
+      id: l.id || null,
+      name,
+      kind,
+      monthly_cents: Math.max(0, displayToCents(String(l.monthly))),
+      start_year: start,
+      end_year: end,
+      // VA disability is never taxed, whatever the box says.
+      taxable: kind === "va" ? false : !!l.taxable,
+      sort_order: i,
+    });
+  }
+
+  // Rentals ride along as JSON too.
+  type RentalIn = {
+    id?: string | null;
+    name?: string;
+    propertyAccountId?: string | null;
+    loanAccountId?: string | null;
+    purchaseYear?: string;
+    value?: string;
+    downPaymentPct?: string;
+    closingCostPct?: string;
+    loanBalance?: string;
+    loanRatePct?: string;
+    loanYears?: string;
+    rent?: string;
+    costs?: string;
+    appreciationPct?: string;
+  };
+  let rentalsIn: RentalIn[] = [];
+  try {
+    rentalsIn = JSON.parse(String(formData.get("rentals") ?? "[]"));
+    if (!Array.isArray(rentalsIn)) rentalsIn = [];
+  } catch {
+    return { error: "Couldn't read the rental properties." };
+  }
+  const thisYearNow = new Date().getFullYear();
+  const pctIn = (raw: string | undefined, fallback: number, min: number, max: number): number | "bad" => {
+    const t = String(raw ?? "").trim();
+    if (!t) return fallback;
+    const n = Number(t);
+    return Number.isFinite(n) && n >= min && n <= max ? n : "bad";
+  };
+  const rentals: Array<Record<string, unknown> & { id: string | null; name: string }> = [];
+  for (const [i, r] of rentalsIn.entries()) {
+    const name = String(r.name ?? "").trim();
+    const label = name || `Rental ${i + 1}`;
+    if (!name) return { error: `${label}: give it a name.` };
+    const owned = !!r.propertyAccountId;
+    const purchaseYear = lineYear(r.purchaseYear);
+    if (purchaseYear === "bad") return { error: `${label}: purchase year has to be a four-digit year.` };
+    if (!owned && purchaseYear == null) {
+      return { error: `${label}: pick its Property account, or enter the year you plan to buy it.` };
+    }
+    if (!owned && purchaseYear != null && purchaseYear <= thisYearNow) {
+      return { error: `${label}: a planned purchase has to be after ${thisYearNow}. Already bought? Add it on Accounts and pick it here.` };
+    }
+    const down = pctIn(r.downPaymentPct, 25, 0, 100);
+    const closing = pctIn(r.closingCostPct, 3, 0, 20);
+    const rate = pctIn(r.loanRatePct, 7, 0, 30);
+    const appreciation = pctIn(r.appreciationPct, 0, -20, 20);
+    const years = pctIn(r.loanYears, 30, 0, 50);
+    if (down === "bad") return { error: `${label}: down payment has to be 0–100%.` };
+    if (closing === "bad") return { error: `${label}: closing costs have to be 0–20%.` };
+    if (rate === "bad") return { error: `${label}: loan rate has to be 0–30%.` };
+    if (appreciation === "bad") return { error: `${label}: value growth has to be between -20% and 20%.` };
+    if (years === "bad" || !Number.isInteger(years)) return { error: `${label}: loan years has to be a whole number 0–50.` };
+    const cents = (raw: string | undefined) => (String(raw ?? "").trim() ? Math.max(0, displayToCents(String(raw))) : 0);
+    if (!owned && cents(r.value) <= 0) return { error: `${label}: enter the price.` };
+    rentals.push({
+      id: r.id || null,
+      name,
+      property_account_id: r.propertyAccountId || null,
+      // The loan now comes from the mortgage linked to the property on Accounts.
+      loan_account_id: null,
+      purchase_year: owned ? null : purchaseYear,
+      value_cents: cents(r.value),
+      down_payment_pct: down,
+      closing_cost_pct: closing,
+      loan_balance_cents: owned ? cents(r.loanBalance) : null,
+      loan_rate_pct: rate,
+      loan_years: years,
+      monthly_rent_cents: cents(r.rent),
+      monthly_costs_cents: cents(r.costs),
+      appreciation_pct: appreciation,
+      sort_order: i,
+    });
   }
 
   const { error } = await supabase.from("retirement_plan").upsert(
@@ -370,22 +539,26 @@ export async function saveRetirementPlan(formData: FormData) {
       household_id: householdId,
       birth_year: birthYear,
       target_retire_year: targetYear,
-      annual_spend_cents: money("annualSpend"),
-      annual_contribution_cents: money("annualContribution"),
+      service_start_year: serviceStart,
+      high3_monthly_cents: money("high3"),
       real_return_pct: realReturn ?? 5,
       withdrawal_rate_pct: withdrawal ?? 4,
-      // Blank means zero drift, not the old nominal defaults of 4% and 2.5%:
-      // these are real rates now, so clearing the box has to mean "keeps pace
-      // with inflation" — the very thing the field's own hint promises.
-      // `projection_return_pct` is deliberately not written: nothing reads it
-      // any more (gains use real_return_pct), and no field on the form sets
-      // it, so every save was quietly stamping it back to 8.
+      inflation_pct: inflation ?? 2.5,
+      sbp_enabled: formData.get("sbpEnabled") === "on",
+      sbp_pct: sbpPct ?? 6.5,
+      retirement_tax_pct: taxPct ?? 12,
+      longevity_age: longevity ?? 90,
+      healthcare_annual_cents: money("healthcareAnnual"),
+      healthcare_start_age: healthStartAge ?? 65,
+      healthcare_growth_pct: healthGrowth ?? 1.5,
       personal_inflation_pct: personalInflation ?? 0,
       income_growth_pct: incomeGrowth ?? 0,
-      // Both nullable: a blank guaranteed income means there isn't one, and a
-      // blank start year means it is already arriving.
-      guaranteed_income_cents: money("guaranteedIncome"),
-      guaranteed_income_start_year: guaranteedStartYear,
+      // Replaced by the Net Worth Plan table (spending, saving) and the income
+      // lines (guaranteed income). Cleared so an old figure can't quietly win.
+      annual_spend_cents: null,
+      annual_contribution_cents: null,
+      guaranteed_income_cents: null,
+      guaranteed_income_start_year: null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "household_id" },
@@ -395,8 +568,281 @@ export async function saveRetirementPlan(formData: FormData) {
     return { error: `Couldn't save the plan — ${error.message}` };
   }
 
+  // Lines: remove the ones taken out, then write the rest.
+  const { data: existing, error: existingError } = await supabase
+    .from("retirement_income_lines")
+    .select("id")
+    .eq("household_id", householdId);
+  if (existingError) return { error: `Couldn't read the income lines — ${existingError.message}` };
+  const keep = new Set(lines.map((l) => l.id).filter(Boolean));
+  const removed = (existing ?? []).map((r) => r.id).filter((id) => !keep.has(id));
+  if (removed.length > 0) {
+    const { error: delError } = await supabase
+      .from("retirement_income_lines")
+      .delete()
+      .eq("household_id", householdId)
+      .in("id", removed);
+    if (delError) return { error: `Couldn't remove an income line — ${delError.message}` };
+  }
+  const stamp = new Date().toISOString();
+  const toUpdate = lines.filter((l) => l.id);
+  const toInsert = lines.filter((l) => !l.id);
+  for (const { id, ...row } of toUpdate) {
+    const { error: upError } = await supabase
+      .from("retirement_income_lines")
+      .update({ ...row, updated_at: stamp })
+      .eq("household_id", householdId)
+      .eq("id", id!);
+    if (upError) return { error: `Couldn't save ${row.name} — ${upError.message}` };
+  }
+  if (toInsert.length > 0) {
+    const { error: insError } = await supabase
+      .from("retirement_income_lines")
+      .insert(
+        toInsert.map((l) => ({
+          household_id: householdId,
+          name: l.name,
+          kind: l.kind,
+          monthly_cents: l.monthly_cents,
+          start_year: l.start_year,
+          end_year: l.end_year,
+          taxable: l.taxable,
+          sort_order: l.sort_order,
+        })),
+      );
+    if (insError) return { error: `Couldn't add an income line — ${insError.message}` };
+  }
+
+  // A linked account has to be this household's Property / loan account.
+  const linkedIds = rentals.flatMap((r) => [r.property_account_id, r.loan_account_id]).filter(Boolean) as string[];
+  if (linkedIds.length > 0) {
+    const { data: owns, error: ownErr } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("household_id", householdId)
+      .in("id", linkedIds);
+    if (ownErr) return { error: `Couldn't check the linked accounts — ${ownErr.message}` };
+    if ((owns ?? []).length !== new Set(linkedIds).size) return { error: "A rental is linked to an account that isn't yours." };
+  }
+
+  // Rentals: same sync as the income lines.
+  const { data: existingRentals, error: rentalReadError } = await supabase
+    .from("rental_properties")
+    .select("id")
+    .eq("household_id", householdId);
+  if (rentalReadError) return { error: `Couldn't read the rentals — ${rentalReadError.message}` };
+  const keepRentals = new Set(rentals.map((r) => r.id).filter(Boolean));
+  const removedRentals = (existingRentals ?? []).map((r) => r.id).filter((id) => !keepRentals.has(id));
+  if (removedRentals.length > 0) {
+    const { error: rDel } = await supabase
+      .from("rental_properties")
+      .delete()
+      .eq("household_id", householdId)
+      .in("id", removedRentals);
+    if (rDel) return { error: `Couldn't remove a rental — ${rDel.message}` };
+  }
+  for (const { id, ...row } of rentals) {
+    const { error: rErr } = id
+      ? await supabase
+          .from("rental_properties")
+          .update({ ...row, updated_at: stamp })
+          .eq("household_id", householdId)
+          .eq("id", id)
+      : await supabase.from("rental_properties").insert({ ...row, household_id: householdId });
+    if (rErr) return { error: `Couldn't save ${row.name} — ${rErr.message}` };
+  }
+
+  try {
+    await recomputeRetirementIncome(supabase, householdId);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Saved, but couldn't update the plan table." };
+  }
   revalidatePath("/networth");
   return { error: null };
+}
+
+const LINE_KINDS: IncomeLineKind[] = ["va", "social_security", "job", "spouse", "other"];
+
+// ---- Recompute the plan table from the retirement inputs.
+//
+// income_cents is each year's TOTAL take-home: the pay typed for the year
+// (work_income_cents, only before the military retirement year) plus every
+// income line paying that year, after SBP and tax. Future gains are the real
+// return on the year's opening balance, so a balance that is being spent down
+// earns less — and nothing once it is gone. The table is extended to the
+// plan-until age, carrying the last year's spending forward.
+//
+// Years before this one are history and are never touched; this year keeps
+// its own gains (the register is measuring them).
+async function recomputeRetirementIncome(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+) {
+  const thisYear = new Date().getFullYear();
+  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes, debtRes] = await Promise.all([
+    supabase.from("retirement_plan").select("*").eq("household_id", householdId).maybeSingle(),
+    supabase.from("retirement_income_lines").select("*").eq("household_id", householdId),
+    supabase
+      .from("networth_projection")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, one_off_cents, eoy_cents, tax_pct")
+      .eq("household_id", householdId)
+      .order("year"),
+    supabase.from("rental_properties").select("*").eq("household_id", householdId),
+    supabase.from("accounts").select("id, current_balance_cents").eq("household_id", householdId),
+    supabase
+      .from("debts")
+      .select("property_account_id, current_balance_cents")
+      .eq("household_id", householdId)
+      .not("property_account_id", "is", null)
+      .is("paid_off_at", null),
+    // Every open debt not tied to a rental (a rental's mortgage is paid out of
+    // its rent in the rental model, not out of household spending).
+    supabase
+      .from("debts")
+      .select("id, current_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, apr, promo_apr_ends_on, post_promo_apr, property_account_id, tracking_enabled")
+      .eq("household_id", householdId)
+      .is("paid_off_at", null)
+      .gt("current_balance_cents", 0),
+  ]);
+  if (debtRes.error) throw new Error(`Could not read the debts: ${debtRes.error.message}`);
+  if (loanRes.error) throw new Error(`Could not read the mortgages: ${loanRes.error.message}`);
+  if (rentalsRes.error) throw new Error(`Could not read the rentals: ${rentalsRes.error.message}`);
+  if (acctRes.error) throw new Error(`Could not read the accounts: ${acctRes.error.message}`);
+  if (planRes.error) throw new Error(`Could not read the retirement plan: ${planRes.error.message}`);
+  if (linesRes.error) throw new Error(`Could not read the income lines: ${linesRes.error.message}`);
+  if (rowsRes.error) throw new Error(`Could not read the projection: ${rowsRes.error.message}`);
+
+  const plan = planRes.data;
+  const rows = (rowsRes.data ?? []).map((r) => ({ ...r, one_off_cents: r.one_off_cents ?? 0 }));
+  if (!plan || rows.length === 0) return;
+
+  const lines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
+    id: l.id,
+    name: l.name,
+    kind: l.kind,
+    monthlyCents: l.monthly_cents,
+    startYear: l.start_year,
+    endYear: l.end_year,
+    taxable: l.taxable,
+  }));
+  const retireYear: number | null = plan.target_retire_year;
+  const pension = estimatePension(
+    {
+      retireYear,
+      serviceStartYear: plan.service_start_year,
+      high3MonthlyCents: plan.high3_monthly_cents,
+      inflationPct: Number(plan.inflation_pct ?? 2.5),
+      sbpEnabled: !!plan.sbp_enabled,
+      sbpPct: Number(plan.sbp_pct ?? 6.5),
+    },
+    thisYear,
+  );
+  const defaultTax = Number(plan.retirement_tax_pct ?? 12);
+  const inflationPct = Number(plan.inflation_pct ?? 2.5);
+  const balances = new Map((acctRes.data ?? []).map((a) => [a.id as string, Number(a.current_balance_cents ?? 0)]));
+  const loanByProperty = new Map<string, number>();
+  for (const d of loanRes.data ?? []) {
+    const id = d.property_account_id as string;
+    loanByProperty.set(id, (loanByProperty.get(id) ?? 0) + Number(d.current_balance_cents ?? 0));
+  }
+  const rentals = ((rentalsRes.data ?? []) as RentalRow[]).map((r) => toRentalProperty(r, balances, loanByProperty));
+  // Payments that stop once each debt is paid off, by year.
+  const lastPlanYear = plan.birth_year
+    ? plan.birth_year + Number(plan.longevity_age ?? 90)
+    : (rows.at(-1)?.year ?? thisYear);
+  const freedByYear = debtFreedByYear(
+    (debtRes.data ?? [])
+      .filter((d) => d.tracking_enabled !== false)
+      .filter(
+        (d) =>
+          !d.property_account_id ||
+          !((rentalsRes.data ?? []) as RentalRow[]).some((r) => r.property_account_id === d.property_account_id),
+      )
+      .map((d) => ({
+        id: d.id,
+        balanceCents: Number(d.current_balance_cents ?? 0),
+        paymentCents: Math.max(
+          0,
+          Math.max(Number(d.min_payment_cents ?? 0), Number(d.target_payment_cents ?? 0)) - Number(d.escrow_cents ?? 0),
+        ),
+        apr: Number(d.apr ?? 0),
+        promoEndsOn: d.promo_apr_ends_on ?? null,
+        postPromoApr: d.post_promo_apr == null ? null : Number(d.post_promo_apr),
+      })),
+    monthStart(),
+    thisYear + 1,
+    Math.max(lastPlanYear, rows.at(-1)?.year ?? thisYear),
+  );
+  const health = {
+    annualCents: plan.healthcare_annual_cents,
+    startAge: Number(plan.healthcare_start_age ?? 65),
+    growthPct: Number(plan.healthcare_growth_pct ?? 1.5),
+  };
+  const returnPct = Number(plan.real_return_pct ?? 5);
+
+  // Run to the plan-until age, carrying the last year forward.
+  const lastYear = plan.birth_year ? plan.birth_year + Number(plan.longevity_age ?? 90) : null;
+  const last = rows[rows.length - 1];
+  if (lastYear != null) {
+    for (let y = last.year + 1; y <= lastYear; y++) {
+      rows.push({
+        ...last,
+        year: y,
+        age: plan.birth_year ? y - plan.birth_year : last.age == null ? null : last.age + (y - last.year),
+        one_off_cents: 0,
+      });
+    }
+  }
+
+  const stamp = new Date().toISOString();
+  const out: Array<Record<string, unknown>> = [];
+  let carry: number | null = null;
+  for (const row of rows) {
+    if (row.year < thisYear) continue;
+    const boy: number = carry ?? row.boy_cents;
+    const work = retireYear == null || row.year < retireYear ? (row.work_income_cents ?? row.income_cents) : 0;
+    const taxPct = row.tax_pct == null ? defaultTax : Number(row.tax_pct);
+    const lineIncome = incomeForYear(row.year, pension, retireYear, lines, taxPct).afterTaxCents;
+    // Rentals: net rent is income; equity is part of net worth but earns no
+    // investment return — it grows by principal paid and appreciation, and a
+    // purchase moves the down payment out of savings (closing costs are gone).
+    const rent = rentalsForYear(rentals, row.year, thisYear, inflationPct, taxPct);
+    const income = work + lineIncome + rent.cashAfterTaxCents;
+    const baseSpend = row.base_spending_cents ?? row.spending_cents;
+    // This year is already in the register, so only later years drop.
+    const freed = row.year > thisYear ? freedByYear.get(row.year) ?? 0 : 0;
+    const spending = Math.max(0, baseSpend + healthcareForYear(row.year, plan.birth_year, health, thisYear) - freed);
+    const investable = boy - rent.equityStartCents;
+    const propertyEffect = rent.equityEndCents - rent.equityStartCents - rent.purchaseCashCents;
+    const growth =
+      row.year === thisYear
+        ? row.growth_cents
+        : (investable > 0 ? Math.round((investable * returnPct) / 100) : 0) + propertyEffect;
+    const eoy = boy + income - spending + growth + row.one_off_cents;
+    out.push({
+      household_id: householdId,
+      year: row.year,
+      age: row.age,
+      boy_cents: boy,
+      work_income_cents: row.work_income_cents ?? row.income_cents,
+      income_cents: income,
+      base_spending_cents: baseSpend,
+      spending_cents: spending,
+      debt_freed_cents: freed,
+      growth_cents: growth,
+      one_off_cents: row.one_off_cents,
+      eoy_cents: eoy,
+      tax_pct: row.tax_pct,
+      updated_at: stamp,
+    });
+    carry = eoy;
+  }
+  if (out.length === 0) return;
+
+  const { error } = await supabase
+    .from("networth_projection")
+    .upsert(out, { onConflict: "household_id,year" });
+  if (error) throw new Error(`Could not update the projection: ${error.message}`);
 }
 
 // ---- The year-by-year net worth projection (Victor's sheet, now data).
@@ -532,7 +978,9 @@ export async function seedProjection(seed: {
       age: birthYear ? year - birthYear : null,
       boy_cents: carry,
       income_cents: income,
+      work_income_cents: income,
       spending_cents: spending,
+      base_spending_cents: spending,
       growth_cents: 0,
       eoy_cents: eoy,
       updated_at: stamp,
@@ -568,7 +1016,7 @@ export async function appendProjectionYears(count: number = APPEND_YEARS) {
   const last = unwrap(
     await supabase
       .from("networth_projection")
-      .select("year, age, income_cents, spending_cents, growth_cents, eoy_cents")
+      .select("year, age, income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, eoy_cents, tax_pct")
       .eq("household_id", householdId)
       .order("year", { ascending: false })
       .limit(1)
@@ -598,8 +1046,11 @@ export async function appendProjectionYears(count: number = APPEND_YEARS) {
       age: last.age == null ? null : last.age + i,
       boy_cents: carry,
       income_cents: last.income_cents,
+      work_income_cents: last.work_income_cents ?? last.income_cents,
       spending_cents: last.spending_cents,
+      base_spending_cents: last.base_spending_cents ?? last.spending_cents,
       growth_cents: last.growth_cents,
+      tax_pct: last.tax_pct,
       eoy_cents: eoy,
       updated_at: stamp,
     });
@@ -610,6 +1061,11 @@ export async function appendProjectionYears(count: number = APPEND_YEARS) {
   if (error) {
     console.error("[appendProjectionYears]", error);
     return { error: `Couldn't add those years — ${error.message}` };
+  }
+  try {
+    await recomputeRetirementIncome(supabase, householdId);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Added, but couldn't update the plan table." };
   }
 
   revalidatePath("/networth");
@@ -627,9 +1083,16 @@ export async function saveProjectionYear(formData: FormData) {
   const ageRaw = String(formData.get("age") ?? "").trim();
   const age = ageRaw ? Number(ageRaw) : null;
 
+  // The typed income is the year's take-home PAY; retirement income lines are
+  // added on top by the recompute below.
   const income = cents("income");
   const spending = cents("spending");
   const growth = cents("growth");
+  const taxRaw = String(formData.get("taxPct") ?? "").trim();
+  const taxPct = taxRaw === "" ? null : Number(taxRaw);
+  if (taxPct != null && (!Number.isFinite(taxPct) || taxPct < 0 || taxPct > 60)) {
+    return { error: "Tax rate has to be between 0% and 60%." };
+  }
   // Signed, unlike the others: a windfall is positive, a house is negative.
   const oneOff = displayToCents(String(formData.get("oneOff") ?? "0"));
 
@@ -638,7 +1101,7 @@ export async function saveProjectionYear(formData: FormData) {
   const prev = unwrap(
     await supabase
       .from("networth_projection")
-      .select("income_cents, spending_cents, growth_cents")
+      .select("income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, tax_pct")
       .eq("household_id", householdId)
       .eq("year", year)
       .maybeSingle(),
@@ -654,9 +1117,12 @@ export async function saveProjectionYear(formData: FormData) {
       // it from the year before when the chain is rebuilt.
       boy_cents: cents("boy"),
       income_cents: income,
+      work_income_cents: income,
       spending_cents: spending,
+      base_spending_cents: spending,
       growth_cents: growth,
       one_off_cents: oneOff,
+      tax_pct: taxPct,
       eoy_cents: 0,
       updated_at: new Date().toISOString(),
     },
@@ -687,11 +1153,20 @@ export async function saveProjectionYear(formData: FormData) {
   // The one-off is never in here, whatever else is: a house bought in 2027 is
   // not a house bought every year to 2047.
   const carryForward = String(formData.get("carryForward") ?? "1") !== "0";
-  const carry: Record<string, number> = {};
+  const carry: Record<string, number | null> = {};
   if (carryForward) {
-    if (!prev || prev.income_cents !== income) carry.income_cents = income;
-    if (!prev || prev.spending_cents !== spending) carry.spending_cents = spending;
+    if (!prev || (prev.work_income_cents ?? prev.income_cents) !== income) {
+      carry.work_income_cents = income;
+      carry.income_cents = income;
+    }
+    if (!prev || (prev.base_spending_cents ?? prev.spending_cents) !== spending) {
+      carry.base_spending_cents = spending;
+      carry.spending_cents = spending;
+    }
     if (!prev || prev.growth_cents !== growth) carry.growth_cents = growth;
+    // A new tax rate is the new normal too (a rental, a business) until
+    // another year says otherwise.
+    if (!prev || (prev.tax_pct == null ? null : Number(prev.tax_pct)) !== taxPct) carry.tax_pct = taxPct;
   }
 
   if (Object.keys(carry).length > 0) {
@@ -708,6 +1183,7 @@ export async function saveProjectionYear(formData: FormData) {
 
   try {
     await rebuildProjectionChain(supabase, householdId, year);
+    await recomputeRetirementIncome(supabase, householdId);
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not rebuild the projection." };
   }
@@ -746,7 +1222,7 @@ export async function fillProjectionForward(fromYear: number) {
       .maybeSingle(),
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, spending_cents, growth_cents, one_off_cents, eoy_cents")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, one_off_cents, eoy_cents")
       .eq("household_id", householdId)
       .order("year"),
   ]);
@@ -805,8 +1281,11 @@ export async function fillProjectionForward(fromYear: number) {
   // because that is the column this exists to fix.
   for (const row of all.filter((r) => r.year > fromYear)) {
     const n = row.year - fromYear;
-    const income = Math.round(row.income_cents * Math.pow(1 + incomePct / 100, n));
-    const spending = Math.round(row.spending_cents * Math.pow(1 + inflationPct / 100, n));
+    // Drift scales the typed pay; retirement income lines are re-added by the
+    // recompute below, so they are never drifted twice.
+    const income = Math.round((row.work_income_cents ?? row.income_cents) * Math.pow(1 + incomePct / 100, n));
+    // Scales the typed spending; healthcare is re-added by the recompute.
+    const spending = Math.round((row.base_spending_cents ?? row.spending_cents) * Math.pow(1 + inflationPct / 100, n));
     const growth = Math.round((carry * returnPct) / 100);
     // A one-off is kept exactly as typed and never scaled: the drift rates say
     // how a salary or a grocery bill changes over time, and a house purchase
@@ -819,7 +1298,9 @@ export async function fillProjectionForward(fromYear: number) {
       age: row.age,
       boy_cents: carry,
       income_cents: income,
+      work_income_cents: income,
       spending_cents: spending,
+      base_spending_cents: spending,
       growth_cents: growth,
       one_off_cents: oneOff,
       eoy_cents: eoy,
@@ -836,6 +1317,11 @@ export async function fillProjectionForward(fromYear: number) {
       console.error("[fillProjectionForward]", error);
       return { error: `Couldn't rebuild the projection — ${error.message}` };
     }
+  }
+  try {
+    await recomputeRetirementIncome(supabase, householdId);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Rebuilt, but couldn't add retirement income." };
   }
 
   revalidatePath("/networth");

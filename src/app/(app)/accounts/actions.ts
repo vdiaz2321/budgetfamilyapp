@@ -342,9 +342,44 @@ export async function addAccount(formData: FormData) {
     }
   }
 
+  if (isDebtAccount && inserted?.id && formData.has("propertyAccountId")) {
+    const linkError = await linkLoanToProperty(supabase, householdId, inserted.id, formData);
+    if (linkError) return { error: `The loan was saved, but ${linkError}`, id: inserted.id };
+  }
+
   await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
   return { error: null, id: inserted?.id ?? null };
+}
+
+// Which property a mortgage is for — stored on its debt row, the one liability
+// ledger. Linked, the loan counts against net worth (lib/net-worth.ts).
+async function linkLoanToProperty(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+  loanAccountId: string,
+  formData: FormData,
+): Promise<string | null> {
+  const propertyId = String(formData.get("propertyAccountId") ?? "").trim() || null;
+  if (propertyId) {
+    const property = unwrap(
+      await supabase
+        .from("accounts")
+        .select("id")
+        .eq("household_id", householdId)
+        .eq("id", propertyId)
+        .eq("kind", "property")
+        .maybeSingle(),
+      "accounts",
+    );
+    if (!property) return "that property couldn't be found.";
+  }
+  const { error } = await supabase
+    .from("debts")
+    .update({ property_account_id: propertyId })
+    .eq("household_id", householdId)
+    .eq("account_id", loanAccountId);
+  return error ? `its property link couldn't be saved — ${error.message}` : null;
 }
 
 // Credit cards are created with their rewards details in one save so the
@@ -427,6 +462,11 @@ export async function updateAccount(formData: FormData) {
     .update(update)
     .eq("id", id)
     .eq("household_id", householdId);
+
+  if (formData.has("propertyAccountId")) {
+    const linkError = await linkLoanToProperty(supabase, householdId, id, formData);
+    if (linkError) console.error("[updateAccount property link]", linkError);
+  }
 
   await captureSnapshots(supabase, householdId, { force: true });
   revalidate();
