@@ -13,7 +13,7 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { CurrencySelect, Field, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
+import { CurrencySelect, Field, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -147,7 +147,9 @@ export function FlightModal({
   });
   // Blank means "the cash tickets' fares". A saved figure that differs from
   // that (taxes added on an award ticket) shows.
-  const [pocketCost, setPocketCost] = useState(() => {
+  // Pocket cost is never typed: it is the linked transactions' total, or
+  // failing that the cash fares (a figure saved by hand earlier is kept).
+  const [pocketCost] = useState(() => {
     if (!flight) return "";
     const cashFares = flight.passengers.reduce((sum, p) => sum + (p.pointsUsed ? 0 : p.fareCents), 0);
     return flight.pocketCostCents !== cashFares ? centsToDisplay(flight.pocketCostCents) : "";
@@ -697,12 +699,12 @@ export function FlightModal({
           </Field>
           <Field label={`Pocket cost (${currencySymbol(currency)})`}>
             <input
-              value={pocketCost}
-              onChange={(e) => setPocketCost(e.target.value)}
-              placeholder={centsToDisplay(pocketCents)}
-              inputMode="decimal"
-              className={inputClass}
+              value={centsToDisplay(flight?.paidCents ?? pocketCents)}
+              readOnly
+              tabIndex={-1}
+              className={`${inputClass} opacity-70`}
             />
+            <PaidNote linked={flight?.paidCents != null} />
           </Field>
         </div>
 

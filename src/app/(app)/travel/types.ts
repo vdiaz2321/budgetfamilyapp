@@ -25,6 +25,9 @@ export type TravelStay = {
   hotelCreditCents: number;
   hotelCostCents: number;
   pocketCostCents: number;
+  /** Linked transactions added up, or null/absent when none are linked —
+   *  then Pocket cost comes from them and the forms show it locked. */
+  paidCents?: number | null;
   pocketPaidWith: PocketPaidWith;
   remarks: string | null;
   // Breakfast came with the room. Lived inside `remarks` on the imported
@@ -172,6 +175,9 @@ export type TravelFlight = {
   /** The second currency its figures are also kept in ("EUR", "GBP", …). */
   foreignCurrency: string;
   pocketCostCents: number;
+  /** Linked transactions added up, or null/absent when none are linked —
+   *  then Pocket cost comes from them and the forms show it locked. */
+  paidCents?: number | null;
   remarks: string | null;
   cancelledAt: string | null;
   rewardActivityId: string | null;
@@ -215,6 +221,9 @@ export type TravelCar = {
   plannedCostForeignCents: number | null;
   foreignCurrency: string;
   pocketCostCents: number;
+  /** Linked transactions added up, or null/absent when none are linked —
+   *  then Pocket cost comes from them and the forms show it locked. */
+  paidCents?: number | null;
   remarks: string | null;
   cancelledAt: string | null;
   rewardActivityId: string | null;

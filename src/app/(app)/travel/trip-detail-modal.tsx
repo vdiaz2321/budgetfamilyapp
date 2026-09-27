@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { formatForeignWhole, formatMoneyWhole } from "@/lib/money";
@@ -13,6 +12,54 @@ import { MatchPurchasesModal } from "./match-purchases-modal";
 
 const DASH = "—";
 const KIND_LABEL = { flight: "Flight", stay: "Stay", car: "Rental" } as const;
+
+// Each booking kind gets its own tint + icon so Flight / Stay / Rental tell
+// apart at a glance. Sky, teal and rose — no purple or orange.
+const KIND_STYLE = {
+  flight: "bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200",
+  stay: "bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200",
+  car: "bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-200",
+} as const;
+const KIND_ICON = {
+  // plane
+  flight: <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />,
+  // bed
+  stay: <><path d="M2 4v16" /><path d="M2 8h18a2 2 0 0 1 2 2v10" /><path d="M2 17h20" /><path d="M6 8v9" /></>,
+  // car
+  car: <><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9L18 10l-2.7-3.6A2 2 0 0 0 13.7 6H10.3a2 2 0 0 0-1.6.8L6 10l-2.5 1.1C2.7 11.3 2 12.1 2 13v3c0 .6.4 1 1 1h2" /><circle cx="7" cy="17" r="2" /><circle cx="17" cy="17" r="2" /><path d="M9 17h6" /></>,
+} as const;
+
+// The chip with the booking's first day under it ("Sun"), read at a glance
+// down the column.
+function KindDay({ booking, className = "" }: { booking: Booking; className?: string }) {
+  const day = new Date(`${booking.start}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+  return (
+    <span className={`flex shrink-0 flex-col items-center gap-0.5 ${className}`}>
+      <KindChip kind={booking.kind} />
+      <span className="text-[10px] font-semibold text-muted">{day}</span>
+    </span>
+  );
+}
+
+// The booking's own remarks, under its date line.
+function bookingRemarks(booking: Booking) {
+  return (booking.kind === "flight" ? booking.flight : booking.kind === "stay" ? booking.stay : booking.car).remarks?.trim() || null;
+}
+function BookingRemarks({ booking }: { booking: Booking }) {
+  const remarks = bookingRemarks(booking);
+  return remarks ? <span className="whitespace-pre-line text-[11px] text-foreground/80">{remarks}</span> : null;
+}
+
+function KindChip({ kind, className = "" }: { kind: keyof typeof KIND_LABEL; className?: string }) {
+  return (
+    <span className={`inline-flex w-16 shrink-0 items-center justify-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold ${KIND_STYLE[kind]} ${className}`}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        {KIND_ICON[kind]}
+      </svg>
+      {KIND_LABEL[kind]}
+    </span>
+  );
+}
 // A section's action, sat right beside its heading. Bordered and on the page
 // background so it reads as a button, not a faint outline. Hover is a light
 // blue wash — grey read as disabled, black as too heavy, and Victor rejects
@@ -49,7 +96,6 @@ export function TripDetailModal({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
-  const [editingNotes, setEditingNotes] = useState(false);
   const [matching, setMatching] = useState(false);
   // The Spending row whose tagged purchases are listed under it.
   const [openRow, setOpenRow] = useState<string | null>(null);
@@ -122,9 +168,6 @@ export function TripDetailModal({
       .filter((b) => !b.cancelled && (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate)
       .reduce((sum, b) => sum + b.pocket, 0);
   const budgetMonth = t.start ? t.start.slice(0, 7) : null;
-  const budgetMonthLabel = budgetMonth
-    ? new Date(`${budgetMonth}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })
-    : null;
 
   function run(action: () => Promise<{ error: string | null }>, after: () => void) {
     start(async () => {
@@ -156,11 +199,26 @@ export function TripDetailModal({
         </select>
       }
       onClose={onClose}
-      className="sm:max-w-4xl"
+      className="sm:max-w-[min(94vw,68rem)]"
       mobileAlign="top"
     >
       <div className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+          {mode !== "edit" ? (
+            <button
+              type="button"
+              onClick={() => {
+                setName(t.trip.name);
+                setStartOn(t.trip.startOn ?? "");
+                setEndOn(t.trip.endOn ?? "");
+                setNotes(t.trip.notes ?? "");
+                setMode("edit");
+              }}
+              className={`${SECTION_BUTTON} text-foreground`}
+            >
+              Edit trip
+            </button>
+          ) : null}
           {t.start ? (
             <span className="tabular-nums">
               {sheetDateRange(t.start, t.end)}
@@ -172,55 +230,48 @@ export function TripDetailModal({
           {t.pax ? <span>{t.pax} pax</span> : null}
           {budgetPlanCents > 0 ? (
             budgetMonth ? (
-              <Link href={`/budget?month=${budgetMonth}`} className="font-semibold text-foreground underline decoration-line underline-offset-2 hover:text-sky-700 dark:hover:text-sky-300">
-                {formatMoneyWhole(budgetPlanCents, currency)} planned on Budget · {budgetMonthLabel} →
-              </Link>
+              <span className="font-semibold text-foreground">{formatMoneyWhole(budgetPlanCents, currency)} planned</span>
             ) : (
               <span className="font-semibold text-negative">Add dates to put its plan on the Budget</span>
             )
           ) : null}
-          {!editingNotes ? (
-            <button type="button" onClick={() => { setNotes(t.trip.notes ?? ""); setEditingNotes(true); }} className={`${SECTION_BUTTON} text-foreground`}>
-              {t.trip.notes ? "Edit notes" : "+ Add notes"}
-            </button>
-          ) : null}
         </div>
 
-        {/* ---- Notes: edited in place, right where they are read; the Edit
-             notes button sits on the dates line above. */}
-        {editingNotes || t.trip.notes ? (
-        <section>
-          {editingNotes ? (
+        {/* ---- Edit trip (name, dates, notes) opens right under the button
+             that starts it; otherwise the notes read here. */}
+        {mode === "edit" ? (
+          <section>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                run(
-                  () => updateTrip(t.trip.id, { name: t.trip.name, startOn: t.trip.startOn ?? "", endOn: t.trip.endOn ?? "", notes }),
-                  () => setEditingNotes(false),
-                );
+                run(() => updateTrip(t.trip.id, { name, startOn, endOn, notes }), () => setMode("view"));
               }}
-              className="space-y-2"
+              className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_9.5rem_9.5rem]"
             >
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={5}
-                autoFocus
-                className={`${inputClass} resize-y`}
-              />
-              <div className="flex flex-wrap gap-2">
-                <button type="submit" disabled={pending} className="rounded-md px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60" style={{ backgroundColor: "var(--viz-income)" }}>
-                  {pending ? "Saving…" : "Save notes"}
+              <Field label="Trip name" className="col-span-2 sm:col-span-1">
+                <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Starts">
+                <input type="date" value={startOn} onChange={(e) => setStartOn(e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Ends">
+                <input type="date" value={endOn} onChange={(e) => setEndOn(e.target.value)} className={inputClass} />
+              </Field>
+              <Field label="Notes" className="col-span-2 sm:col-span-3">
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={`${inputClass} resize-y`} />
+              </Field>
+              <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3">
+                <button type="submit" disabled={pending} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                  {pending ? "Saving…" : "Save trip"}
                 </button>
-                <button type="button" onClick={() => setEditingNotes(false)} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground">
+                <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground">
                   Cancel
                 </button>
               </div>
             </form>
-          ) : (
-            <p className="whitespace-pre-line text-xs">{t.trip.notes}</p>
-          )}
-        </section>
+          </section>
+        ) : t.trip.notes ? (
+          <p className="whitespace-pre-line text-xs">{t.trip.notes}</p>
         ) : null}
 
         {/* What the trip came to, left to right as it adds up: the two parts,
@@ -228,22 +279,22 @@ export function TripDetailModal({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {/* Each box counts only money that left the wallet; what's still
               a plan (unbought bookings, spending with no actual yet) sits
-              under it as "+ $X planned" — same split as the Combined Log. */}
+              under it as "Plan left: $X" — a paid item drops out of the plan. */}
           <Stat
-            label="Bookings"
+            label="Flights/Stays/Rentals"
             value={formatMoneyWhole(t.flights + t.hotels + t.rentals - t.planOnly.bookings, currency)}
-            note={t.planOnly.bookings > 0 ? `+ ${formatMoneyWhole(t.planOnly.bookings, currency)} planned` : "flights · stays · rental"}
+            note={t.planOnly.bookings > 0 ? `Plan left: ${formatMoneyWhole(t.planOnly.bookings, currency)}` : "flights · stays · rental"}
           />
           <Stat
             label="Spending"
             value={formatMoneyWhole(t.miscTotal - t.planOnly.miscTotal, currency)}
-            note={t.planOnly.miscTotal > 0 ? `+ ${formatMoneyWhole(t.planOnly.miscTotal, currency)} planned` : "day to day"}
+            note={t.planOnly.miscTotal > 0 ? `Plan left: ${formatMoneyWhole(t.planOnly.miscTotal, currency)}` : "day to day"}
           />
           <Stat
             label="Total spent"
             value={formatMoneyWhole(t.spent, currency)}
             className={t.spent > 0 ? "text-negative" : "text-muted"}
-            note={t.planOnly.total > 0 ? `+ ${formatMoneyWhole(t.planOnly.total, currency)} planned` : undefined}
+            note={t.planOnly.total > 0 ? `Plan left: ${formatMoneyWhole(t.planOnly.total, currency)}` : undefined}
           />
           <Stat
             label={t.points > 0 ? "Pts used · saved" : "Saved"}
@@ -255,7 +306,7 @@ export function TripDetailModal({
         {/* ---- Bookings */}
         <section>
           <div className="mb-1 flex items-center gap-3">
-            <h3 className="text-xs font-bold uppercase tracking-wide">Bookings</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wide">Flights/Stays/Rentals</h3>
             <button
               type="button"
               onClick={onAddBooking}
@@ -280,9 +331,7 @@ export function TripDetailModal({
                   <li key={`${b.kind}-${b.id}`} className={b.cancelled ? "opacity-60" : ""}>
                     <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-black/[0.04] dark:active:bg-white/[0.06]">
                       <span className="flex min-w-0 items-start gap-2">
-                        <span className="mt-0.5 w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
-                          {KIND_LABEL[b.kind]}
-                        </span>
+                        <KindDay booking={b} className="mt-0.5" />
                         <span className="flex min-w-0 flex-col">
                           <span className="text-[13px] font-semibold">
                             {b.title}
@@ -291,6 +340,7 @@ export function TripDetailModal({
                           <span className="text-[11px] text-muted">
                             <span className="tabular-nums">{sheetDateRange(b.start, b.end)}</span> · {b.detail}
                           </span>
+                          <BookingRemarks booking={b} />
                         </span>
                       </span>
                       <MobileFigures
@@ -379,28 +429,31 @@ export function TripDetailModal({
                 </colgroup>
                 <thead>
                   <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
-                    <th className="px-3 py-1.5 text-center font-semibold">Booking</th>
+                    <th className="px-3 py-1.5 text-center font-semibold">Flight/Stay/Rental</th>
                     <th className="px-3 py-1.5 text-center font-semibold">Planned</th>
                     <th className="px-3 py-1.5 text-center font-semibold">Spent</th>
                     <th className="px-3 py-1.5 text-center font-semibold">Difference</th>
                   </tr>
                 </thead>
-                <tbody>
+                {/* One <tbody> per booking: its figures row, then its remarks
+                    on a row of their own spanning every column — so a long
+                    remark runs out under the figures instead of wrapping
+                    inside the name column. Hover and click cover both rows. */}
                   {t.bookings.map((b) => {
                     const { planned, actual } = bookingPlanActual(b);
                     const fx = bookingForeign(b);
                     const diff = planned != null && actual != null ? planned - actual : null;
+                    const remarks = bookingRemarks(b);
                     return (
-                      <tr
+                      <tbody
                         key={`${b.kind}-${b.id}`}
                         onClick={() => onEditBooking(b)}
-                        className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${b.cancelled ? "opacity-60" : ""}`}
+                        className={`cursor-pointer border-b border-line/60 transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${b.cancelled ? "opacity-60" : ""}`}
                       >
+                      <tr className={remarks ? "[&>td]:pb-0" : ""}>
                         <td className="px-3 py-2 text-left">
-                          <button type="button" onClick={(e) => { e.stopPropagation(); onEditBooking(b); }} className="flex min-w-0 items-center gap-2 text-left">
-                            <span className="w-14 shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-center text-[10px] font-semibold text-slate-600 dark:bg-neutral-800 dark:text-neutral-300">
-                              {KIND_LABEL[b.kind]}
-                            </span>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); onEditBooking(b); }} className="flex min-w-0 items-start gap-2 text-left">
+                            <KindDay booking={b} />
                             <span className="flex min-w-0 flex-col">
                               <span className="text-[13px] font-semibold">
                                 {b.title}
@@ -440,9 +493,16 @@ export function TripDetailModal({
                           ) : null}
                         </td>
                       </tr>
+                      {remarks ? (
+                        <tr>
+                          <td colSpan={4} className="whitespace-pre-line px-3 pb-2 pl-[5.25rem] text-[11px] text-foreground/80">
+                            {remarks}
+                          </td>
+                        </tr>
+                      ) : null}
+                      </tbody>
                     );
                   })}
-                </tbody>
                 {bookingTotals.rows > 1 ? (
                   <tfoot>
                     <tr className="border-t-2 border-line font-bold">
@@ -659,36 +719,7 @@ export function TripDetailModal({
 
         {/* ---- The trip itself */}
         <section className="border-t border-line pt-3">
-          {mode === "edit" ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                run(() => updateTrip(t.trip.id, { name, startOn, endOn, notes }), () => setMode("view"));
-              }}
-              className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_9.5rem_9.5rem]"
-            >
-              <Field label="Trip name" className="col-span-2 sm:col-span-1">
-                <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
-              </Field>
-              <Field label="Starts">
-                <input type="date" value={startOn} onChange={(e) => setStartOn(e.target.value)} className={inputClass} />
-              </Field>
-              <Field label="Ends">
-                <input type="date" value={endOn} onChange={(e) => setEndOn(e.target.value)} className={inputClass} />
-              </Field>
-              <Field label="Notes" className="col-span-2 sm:col-span-3">
-                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} className={`${inputClass} resize-y`} />
-              </Field>
-              <div className="col-span-2 flex flex-wrap gap-2 sm:col-span-3">
-                <button type="submit" disabled={pending} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
-                  {pending ? "Saving…" : "Save trip"}
-                </button>
-                <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : mode === "delete" ? (
+          {mode === "delete" ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-muted">Delete this trip and everything in it — its stays, flights, rentals and spending?</span>
               <button
@@ -705,13 +736,13 @@ export function TripDetailModal({
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => { setNotes(t.trip.notes ?? ""); setMode("edit"); }}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-              >
-                Edit trip
-              </button>
+              {/* Hidden while Edit trip is open: Close doesn't save, so the
+                  way out of that form is Save trip or Cancel. */}
+              {mode !== "edit" ? (
+                <button type="button" onClick={onClose} className="rounded-md border border-black/25 bg-background px-4 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40">
+                  Close
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setMode("delete")}

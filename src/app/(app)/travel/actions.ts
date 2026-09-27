@@ -8,6 +8,7 @@ import { unwrap } from "@/lib/supabase-result";
 import { centsPerPointToMicros } from "./points-value";
 import { syncFreeNightStamp, syncRewardLedger, type RewardDraw } from "./reward-ledger";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
+import { linkedPaidCents } from "./booking-payments";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -67,7 +68,10 @@ export async function saveTravelStay(formData: FormData) {
   // Booked once a Spent figure or the reservation date is in (isPlannedOnly
   // in travel-form); a plan until then. A plan takes nothing — points, night
   // credit or certificate — off a card.
-  const isEstimate = money("pocketCost") == null && money("spentForeign") == null && !reservedOn;
+  // Linked transactions set the pocket cost and mark it booked; a form save
+  // keeps both rather than undoing what the payments did.
+  const paid = id ? await linkedPaidCents(supabase, householdId, "stay", id) : null;
+  const isEstimate = money("pocketCost") == null && money("spentForeign") == null && !reservedOn && paid == null;
   const plannedCost = money("plannedCost");
   const pointsDrawn = pointsUsed && !isEstimate ? pointsCost : 0;
   const hotelCredit = Math.max(0, displayToCents(String(formData.get("hotelCredit") ?? "0")));
@@ -75,7 +79,7 @@ export async function saveTravelStay(formData: FormData) {
   const certificateUsed = freeNightUsed && !isEstimate;
   // The pocket column holds what the stay costs now — the plan until it is
   // booked — so every total that reads it is unchanged.
-  const pocketCost = (isEstimate ? plannedCost : money("pocketCost")) ?? 0;
+  const pocketCost = paid ?? (isEstimate ? plannedCost : money("pocketCost")) ?? 0;
   const foreignCurrency = String(formData.get("foreignCurrency") ?? "");
 
   // How the out-of-pocket half was settled is not a choice any more: it is
@@ -189,7 +193,8 @@ export async function saveTravelStay(formData: FormData) {
 
     const { error } = await supabase
       .from("travel_stays")
-      .update({ ...row, reward_activity_id: activityId, payment_restore: null })
+      // Payments still linked: keep what unlinking them would restore.
+      .update({ ...row, reward_activity_id: activityId, ...(paid == null ? { payment_restore: null } : {}) })
       .eq("id", id)
       .eq("household_id", householdId);
     if (error) {

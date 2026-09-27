@@ -7,7 +7,7 @@ import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import {
-  CurrencySelect, Field, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote,
+  CurrencySelect, Field, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote,
   type PlanSpent, type PlanSpentSlot,
 } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
@@ -77,7 +77,9 @@ export function CarModal({
     const implied = car.pointsCost > 0 && car.costCents > 0 ? Math.round((car.costCents / car.pointsCost) * 10_000) : null;
     return car.pointsValueMicros !== implied ? rateDisplay(car.pointsValueMicros) : "";
   });
-  const [pocketCost, setPocketCost] = useState(() => {
+  // Pocket cost is never typed: it is the linked transactions' total, or
+  // failing that the cost (a figure saved by hand earlier is kept).
+  const [pocketCost] = useState(() => {
     if (!car) return "";
     const expected = car.pointsUsed ? 0 : car.costCents;
     return car.pocketCostCents !== expected ? centsToDisplay(car.pocketCostCents) : "";
@@ -281,12 +283,12 @@ export function CarModal({
             </Field>
             <Field label={`Pocket cost (${currencySymbol(currency)})`}>
               <input
-                value={pocketCost}
-                onChange={(e) => setPocketCost(e.target.value)}
-                placeholder={centsToDisplay(pocketCents)}
-                inputMode="decimal"
-                className={inputClass}
+                value={centsToDisplay(car?.paidCents ?? pocketCents)}
+                readOnly
+                tabIndex={-1}
+                className={`${inputClass} opacity-70`}
               />
+              <PaidNote linked={car?.paidCents != null} />
             </Field>
           </div>
 
@@ -316,7 +318,7 @@ export function CarModal({
         {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
-            Pocket cost <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(pocketCents, currency)}</span>
+            Pocket cost <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(car?.paidCents ?? pocketCents, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {car ? (

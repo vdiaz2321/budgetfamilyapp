@@ -126,6 +126,22 @@ function coveredBy(stay: TravelStay): string {
   return DASH;
 }
 
+// Upcoming-reservation figures sit in fixed-width slots from sm up, so each
+// figure lines up in a column down the list whatever the value's length. A
+// slot is always drawn (empty when there's nothing to show) so a missing
+// figure never shifts the ones beside it.
+const SLOT_DAYS = "sm:w-28";
+const SLOT_MONEY = "sm:w-36";
+const SLOT_PTS = "sm:w-52";
+
+// Points and/or hotel credit that paid for a booking — blank until used.
+function ptsCreditUsed(points: number, pointsUsed: boolean, creditCents: number, currency: string): string {
+  const parts: string[] = [];
+  if (pointsUsed && points > 0) parts.push(`${points.toLocaleString()} pts`);
+  if (creditCents > 0) parts.push(`${formatMoneyWhole(creditCents, currency)} credit`);
+  return parts.join(" + ");
+}
+
 export function TravelBoard({
   stays,
   flights,
@@ -788,7 +804,7 @@ export function TravelBoard({
         <button
           type="button"
           onClick={() => setEditing(s)}
-          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
         >
           {/* Two lines, not one. Sharing a line with the trip
               details left the name a `truncate` box ~30px wide
@@ -796,9 +812,9 @@ export function TravelBoard({
               Royal" rendered as "Hot…". The name owns its line
               and the details sit under it, the way the mobile
               card already reads. */}
-          <span className="flex min-w-0 flex-1 flex-col gap-y-0.5">
-            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="text-sm font-semibold">{s.propertyName}</span>
+          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
+              <span className="min-w-0 text-sm font-semibold sm:truncate">{s.propertyName}</span>
               {/* Same chip as the card panel's "Owner:" / "Bank:". */}
               {s.brand ? (
                 <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
@@ -812,7 +828,6 @@ export function TravelBoard({
               {s.city ? <span>{s.city}</span> : null}
               {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
             </span>
-            <Remarks text={s.remarks} />
           </span>
           {/* At 375px these wrap under the name; at sm+ they hold
               the right-hand end of the single line. */}
@@ -822,11 +837,13 @@ export function TravelBoard({
               value={String(daysUntil(today, s.checkIn))}
               tone=""
               style={{ color: "var(--viz-savings)" }}
+              className={SLOT_DAYS}
             />
             <Figure
               label="Hotel cost"
               value={s.hotelCostCents > 0 ? formatMoneyWhole(s.hotelCostCents, currency) : DASH}
               tone=""
+              className={SLOT_MONEY}
             />
             <Figure
               label="Pocket cost"
@@ -836,8 +853,17 @@ export function TravelBoard({
                   : coveredBy(s)
               }
               tone={s.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+              className={SLOT_MONEY}
+            />
+            <Figure
+              label="Pts/Credit used"
+              value={ptsCreditUsed(s.pointsCost, s.pointsUsed, s.hotelCreditCents, currency)}
+              tone=""
+              style={{ color: "var(--viz-savings)" }}
+              className={`${SLOT_PTS} ${ptsCreditUsed(s.pointsCost, s.pointsUsed, s.hotelCreditCents, currency) ? "" : "max-sm:hidden"}`}
             />
           </span>
+          <Remarks text={s.remarks} />
         </button>
       </li>
     ))}
@@ -856,10 +882,10 @@ export function TravelBoard({
           <button
             type="button"
             onClick={() => setEditingFlight(f)}
-            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
           >
             <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
-              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
                 <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
                 <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                   {f.airline}
@@ -874,20 +900,27 @@ export function TravelBoard({
                 {next.fromPlace && next.toPlace ? <span>{next.fromPlace} → {next.toPlace}</span> : null}
                 <span className="tabular-nums">{f.passengers.length} pax</span>
               </span>
-              <Remarks text={f.remarks} />
             </span>
             <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
-              <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} />
-              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoneyWhole(f.flightCostCents, currency) : DASH} tone="" />
-              {/* Only when points paid part of it — otherwise it repeats the flight cost. */}
-              {f.pocketCostCents !== f.flightCostCents ? (
-                <Figure
-                  label="Pocket cost"
-                  value={f.pocketCostCents > 0 ? formatMoneyWhole(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
-                  tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-                />
-              ) : null}
+              <Figure label="Days away" value={String(daysUntil(today, next.flightOn))} tone="" style={{ color: "var(--viz-savings)" }} className={SLOT_DAYS} />
+              <Figure label="Flight cost" value={f.flightCostCents > 0 ? formatMoneyWhole(f.flightCostCents, currency) : DASH} tone="" className={SLOT_MONEY} />
+              {/* Only when points paid part of it — otherwise it repeats the
+                  flight cost. Hidden, not removed, so the slots stay lined up. */}
+              <Figure
+                label="Pocket cost"
+                value={f.pocketCostCents > 0 ? formatMoneyWhole(f.pocketCostCents, currency) : f.pointsUsed ? "Points" : DASH}
+                tone={f.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+                className={`${SLOT_MONEY} ${f.pocketCostCents !== f.flightCostCents ? "" : "max-sm:hidden sm:invisible"}`}
+              />
+              <Figure
+                label="Pts used"
+                value={ptsCreditUsed(f.pointsCost, f.pointsUsed, 0, currency)}
+                tone=""
+                style={{ color: "var(--viz-savings)" }}
+                className={`${SLOT_PTS} ${ptsCreditUsed(f.pointsCost, f.pointsUsed, 0, currency) ? "" : "max-sm:hidden"}`}
+              />
             </span>
+            <Remarks text={f.remarks} />
           </button>
         </li>
       );
@@ -901,7 +934,7 @@ export function TravelBoard({
         <button
           type="button"
           onClick={() => setEditingCar(c)}
-          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:flex-nowrap sm:px-6"
+          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
         >
           <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
             <span className="flex min-w-0 items-center gap-1.5">
@@ -918,7 +951,6 @@ export function TravelBoard({
               </span>
               {c.pickupPlace ? <span>{c.pickupPlace}</span> : null}
             </span>
-            <Remarks text={c.remarks} />
           </span>
           <span className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1 sm:shrink-0 sm:gap-x-4">
             {/* Already picked up: nothing left to count down. */}
@@ -927,16 +959,24 @@ export function TravelBoard({
               value={c.pickupOn >= today ? String(daysUntil(today, c.pickupOn)) : "Out now"}
               tone=""
               style={{ color: "var(--viz-savings)" }}
+              className={SLOT_DAYS}
             />
-            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoneyWhole(c.costCents, currency) : DASH} tone="" />
-            {c.pocketCostCents !== c.costCents ? (
-              <Figure
-                label="Pocket cost"
-                value={c.pocketCostCents > 0 ? formatMoneyWhole(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
-                tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
-              />
-            ) : null}
+            <Figure label="Rental cost" value={c.costCents > 0 ? formatMoneyWhole(c.costCents, currency) : DASH} tone="" className={SLOT_MONEY} />
+            <Figure
+              label="Pocket cost"
+              value={c.pocketCostCents > 0 ? formatMoneyWhole(c.pocketCostCents, currency) : c.pointsUsed ? "Points" : DASH}
+              tone={c.pocketCostCents > 0 ? "text-negative" : "text-muted"}
+              className={`${SLOT_MONEY} ${c.pocketCostCents !== c.costCents ? "" : "max-sm:hidden sm:invisible"}`}
+            />
+            <Figure
+              label="Pts used"
+              value={ptsCreditUsed(c.pointsCost, c.pointsUsed, 0, currency)}
+              tone=""
+              style={{ color: "var(--viz-savings)" }}
+              className={`${SLOT_PTS} ${ptsCreditUsed(c.pointsCost, c.pointsUsed, 0, currency) ? "" : "max-sm:hidden"}`}
+            />
           </span>
+          <Remarks text={c.remarks} />
         </button>
       </li>
     ))}
@@ -1357,7 +1397,9 @@ export function TravelBoard({
             expandedUpcoming === "hotels" ? "Hotel Reservations" : expandedUpcoming === "flights" ? "Flight Reservations" : "Rental Reservations"
           }
           onClose={() => setExpandedUpcoming(null)}
-          className="sm:max-w-5xl"
+          // Room for the name + its chip on one line beside four figure
+          // columns; grows with the window up to 72rem.
+          className="sm:max-w-[min(94vw,72rem)]"
         >
           {expandedUpcoming === "hotels" ? hotelRows : expandedUpcoming === "flights" ? flightRows : carRows}
         </ModalShell>
@@ -1465,9 +1507,12 @@ export function TravelBoard({
 }
 
 // A booking's remarks, under its details — only when there are any.
+// Its own full-width line under the row (basis-full wraps it below the
+// figures), so a long remark runs the width of the list instead of wrapping
+// inside the name column.
 function Remarks({ text }: { text: string | null }) {
   if (!text?.trim()) return null;
-  return <span className="line-clamp-2 text-[11px] italic text-muted">{text}</span>;
+  return <span className="line-clamp-2 basis-full text-[11px] italic text-muted">{text}</span>;
 }
 
 // The heading over one group in the upcoming card: what the group holds, and

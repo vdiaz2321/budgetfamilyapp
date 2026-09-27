@@ -67,6 +67,28 @@ export async function resolveBookingRef(
 }
 
 /**
+ * What the transactions linked to a booking add up to (a refund comes off),
+ * or null when none are linked. A booking with linked payments takes its
+ * Pocket cost from them — the booking forms show it locked, and saving a form
+ * keeps this total rather than whatever the form sent.
+ */
+export async function linkedPaidCents(
+  supabase: SupabaseClient,
+  householdId: string,
+  kind: BookingKind,
+  id: string,
+): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("amount_cents")
+    .eq("household_id", householdId)
+    .eq(BOOKING_COLUMN[kind], id);
+  if (error) throw new Error(`Couldn't read the booking's payments — ${error.message}`);
+  if (!data || data.length === 0) return null;
+  return Math.max(0, data.reduce((sum, p) => sum + Number(p.amount_cents), 0));
+}
+
+/**
  * The booking as it stood just before its first linked payment — kept in the
  * booking's `payment_restore` column so removing the last payment can put it
  * back. NULL there means the figures are the user's own (never linked, or saved

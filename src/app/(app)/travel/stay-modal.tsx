@@ -155,7 +155,8 @@ export function StayModal({
   const [fig, setFig] = useState<PlanSpent>(() => ({
     planned: money((stay?.isEstimate ? stay.pocketCostCents : stay?.plannedCostCents) ?? undefined),
     plannedForeign: money((stay?.isEstimate ? stay.costForeignCents : stay?.plannedCostForeignCents) ?? undefined),
-    spent: stay?.isEstimate ? "" : money(stay?.pocketCostCents),
+    // Linked transactions are the spent figure once there are any.
+    spent: stay?.paidCents != null ? money(stay.paidCents) : stay?.isEstimate ? "" : money(stay?.pocketCostCents),
     spentForeign: stay?.isEstimate ? "" : money(stay?.costForeignCents ?? undefined),
   }));
   const [foreignCurrency, setForeignCurrency] = useState(base?.foreignCurrency ?? "EUR");
@@ -431,6 +432,7 @@ export function StayModal({
             currency={currency}
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
+            spentLocked={stay?.paidCents != null}
           />
           <input type="hidden" name="plannedCost" value={fig.planned} />
           <input type="hidden" name="plannedCostForeign" value={fig.plannedForeign} />

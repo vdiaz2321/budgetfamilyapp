@@ -1231,7 +1231,14 @@ function AccountPicker({
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
+  // Row the arrow keys have landed on; Enter picks it. Resets to the top
+  // match whenever the search text changes.
+  const [activeIndex, setActiveIndex] = useState(0);
+  // Only paint that highlight while the search box has focus — otherwise a
+  // phone would show the top row lit up for no reason.
+  const [searchFocused, setSearchFocused] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const q = search.trim().toLowerCase();
 
   // Straight into the search box on desktop. Not on a phone, where focusing
@@ -1246,7 +1253,15 @@ function AccountPicker({
       accounts: (accountByGroup.get(group) ?? []).filter((a) => !q || a.name.toLowerCase().includes(q)),
     }))
     .filter((g) => g.accounts.length > 0);
-  const firstMatch = groups[0]?.accounts[0];
+  const flat = groups.flatMap((g) => g.accounts);
+  const activeAccount = flat[Math.min(activeIndex, flat.length - 1)];
+
+  // Keep the highlighted row in view as the arrows walk past the fold.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-account-id="${activeAccount?.id}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeAccount?.id]);
 
   return (
     <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface pt-[max(env(safe-area-inset-top),1.75rem)] sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4 sm:pt-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1269,12 +1284,21 @@ function AccountPicker({
             type="search"
             placeholder="Search accounts…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setActiveIndex(0); }}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             onKeyDown={(e) => {
-              // Enter takes the top match, so typing "sapp" then Enter picks the card.
-              if (e.key === "Enter") {
+              // Arrows move the highlight; Enter picks it (the top match
+              // until an arrow is pressed), so "sapp" + Enter picks the card.
+              if (e.key === "ArrowDown") {
                 e.preventDefault();
-                if (firstMatch) onSelect(firstMatch.id);
+                setActiveIndex((i) => Math.min(i + 1, flat.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => Math.max(i - 1, 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (activeAccount) onSelect(activeAccount.id);
               } else if (e.key === "Escape") {
                 e.preventDefault();
                 onClose();
@@ -1285,7 +1309,7 @@ function AccountPicker({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
         {groups.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">No accounts found</p>
         ) : null}
@@ -1297,13 +1321,15 @@ function AccountPicker({
             </div>
             {accounts.map((account) => {
               const selected = account.id === selectedAccountId;
+              const active = searchFocused && account.id === activeAccount?.id;
               const cents = account.balanceCents;
               return (
                 <button
                   key={account.id}
+                  data-account-id={account.id}
                   type="button"
                   onClick={() => onSelect(account.id)}
-                  className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left transition hover:bg-black/[0.03] active:bg-brand-soft/40 dark:hover:bg-white/[0.06] ${selected ? "bg-black/[0.04] dark:bg-white/[0.08]" : ""}`}
+                  className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left transition hover:bg-black/[0.03] active:bg-brand-soft/40 dark:hover:bg-white/[0.06] ${active ? "sm:bg-sky-100 sm:hover:bg-sky-100 sm:dark:bg-sky-400/15 sm:dark:hover:bg-sky-400/15" : ""} ${selected ? "bg-black/[0.04] dark:bg-white/[0.08]" : ""}`}
                 >
                   <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
                     {selected ? (
@@ -1335,19 +1361,22 @@ function AccountPicker({
 function PickerRow({
   option,
   checked,
+  active,
   showPlanned,
   onToggle,
 }: {
   option: SubOption;
   checked: boolean;
+  active: boolean;
   showPlanned: boolean;
   onToggle: (id: string) => void;
 }) {
   return (
     <button
       type="button"
+      data-option-id={option.id}
       onClick={() => onToggle(option.id)}
-      className="flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40"
+      className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40 ${active ? "sm:bg-sky-100 sm:dark:bg-sky-400/15" : ""}`}
     >
       <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
         {checked && (
@@ -1401,7 +1430,11 @@ function BudgetItemPicker({
 }) {
   const [search, setSearch] = useState("");
   const [checked, setChecked] = useState<Set<string>>(new Set(selectedIds));
+  // Keyboard highlight (desktop): null until something is typed or an arrow
+  // is pressed, so Enter on an empty search box means Done.
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   // Desktop opens with the cursor already in the search box, so the picker can
   // be driven from the keyboard. Never on a phone: focusing there throws the
   // keyboard up over half the list before anything is typed (same rule as the
@@ -1419,6 +1452,23 @@ function BudgetItemPicker({
   // Snowball's debt picker carries balances only, no plan — skip the column there.
   const showPlanned = options.some((o) => o.plannedCents != null);
 
+  // Rows in the order they're drawn — Selected first, then each category —
+  // so the arrow keys walk down the list exactly as it reads.
+  const selectedItems = options.filter((o) => checked.has(o.id));
+  const unselectedFiltered = filtered.filter((o) => !checked.has(o.id));
+  const multiKind = new Set(unselectedFiltered.map((o) => o.kind)).size > 1;
+  const visibleKinds = CATEGORY_KINDS.filter(({ kind }) => unselectedFiltered.some((o) => o.kind === kind));
+  const ordered = [
+    ...selectedItems,
+    ...visibleKinds.flatMap(({ kind }) => unselectedFiltered.filter((o) => o.kind === kind)),
+  ];
+  // Typing lands the highlight on the first match that isn't already ticked.
+  const activeId = activeIndex == null ? null : ordered[Math.min(activeIndex, ordered.length - 1)]?.id ?? null;
+
+  useEffect(() => {
+    if (activeId) listRef.current?.querySelector<HTMLElement>(`[data-option-id="${activeId}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [activeId]);
+
   function toggle(id: string) {
     setChecked((prev) => {
       const next = new Set(prev);
@@ -1429,6 +1479,7 @@ function BudgetItemPicker({
     // Return cursor to the search box so the user can keep typing to filter
     // and pick the next item without an extra tap.
     setSearch("");
+    setActiveIndex(null);
     focusSearchOnDesktop();
   }
 
@@ -1472,7 +1523,28 @@ function BudgetItemPicker({
             type="search"
             placeholder="Search…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setActiveIndex(e.target.value ? selectedItems.length : null);
+            }}
+            onKeyDown={(e) => {
+              // Arrows move the highlight; Enter ticks it. With nothing
+              // highlighted, Enter is Done.
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveIndex((i) => (i == null ? 0 : Math.min(i + 1, ordered.length - 1)));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveIndex((i) => (i == null ? 0 : Math.max(i - 1, 0)));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (activeId) toggle(activeId);
+                else onConfirm([...checked]);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+              }
+            }}
             className="w-full rounded-xl bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
@@ -1482,7 +1554,7 @@ function BudgetItemPicker({
           top: outside it, the list's scrollbar made every row narrower than
           the header and the column labels sat to the right of their own
           figures. */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y pb-[env(safe-area-inset-bottom)]">
         <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-line/40 bg-surface px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
           <span className="flex-1">Item</span>
           {showPlanned && <span className={PICKER_AMOUNT_COL}>Planned</span>}
@@ -1491,12 +1563,8 @@ function BudgetItemPicker({
         {filtered.length === 0 && checked.size === 0
           ? <p className="px-4 py-8 text-center text-sm text-muted">No items found</p>
           : (() => {
-              const selectedItems = options.filter((o) => checked.has(o.id));
-              const unselectedFiltered = filtered.filter((o) => !checked.has(o.id));
-              const multiKind = new Set(unselectedFiltered.map((o) => o.kind)).size > 1;
-
               const renderItem = (o: SubOption) => (
-                <PickerRow key={o.id} option={o} checked={checked.has(o.id)} showPlanned={showPlanned} onToggle={toggle} />
+                <PickerRow key={o.id} option={o} checked={checked.has(o.id)} active={o.id === activeId} showPlanned={showPlanned} onToggle={toggle} />
               );
 
               return (
@@ -1509,8 +1577,7 @@ function BudgetItemPicker({
                       {selectedItems.map(renderItem)}
                     </>
                   )}
-                  {CATEGORY_KINDS
-                    .filter(({ kind }) => unselectedFiltered.some((o) => o.kind === kind))
+                  {visibleKinds
                     .map(({ kind, name }) => {
                   const categoryItems = unselectedFiltered.filter((o) => o.kind === kind);
 
@@ -1623,7 +1690,9 @@ function PayeeField({
         }
       />
       {open && value.trim().length > 0 && matches.length > 0 ? (
-        <ul className="absolute inset-x-0 bottom-full z-10 mb-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line">
+        // Above the field on a phone, where the keyboard covers what's below;
+        // below it on desktop, where the eye is already moving down the form.
+        <ul className="absolute inset-x-0 bottom-full z-10 mb-1 max-h-48 overflow-y-auto rounded-xl bg-surface py-1 shadow-lg ring-1 ring-line sm:bottom-auto sm:top-full sm:mb-0 sm:mt-1">
           {matches.map((entry, idx) => {
             const isLineItem = "kind" in entry;
             const isHighlighted = idx === highlighted;

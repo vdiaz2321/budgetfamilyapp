@@ -127,11 +127,12 @@ export function CardPaymentsLedger({
 
   return (
     <section>
-      {/* Title + month/year pickers on the left, the two total tiles centered
-          in the bar (a three-zone grid once it's wide; stacked and centered on
-          a phone). All of it stays visible when collapsed, so the totals and
-          pickers never disappear with the table. */}
-      <div className="flex flex-col gap-2 border-b border-line px-4 py-3 md:grid md:grid-cols-[1fr_auto_1fr] md:items-center md:gap-x-4">
+      {/* Title + month/year pickers, then the two total tiles right beside
+          them — kept together on the left so a wide screen doesn't drift the
+          totals away from the controls they belong to (stacked and centered
+          on a phone). All of it stays visible when collapsed, so the totals
+          and pickers never disappear with the table. */}
+      <div className="flex flex-col gap-2 border-b border-line px-4 py-3 md:flex-row md:items-center md:gap-x-6">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <button
             type="button"
@@ -200,9 +201,6 @@ export function CardPaymentsLedger({
             <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
           </div>
         </div>
-        {/* Empty third column: balances the left group so the tiles sit at
-            the true center of the bar. */}
-        <div aria-hidden className="hidden md:block" />
       </div>
 
       {!open ? null : rows.length === 0 ? (

@@ -929,27 +929,61 @@ function CreditCardListSection({
   const isMain = section.key === "credit";
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
 
+  // Drag a tile by its grip onto another to SWAP the two. Inserting (as the
+  // account lists do) shifted every later tile one slot and reflowed the
+  // grid's rows, undoing placements already made. Same optimistic pattern:
+  // the new order shows at once, then the server's copy replaces it.
+  const [localCards, setLocalCards] = useState(accounts);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [, startReorder] = useTransition();
+  // `accounts` is a fresh filtered array on every parent render; syncing on
+  // it would snap a just-made swap back before the save lands. Sync only when
+  // the server's order or figures actually change.
+  const serverKey = accounts.map((a) => `${a.id}:${a.owedCents ?? 0}:${a.dateClosed ?? ""}:${a.name}`).join("|");
+  const [syncedKey, setSyncedKey] = useState(serverKey);
+  if (syncedKey !== serverKey) {
+    setSyncedKey(serverKey);
+    setLocalCards(accounts);
+  }
+  const reorder = (fromId: string, toId: string) => {
+    const fromIdx = localCards.findIndex((a) => a.id === fromId);
+    const toIdx = localCards.findIndex((a) => a.id === toId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const next = [...localCards];
+    [next[fromIdx], next[toIdx]] = [next[toIdx], next[fromIdx]];
+    setLocalCards(next);
+    const fd = new FormData();
+    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
+    startReorder(async () => {
+      const res = await reorderAccounts(fd);
+      setReorderError(res?.error ?? null);
+    });
+  };
+  const { dragOverId, startDrag } = usePointerReorder("card", reorder);
+  // The grip sits inside the tile's button; a press on it must not open Pay.
+  const grip = (id: string) => (
+    <span className="hidden sm:flex" onClick={(e) => e.stopPropagation()}>
+      <GripHandle onMouseDown={() => startDrag(id)} size="sm" />
+    </span>
+  );
+
   return (
     <section id={isMain ? "credit-cards" : undefined} className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* Mobile puts the title and chevron on their own row and drops the
-          link + total underneath; below ~400px they cannot share a line
-          without the chip sitting on top of the title. */}
-      {/* The whole header toggles, blank space included — same as the other
-          section tiles. The title and chevron buttons have no onClick of their
-          own: their clicks (and Enter/Space) bubble up to this one. */}
+      {/* One line, left to right: title, the points link, the total. The
+          chevron keeps the far edge. On a phone the link + total wrap under
+          the title. The whole header toggles, blank space included — the
+          title and chevron buttons' clicks bubble up to this one. */}
       <div
         onClick={onToggle}
-        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition hover:bg-black/[0.02] sm:px-6 dark:hover:bg-white/[0.04]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition hover:bg-black/[0.02] sm:px-6 dark:hover:bg-white/[0.04]"
       >
-        <button type="button" className="order-1 min-w-0 shrink-0 text-left" aria-expanded={open}>
+        <button type="button" className="min-w-0 shrink-0 text-left" aria-expanded={open}>
           <span className="inline-flex items-center gap-2">
             <span className={`h-2 w-2 shrink-0 rounded-full ${section.dot}`} aria-hidden />
             <span className="text-base font-bold sm:text-lg">{section.label}</span>
           </span>
         </button>
-        {/* ml-auto pins this group right even when collapsed — the hint
-            above used to be the only spacer, so it slid left without it. */}
-        <div className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:ml-auto sm:w-auto sm:justify-end">
+        <div className="order-last flex w-full flex-wrap items-center gap-x-4 gap-y-1 sm:order-none sm:w-auto">
         {/* Where the points live now. Named for what it holds, not "see also". */}
         <Link
           href="/travel"
@@ -958,17 +992,17 @@ function CreditCardListSection({
         >
           Points & rewards →
         </Link>
-        <span className="shrink-0 text-right">
-          <span className="block text-[10px] font-semibold uppercase tracking-wide text-muted">Total CC owed</span>
-          <span className="block text-sm font-bold tabular-nums text-negative sm:text-base">
+        <span className="flex shrink-0 items-baseline gap-1.5 whitespace-nowrap">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total CC owed</span>
+          <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
             {formatMoney(totalOwed, currency)}
           </span>
-          <span className="block text-[11px] text-muted">Not in Net Worth</span>
+          <span className="text-[11px] text-muted">· Not in Net Worth</span>
         </span>
         </div>
         <button
           type="button"
-          className="order-2 ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:order-3 sm:ml-0"
+          className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
           aria-label={open ? `Collapse ${section.label}` : `Expand ${section.label}`}
         >
           <svg
@@ -997,8 +1031,8 @@ function CreditCardListSection({
           // long name like "1002 Hilton Aspire Amex V" still needs room for
           // an owed amount beside it.
           <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:px-6 @[56rem]:grid-cols-3 @[72rem]:grid-cols-4">
-            {accounts.map((a) => (
-              <li key={a.id}>
+            {localCards.map((a) => (
+              <li key={a.id} data-drop-key={`card:${a.id}`} className={`rounded-lg ${dragOverId === a.id ? "ring-2 ring-sky-400" : ""}`}>
                 {/* An open card is the whole row: thirteen Pay pills read as a
                     field of buttons, and the card is the thing you mean to
                     press. A closed card keeps the row, minus the action. */}
@@ -1011,6 +1045,7 @@ function CreditCardListSection({
                     // the card's own border.
                     className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-2 text-left transition hover:bg-black/[0.08] dark:bg-white/[0.04] dark:hover:bg-white/[0.1]"
                   >
+                    {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
                     {/* Red is for money actually owed. A settled card prints
                         nothing at all — twelve rows of "$0.00" buried the one
@@ -1035,6 +1070,7 @@ function CreditCardListSection({
                   </button>
                 ) : (
                   <div className="flex w-full items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
+                    {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{a.name}</span>
                     {(a.owedCents ?? 0) > 0 ? (
                       <span className="shrink-0 text-sm font-semibold tabular-nums text-muted">
@@ -1048,6 +1084,7 @@ function CreditCardListSection({
           </ul>
         )
       ) : null}
+      {reorderError ? <p className="px-4 pb-2 text-xs font-medium text-negative sm:px-6">{reorderError}</p> : null}
 
       {payCardFor ? (
         <PayCardModal

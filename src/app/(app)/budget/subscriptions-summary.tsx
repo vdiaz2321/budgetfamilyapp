@@ -611,7 +611,15 @@ export function IrregularBillsSummaryCard({
               <span>Spent: <span className="font-semibold text-negative">{formatMoney(totalSpent, currency)}</span></span>
             </div>
           )}
-          <span className="size-8 shrink-0" aria-hidden />
+          {/* Invisible copy of the Subscriptions card's sort toggle + Add
+              button, so Plan / Spent sit in the same columns on both cards. */}
+          <div className="invisible hidden items-center gap-2 sm:flex" aria-hidden>
+            <div className="flex shrink-0 overflow-hidden rounded-lg text-[11px] ring-1 ring-line">
+              <span className="px-2 py-1 font-medium">By due</span>
+              <span className="px-2 py-1 font-medium">Manual</span>
+            </div>
+            <span className="inline-flex shrink-0 rounded-lg border px-2.5 py-1 text-xs font-semibold">+ Add</span>
+          </div>
         </div>
       </div>
 
@@ -696,9 +704,6 @@ export function IrregularBillsSummaryCard({
                   </div>
                 );
               })}
-              <p className={`px-4 py-2 text-[11px] text-muted ${overspentOnly ? "hidden" : ""}`}>
-                Spent amounts are pulled automatically from transactions. Set a Planned amount per item to budget ahead for occasional expenses — totals sync to the Bills category above. Tap a bill&apos;s name to see the charges behind its Spent figure.
-              </p>
             </div>
           )}
 

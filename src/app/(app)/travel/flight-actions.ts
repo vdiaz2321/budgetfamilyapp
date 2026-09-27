@@ -7,6 +7,7 @@ import { unwrap } from "@/lib/supabase-result";
 import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger, type RewardDraw } from "./reward-ledger";
+import { linkedPaidCents } from "./booking-payments";
 
 function revalidate() {
   revalidatePath("/travel");
@@ -87,6 +88,9 @@ export async function saveTravelFlight(payload: FlightPayload) {
   // Bought once a Spent fare or the booking date is in; a plan until then
   // (isPlannedOnly in travel-form, the same rule the form shows).
   const isEstimate = !named.some((p) => p.fare.trim() || p.fareEur.trim()) && !reservedOn;
+  // Linked transactions set the pocket cost and mark it bought; a form save
+  // keeps both rather than undoing what the payments did.
+  const paid = payload.id ? await linkedPaidCents(supabase, householdId, "flight", payload.id) : null;
   const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : null);
   const passengers = named
     .map((p) => {
@@ -132,7 +136,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
   const pointsCost = passengers.reduce((sum, p) => sum + (p.pointsUsed ? p.pointsCost : 0), 0);
   const pointsUsed = pointsCost > 0;
   // What the card gives up: nothing until the tickets are actually bought.
-  const drawPoints = isEstimate || !pointsUsed ? 0 : pointsCost;
+  const drawPoints = (isEstimate && paid == null) || !pointsUsed ? 0 : pointsCost;
   const flightCost = passengers.reduce((sum, p) => sum + p.fareCents, 0);
   const pointsFares = passengers.reduce((sum, p) => sum + (p.pointsUsed ? p.fareCents : 0), 0);
   // Left blank, what came out of pocket is the cash tickets' fares. Typed, it
@@ -174,8 +178,8 @@ export async function saveTravelFlight(payload: FlightPayload) {
     flight_cost_eur_cents: passengers.some((p) => p.fareEurCents != null)
       ? passengers.reduce((sum, p) => sum + (p.fareEurCents ?? 0), 0)
       : null,
-    pocket_cost_cents: pocketCost,
-    is_estimate: isEstimate,
+    pocket_cost_cents: paid ?? pocketCost,
+    is_estimate: isEstimate && paid == null,
     foreign_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : "EUR",
     // While an estimate, its cost is the plan. Once bought, the plan is the
     // Planned column added up (cash seats, as pocket cost counts them), kept
@@ -223,7 +227,8 @@ export async function saveTravelFlight(payload: FlightPayload) {
 
     const { error } = await supabase
       .from("travel_flights")
-      .update({ ...row, reward_activity_id: sync.activityId, payment_restore: null })
+      // Payments still linked: keep what unlinking them would restore.
+      .update({ ...row, reward_activity_id: sync.activityId, ...(paid == null ? { payment_restore: null } : {}) })
       .eq("id", flightId)
       .eq("household_id", householdId);
     if (error) return fail(`Couldn't save that flight — ${error.message}`);

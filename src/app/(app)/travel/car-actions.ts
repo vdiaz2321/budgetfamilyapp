@@ -7,6 +7,7 @@ import { unwrap } from "@/lib/supabase-result";
 import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger } from "./reward-ledger";
+import { linkedPaidCents } from "./booking-payments";
 import type { CarKind } from "./types";
 
 function revalidate() {
@@ -82,6 +83,9 @@ export async function saveTravelCar(payload: CarPayload) {
   // Booked once a Spent figure or the booking date is in (isPlannedOnly in
   // travel-form); the family car is always a real drive.
   const isEstimate = rental && !payload.spent.trim() && !payload.spentForeign.trim() && !reservedOn;
+  // Linked transactions set the pocket cost and mark it booked; a form save
+  // keeps both rather than undoing what the payments did.
+  const paid = payload.id ? await linkedPaidCents(supabase, householdId, "car", payload.id) : null;
   // The cost columns hold what it costs now — the plan until it is booked —
   // so every total that reads them is unchanged.
   const cost = (isEstimate ? cents(payload.planned) : cents(payload.spent)) ?? 0;
@@ -90,7 +94,7 @@ export async function saveTravelCar(payload: CarPayload) {
   const points = rental ? Math.max(0, Math.trunc(Number(payload.points.replace(/,/g, "")) || 0)) : 0;
   const pointsUsed = rental && payload.pointsUsed && points > 0;
   // Nothing leaves a card until a planned rental is booked.
-  const drawPoints = pointsUsed && !isEstimate ? points : 0;
+  const drawPoints = pointsUsed && (!isEstimate || paid != null) ? points : 0;
   // Left blank, what left the wallet is the cost — or nothing on points.
   const pocketCost = payload.pocketCost.trim()
     ? Math.max(0, displayToCents(payload.pocketCost))
@@ -129,8 +133,8 @@ export async function saveTravelCar(payload: CarPayload) {
     points_value_micros: points > 0 ? pointsValueMicros : null,
     cost_cents: cost,
     cost_eur_cents: costForeign,
-    pocket_cost_cents: pocketCost,
-    is_estimate: isEstimate,
+    pocket_cost_cents: paid ?? pocketCost,
+    is_estimate: isEstimate && paid == null,
     foreign_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : "EUR",
     // While a plan, its cost is the plan; once booked, the Planned figure
     // stays beside what was paid.
@@ -166,7 +170,8 @@ export async function saveTravelCar(payload: CarPayload) {
     if (sync.error) return fail(sync.error);
     const { error } = await supabase
       .from("travel_cars")
-      .update({ ...row, reward_activity_id: sync.activityId, payment_restore: null })
+      // Payments still linked: keep what unlinking them would restore.
+      .update({ ...row, reward_activity_id: sync.activityId, ...(paid == null ? { payment_restore: null } : {}) })
       .eq("id", payload.id)
       .eq("household_id", householdId);
     if (error) return fail(`Couldn't save that car — ${error.message}`);

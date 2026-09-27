@@ -9,7 +9,7 @@ export const metadata = { title: "Travel Log · Capitall" };
 export default async function TravelPage() {
   const { supabase, household } = await getSessionContext();
 
-  const [stays, brands, rewards, flights, legs, passengers, travellers, cars, trips, expenses, tripTx] = await Promise.all([
+  const [stays, brands, rewards, flights, legs, passengers, travellers, cars, trips, expenses, tripTx, bookingTx] = await Promise.all([
     supabase
       .from("travel_stays")
       .select(
@@ -73,6 +73,13 @@ export default async function TravelPage() {
       .select("id, occurred_on, trip_id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, travel_category, subcategories(name, travel_category), payees(name)")
       .eq("household_id", household.id)
       .not("trip_id", "is", null),
+    // Payments linked to a booking, trip-tagged or not: they are its Pocket
+    // cost, which the booking forms then show locked.
+    supabase
+      .from("transactions")
+      .select("amount_cents, travel_stay_id, travel_flight_id, travel_car_id")
+      .eq("household_id", household.id)
+      .or("travel_stay_id.not.is.null,travel_flight_id.not.is.null,travel_car_id.not.is.null"),
   ]);
   throwIfAny({
     travel_stays: stays.error,
@@ -85,7 +92,16 @@ export default async function TravelPage() {
     travel_trips: trips.error,
     travel_trip_expenses: expenses.error,
     transactions: tripTx.error,
+    booking_transactions: bookingTx.error,
   });
+
+  // Linked payments per booking, keyed "<kind>:<id>"; a refund comes off.
+  const paidByBooking = new Map<string, number>();
+  for (const t of bookingTx.data ?? []) {
+    const key = t.travel_stay_id ? `stay:${t.travel_stay_id}` : t.travel_flight_id ? `flight:${t.travel_flight_id}` : `car:${t.travel_car_id}`;
+    paidByBooking.set(key, (paidByBooking.get(key) ?? 0) + Number(t.amount_cents));
+  }
+  const paidFor = (key: string) => (paidByBooking.has(key) ? Math.max(0, paidByBooking.get(key) ?? 0) : null);
 
   const sortByDate = (list: TripTaggedPurchase[]) =>
     [...list].sort((a, b) => a.date.localeCompare(b.date) || b.amountCents - a.amountCents);
@@ -186,6 +202,7 @@ export default async function TravelPage() {
     hotelCreditCents: s.hotel_credit_cents ?? 0,
     hotelCostCents: s.hotel_cost_cents ?? 0,
     pocketCostCents: s.pocket_cost_cents ?? 0,
+    paidCents: paidFor(`stay:${s.id}`),
     pocketPaidWith: (s.pocket_paid_with ?? "card") as PocketPaidWith,
     remarks: s.remarks ?? null,
     pointsUsed: s.points_used ?? false,
@@ -223,6 +240,7 @@ export default async function TravelPage() {
     plannedCostForeignCents: f.planned_cost_foreign_cents == null ? null : Number(f.planned_cost_foreign_cents),
     foreignCurrency: f.foreign_currency ?? "EUR",
     pocketCostCents: Number(f.pocket_cost_cents ?? 0),
+    paidCents: paidFor(`flight:${f.id}`),
     remarks: f.remarks ?? null,
     cancelledAt: f.cancelled_at ?? null,
     rewardActivityId: f.reward_activity_id ?? null,
@@ -277,6 +295,7 @@ export default async function TravelPage() {
     plannedCostForeignCents: c.planned_cost_foreign_cents == null ? null : Number(c.planned_cost_foreign_cents),
     foreignCurrency: c.foreign_currency ?? "EUR",
     pocketCostCents: Number(c.pocket_cost_cents ?? 0),
+    paidCents: paidFor(`car:${c.id}`),
     remarks: c.remarks ?? null,
     cancelledAt: c.cancelled_at ?? null,
     rewardActivityId: c.reward_activity_id ?? null,

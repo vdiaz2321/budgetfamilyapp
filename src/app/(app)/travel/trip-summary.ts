@@ -113,7 +113,7 @@ function stayBooking(s: TravelStay): Booking {
     start: s.checkIn,
     end: addDays(s.checkIn, s.nights),
     title: s.propertyName,
-    detail: `${s.nights}n${s.city ? ` · ${s.city}` : ""}`,
+    detail: `${s.city ? `${s.city} ` : ""}(${s.nights}\u00a0night${s.nights === 1 ? "" : "s"})`,
     cost: s.hotelCostCents,
     pocket: s.pocketCostCents,
     points: s.pointsUsed ? s.pointsCost : 0,

@@ -75,6 +75,7 @@ export function PlanSpentFields({
   foreignCurrency,
   what = "cost",
   onFocusSlot,
+  spentLocked = false,
 }: {
   value: PlanSpent;
   onChange: (next: PlanSpent) => void;
@@ -84,6 +85,8 @@ export function PlanSpentFields({
   what?: string;
   /** The last box clicked into, so the currency converter can fill it. */
   onFocusSlot?: (slot: PlanSpentSlot) => void;
+  /** Spent comes from linked transactions: shown locked, not typed. */
+  spentLocked?: boolean;
 }) {
   const usd = currencySymbol(currency);
   const fx = foreignSymbol(foreignCurrency);
@@ -95,18 +98,33 @@ export function PlanSpentFields({
   ];
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {boxes.map((b) => (
-        <Field key={b.slot} label={b.label}>
-          <input
-            value={value[b.slot]}
-            onChange={(e) => onChange({ ...value, [b.slot]: e.target.value })}
-            onFocus={() => onFocusSlot?.(b.slot)}
-            inputMode="decimal"
-            className={inputClass}
-          />
-        </Field>
-      ))}
+      {boxes.map((b) => {
+        const locked = spentLocked && b.slot === "spent";
+        return (
+          <Field key={b.slot} label={b.label}>
+            <input
+              value={value[b.slot]}
+              onChange={(e) => onChange({ ...value, [b.slot]: e.target.value })}
+              onFocus={() => onFocusSlot?.(b.slot)}
+              readOnly={locked}
+              tabIndex={locked ? -1 : undefined}
+              inputMode="decimal"
+              className={`${inputClass} ${locked ? "opacity-70" : ""}`}
+            />
+            {locked ? <PaidNote linked /> : null}
+          </Field>
+        );
+      })}
     </div>
+  );
+}
+
+// Under a locked Pocket cost: where its figure comes from.
+export function PaidNote({ linked }: { linked: boolean }) {
+  return (
+    <span className="mt-0.5 block text-[10px] font-medium text-muted">
+      {linked ? "From linked transactions" : "Fills in from a linked transaction"}
+    </span>
   );
 }
 
