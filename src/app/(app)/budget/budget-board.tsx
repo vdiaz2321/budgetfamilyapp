@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { addToPlan, copyPlansFromPreviousMonth, listPayees, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
+import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchPlansToSpent, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
 import { advanceSubscriptionRenewal } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
@@ -374,6 +374,18 @@ export function BudgetBoard({
   const savings = kindTotals(["savings"]);
   const debt = kindTotals(["debt"]);
 
+  // Items the hero's "Match Spent Amount" would change: some spending, and a
+  // plan that differs from it. $0-spent items are left out on purpose — the
+  // month-end payroll deductions haven't posted yet and still need their plan.
+  // It's a month-end tool, so it only appears from the 25th of the current
+  // month on (and on any past month); earlier, the list stays empty.
+  const matchWindowOpen = month.key < currentMonthKey || (isCurrentMonth && today.getDate() >= 25);
+  const matchCandidates: MatchCandidate[] = !matchWindowOpen ? [] : groups
+    .filter((g) => g.kind !== "income")
+    .flatMap((g) => g.rows.filter((r) => isVisibleRow(g.kind, r)))
+    .filter((r) => !r.autoPlanned && r.spentCents > 0 && r.spentCents !== r.plannedCents)
+    .map((r) => ({ subId: r.subId, name: r.name, plannedCents: r.plannedCents, spentCents: r.spentCents }));
+
   // Re-derive the selected row from fresh data each render so the panel
   // reflects saved values (and clears if the row was deleted).
   const selectedRow: RowData | null = selected
@@ -475,6 +487,7 @@ export function BudgetBoard({
           debt={debt}
           rolloverCents={rollover.inCents}
           rollover={rollover}
+          matchCandidates={matchCandidates}
           monthFirstOfMonth={month.firstOfMonth}
           currency={currency}
         />
@@ -1124,6 +1137,174 @@ function AssignLeftover({
   );
 }
 
+export type MatchCandidate = { subId: string; name: string; plannedCents: number; spentCents: number };
+
+// Month-end shortcut: set every item's plan to what it actually spent, instead
+// of editing each Planned cell by hand. The rule for which items qualify
+// (spent > $0, not income, not a card-owned row) lives in BudgetBoard and is
+// re-checked by matchPlansToSpent. It asks first — listing each change — and
+// offers Undo for 30s afterwards, the same way the plan roll-in does.
+function MatchSpentButton({
+  candidates,
+  monthKey,
+  currency,
+}: {
+  candidates: MatchCandidate[];
+  monthKey: string;
+  currency: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const [undoPending, startUndo] = useTransition();
+  const [snapshot, setSnapshot] = useState<
+    Array<{ subcategory_id: string; planned_cents: number | null }> | null
+  >(null);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const t = window.setTimeout(() => setSnapshot(null), 30_000);
+    return () => window.clearTimeout(t);
+  }, [snapshot]);
+
+  // Every item starts ticked, so one click still matches them all; unticking
+  // one keeps its plan as it is.
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const picked = candidates.filter((c) => !skipped.has(c.subId));
+  const allPicked = picked.length === candidates.length;
+  const toggle = (id: string) =>
+    setSkipped((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const netChange = picked.reduce((sum, c) => sum + (c.spentCents - c.plannedCents), 0);
+
+  if (snapshot) {
+    return (
+      <button
+        type="button"
+        disabled={undoPending}
+        onClick={() => {
+          const snap = snapshot;
+          startUndo(async () => {
+            await restorePlansSnapshot(monthKey, snap);
+            setSnapshot(null);
+          });
+        }}
+        className="mt-1.5 inline-flex w-fit whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
+      >
+        {undoPending ? "Undoing…" : "↩ Undo Match Spent"}
+      </button>
+    );
+  }
+  if (candidates.length === 0) return null;
+
+  // Mobile: the name gets its own line and the three figures sit under it —
+  // four columns side by side left the name a few characters wide at 375px.
+  const rowGrid =
+    "grid grid-cols-[1rem_repeat(4,minmax(0,1fr))] items-center gap-x-1 sm:grid-cols-[1rem_minmax(0,1fr)_5.5rem_5.5rem_5.5rem_5rem] sm:gap-x-2";
+  const checkbox = "size-4 cursor-pointer accent-[color:var(--brand)]";
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => { setError(null); setSkipped(new Set()); setOpen(true); }}
+        className="mt-1.5 inline-flex w-fit cursor-pointer items-center whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
+      >
+        Match Spent Amount
+      </button>
+
+      {open ? (
+        <ModalShell title="Match plans to spent" onClose={() => setOpen(false)} className="sm:max-w-2xl" mobileAlign="top">
+          <div className="space-y-4 px-3 py-4 sm:px-5">
+            <div className="max-h-80 overflow-y-auto rounded-xl ring-1 ring-line">
+              <label className={`${rowGrid} sticky top-0 z-10 cursor-pointer bg-background px-2 py-1.5 sm:px-3 text-center text-[10px] font-semibold uppercase tracking-wide text-muted`}>
+                <input
+                  type="checkbox"
+                  checked={allPicked}
+                  onChange={() => setSkipped(allPicked ? new Set(candidates.map((c) => c.subId)) : new Set())}
+                  aria-label="Select all items"
+                  className={checkbox}
+                />
+                <span className="hidden text-left sm:block">Item</span>
+                <span>Planned</span>
+                <span>New plan</span>
+                <span>Spent</span>
+                <span>Diff</span>
+              </label>
+              {candidates.map((c) => {
+                const on = !skipped.has(c.subId);
+                // Spent − planned: green when the plan drops, red when it was overspent.
+                const diff = c.spentCents - c.plannedCents;
+                return (
+                  <label key={c.subId} className={`${rowGrid} cursor-pointer gap-y-0.5 border-t border-line px-2 py-1.5 text-xs transition sm:px-3 sm:text-sm hover:bg-black/5 dark:hover:bg-white/10`}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggle(c.subId)}
+                      className={`${checkbox} row-span-2 sm:row-span-1`}
+                    />
+                    <span className={`col-span-4 min-w-0 truncate sm:col-span-1 ${on ? "" : "text-muted"}`}>{c.name}</span>
+                    <span className={`text-center tabular-nums text-muted ${on ? "line-through" : ""}`}>{formatMoney(c.plannedCents, currency)}</span>
+                    <span className="text-center font-semibold tabular-nums">{formatMoney(on ? c.spentCents : c.plannedCents, currency)}</span>
+                    <span className="text-center tabular-nums text-negative">{formatMoney(c.spentCents, currency)}</span>
+                    <span className={`text-center font-semibold tabular-nums ${!on ? "text-muted" : diff <= 0 ? "text-positive" : "text-negative"}`}>
+                      {diff > 0 ? "−" : diff < 0 ? "+" : ""}{formatMoney(Math.abs(diff), currency)}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-sm">
+              {netChange <= 0 ? "Total Amount Return to Planned Budget:" : "Total Amount Over Planned:"}{" "}
+              <span className={`font-semibold tabular-nums ${netChange <= 0 ? "text-positive" : "text-negative"}`}>
+                {netChange > 0 ? "−" : netChange < 0 ? "+" : ""}{formatMoney(Math.abs(netChange), currency)}
+              </span>
+            </p>
+
+            <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  if (picked.length === 0) {
+                    setError("Tick at least one item to match.");
+                    return;
+                  }
+                  setError(null);
+                  start(async () => {
+                    const res = await matchPlansToSpent(monthKey, picked.map((c) => c.subId));
+                    if (res.error) {
+                      setError(res.error);
+                      return;
+                    }
+                    setOpen(false);
+                    if (res.snapshot?.length) setSnapshot(res.snapshot);
+                  });
+                }}
+                className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+              >
+                {pending ? "Matching…" : allPicked ? "Match all" : `Match ${picked.length} ${picked.length === 1 ? "item" : "items"}`}
+              </button>
+            </div>
+            {error ? <p className="text-xs text-negative">{error}</p> : null}
+          </div>
+        </ModalShell>
+      ) : null}
+    </>
+  );
+}
+
 // Overspent means the month's spending has passed the income PLANNED for it,
 // not the income received so far. Measured against what has landed, the badge
 // fired on the 1st of every month — before a single paycheque was in, any
@@ -1222,6 +1403,7 @@ function SummaryHeroCard({
   debt,
   rolloverCents,
   rollover,
+  matchCandidates,
   monthFirstOfMonth,
   heroSubOptions,
   currency,
@@ -1236,6 +1418,7 @@ function SummaryHeroCard({
   debt: { planned: number; spent: number };
   rolloverCents: number;
   rollover: Props["rollover"];
+  matchCandidates: MatchCandidate[];
   monthFirstOfMonth: string;
   heroSubOptions: SubOption[];
   currency: string;
@@ -1299,15 +1482,18 @@ function SummaryHeroCard({
                 used to sit here as a read-only fact; now it's the entry point
                 for giving the money one — or, when the month is over-budgeted,
                 for taking a job away so the two sides balance again. */}
-            {displayLeft !== 0 ? (
-              <AssignLeftover
-                mode={displayLeft < 0 ? "trim" : "assign"}
-                leftoverCents={displayLeft}
-                monthKey={monthFirstOfMonth}
-                currency={currency}
-                options={heroSubOptions}
-              />
-            ) : null}
+            <div className="flex flex-col items-start">
+              {displayLeft !== 0 ? (
+                <AssignLeftover
+                  mode={displayLeft < 0 ? "trim" : "assign"}
+                  leftoverCents={displayLeft}
+                  monthKey={monthFirstOfMonth}
+                  currency={currency}
+                  options={heroSubOptions}
+                />
+              ) : null}
+              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} />
+            </div>
             {rolloverCents > 0 && (
               // <div> (not <p>) because UndoRolloverButton renders a <form>,
               // and forms inside paragraphs are invalid HTML.

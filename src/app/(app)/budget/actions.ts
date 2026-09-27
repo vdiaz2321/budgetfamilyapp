@@ -485,6 +485,74 @@ export async function trimFromPlan(formData: FormData) {
   return {};
 }
 
+/**
+ * Month-end tidy-up: set each picked item's plan to exactly what it spent.
+ *
+ * Only items that have spending count. An item at $0 spent is usually one
+ * that hasn't posted yet — the payroll deductions (taxes, TSP, SGLV) land with
+ * the month-end paycheck — so zeroing it would wipe a plan that is still
+ * right. Income, Subscriptions and Irregular Bills are skipped: income isn't
+ * spending, and the other two are planned on their own cards. Spent is re-read
+ * here rather than trusted from the page, and the old plans come back as a
+ * snapshot so the board can offer Undo through restorePlansSnapshot.
+ */
+export async function matchPlansToSpent(
+  month: string,
+  subIds: string[],
+): Promise<{ error?: string; snapshot?: Array<{ subcategory_id: string; planned_cents: number | null }> }> {
+  const { supabase, householdId } = await requireHousehold();
+  if (!/^\d{4}-\d{2}-01$/.test(month) || subIds.length === 0) return { error: "Nothing to match." };
+
+  const [subs, irregular, subscriptions, actuals, plans] = await Promise.all([
+    supabase.from("subcategories").select("id, categories!inner(kind)").eq("household_id", householdId).in("id", subIds),
+    supabase.from("irregular_bills").select("subcategory_id").eq("household_id", householdId).in("subcategory_id", subIds),
+    supabase.from("subscriptions").select("subcategory_id").eq("household_id", householdId).in("subcategory_id", subIds),
+    supabase.from("v_monthly_actuals").select("subcategory_id, actual_cents").eq("household_id", householdId).eq("month", month).in("subcategory_id", subIds),
+    supabase.from("budget_plans").select("subcategory_id, planned_cents").eq("household_id", householdId).eq("month", month).in("subcategory_id", subIds),
+  ]);
+  const subRows = unwrap(subs, "subcategories");
+  const cardOwned = new Set([
+    ...(unwrap(irregular, "irregular_bills") ?? []).map((r) => r.subcategory_id as string),
+    ...(unwrap(subscriptions, "subscriptions") ?? []).map((r) => r.subcategory_id as string),
+  ]);
+  const spentBySub = new Map<string, number>();
+  for (const a of unwrap(actuals, "v_monthly_actuals") ?? []) {
+    spentBySub.set(a.subcategory_id, (spentBySub.get(a.subcategory_id) ?? 0) + a.actual_cents);
+  }
+  const plannedBySub = new Map(
+    (unwrap(plans, "budget_plans") ?? []).map((p) => [p.subcategory_id as string, p.planned_cents as number | null]),
+  );
+
+  const rows = (subRows ?? [])
+    .filter((s) => {
+      const cat = s.categories as unknown as { kind: string } | { kind: string }[];
+      const kind = Array.isArray(cat) ? cat[0]?.kind : cat?.kind;
+      return kind !== "income" && !cardOwned.has(s.id);
+    })
+    .map((s) => ({ id: s.id as string, spent: spentBySub.get(s.id) ?? 0 }))
+    .filter((r) => r.spent > 0 && r.spent !== plannedBySub.get(r.id));
+  if (rows.length === 0) return { error: "Every item already matches what it spent." };
+
+  const snapshot = rows.map((r) => ({
+    subcategory_id: r.id,
+    planned_cents: plannedBySub.has(r.id) ? (plannedBySub.get(r.id) ?? null) : null,
+  }));
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("budget_plans").upsert(
+    rows.map((r) => ({ household_id: householdId, month, subcategory_id: r.id, planned_cents: r.spent, updated_at: now })),
+    { onConflict: "household_id,month,subcategory_id" },
+  );
+  if (error) return { error: "Couldn't save the new plans. Try again." };
+
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  revalidatePath("/insights");
+  revalidatePath("/snowball");
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
+  return { snapshot };
+}
+
 export async function upsertPlan(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const subcategoryId = String(formData.get("subcategoryId") ?? "");
