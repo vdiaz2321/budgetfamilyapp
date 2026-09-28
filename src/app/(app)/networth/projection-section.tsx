@@ -204,7 +204,7 @@ export function ProjectionSection({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex min-w-0 items-center gap-2 text-left"
+          className="flex w-full min-w-0 items-center gap-2 text-left"
         >
           <svg
             aria-hidden

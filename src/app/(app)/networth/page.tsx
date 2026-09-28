@@ -1,4 +1,4 @@
-import { toRentalProperty, type RentalRow } from "@/lib/retirement";
+import { parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -118,7 +118,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, personal_inflation_pct, income_growth_pct, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, sbp_enabled, sbp_pct, retirement_tax_pct, longevity_age, healthcare_annual_cents, healthcare_start_age, healthcare_growth_pct")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, personal_inflation_pct, income_growth_pct, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, sbp_enabled, sbp_pct, retirement_tax_pct, longevity_age, healthcare_annual_cents, health_plans, dental_vision_annual_cents, healthcare_start_age, healthcare_growth_pct")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -731,6 +731,7 @@ export default async function NetworthPage() {
       fiPlan={{
         birthYear: planRow?.birth_year ?? null,
         targetRetireYear: planRow?.target_retire_year ?? null,
+        targetRetireMonth: planRow?.target_retire_month ?? null,
         annualSpendCents: planRow?.annual_spend_cents ?? null,
         annualContributionCents: planRow?.annual_contribution_cents ?? null,
         realReturnPct: planRow?.real_return_pct == null ? 5 : Number(planRow.real_return_pct),
@@ -747,6 +748,7 @@ export default async function NetworthPage() {
         guaranteedIncomeCents: planRow?.guaranteed_income_cents ?? null,
         guaranteedIncomeStartYear: planRow?.guaranteed_income_start_year ?? null,
         serviceStartYear: planRow?.service_start_year ?? null,
+        serviceStartMonth: planRow?.service_start_month ?? null,
         high3MonthlyCents: planRow?.high3_monthly_cents ?? null,
         inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
         sbpEnabled: !!planRow?.sbp_enabled,
@@ -754,6 +756,8 @@ export default async function NetworthPage() {
         retirementTaxPct: planRow?.retirement_tax_pct == null ? 12 : Number(planRow.retirement_tax_pct),
         longevityAge: planRow?.longevity_age ?? 90,
         healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
+        healthPlans: parseHealthPlans(planRow?.health_plans),
+        dentalVisionAnnualCents: planRow?.dental_vision_annual_cents ?? null,
         healthcareStartAge: planRow?.healthcare_start_age ?? 65,
         healthcareGrowthPct: planRow?.healthcare_growth_pct == null ? 1.5 : Number(planRow.healthcare_growth_pct),
         rentalRows: (rentalRows ?? []) as RentalRow[],

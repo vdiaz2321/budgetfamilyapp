@@ -14,6 +14,8 @@ import {
   rentalForYear,
   rentalsForYear,
   type FiScheduleYear,
+  type HealthPlan,
+  type HealthPlanKind,
   type IncomeLine,
   type IncomeLineKind,
   type RentalProperty,
@@ -24,6 +26,8 @@ import { saveRetirementPlan } from "./actions";
 export type FiPlan = {
   birthYear: number | null;
   targetRetireYear: number | null;
+  /** First month on retired pay (1–12); null = the whole year. */
+  targetRetireMonth: number | null;
   annualSpendCents: number | null;
   annualContributionCents: number | null;
   realReturnPct: number;
@@ -38,6 +42,7 @@ export type FiPlan = {
   guaranteedIncomeStartYear: number | null;
   /** Military retirement: service start, High-3 (retirement-year dollars). */
   serviceStartYear: number | null;
+  serviceStartMonth: number | null;
   high3MonthlyCents: number | null;
   inflationPct: number;
   sbpEnabled: boolean;
@@ -46,9 +51,14 @@ export type FiPlan = {
   retirementTaxPct: number;
   /** The age the plan runs to. */
   longevityAge: number;
-  /** Yearly healthcare cost (today's dollars) from the start age, rising
-   *  growthPct a year above inflation. */
+  /** TRICARE For Life: yearly Medicare Part B premium (today's dollars)
+   *  from the start age, rising growthPct a year above inflation. */
   healthcareAnnualCents: number | null;
+  /** Health plans from military retirement until TFL, each with its yearly
+   *  premium. More than one runs side by side. */
+  healthPlans: HealthPlan[];
+  /** Dental & vision per year from military retirement on. */
+  dentalVisionAnnualCents: number | null;
   healthcareStartAge: number;
   healthcareGrowthPct: number;
   incomeLines: IncomeLine[];
@@ -86,6 +96,8 @@ export type FiProjectionYear = {
   taxPct: number | null;
   /** Gains: investment return + rental equity change. */
   growthCents: number;
+  /** Net worth actually recorded for that year, when there is one. */
+  actualCents?: number | null;
 };
 
 export function FiSection({
@@ -109,14 +121,26 @@ export function FiSection({
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
   const [editing, setEditing] = useState(false);
+  // Year shown on the net worth card; null = today.
+  const [nwYear, setNwYear] = useState<number | null>(null);
 
   const portfolioCents = measured.assetsCents;
+  // The projection starts from this year's planned year-end net worth (the
+  // Net Worth Plan table's own figure), so every future year matches the
+  // table exactly. Today's actual balance still shows on the Net worth card.
+  const startCents =
+    projection.find((p) => p.year === thisYear)?.eoyCents || portfolioCents;
+  // Last year's closing net worth: the recorded figure, else the plan's.
+  const lastYearRow = projection.find((p) => p.year === thisYear - 1);
+  const prevNwCents = lastYearRow ? lastYearRow.actualCents ?? lastYearRow.eoyCents : null;
 
   // Military retired pay in today's dollars, from the DFAS High-3 formula.
   const pension = estimatePension(
     {
       retireYear: plan.targetRetireYear,
+      retireMonth: plan.targetRetireMonth,
       serviceStartYear: plan.serviceStartYear,
+      serviceStartMonth: plan.serviceStartMonth,
       high3MonthlyCents: plan.high3MonthlyCents,
       inflationPct: plan.inflationPct,
       sbpEnabled: plan.sbpEnabled,
@@ -163,7 +187,7 @@ export function FiSection({
     () =>
       projectFi(
         {
-          portfolioCents,
+          portfolioCents: startCents,
           annualContributionCents: measured.contributionCents,
           annualSpendCents: measured.spendCents,
           realReturnPct: plan.realReturnPct,
@@ -173,7 +197,7 @@ export function FiSection({
         },
         thisYear,
       ),
-    [portfolioCents, measured.contributionCents, measured.spendCents, plan.realReturnPct, plan.withdrawalRatePct, schedule, untilYear, thisYear],
+    [startCents, measured.contributionCents, measured.spendCents, plan.realReturnPct, plan.withdrawalRatePct, schedule, untilYear, thisYear],
   );
 
   const fiAge = ageInYear(plan.birthYear, fi.fiYear ?? thisYear);
@@ -188,7 +212,7 @@ export function FiSection({
       ? null
       : fi.years.find((y) => y.year === fi.fiYear) ?? {
           year: fi.fiYear,
-          endCents: portfolioCents,
+          endCents: startCents,
           targetCents: fi.fiNumberCents,
           spendCents: schedule.find((y) => y.year === fi.fiYear)?.spendCents ?? measured.spendCents,
           guaranteedCents: 0,
@@ -207,17 +231,35 @@ export function FiSection({
     const tax = projection.find((p) => p.year === plan.targetRetireYear)?.taxPct ?? null;
     const base = incomeIn(plan.targetRetireYear, tax);
     const rent = rentIn(plan.targetRetireYear, tax);
+    const parts = [
+      ...base.parts,
+      ...rent.parts.map((r) => ({
+        name: `Rent: ${r.name}`,
+        kind: "other" as const,
+        monthlyAfterTaxCents: r.monthlyAfterTaxCents,
+        monthlyBeforeTaxCents: r.monthlyBeforeTaxCents,
+      })),
+    ];
     return {
-      parts: [
-        ...base.parts,
-        ...rent.parts.map((r) => ({ name: `Rent: ${r.name}`, kind: "other" as const, monthlyAfterTaxCents: r.monthlyAfterTaxCents })),
-      ],
+      parts,
       afterTaxCents: base.afterTaxCents + rent.cashAfterTaxCents,
+      taxPct: tax ?? plan.retirementTaxPct,
+      // The tax is whatever separates the before- and after-tax rows, so the
+      // breakdown always adds up exactly.
+      taxMonthly:
+        parts.reduce((t, p) => t + p.monthlyBeforeTaxCents, 0) -
+        parts.reduce((t, p) => t + p.monthlyAfterTaxCents, 0),
     };
   })();
-  const retireSpendMonthly = plan.targetRetireYear
-    ? Math.round((projection.find((p) => p.year === plan.targetRetireYear)?.spendingCents ?? 0) / 12)
+  // The year the Investments panel checks: military retirement when set,
+  // otherwise the year the plan becomes financially free.
+  const mile = atTarget ?? fiRow;
+  // The Growth card's year: whatever was picked, else the first plan year.
+  const nwRow = (nwYear == null ? null : fi.years.find((y) => y.year === nwYear)) ?? fi.years[0] ?? null;
+  const retireSpendYearly = plan.targetRetireYear
+    ? projection.find((p) => p.year === plan.targetRetireYear)?.spendingCents ?? 0
     : 0;
+  const retireSpendMonthly = Math.round(retireSpendYearly / 12);
   const ssLine = plan.incomeLines.find((l) => l.kind === "social_security" && l.startYear != null) ?? null;
 
   return (
@@ -227,7 +269,7 @@ export function FiSection({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex min-w-0 items-center gap-2 text-left"
+          className="flex w-full min-w-0 items-center gap-2 text-left"
         >
           <svg
             aria-hidden
@@ -244,44 +286,76 @@ export function FiSection({
           <span className="text-sm font-bold">Retirement Plan</span>
         </button>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {/* The two "today" facts live up here rather than in the body: they
-              describe where he stands now, so they'd read as competing with
-              the chart's per-year readout if they sat beside it. */}
+        {/* Today, growth to a picked year, and whether the plan works.
+            The breakdown behind "On track" lives in the panels below. */}
+        <div className={`mt-3 grid grid-cols-2 gap-2 ${nwRow ? "sm:grid-cols-3" : ""}`}>
+          {/* Always today's balance — the year picker lives on the Growth card. */}
           <Figure
-            label="Current net worth"
+            label="Net worth"
             value={formatMoneyWhole(portfolioCents, currency)}
             tone="text-foreground"
+            sub={prevNwCents != null ? `Prev NW: ${formatMoneyWhole(prevNwCents, currency)}` : "today"}
           />
-          {/* The goal and the year it's reached are one fact — the target
-              and when you hit it — so they share a card. */}
-          <Figure
-            label="FI goal"
-            value={formatMoneyWhole(fi.fiNumberCents, currency)}
-            tone="text-foreground"
-            sub={
-              fi.fiYear
-                ? `${fi.progress >= 1 ? "Reached" : "Expected"} ${fi.fiYear}${fiAge != null ? ` · age ${fiAge}` : ""}`
-                : "Not expected on this plan"
-            }
-            subClassName={`font-semibold ${fi.fiYear ? "text-positive" : "text-negative"}`}
-          />
-          {/* Portfolio today ÷ FI number. */}
-          <Figure
-            label="Progress to FI"
-            value={`${Math.round(fi.progress * 100)}%`}
-            tone=""
-            style={{ color: "var(--viz-savings)" }}
-            bar={fi.progress}
-          />
-          {/* Portfolio today × withdrawal rate — what today's assets could pay
-              out each year if he stopped working now. */}
-          <Figure
-            label="Income if you retired today"
-            value={`${formatMoneyWhole(fi.sustainableSpendCents, currency)}/yr`}
-            tone="text-foreground"
-            sub={`Withdrawal ${plan.withdrawalRatePct}% of ${formatMoneyWhole(portfolioCents, currency)}/yr`}
-          />
+          {/* How much the picked year adds on top of today's net worth
+              (same figures as the chart and the Investments panel). */}
+          {nwRow ? (
+            <Figure
+              label={
+                <span className="flex flex-col items-center justify-center gap-1 sm:flex-row sm:gap-1.5">
+                  NW Growth by:
+                  <select
+                    value={nwRow.year}
+                    onChange={(e) => setNwYear(Number(e.target.value))}
+                    aria-label="Growth year"
+                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    {fi.years.map((y) => (
+                      <option key={y.year} value={y.year}>
+                        {y.year}
+                        {plan.birthYear ? ` · age ${y.year - plan.birthYear}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              }
+              value={`${nwRow.endCents >= portfolioCents ? "+" : "−"}${formatMoneyWhole(Math.abs(nwRow.endCents - portfolioCents), currency)}`}
+              tone={nwRow.endCents >= portfolioCents ? "text-positive" : "text-negative"}
+              sub={
+                <>
+                  {formatMoneyWhole(nwRow.endCents, currency)} expected
+                  {portfolioCents > 0
+                    ? ` · ${nwRow.endCents >= portfolioCents ? "+" : "−"}${Math.round((Math.abs(nwRow.endCents - portfolioCents) / portfolioCents) * 100)}%`
+                    : ""}
+                </>
+              }
+            />
+          ) : null}
+          {mile ? (
+            <Figure
+              className={nwRow ? "col-span-2 sm:col-span-1" : ""}
+              label={`Retirement ${mile.year}`}
+              value={
+                mile.endCents >= mile.targetCents
+                  ? "On track"
+                  : `Short ${formatMoneyWhole(mile.targetCents - mile.endCents, currency)}`
+              }
+              tone={mile.endCents >= mile.targetCents ? "text-positive" : "text-negative"}
+              sub={
+                <>
+                  <span className="font-semibold text-positive">{axisMoney(mile.endCents)} expected</span>
+                  {" · "}
+                  <span className="font-semibold text-negative">{axisMoney(mile.targetCents)} needed</span>
+                </>
+              }
+            />
+          ) : (
+            <Figure
+              className={nwRow ? "col-span-2 sm:col-span-1" : ""}
+              label="Retirement"
+              value="Not on this plan"
+              tone="text-negative"
+            />
+          )}
         </div>
       </div>
 
@@ -308,130 +382,148 @@ export function FiSection({
             </span>
           </p>
 
-          {/* The three answers a retirement plan exists to give: does the
-              money last, what's left for the kids, and what retirement pays. */}
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Money lasts</p>
-              {untilYear == null ? (
-                <p className="mt-1 text-xs text-foreground/80">Add your birth year in Edit assumptions.</p>
-              ) : runsOutAge != null ? (
-                <>
-                  <p className="mt-0.5 text-base font-bold text-negative">Runs out at age {runsOutAge}</p>
-                  <p className="text-xs text-foreground/80">in {fi.runsOutYear} · plan runs to age {plan.longevityAge}</p>
-                </>
-              ) : (
-                <>
-                  <p className="mt-0.5 text-base font-bold text-positive">To age {plan.longevityAge}</p>
-                  <p className="text-xs text-foreground/80">never runs out through {untilYear}</p>
-                </>
-              )}
-            </div>
-            <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/75">What is expected</p>
-              {/* Stacked, not side by side: two seven-digit figures in one
-                  row overlapped once the card got narrow. */}
-              <div className="mx-auto mt-0.5 max-w-[14rem] space-y-0.5">
+          {/* Two panels instead of five scattered cards: what retirement
+              pays (before tax, the tax, after tax, against spending) and what
+              the investments have to do about the gap. Each reads top to
+              bottom as one sum. */}
+          <div className={`mt-3 grid gap-3 ${retireIncome ? "md:grid-cols-2" : ""}`}>
+            {retireIncome && plan.targetRetireYear ? (
+              <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+                <p className="text-center text-sm font-bold">
+                  Income in {plan.targetRetireYear}
+                  {plan.birthYear ? ` · age ${plan.targetRetireYear - plan.birthYear}` : ""}
+                  <span className="font-normal text-foreground/75"> · today&rsquo;s dollars</span>
+                </p>
+                {retireIncome.parts.length === 0 ? (
+                  <p className="mt-1 text-center text-xs text-foreground/80">No retirement income yet — add it in Edit assumptions.</p>
+                ) : (
+                  <ul className="mt-1.5 divide-y divide-line/60 text-sm">
+                    <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+                      <span />
+                      <span className="flex shrink-0">
+                        <span className="w-[4.5rem] text-right sm:w-20">Monthly</span>
+                        <span className="w-[5.75rem] text-right sm:w-24">Yearly</span>
+                      </span>
+                    </li>
+                    {retireIncome.parts.map((part, i) => (
+                      <IncomeRow
+                        key={i}
+                        label={part.name}
+                        note={retireIncome.taxMonthly > 0 ? "before tax" : undefined}
+                        monthly={part.monthlyBeforeTaxCents}
+                        yearly={part.monthlyBeforeTaxCents * 12}
+                        currency={currency}
+                      />
+                    ))}
+                    {retireIncome.taxMonthly > 0 ? (
+                      <IncomeRow
+                        label={`Tax (${retireIncome.taxPct}%)`}
+                        monthly={-retireIncome.taxMonthly}
+                        yearly={-retireIncome.taxMonthly * 12}
+                        currency={currency}
+                        tone="text-negative"
+                      />
+                    ) : null}
+                    <IncomeRow
+                      label="Income after tax"
+                      monthly={Math.round(retireIncome.afterTaxCents / 12)}
+                      yearly={retireIncome.afterTaxCents}
+                      currency={currency}
+                      tone="text-positive"
+                      bold
+                    />
+                    <IncomeRow
+                      label="Planned spending"
+                      monthly={-retireSpendMonthly}
+                      yearly={-retireSpendYearly}
+                      currency={currency}
+                    />
+                    {(() => {
+                      const net = Math.round(retireIncome.afterTaxCents / 12) - retireSpendMonthly;
+                      const netYearly = retireIncome.afterTaxCents - retireSpendYearly;
+                      return (
+                        <IncomeRow
+                          label={net >= 0 ? "Left to save" : "Gap from savings"}
+                          monthly={Math.abs(net)}
+                          yearly={Math.abs(netYearly)}
+                          currency={currency}
+                          tone={net >= 0 ? "text-positive" : "text-negative"}
+                          bold
+                        />
+                      );
+                    })()}
+                  </ul>
+                )}
+                {pension ? (
+                  <p className="mt-1.5 text-center text-xs text-foreground/80">
+                    Retired pay{plan.targetRetireMonth ? ` from ${MONTHS[plan.targetRetireMonth - 1]} ${plan.targetRetireYear}` : ""}: {pension.multiplierPct}% of High-3 ·{" "}
+                    {formatMoneyWhole(pension.grossAtRetireCents, currency)}/mo in {plan.targetRetireYear} dollars
+                    {pension.sbpTodayCents > 0 ? ` · after SBP of ${formatMoneyWhole(pension.sbpTodayCents, currency)}/mo` : ""}
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-center text-xs text-foreground/80">Add service start and High-3 in Edit assumptions.</p>
+                )}
+              </div>
+            ) : null}
+
+            <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+              <p className="text-center text-sm font-bold">Investments</p>
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm">
+                {mile ? (
+                  <>
+                    <ValueRow
+                      label={`Needed in ${mile.year}`}
+                      note={`to cover the gap at ${plan.withdrawalRatePct}% a year`}
+                      value={formatMoneyWhole(mile.targetCents, currency)}
+                    />
+                    <ValueRow label={`Expected in ${mile.year}`} value={formatMoneyWhole(mile.endCents, currency)} />
+                    <ValueRow
+                      label="Status"
+                      value={
+                        mile.endCents >= mile.targetCents
+                          ? "On track"
+                          : `Short ${formatMoneyWhole(mile.targetCents - mile.endCents, currency)}`
+                      }
+                      tone={mile.endCents >= mile.targetCents ? "text-positive" : "text-negative"}
+                      bold
+                    />
+                  </>
+                ) : null}
+                <ValueRow
+                  label="Financially free"
+                  value={fi.fiYear ? `${fi.fiYear}${fiAge != null ? ` · age ${fiAge}` : ""}` : "Not on this plan"}
+                  tone={fi.fiYear ? "" : "text-negative"}
+                />
+                <ValueRow
+                  label="Money lasts"
+                  // The gap as a share of the expected balance — how hard the
+                  // investments work that year, next to the 4% rule of thumb.
+                  note={
+                    mile && mile.endCents > 0 && mile.targetCents > 0
+                      ? `drawing ${((plan.withdrawalRatePct * mile.targetCents) / mile.endCents).toFixed(1)}% a year in ${mile.year}`
+                      : undefined
+                  }
+                  value={
+                    untilYear == null
+                      ? "Add birth year"
+                      : runsOutAge != null
+                        ? `Runs out at age ${runsOutAge}`
+                        : `To age ${plan.longevityAge}`
+                  }
+                  tone={untilYear == null ? "" : runsOutAge != null ? "text-negative" : "text-positive"}
+                />
                 {[
                   { age: 80, cents: at80 },
                   { age: plan.longevityAge, cents: atEnd },
                 ].map((row) => (
-                  <p key={row.age} className="flex items-baseline justify-between gap-2">
-                    <span className="whitespace-nowrap text-xs text-foreground/80">at age {row.age}</span>
-                    <span className="text-base font-bold tabular-nums">
-                      {row.cents == null ? "—" : formatMoneyWhole(Math.max(0, row.cents), currency)}
-                    </span>
-                  </p>
+                  <ValueRow
+                    key={row.age}
+                    label={`Left at age ${row.age}`}
+                    value={row.cents == null ? "—" : formatMoneyWhole(Math.max(0, row.cents), currency)}
+                  />
                 ))}
-              </div>
+              </ul>
             </div>
-            <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Military retired pay</p>
-              {pension ? (
-                <>
-                  <p className="mt-0.5 text-base font-bold tabular-nums">
-                    {formatMoneyWhole(pension.grossAtRetireCents, currency)}/mo
-                  </p>
-                  <p className="text-xs text-foreground/80">
-                    {pension.multiplierPct}% of High-3 · {plan.targetRetireYear} dollars ·{" "}
-                    {formatMoneyWhole(pension.grossTodayCents, currency)} today
-                  </p>
-                </>
-              ) : (
-                <p className="mt-1 text-xs text-foreground/80">Add service start and High-3 in Edit assumptions.</p>
-              )}
-            </div>
-          </div>
-
-          {/* Monthly income the first year of military retirement, by source,
-              against that year's monthly spending. */}
-          {retireIncome && plan.targetRetireYear ? (
-            <div className="mt-3 rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-              <p className="text-center text-sm font-bold">
-                Monthly income in {plan.targetRetireYear}
-                {plan.birthYear ? ` · age ${plan.targetRetireYear - plan.birthYear}` : ""}
-                <span className="font-normal text-foreground/75"> · after tax, today&rsquo;s dollars</span>
-              </p>
-              {retireIncome.parts.length === 0 ? (
-                <p className="mt-1 text-center text-xs text-foreground/80">No retirement income yet — add it in Edit assumptions.</p>
-              ) : (
-                <ul className="mt-1.5 divide-y divide-line/60 text-sm">
-                  {retireIncome.parts.map((part) => (
-                    <li key={part.name} className="flex justify-between gap-3 py-1">
-                      <span className="min-w-0 truncate">{part.name}</span>
-                      <span className="tabular-nums text-positive">{formatMoneyWhole(part.monthlyAfterTaxCents, currency)}</span>
-                    </li>
-                  ))}
-                  <li className="flex justify-between gap-3 py-1 font-semibold">
-                    <span>Total income</span>
-                    <span className="tabular-nums">{formatMoneyWhole(Math.round(retireIncome.afterTaxCents / 12), currency)}</span>
-                  </li>
-                  <li className="flex justify-between gap-3 py-1">
-                    <span>Spending (Net Worth Plan table)</span>
-                    <span className="tabular-nums text-negative">{formatMoneyWhole(retireSpendMonthly, currency)}</span>
-                  </li>
-                  {(() => {
-                    const net = Math.round(retireIncome.afterTaxCents / 12) - retireSpendMonthly;
-                    return (
-                      <li className="flex justify-between gap-3 py-1 font-semibold">
-                        <span>{net >= 0 ? "Left to save" : "Taken from savings"}</span>
-                        <span className={`tabular-nums ${net >= 0 ? "text-positive" : "text-negative"}`}>
-                          {formatMoneyWhole(Math.abs(net), currency)}
-                        </span>
-                      </li>
-                    );
-                  })()}
-                </ul>
-              )}
-            </div>
-          ) : null}
-
-          <div className={`mt-3 grid gap-3 ${atTarget && atTarget.year !== fi.fiYear ? "sm:grid-cols-2" : ""}`}>
-            {atTarget && atTarget.year !== fi.fiYear ? (
-              <Milestone
-                title={`Military retirement ${atTarget.year}${plan.birthYear ? ` · age ${atTarget.year - plan.birthYear}` : ""}`}
-                haveCents={atTarget.endCents}
-                needCents={atTarget.targetCents}
-                spendCents={atTarget.spendCents}
-                guaranteedCents={atTarget.guaranteedCents}
-                currency={currency}
-              />
-            ) : null}
-            {fiRow ? (
-              <Milestone
-                title={`Financially free ${fiRow.year}${fiAge != null ? ` · age ${fiAge}` : ""}`}
-                haveCents={fiRow.endCents}
-                needCents={fiRow.targetCents}
-                spendCents={fiRow.spendCents}
-                guaranteedCents={fiRow.guaranteedCents}
-                currency={currency}
-              />
-            ) : (
-              <p className="rounded-lg bg-background px-3 py-2 text-xs ring-1 ring-line">
-                <span className="font-semibold text-negative">Not reached on this plan.</span>{" "}
-                Save more or spend less in the Net Worth Plan table.
-              </p>
-            )}
           </div>
 
           <FiChart
@@ -793,50 +885,28 @@ function FiChart({
   );
 }
 
-// One milestone year: what the portfolio is expected to hold, what that year's spending
-// needs, and the gap or "enough".
-function Milestone({
-  title,
-  haveCents,
-  needCents,
-  spendCents,
-  guaranteedCents,
-  currency,
+/** One label/value line in the Investments panel, styled like IncomeRow. */
+function ValueRow({
+  label,
+  note,
+  value,
+  tone = "",
+  bold = false,
 }: {
-  title: string;
-  haveCents: number;
-  needCents: number;
-  spendCents: number;
-  guaranteedCents: number;
-  currency: string;
+  label: string;
+  note?: string;
+  value: string;
+  tone?: string;
+  bold?: boolean;
 }) {
-  const gap = needCents - haveCents;
-  const label = "text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75";
-  const value = "mt-0.5 truncate text-sm font-bold tabular-nums sm:text-base";
   return (
-    <div className="rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line">
-      <p className="text-sm font-bold">{title}</p>
-      <div className="mt-2 grid grid-cols-3 gap-1 sm:gap-2">
-        <div className="min-w-0">
-          <p className={label}>Expected</p>
-          <p className={value}>{formatMoneyWhole(haveCents, currency)}</p>
-        </div>
-        <div className="min-w-0">
-          <p className={label}>Needed</p>
-          <p className={value}>{formatMoneyWhole(needCents, currency)}</p>
-        </div>
-        <div className="min-w-0">
-          <p className={label}>{gap > 0 ? "Shortfall" : "Status"}</p>
-          <p className={`${value} ${gap > 0 ? "text-negative" : "text-positive"}`}>
-            {gap > 0 ? formatMoneyWhole(gap, currency) : "On track"}
-          </p>
-        </div>
-      </div>
-      <p className="mt-1.5 text-xs text-foreground/80">
-        to spend {formatMoneyWhole(spendCents, currency)} a year
-        {guaranteedCents > 0 ? `, ${formatMoneyWhole(guaranteedCents, currency)} of it from guaranteed income` : ""}
-      </p>
-    </div>
+    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
+      <span className="min-w-0">
+        {label}
+        {note ? <span className="block text-xs font-normal text-foreground/75">{note}</span> : null}
+      </span>
+      <span className={`shrink-0 text-right tabular-nums ${tone}`}>{value}</span>
+    </li>
   );
 }
 
@@ -907,16 +977,33 @@ function PlanModal({
   // they're typed.
   const [retireYear, setRetireYear] = useState(plan.targetRetireYear?.toString() ?? "");
   const [serviceStart, setServiceStart] = useState(plan.serviceStartYear?.toString() ?? "");
+  const [retireMonth, setRetireMonth] = useState(plan.targetRetireMonth?.toString() ?? "");
+  const [serviceMonth, setServiceMonth] = useState(plan.serviceStartMonth?.toString() ?? "");
   const [high3, setHigh3] = useState(plan.high3MonthlyCents ? centsToDisplay(plan.high3MonthlyCents) : "");
   const [inflation, setInflation] = useState(String(plan.inflationPct));
   const [sbpEnabled, setSbpEnabled] = useState(plan.sbpEnabled);
   const [sbpPct, setSbpPct] = useState(String(plan.sbpPct));
+  // Starts with one TRICARE Select row so the choice is visible; an empty
+  // amount saves as $0.
+  const [healthPlans, setHealthPlans] = useState<{ key: string; kind: HealthPlanKind; amount: string }[]>(() =>
+    plan.healthPlans.length > 0
+      ? plan.healthPlans.map((p, i) => ({
+          key: `saved-${i}`,
+          kind: p.kind,
+          amount: p.annualCents ? centsToDisplay(p.annualCents) : "",
+        }))
+      : [{ key: "new-0", kind: "tricare_select", amount: "" }],
+  );
+  const updateHealthPlan = (key: string, patch: Partial<{ kind: HealthPlanKind; amount: string }>) =>
+    setHealthPlans((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
   const toYear = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
   const estimate = estimatePension(
     {
       retireYear: toYear(retireYear),
+      retireMonth: retireMonth ? Number(retireMonth) : null,
       serviceStartYear: toYear(serviceStart),
+      serviceStartMonth: serviceMonth ? Number(serviceMonth) : null,
       high3MonthlyCents: high3.trim() ? Math.round(Number(high3.replace(/[$,]/g, "")) * 100) || null : null,
       inflationPct: Number(inflation) || 0,
       sbpEnabled,
@@ -1012,18 +1099,18 @@ function PlanModal({
 
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  const addLine = () =>
+  const addLine = (kind: IncomeLineKind) =>
     setLines((prev) => [
       ...prev,
       {
         key: `new-${Date.now()}`,
         id: null,
-        name: DEFAULT_LINE_NAME.va,
-        kind: "va",
+        name: DEFAULT_LINE_NAME[kind],
+        kind,
         monthly: "",
         startYear: retireYear,
         endYear: "",
-        taxable: false,
+        taxable: kind !== "va",
       },
     ]);
 
@@ -1031,6 +1118,7 @@ function PlanModal({
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
+    formData.set("healthPlans", JSON.stringify(healthPlans.map(({ kind, amount }) => ({ kind, amount }))));
     formData.set(
       "incomeLines",
       JSON.stringify(
@@ -1079,12 +1167,33 @@ function PlanModal({
   const heading = "sm:col-span-2 border-t border-line pt-3 text-sm font-bold uppercase tracking-wide first:border-t-0 first:pt-0";
 
   return (
-    <ModalShell title="Retirement / FI Assumptions" onClose={onClose} className="sm:max-w-3xl">
+    <ModalShell
+      title={
+        // Capped on a phone so the title, Save and Close share one line.
+        <span className="flex min-w-0 max-w-[calc(100vw-5.5rem)] items-center gap-2 text-base sm:max-w-none sm:gap-3 sm:text-lg">
+          <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Retirement / FI Assumptions</span>
+          {/* Outside the <form>, so it points at it by id. */}
+          <button
+            type="submit"
+            form="fi-plan-form"
+            disabled={pending}
+            className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save"}
+          </button>
+        </span>
+      }
+      onClose={onClose}
+      className="sm:max-w-3xl"
+    >
       <form
+        id="fi-plan-form"
         onSubmit={submit}
         className="grid grid-cols-1 gap-x-8 gap-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
       >
-        <h3 className={heading}>You</h3>
+        {/* Also up here, so a rejected save from the top Save is seen. */}
+        {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
+        <h3 className={heading}>Info Data About You</h3>
         <Field label="Birth year" hint="Used to show your age on the chart.">
           <input name="birthYear" inputMode="numeric" defaultValue={plan.birthYear ?? ""} className={inputClass} />
         </Field>
@@ -1093,34 +1202,38 @@ function PlanModal({
         </Field>
 
         <h3 className={heading}>Military retirement</h3>
-        <Field label="Military retirement year" hint="Active-duty pay stops and retired pay starts.">
-          <input
-            name="targetRetireYear"
-            inputMode="numeric"
-            value={retireYear}
-            onChange={(e) => setRetireYear(e.target.value)}
-            className={inputClass}
+        <Field label="Month & Year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
+          <MonthYear
+            monthName="targetRetireMonth"
+            month={retireMonth}
+            onMonth={setRetireMonth}
+            yearName="targetRetireYear"
+            year={retireYear}
+            onYear={setRetireYear}
+            label="Retirement"
           />
         </Field>
         <Field
-          label="Service start year"
+          label="Month & Year service started"
           hint={
             estimate
-              ? `${estimate.yearsOfService} years of service × 2.5% = ${estimate.multiplierPct}% of High-3.`
+              ? `${estimate.yearsOfService} years${estimate.extraMonths ? ` ${estimate.extraMonths} month${estimate.extraMonths === 1 ? "" : "s"}` : ""} of service × 2.5% = ${estimate.multiplierPct}% of High-3.`
               : "Years of service × 2.5% sets your retired pay %."
           }
         >
-          <input
-            name="serviceStartYear"
-            inputMode="numeric"
-            value={serviceStart}
-            onChange={(e) => setServiceStart(e.target.value)}
-            className={inputClass}
+          <MonthYear
+            monthName="serviceStartMonth"
+            month={serviceMonth}
+            onMonth={setServiceMonth}
+            yearName="serviceStartYear"
+            year={serviceStart}
+            onYear={setServiceStart}
+            label="Service start"
           />
         </Field>
         <Field
           label="High-3 (/mo)"
-          hint={`Average of your highest 36 months of base pay, in ${toYear(retireYear) ?? "retirement-year"} dollars.`}
+          hint={`Add total amount expected from monthly Base Pay${toYear(retireYear) ? ` in ${toYear(retireYear)}` : ""}.`}
         >
           <input
             name="high3"
@@ -1131,7 +1244,23 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="SBP (Survivor Benefit Plan)" hint="Tick if you elect it. The rate comes off gross retired pay, before tax.">
+        <Field
+          label="SBP (Survivor Benefit Plan)"
+          hint={
+            <>
+              Select and the rate comes off gross retired pay, before tax.{" "}
+              <a
+                href="https://www.dfas.mil/RetiredMilitary/provide/sbp/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="whitespace-nowrap font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                Read about SBP (DFAS)
+              </a>
+            </>
+          }
+        >
           <span className="flex w-28 items-center gap-2">
             <input
               type="checkbox"
@@ -1141,16 +1270,18 @@ function PlanModal({
               className="size-4 cursor-pointer accent-[color:var(--brand)]"
               aria-label="Elect SBP"
             />
-            <input
-              name="sbpPct"
-              inputMode="decimal"
-              value={sbpPct}
-              onChange={(e) => setSbpPct(e.target.value)}
-              disabled={!sbpEnabled}
-              aria-label="SBP rate %"
-              className="w-full min-w-0 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-50"
-            />
-            <span className="text-sm">%</span>
+            <span className={`relative min-w-0 flex-1 ${sbpEnabled ? "" : "opacity-50"}`}>
+              <input
+                name="sbpPct"
+                inputMode="decimal"
+                value={sbpPct}
+                onChange={(e) => setSbpPct(e.target.value)}
+                disabled={!sbpEnabled}
+                aria-label="SBP rate %"
+                className="w-full min-w-0 rounded-md bg-background py-1.5 pl-2 pr-6 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground/75">%</span>
+            </span>
           </span>
         </Field>
         {estimate ? (
@@ -1164,7 +1295,79 @@ function PlanModal({
         ) : null}
 
         <h3 className={heading}>Healthcare in retirement</h3>
-        <Field label="Healthcare (/yr)" hint="Premiums, dental, vision and out-of-pocket for the family, in today's dollars. Added to that year's spending.">
+        <p className="-mt-2 text-xs text-foreground/80 sm:col-span-2">
+          Yearly premiums for the family, in today&rsquo;s dollars. Each one is added to that year&rsquo;s spending.
+        </p>
+        {/* One row per plan; two can run side by side (a TRICARE plan plus a
+            private supplement). All of them stop when TFL starts. */}
+        <div className="space-y-2 sm:col-span-2">
+          <span className="block text-[11px] font-bold uppercase tracking-wide text-foreground">Health plan (/yr)</span>
+          {healthPlans.length === 0 ? (
+            <p className="text-xs text-foreground/80">No health plan premium before TRICARE For Life.</p>
+          ) : null}
+          {healthPlans.map((row) => (
+            <div key={row.key} className="flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-x-3">
+              <select
+                value={row.kind}
+                onChange={(e) => updateHealthPlan(row.key, { kind: e.target.value as HealthPlanKind })}
+                aria-label="Health plan"
+                className="w-40 cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-44"
+              >
+                <option value="tricare_prime">TRICARE Prime</option>
+                <option value="tricare_select">TRICARE Select</option>
+                <option value="private">Private insurance</option>
+              </select>
+              <input
+                inputMode="decimal"
+                value={row.amount}
+                onChange={(e) => updateHealthPlan(row.key, { amount: e.target.value })}
+                placeholder="0.00"
+                aria-label="Premium per year"
+                className="w-24 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-28"
+              />
+              <button
+                type="button"
+                onClick={() => setHealthPlans((rows) => rows.filter((r) => r.key !== row.key))}
+                aria-label="Remove health plan"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+              <span className="basis-full text-xs leading-snug text-foreground/80 sm:basis-0 sm:flex-1">
+                {row.kind === "private"
+                  ? "Private or employer plan premium, from the month you retire until TRICARE For Life starts."
+                  : `Retiree ${row.kind === "tricare_prime" ? "TRICARE Prime" : "TRICARE Select"} enrollment fee, from the month you retire until TRICARE For Life starts.`}
+              </span>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "" }])
+            }
+            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
+          >
+            + Add health plan
+          </button>
+        </div>
+        <Field
+          label="Dental & vision (/yr)"
+          hint="From the month you retire. TRICARE For Life covers neither."
+        >
+          <input
+            name="dentalVisionAnnual"
+            inputMode="decimal"
+            defaultValue={plan.dentalVisionAnnualCents ? centsToDisplay(plan.dentalVisionAnnualCents) : ""}
+            placeholder="0.00"
+            className={inputClass}
+          />
+        </Field>
+        <Field
+          label="TRICARE For Life (/yr)"
+          hint="Your Medicare Part B premium. TFL itself has no fee."
+        >
           <input
             name="healthcareAnnual"
             inputMode="decimal"
@@ -1173,14 +1376,30 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Starts at age" hint="65 is when Medicare begins. Use an earlier age if costs start at military retirement.">
+        <Field
+          label="TFL starts at age"
+          hint={
+            <>
+              At age 65, Medicare begins or adjust if earlier.{" "}
+              <a
+                href="https://www.tricare.mil/tfl"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="whitespace-nowrap font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                Read about TRICARE For Life
+              </a>
+            </>
+          }
+        >
           <input name="healthcareStartAge" inputMode="numeric" defaultValue={plan.healthcareStartAge} className={inputClass} />
         </Field>
         <Field label="Rises above inflation (%/yr)" hint="Medical costs grow faster than prices overall. 1.5% = medical inflation of about 4%.">
           <input name="healthcareGrowthPct" inputMode="decimal" defaultValue={plan.healthcareGrowthPct} className={inputClass} />
         </Field>
 
-        <h3 className={heading}>Rates</h3>
+        <h3 className={heading}>Growth, Withdrawal &amp; Tax Rates</h3>
         <Field label="Real return (%)" hint="Yearly growth of your investments, after inflation.">
           <input name="realReturnPct" inputMode="decimal" defaultValue={plan.realReturnPct} className={inputClass} />
         </Field>
@@ -1208,29 +1427,19 @@ function PlanModal({
 
         <h3 className={heading}>Other income</h3>
         <p className="-mt-2 text-xs text-foreground/80 sm:col-span-2">
-          Per month in today&rsquo;s dollars, before tax. For a VA rating change, end one line and start a new one that year.
+          Per month in today&rsquo;s dollars, before tax. If an amount changes, type an End Year on the old line,
+          then + Add income with the new amount starting the year after.
         </p>
         <div className="space-y-2 sm:col-span-2">
           {lines.map((l) => (
-            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_9.5rem_6rem_4.5rem_4.5rem_auto_auto]">
-              <LineField label="Name" className="col-span-2 sm:col-span-1">
-                <input
-                  value={l.name}
-                  onChange={(e) => updateLine(l.key, { name: e.target.value })}
-                  className={lineInput}
-                />
-              </LineField>
+            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_4.5rem_4.5rem_auto_auto]">
               <LineField label="Type" className="col-span-2 sm:col-span-1">
                 <select
                   value={l.kind}
                   onChange={(e) => {
+                    // The type is the line's name — there is no separate Name field.
                     const kind = e.target.value as IncomeLineKind;
-                    const renamed = l.name === DEFAULT_LINE_NAME[l.kind] || !l.name.trim();
-                    updateLine(l.key, {
-                      kind,
-                      taxable: kind !== "va",
-                      ...(renamed ? { name: DEFAULT_LINE_NAME[kind] } : {}),
-                    });
+                    updateLine(l.key, { kind, taxable: kind !== "va", name: DEFAULT_LINE_NAME[kind] });
                   }}
                   className={lineInput}
                 >
@@ -1257,12 +1466,11 @@ function PlanModal({
                   className={`${lineInput} text-center`}
                 />
               </LineField>
-              <LineField label="Last year">
+              <LineField label="End year">
                 <input
                   inputMode="numeric"
                   value={l.endYear}
                   onChange={(e) => updateLine(l.key, { endYear: e.target.value })}
-                  placeholder="Life"
                   className={`${lineInput} text-center`}
                 />
               </LineField>
@@ -1285,19 +1493,27 @@ function PlanModal({
               </button>
             </div>
           ))}
-          <button
-            type="button"
-            onClick={addLine}
-            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+          {/* Picking a type adds a line of that type, then resets. */}
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) addLine(e.target.value as IncomeLineKind);
+            }}
+            aria-label="Add income"
+            className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-white/10"
           >
-            + Add income
-          </button>
+            <option value="">+ Add income</option>
+            {INCOME_LINE_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>{k.label}</option>
+            ))}
+          </select>
         </div>
 
         <h3 className={heading}>Rental properties</h3>
         <p className="-mt-2 text-xs text-foreground/80 sm:col-span-2">
           Prices, rent and costs in today&rsquo;s dollars. Net rent counts as income (taxed when positive); equity
-          (value − loan) counts toward net worth. Already own one? Add it on Accounts under Property, then pick it here.
+          (value − loan) counts toward net worth. Planning to buy? Fill it in here. Already own one? Add it on
+          Accounts under Property, then pick it in Property.
         </p>
         <div className="space-y-2 sm:col-span-2">
           {rentalDrafts.map((r) => {
@@ -1431,7 +1647,7 @@ const lineInput =
 function LineField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
     <label className={`block min-w-0 ${className ?? ""}`}>
-      <span className="mb-0.5 block text-[11px] font-bold uppercase tracking-wide text-foreground">{label}</span>
+      <span className="mb-0.5 block text-center text-[11px] font-bold uppercase tracking-wide text-foreground">{label}</span>
       {children}
     </label>
   );
@@ -1439,6 +1655,55 @@ function LineField({ label, className, children }: { label: string; className?: 
 
 // Sized to the longest value (80000.00), not the column — full-width boxes
 // holding "5" or "1981" were mostly empty space.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// A month picker and a four-digit year box, side by side in one field.
+function MonthYear({
+  monthName,
+  month,
+  onMonth,
+  yearName,
+  year,
+  onYear,
+  label,
+}: {
+  monthName: string;
+  month: string;
+  onMonth: (v: string) => void;
+  yearName: string;
+  year: string;
+  onYear: (v: string) => void;
+  label: string;
+}) {
+  return (
+    <span className="flex w-44 gap-1.5">
+      <select
+        name={monthName}
+        value={month}
+        onChange={(e) => onMonth(e.target.value)}
+        aria-label={`${label} month`}
+        className="w-[5.5rem] shrink-0 cursor-pointer rounded-md bg-background px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      >
+        <option value="">Month</option>
+        {MONTHS.map((m, i) => (
+          <option key={m} value={i + 1}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <input
+        name={yearName}
+        inputMode="numeric"
+        value={year}
+        onChange={(e) => onYear(e.target.value)}
+        aria-label={`${label} year`}
+        placeholder="Year"
+        className="w-full min-w-0 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+    </span>
+  );
+}
+
 const inputClass =
   "w-28 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 
@@ -1459,6 +1724,39 @@ function Field({ label, hint, children }: { label: string; hint?: React.ReactNod
 // A header stat as its own small card, the same look as the milestone cards
 // under it, so the summary and the detail read as one set rather than a line
 // of labels floating over a divider.
+/** One line of the retirement-income breakdown: a label, then the monthly and
+ *  yearly amounts in fixed-width columns so they line up down the list. */
+function IncomeRow({
+  label,
+  note,
+  monthly,
+  yearly,
+  currency,
+  tone = "",
+  bold = false,
+}: {
+  label: string;
+  note?: string;
+  monthly: number;
+  yearly: number;
+  currency: string;
+  tone?: string;
+  bold?: boolean;
+}) {
+  return (
+    <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
+      <span className="min-w-0">
+        {label}
+        {note ? <span className="block text-xs font-normal text-foreground/75">{note}</span> : null}
+      </span>
+      <span className={`flex shrink-0 tabular-nums ${tone}`}>
+        <span className="w-[4.5rem] text-right sm:w-20">{formatMoneyWhole(monthly, currency)}</span>
+        <span className="w-[5.75rem] text-right sm:w-24">{formatMoneyWhole(yearly, currency)}</span>
+      </span>
+    </li>
+  );
+}
+
 function Figure({
   label,
   value,
@@ -1469,7 +1767,7 @@ function Figure({
   sub,
   subClassName,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   tone: string;
   style?: React.CSSProperties;
@@ -1477,12 +1775,12 @@ function Figure({
   /** 0–1: draws a thin progress bar under the value. */
   bar?: number;
   /** A short "how it's worked out" line under the value. */
-  sub?: string;
+  sub?: React.ReactNode;
   subClassName?: string;
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
-      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75">{label}</p>
+      <div className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75">{label}</div>
       <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
         {value}
       </p>

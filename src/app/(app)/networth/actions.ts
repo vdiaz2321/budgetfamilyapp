@@ -13,6 +13,10 @@ import {
   estimatePension,
   healthcareForYear,
   incomeForYear,
+  retiredShareOfYear,
+  type HealthcarePlan,
+  type HealthPlan,
+  parseHealthPlans,
   rentalsForYear,
   toRentalProperty,
   type IncomeLine,
@@ -348,6 +352,12 @@ export async function saveRetirementPlan(formData: FormData) {
   const birthYear = num("birthYear");
   const targetYear = num("targetRetireYear");
   const serviceStart = num("serviceStartYear");
+  const month = (key: string): number | null => {
+    const n = num(key);
+    return n != null && Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
+  };
+  const targetMonth = month("targetRetireMonth");
+  const serviceStartMonth = month("serviceStartMonth");
   const realReturn = num("realReturnPct");
   const withdrawal = num("withdrawalRatePct");
   const inflation = num("inflationPct");
@@ -355,6 +365,16 @@ export async function saveRetirementPlan(formData: FormData) {
   const taxPct = num("retirementTaxPct");
   const longevity = num("longevityAge");
   const healthStartAge = num("healthcareStartAge");
+  // Each row: a plan kind and its yearly premium as typed.
+  let healthPlans: HealthPlan[] = [];
+  try {
+    const raw = JSON.parse(String(formData.get("healthPlans") ?? "[]")) as { kind: string; amount: string }[];
+    healthPlans = parseHealthPlans(
+      raw.map((r) => ({ kind: r.kind, annualCents: r.amount?.trim() ? Math.max(0, displayToCents(r.amount)) : 0 })),
+    );
+  } catch {
+    return { error: "Could not read the health plans." };
+  }
   const healthGrowth = num("healthcareGrowthPct");
   // The two drift rates the projection grid fills forward with.
   const personalInflation = num("personalInflationPct");
@@ -363,7 +383,11 @@ export async function saveRetirementPlan(formData: FormData) {
   if (!year(birthYear)) return { error: "Enter a four-digit birth year." };
   if (!year(targetYear)) return { error: "Enter a four-digit military retirement year." };
   if (!year(serviceStart)) return { error: "Enter a four-digit year for when service started." };
-  if (serviceStart != null && targetYear != null && serviceStart > targetYear) {
+  if (
+    serviceStart != null &&
+    targetYear != null &&
+    serviceStart * 12 + (serviceStartMonth ?? 1) > targetYear * 12 + (targetMonth ?? 1)
+  ) {
     return { error: "Service has to start before the military retirement year." };
   }
   if (realReturn != null && (realReturn < -20 || realReturn > 20)) {
@@ -539,7 +563,9 @@ export async function saveRetirementPlan(formData: FormData) {
       household_id: householdId,
       birth_year: birthYear,
       target_retire_year: targetYear,
+      target_retire_month: targetMonth,
       service_start_year: serviceStart,
+      service_start_month: serviceStartMonth,
       high3_monthly_cents: money("high3"),
       real_return_pct: realReturn ?? 5,
       withdrawal_rate_pct: withdrawal ?? 4,
@@ -548,7 +574,9 @@ export async function saveRetirementPlan(formData: FormData) {
       sbp_pct: sbpPct ?? 6.5,
       retirement_tax_pct: taxPct ?? 12,
       longevity_age: longevity ?? 90,
+      health_plans: healthPlans,
       healthcare_annual_cents: money("healthcareAnnual"),
+      dental_vision_annual_cents: money("dentalVisionAnnual"),
       healthcare_start_age: healthStartAge ?? 65,
       healthcare_growth_pct: healthGrowth ?? 1.5,
       personal_inflation_pct: personalInflation ?? 0,
@@ -726,10 +754,13 @@ async function recomputeRetirementIncome(
     taxable: l.taxable,
   }));
   const retireYear: number | null = plan.target_retire_year;
+  const retireMonth: number | null = plan.target_retire_month ?? null;
   const pension = estimatePension(
     {
       retireYear,
+      retireMonth,
       serviceStartYear: plan.service_start_year,
+      serviceStartMonth: plan.service_start_month ?? null,
       high3MonthlyCents: plan.high3_monthly_cents,
       inflationPct: Number(plan.inflation_pct ?? 2.5),
       sbpEnabled: !!plan.sbp_enabled,
@@ -773,9 +804,14 @@ async function recomputeRetirementIncome(
     thisYear + 1,
     Math.max(lastPlanYear, rows.at(-1)?.year ?? thisYear),
   );
-  const health = {
-    annualCents: plan.healthcare_annual_cents,
-    startAge: Number(plan.healthcare_start_age ?? 65),
+  const health: HealthcarePlan = {
+    birthYear: plan.birth_year,
+    retireYear,
+    retireMonth,
+    planAnnualCents: parseHealthPlans(plan.health_plans).reduce((t, p) => t + p.annualCents, 0),
+    tflAnnualCents: plan.healthcare_annual_cents,
+    tflStartAge: Number(plan.healthcare_start_age ?? 65),
+    dentalVisionAnnualCents: plan.dental_vision_annual_cents ?? null,
     growthPct: Number(plan.healthcare_growth_pct ?? 1.5),
   };
   const returnPct = Number(plan.real_return_pct ?? 5);
@@ -800,9 +836,14 @@ async function recomputeRetirementIncome(
   for (const row of rows) {
     if (row.year < thisYear) continue;
     const boy: number = carry ?? row.boy_cents;
-    const work = retireYear == null || row.year < retireYear ? (row.work_income_cents ?? row.income_cents) : 0;
+    // The retirement year is split by month: a November retirement keeps ten
+    // months of active-duty pay and gets two months of retired pay.
+    const retiredShare = retiredShareOfYear(row.year, retireYear, retireMonth);
+    const work = Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare));
     const taxPct = row.tax_pct == null ? defaultTax : Number(row.tax_pct);
-    const lineIncome = incomeForYear(row.year, pension, retireYear, lines, taxPct).afterTaxCents;
+    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, taxPct);
+    const pensionYearly = (yearIncome.parts.find((p) => p.kind === "pension")?.monthlyAfterTaxCents ?? 0) * 12;
+    const lineIncome = yearIncome.afterTaxCents - Math.round(pensionYearly * (1 - retiredShare));
     // Rentals: net rent is income; equity is part of net worth but earns no
     // investment return — it grows by principal paid and appreciation, and a
     // purchase moves the down payment out of savings (closing costs are gone).
@@ -811,7 +852,7 @@ async function recomputeRetirementIncome(
     const baseSpend = row.base_spending_cents ?? row.spending_cents;
     // This year is already in the register, so only later years drop.
     const freed = row.year > thisYear ? freedByYear.get(row.year) ?? 0 : 0;
-    const spending = Math.max(0, baseSpend + healthcareForYear(row.year, plan.birth_year, health, thisYear) - freed);
+    const spending = Math.max(0, baseSpend + healthcareForYear(row.year, health, thisYear) - freed);
     const investable = boy - rent.equityStartCents;
     const propertyEffect = rent.equityEndCents - rent.equityStartCents - rent.purchaseCashCents;
     const growth =

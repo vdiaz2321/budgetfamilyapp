@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeInit } from "./theme-init";
 
@@ -6,6 +7,10 @@ export const metadata: Metadata = {
   title: "Capitall",
   description: "A budget built for how your family actually spends.",
 };
+
+// Inter, self-hosted by next/font (no request to Google at runtime). Exposed
+// as a CSS variable so globals.css can put it at the front of --font-sans.
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
 
 const SUPABASE_ORIGIN = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
@@ -17,7 +22,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className="h-full antialiased"
+      className={`${inter.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
