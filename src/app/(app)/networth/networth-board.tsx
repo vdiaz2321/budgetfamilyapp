@@ -164,6 +164,8 @@ type Props = {
   fiPlan: FiPlan;
   fiMeasured: FiMeasured;
   thisYear: number;
+  /** How far through the year today is, 0–1. */
+  yearElapsed: number;
   projectionYears: ProjectionYear[];
   projectionSeed: ProjectionSeed;
 };
@@ -177,6 +179,7 @@ export function NetworthBoard({
   fiPlan,
   fiMeasured,
   thisYear,
+  yearElapsed,
   projectionYears,
   projectionSeed,
 }: Props) {
@@ -222,16 +225,6 @@ export function NetworthBoard({
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <h1 className="text-lg font-bold sm:text-xl">Net Worth</h1>
 
-      {/* Where the line is heading. It sits above the history because the
-          history is the evidence for it, not the other way round. */}
-      <FiSection
-        plan={fiPlan}
-        measured={fiMeasured}
-        currency={currency}
-        thisYear={thisYear}
-        projection={projectionYears}
-      />
-
       {/* The household's own year-by-year plan, and how the record compares.
           Rendered even with no years yet — that empty case is the only place
           a projection can be started from. */}
@@ -250,6 +243,18 @@ export function NetworthBoard({
         }}
         militaryRetireYear={fiPlan.targetRetireYear}
         defaultTaxPct={fiPlan.retirementTaxPct}
+        currentNwCents={fiMeasured.assetsCents}
+        yearElapsed={yearElapsed}
+      />
+
+      {/* Retirement Financial Planner — sits under the year-by-year plan, and
+          above the history because the history is the evidence for both. */}
+      <FiSection
+        plan={fiPlan}
+        measured={fiMeasured}
+        currency={currency}
+        thisYear={thisYear}
+        projection={projectionYears}
       />
 
       {/* The chart used to pin to the top of the viewport while you scrolled
@@ -1406,7 +1411,7 @@ function BalanceGrid({
       {reorderError ? (
         <p className="px-4 pb-2 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
-      {/* Boxed like the Net Worth Plan table and the stat cards on this page. */}
+      {/* Boxed like the Current and Projected Net Worth table and the stat cards on this page. */}
       <div className="mx-4 mb-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
       <div ref={scrollBoxRef} className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
         <table

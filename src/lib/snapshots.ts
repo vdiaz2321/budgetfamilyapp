@@ -2,6 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { throwIfAny } from "./supabase-result";
 
 // First day of the current month as YYYY-MM-01 (local time).
+// How far through the current year today is, 0–1 — for pace forecasts.
+export function yearElapsedFraction(): number {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 1).getTime();
+  const end = new Date(now.getFullYear() + 1, 0, 1).getTime();
+  return Math.min(1, Math.max(0, (now.getTime() - start) / (end - start)));
+}
+
 export function currentMonthFirst(): string {
   const now = new Date();
   const y = now.getFullYear();

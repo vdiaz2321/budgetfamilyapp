@@ -7,9 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
-import { currentMonthFirst as monthStart } from "@/lib/snapshots";
 import {
-  debtFreedByYear,
   estimatePension,
   healthcareForYear,
   incomeForYear,
@@ -707,7 +705,7 @@ async function recomputeRetirementIncome(
   householdId: string,
 ) {
   const thisYear = new Date().getFullYear();
-  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes, debtRes] = await Promise.all([
+  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes] = await Promise.all([
     supabase.from("retirement_plan").select("*").eq("household_id", householdId).maybeSingle(),
     supabase.from("retirement_income_lines").select("*").eq("household_id", householdId),
     supabase
@@ -723,16 +721,7 @@ async function recomputeRetirementIncome(
       .eq("household_id", householdId)
       .not("property_account_id", "is", null)
       .is("paid_off_at", null),
-    // Every open debt not tied to a rental (a rental's mortgage is paid out of
-    // its rent in the rental model, not out of household spending).
-    supabase
-      .from("debts")
-      .select("id, current_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, apr, promo_apr_ends_on, post_promo_apr, property_account_id, tracking_enabled")
-      .eq("household_id", householdId)
-      .is("paid_off_at", null)
-      .gt("current_balance_cents", 0),
   ]);
-  if (debtRes.error) throw new Error(`Could not read the debts: ${debtRes.error.message}`);
   if (loanRes.error) throw new Error(`Could not read the mortgages: ${loanRes.error.message}`);
   if (rentalsRes.error) throw new Error(`Could not read the rentals: ${rentalsRes.error.message}`);
   if (acctRes.error) throw new Error(`Could not read the accounts: ${acctRes.error.message}`);
@@ -777,33 +766,6 @@ async function recomputeRetirementIncome(
     loanByProperty.set(id, (loanByProperty.get(id) ?? 0) + Number(d.current_balance_cents ?? 0));
   }
   const rentals = ((rentalsRes.data ?? []) as RentalRow[]).map((r) => toRentalProperty(r, balances, loanByProperty));
-  // Payments that stop once each debt is paid off, by year.
-  const lastPlanYear = plan.birth_year
-    ? plan.birth_year + Number(plan.longevity_age ?? 90)
-    : (rows.at(-1)?.year ?? thisYear);
-  const freedByYear = debtFreedByYear(
-    (debtRes.data ?? [])
-      .filter((d) => d.tracking_enabled !== false)
-      .filter(
-        (d) =>
-          !d.property_account_id ||
-          !((rentalsRes.data ?? []) as RentalRow[]).some((r) => r.property_account_id === d.property_account_id),
-      )
-      .map((d) => ({
-        id: d.id,
-        balanceCents: Number(d.current_balance_cents ?? 0),
-        paymentCents: Math.max(
-          0,
-          Math.max(Number(d.min_payment_cents ?? 0), Number(d.target_payment_cents ?? 0)) - Number(d.escrow_cents ?? 0),
-        ),
-        apr: Number(d.apr ?? 0),
-        promoEndsOn: d.promo_apr_ends_on ?? null,
-        postPromoApr: d.post_promo_apr == null ? null : Number(d.post_promo_apr),
-      })),
-    monthStart(),
-    thisYear + 1,
-    Math.max(lastPlanYear, rows.at(-1)?.year ?? thisYear),
-  );
   const health: HealthcarePlan = {
     birthYear: plan.birth_year,
     retireYear,
@@ -850,9 +812,11 @@ async function recomputeRetirementIncome(
     const rent = rentalsForYear(rentals, row.year, thisYear, inflationPct, taxPct);
     const income = work + lineIncome + rent.cashAfterTaxCents;
     const baseSpend = row.base_spending_cents ?? row.spending_cents;
-    // This year is already in the register, so only later years drop.
-    const freed = row.year > thisYear ? freedByYear.get(row.year) ?? 0 : 0;
-    const spending = Math.max(0, baseSpend + healthcareForYear(row.year, health, thisYear) - freed);
+    // Spending is what was typed plus healthcare — nothing else. It used to
+    // drop by each debt's payment once the Debts page projected it paid off,
+    // which on two small 0% cards meant a −$33…−$900 line on every row from
+    // 2028; Victor had it removed (2026-09-28).
+    const spending = Math.max(0, baseSpend + healthcareForYear(row.year, health, thisYear));
     const investable = boy - rent.equityStartCents;
     const propertyEffect = rent.equityEndCents - rent.equityStartCents - rent.purchaseCashCents;
     const growth =
@@ -869,7 +833,7 @@ async function recomputeRetirementIncome(
       income_cents: income,
       base_spending_cents: baseSpend,
       spending_cents: spending,
-      debt_freed_cents: freed,
+      debt_freed_cents: 0,
       growth_cents: growth,
       one_off_cents: row.one_off_cents,
       eoy_cents: eoy,
@@ -1436,4 +1400,39 @@ export async function adoptClosedProjectionYears(
     await rebuildProjectionChain(supabase, householdId, earliest);
   }
   return adopted;
+}
+
+// The year in progress opens on what net worth ACTUALLY closed at last year,
+// not on what the plan said it would. The plan chained plan-to-plan, so 2026
+// opened on the 2025 plan's $316,635 while 2025 really closed at $308,096 —
+// and every target after it sat $8,539 too high (Victor, 2026-09-28).
+//
+// Runs on page load, like adoptClosedProjectionYears, so a save that re-walks
+// the chain from an earlier year can't leave it undone past the next refresh.
+// Only the current year is anchored; earlier years keep the plan as it was.
+export async function anchorYearToActualStart(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  householdId: string,
+  year: number,
+  actualStartCents: number | null,
+): Promise<boolean> {
+  if (actualStartCents == null) return false;
+  const row = unwrap(
+    await supabase
+      .from("networth_projection")
+      .select("boy_cents")
+      .eq("household_id", householdId)
+      .eq("year", year)
+      .maybeSingle(),
+    "networth_projection",
+  );
+  if (!row || row.boy_cents === actualStartCents) return false;
+  const { error } = await supabase
+    .from("networth_projection")
+    .update({ boy_cents: actualStartCents, updated_at: new Date().toISOString() })
+    .eq("household_id", householdId)
+    .eq("year", year);
+  if (error) throw new Error(`Could not update the projection: ${error.message}`);
+  await rebuildProjectionChain(supabase, householdId, year);
+  return true;
 }

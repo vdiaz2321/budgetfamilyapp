@@ -1,5 +1,3 @@
-import { projectSnowball } from "./snowball";
-
 /**
  * When the portfolio can pay for the life the household already lives.
  *
@@ -627,57 +625,3 @@ export function toRentalProperty(
   };
 }
 
-// ---- Debt payoffs.
-
-export type PlanDebt = {
-  id: string;
-  balanceCents: number;
-  /** What is paid each month toward principal + interest (escrow excluded). */
-  paymentCents: number;
-  apr: number;
-  promoEndsOn: string | null;
-  postPromoApr: number | null;
-};
-
-/**
- * The yearly payment each paid-off debt no longer needs, by calendar year.
- * Same projection as Debt/Loans' "My Plan": every debt pays its own planned
- * amount, independently (no snowball waterfall). A year only frees the months
- * after the payoff, so the year it's paid off frees part of a year.
- */
-export function debtFreedByYear(
-  debts: PlanDebt[],
-  startMonth: string,
-  fromYear: number,
-  toYear: number,
-): Map<number, number> {
-  const live = debts.filter((d) => d.balanceCents > 0 && d.paymentCents > 0);
-  const out = new Map<number, number>();
-  if (live.length === 0) return out;
-  const { ledger } = projectSnowball(
-    live.map((d) => ({
-      id: d.id,
-      balanceCents: d.balanceCents,
-      minCents: d.paymentCents,
-      apr: d.apr,
-      promoEndsOn: d.promoEndsOn,
-      postPromoApr: d.postPromoApr,
-    })),
-    0,
-    startMonth,
-    Math.max(12, (toYear - fromYear + 2) * 12),
-    true,
-  );
-  const yearlyBudget = 12 * live.reduce((s, d) => s + d.paymentCents, 0);
-  const paidByYear = new Map<number, number>();
-  for (const entries of ledger.values()) {
-    for (const e of entries) {
-      const y = Number(e.month.slice(0, 4));
-      paidByYear.set(y, (paidByYear.get(y) ?? 0) + e.paymentCents);
-    }
-  }
-  for (let y = fromYear; y <= toYear; y++) {
-    out.set(y, Math.max(0, yearlyBudget - (paidByYear.get(y) ?? 0)));
-  }
-  return out;
-}

@@ -126,7 +126,7 @@ export function FiSection({
 
   const portfolioCents = measured.assetsCents;
   // The projection starts from this year's planned year-end net worth (the
-  // Net Worth Plan table's own figure), so every future year matches the
+  // Current and Projected Net Worth table's own figure), so every future year matches the
   // table exactly. Today's actual balance still shows on the Net worth card.
   const startCents =
     projection.find((p) => p.year === thisYear)?.eoyCents || portfolioCents;
@@ -283,7 +283,7 @@ export function FiSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">Retirement Plan</span>
+          <span className="text-sm font-bold">Retirement Financial Planner</span>
         </button>
 
         {/* Today, growth to a picked year, and whether the plan works.
@@ -291,10 +291,10 @@ export function FiSection({
         <div className={`mt-3 grid grid-cols-2 gap-2 ${nwRow ? "sm:grid-cols-3" : ""}`}>
           {/* Always today's balance — the year picker lives on the Growth card. */}
           <Figure
-            label="Net worth"
+            label={`Net worth: ${thisYear}`}
             value={formatMoneyWhole(portfolioCents, currency)}
             tone="text-foreground"
-            sub={prevNwCents != null ? `Prev NW: ${formatMoneyWhole(prevNwCents, currency)}` : "today"}
+            sub={prevNwCents != null ? `${thisYear - 1} NW: ${formatMoneyWhole(prevNwCents, currency)}` : "today"}
           />
           {/* How much the picked year adds on top of today's net worth
               (same figures as the chart and the Investments panel). */}
@@ -1415,13 +1415,13 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Tax on retirement income (%)" hint="Default for every year. Change a single year in the Net Worth Plan table. VA is never taxed.">
+        <Field label="Tax on retirement income (%)" hint="Default for every year. Change a single year in the Current and Projected Net Worth table. VA is never taxed.">
           <input name="retirementTaxPct" inputMode="decimal" defaultValue={plan.retirementTaxPct} className={inputClass} />
         </Field>
-        <Field label="Income growth (%/yr)" hint="Yearly raise above inflation. 0 = keeps pace. Used by Fill forward in the Net Worth Plan table.">
+        <Field label="Income growth (%/yr)" hint="Yearly raise above inflation. 0 = keeps pace. Used by Fill forward in the Current and Projected Net Worth table.">
           <input name="incomeGrowthPct" inputMode="decimal" defaultValue={plan.incomeGrowthPct} className={inputClass} />
         </Field>
-        <Field label="Spending growth (%/yr)" hint="Yearly spending rise above inflation. 0 = keeps pace. Used by Fill forward in the Net Worth Plan table.">
+        <Field label="Spending growth (%/yr)" hint="Yearly spending rise above inflation. 0 = keeps pace. Used by Fill forward in the Current and Projected Net Worth table.">
           <input name="personalInflationPct" inputMode="decimal" defaultValue={plan.spendingGrowthPct} className={inputClass} />
         </Field>
 
