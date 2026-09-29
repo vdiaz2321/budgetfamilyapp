@@ -61,6 +61,13 @@ export type ProjectionYear = {
   actualInvestedCents: number | null;
   /** True while the year is still running — its actual is only part-way. */
   inProgress: boolean;
+  /** Planned-but-unpaid cost of trips still ahead this year (Travel's
+   *  "Planned"). Zero for every other year. */
+  upcomingTravelCents: number;
+  /** Net worth at the close of the last finished month this year, and how
+   *  many months are finished — what the forecast's pace is built on. */
+  monthEndCents: number | null;
+  monthsDone: number;
 };
 
 // Below this many recorded months, a year's income and spending totals say
@@ -95,24 +102,42 @@ export type ProjectionRates = {
 // $2,000 a month, so it read far too high (Victor, 2026-09-28).
 //
 // Net worth already holds everything real: contributions, market gains, cash
-// and debt paydown, with the kids' 529s left out — so the pace needs nothing
-// added or subtracted. One function for the card, the table row and the popup.
-export type YearForecast = { cents: number; perMonthCents: number; monthsLeft: number };
-function yearForecast(
-  y: ProjectionYear,
-  thisYear: number,
-  yearElapsed: number,
-): YearForecast | null {
-  if (y.year !== thisYear || y.actualCents == null || y.startActualCents == null) return null;
-  // Under a month in, one month's movement is not a pace worth multiplying.
-  if (yearElapsed < 1 / 12) return null;
-  const monthsIn = yearElapsed * 12;
-  const monthsLeft = 12 - monthsIn;
-  const perMonthCents = (y.actualCents - y.startActualCents) / monthsIn;
+// and debt paydown, with the kids' 529s left out. What it can't see is a trip
+// planned for later in the year and not paid yet, so that plan comes off the
+// end (Victor, 2026-09-29). One function for the card, the table row and the
+// popup.
+//
+// Built on whole months — last month's close, over the months finished — so
+// it holds still all month and moves on the 1st. Measured from today it
+// drifted a few dollars every day, and the popup's worked sum could never
+// match the figure beside it for long.
+export type YearForecast = {
+  cents: number;
+  startCents: number;
+  monthEndCents: number;
+  monthsDone: number;
+  monthsLeft: number;
+  perMonthCents: number;
+  travelCents: number;
+};
+function yearForecast(y: ProjectionYear, thisYear: number): YearForecast | null {
+  // January has no finished month yet — nothing to take a pace from.
+  if (y.year !== thisYear || y.monthEndCents == null || y.startActualCents == null || y.monthsDone < 1) {
+    return null;
+  }
+  const monthsLeft = 12 - y.monthsDone;
+  // Whole dollars throughout, so the sum written out in the popup adds up to
+  // the dollar on a calculator.
+  const whole = (cents: number) => Math.round(cents / 100) * 100;
+  const perMonthCents = whole((y.monthEndCents - y.startActualCents) / y.monthsDone);
   return {
-    cents: Math.round(y.actualCents + perMonthCents * monthsLeft),
-    perMonthCents: Math.round(perMonthCents),
+    cents: whole(y.monthEndCents) + perMonthCents * monthsLeft - whole(y.upcomingTravelCents),
+    startCents: y.startActualCents,
+    monthEndCents: y.monthEndCents,
+    monthsDone: y.monthsDone,
     monthsLeft,
+    perMonthCents,
+    travelCents: y.upcomingTravelCents,
   };
 }
 
@@ -125,7 +150,6 @@ export function ProjectionSection({
   militaryRetireYear,
   defaultTaxPct,
   currentNwCents,
-  yearElapsed,
 }: {
   years: ProjectionYear[];
   currency: string;
@@ -136,8 +160,6 @@ export function ProjectionSection({
   defaultTaxPct: number;
   /** Today's net worth — the same figure as the Retirement Financial Planner's card. */
   currentNwCents: number;
-  /** How far through the year today is, 0–1. */
-  yearElapsed: number;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: false }));
@@ -152,7 +174,7 @@ export function ProjectionSection({
 
   const current = years.find((y) => y.year === thisYear) ?? null;
 
-  const forecastFor = (y: ProjectionYear) => yearForecast(y, thisYear, yearElapsed)?.cents ?? null;
+  const forecastFor = (y: ProjectionYear) => yearForecast(y, thisYear)?.cents ?? null;
   const forecast = current ? forecastFor(current) : null;
   // Where the year is heading against the plan.
   //
@@ -300,7 +322,7 @@ export function ProjectionSection({
                   <th className="whitespace-nowrap px-2.5 py-2 text-center font-semibold">Saved / invested</th>
                   <th className="whitespace-nowrap px-2.5 py-2 text-center font-semibold">Actual NW</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Proj EOY NW</th>
-                  <th className="whitespace-nowrap px-2.5 py-2 text-center font-semibold">Actual Diff</th>
+                  <th className="whitespace-nowrap px-2.5 py-2 text-center font-semibold">Actual vs Proj NW</th>
                 </tr>
               </thead>
               <tbody>
@@ -547,11 +569,51 @@ export function ProjectionSection({
           thisYear={thisYear}
           militaryRetireYear={militaryRetireYear}
           defaultTaxPct={defaultTaxPct}
-          yearElapsed={yearElapsed}
           onClose={() => setEditing(null)}
         />
       ) : null}
     </section>
+  );
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function ForecastBreakdown({
+  forecast: f,
+  year,
+  currency,
+}: {
+  forecast: YearForecast;
+  year: number;
+  currency: string;
+}) {
+  const $ = (cents: number) => formatMoneyWhole(cents, currency);
+  const grown = f.monthEndCents - f.startCents;
+  const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
+  const Line = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <p>
+      <span className="font-semibold text-foreground">{label}:</span> {children}
+    </p>
+  );
+  return (
+    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-black/5 px-3 py-2 text-xs tabular-nums text-foreground/80 dark:bg-white/10">
+      <p className="pb-0.5 font-semibold text-foreground">
+        Forecast breakdown and the &quot;at current pace&quot; card:
+      </p>
+      <Line label={`Start of ${year}`}>{$(f.startCents)}</Line>
+      <Line label={`End of ${MONTH_NAMES[f.monthsDone - 1]}`}>
+        {$(f.monthEndCents)} ({grown >= 0 ? "+" : "−"}
+        {$(Math.abs(grown))} in {months(f.monthsDone)})
+      </Line>
+      <Line label="Pace">
+        {$(f.perMonthCents)} a month
+      </Line>
+      <Line label="Forecast">
+        {$(f.monthEndCents)} + {$(f.perMonthCents)} × {months(f.monthsLeft)}
+        {f.travelCents > 0 ? ` − ${$(f.travelCents)} planned trips` : ""} ={" "}
+        <span className="font-semibold text-foreground">{$(f.cents)}</span>
+      </Line>
+    </div>
   );
 }
 
@@ -605,7 +667,6 @@ function YearModal({
   thisYear,
   militaryRetireYear,
   defaultTaxPct,
-  yearElapsed,
   onClose,
 }: {
   row: ProjectionYear;
@@ -613,7 +674,6 @@ function YearModal({
   thisYear: number;
   militaryRetireYear: number | null;
   defaultTaxPct: number;
-  yearElapsed: number;
   onClose: () => void;
 }) {
   // From the military retirement year on, income is the income lines (after
@@ -696,7 +756,7 @@ function YearModal({
   // behind it is the whole point of the figure, and a "close enough" grey band
   // hid exactly the small drifts worth watching.
   const liveDiffCents = row.actualCents == null ? null : row.actualCents - predictedEoyCents;
-  const forecast = yearForecast(row, thisYear, yearElapsed);
+  const forecast = yearForecast(row, thisYear);
   const forecastCents = forecast?.cents ?? null;
 
   const changes = [
@@ -819,10 +879,15 @@ function YearModal({
               <span className="font-semibold text-foreground sm:block">
                 {formatMoneyWhole(forecastCents, currency)}
               </span>
+              {forecast && forecast.travelCents > 0 ? (
+                <span className="text-muted sm:block">
+                  {" "}after {formatMoneyWhole(forecast.travelCents, currency)} planned trips
+                </span>
+              ) : null}
             </p>
           ) : null}
           <p>
-            <span className="text-muted">Actual Diff: </span>
+            <span className="text-muted">{row.inProgress ? "Current vs Proj NW: " : "Actual vs Proj NW: "}</span>
             {liveDiffCents == null ? (
               <span className="font-semibold text-foreground sm:block">—</span>
             ) : (
@@ -843,7 +908,7 @@ function YearModal({
             dollars; the two calculated ones are locked, so there is only ever
             one way to change a number (Victor, 2026-09-28). */}
         <p className="sm:col-span-2 border-t border-line pt-3 text-center text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
-          Plan for {row.year}
+          NW Estimated Projection: {row.year}
         </p>
         {/* Read left to right, top to bottom, as the sum itself:
             start + income − spending → saved, + gains + one-off → Proj EOY NW. */}
@@ -957,18 +1022,21 @@ function YearModal({
             ("House, car, windfall. This year only") that said nothing. */}
         <div className="sm:col-span-2 space-y-1 text-left text-xs text-foreground/80">
           <p>
-            <span className="font-semibold text-foreground">One-off:</span> a single
-            money event that only happens in {row.year}
-            {" — "}a <span className="whitespace-nowrap">+$20,000</span>{" "}inheritance or
-            bonus, or <span className="whitespace-nowrap">−$15,000</span>{" "}of closing costs
-            on a house. It changes this year&apos;s Proj EOY NW only and does not
-            repeat in later years.
+            <span className="font-semibold text-foreground">One-off:</span> {row.year} only
+            — bonus, inheritance, closing costs.
           </p>
           <p>
-            <span className="font-semibold text-foreground">Proj EOY NW</span> = Start
-            + Est. Saved / Invested + Est. Gains + One-off.
+            <span className="font-semibold text-foreground">Proj EOY NW:</span> Auto-calculate
+            from entries: Start of NW + Est. Income − Est. Spending + Est. Gains + One-off.
           </p>
         </div>
+
+        {/* The forecast worked out, so it's never a black box — under the
+            footnotes (Victor, 2026-09-29). Month-end figures, so it only
+            changes on the 1st. */}
+        {forecast ? (
+          <ForecastBreakdown forecast={forecast} year={row.year} currency={currency} />
+        ) : null}
 
         {/* Exactly what would change, before it changes. */}
         {preview ? (

@@ -1,5 +1,5 @@
 import { parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
-import { captureSnapshots, currentMonthFirst, yearElapsedFraction } from "@/lib/snapshots";
+import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
 import { adoptClosedProjectionYears, anchorYearToActualStart } from "./actions";
@@ -8,6 +8,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
 import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
 import { throwIfAny } from "@/lib/supabase-result";
+import { loadUpcomingTravelPlanCents } from "../travel/upcoming-plan";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
@@ -31,6 +32,15 @@ export default async function NetworthPage() {
   // Refresh this month's snapshot on every visit — this is what freezes prior
   // months into history even if no balance was edited after a month rollover.
   await captureSnapshots(supabase, household.id);
+
+  // Trips still ahead this year, planned but not paid — kept off the pace
+  // forecast. Started now so it runs beside the reads below.
+  const upcomingTravelPromise = loadUpcomingTravelPlanCents(
+    supabase,
+    household.id,
+    new Date().toISOString().slice(0, 10),
+    Number(fiToMonth.slice(0, 4)),
+  );
 
   const [
     accSnaps,
@@ -567,8 +577,13 @@ export default async function NetworthPage() {
     netByYear.set(Number(point.month.slice(0, 4)), point.net);
   }
   const thisYearNum = Number(fiToMonth.slice(0, 4));
-  // How far through the year today is (0–1), for the pace forecast.
-  const yearElapsed = yearElapsedFraction();
+  // The pace forecast runs on finished months: last month's close, over how
+  // many months are done (September → the close of August, over 8).
+  const monthsDone = Number(fiToMonth.slice(5, 7)) - 1;
+  const monthEndNet =
+    monthsDone > 0
+      ? points.find((p) => p.month === `${thisYearNum}-${String(monthsDone).padStart(2, "0")}-01`)?.net ?? null
+      : null;
 
   // Contributions and gains, resolved exactly the way Invest / Savings resolves
   // them — same helper, so the two pages can't drift apart. Kids' accounts are
@@ -739,6 +754,8 @@ export default async function NetworthPage() {
   }
 
 
+  const upcomingTravelCents = await upcomingTravelPromise;
+
   const projectionYears = (projectionRows ?? []).map((r) => ({
     year: r.year,
     age: r.age ?? null,
@@ -773,6 +790,9 @@ export default async function NetworthPage() {
     runningGainsCents: runningGainsByYear.get(r.year) ?? null,
     actualInvestedCents: investedByYear.get(r.year) ?? null,
     inProgress: r.year === thisYearNum,
+    upcomingTravelCents: r.year === thisYearNum ? upcomingTravelCents : 0,
+    monthEndCents: r.year === thisYearNum ? monthEndNet : null,
+    monthsDone: r.year === thisYearNum ? monthsDone : 0,
   }));
 
   return (
@@ -849,7 +869,6 @@ export default async function NetworthPage() {
         toMonth: fiToMonth.slice(0, 7),
       }}
       thisYear={thisYearNum}
-      yearElapsed={yearElapsed}
       projectionYears={projectionYears}
       projectionSeed={{
         // Where the plan starts: net worth as it stands today.

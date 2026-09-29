@@ -164,8 +164,6 @@ type Props = {
   fiPlan: FiPlan;
   fiMeasured: FiMeasured;
   thisYear: number;
-  /** How far through the year today is, 0–1. */
-  yearElapsed: number;
   projectionYears: ProjectionYear[];
   projectionSeed: ProjectionSeed;
 };
@@ -179,7 +177,6 @@ export function NetworthBoard({
   fiPlan,
   fiMeasured,
   thisYear,
-  yearElapsed,
   projectionYears,
   projectionSeed,
 }: Props) {
@@ -244,7 +241,6 @@ export function NetworthBoard({
         militaryRetireYear={fiPlan.targetRetireYear}
         defaultTaxPct={fiPlan.retirementTaxPct}
         currentNwCents={fiMeasured.assetsCents}
-        yearElapsed={yearElapsed}
       />
 
       {/* Retirement Financial Planner — sits under the year-by-year plan, and
