@@ -32,10 +32,6 @@ export type FiPlan = {
   annualContributionCents: number | null;
   realReturnPct: number;
   withdrawalRatePct: number;
-  /** Spending drift above inflation, in real terms — 0 means "keeps pace". */
-  spendingGrowthPct: number;
-  /** Income drift above inflation, in real terms. */
-  incomeGrowthPct: number;
   /** Pension + VA + Social Security per year, in today's money. */
   guaranteedIncomeCents: number | null;
   /** First year that income arrives; null means it already does. */
@@ -456,7 +452,11 @@ export function FiSection({
                 )}
                 {pension ? (
                   <p className="mt-1.5 text-center text-xs text-foreground/80">
-                    Retired pay{plan.targetRetireMonth ? ` from ${MONTHS[plan.targetRetireMonth - 1]} ${plan.targetRetireYear}` : ""}: {pension.multiplierPct}% of High-3 ·{" "}
+                    {/* Spelled out as the DFAS sum — service × 2.5% = the share of High-3 —
+                        so the percentage is never a bare number to take on trust. */}
+                    Retired pay{plan.targetRetireMonth ? ` from ${MONTHS[plan.targetRetireMonth - 1]} ${plan.targetRetireYear}` : ""}:{" "}
+                    {pension.yearsOfService} yrs{pension.extraMonths ? ` ${pension.extraMonths} mos` : ""} of service × 2.5% ={" "}
+                    {pension.multiplierPct}% of your {formatMoneyWhole(plan.high3MonthlyCents ?? 0, currency)}/mo High-3 ={" "}
                     {formatMoneyWhole(pension.grossAtRetireCents, currency)}/mo in {plan.targetRetireYear} dollars
                     {pension.sbpTodayCents > 0 ? ` · after SBP of ${formatMoneyWhole(pension.sbpTodayCents, currency)}/mo` : ""}
                   </p>
@@ -500,7 +500,15 @@ export function FiSection({
                   // investments work that year, next to the 4% rule of thumb.
                   note={
                     mile && mile.endCents > 0 && mile.targetCents > 0
-                      ? `drawing ${((plan.withdrawalRatePct * mile.targetCents) / mile.endCents).toFixed(1)}% a year in ${mile.year}`
+                      ? (() => {
+                          // The share of the investments the year's gap uses,
+                          // read against the withdrawal-rate limit set in
+                          // Edit assumptions — the one % he can find there.
+                          const usePct = (plan.withdrawalRatePct * mile.targetCents) / mile.endCents;
+                          return `you'd use ${usePct.toFixed(1)}% a year in ${mile.year} · ${
+                            usePct <= plan.withdrawalRatePct ? "under" : "over"
+                          } your ${plan.withdrawalRatePct}% limit`;
+                        })()
                       : undefined
                   }
                   value={
@@ -519,6 +527,9 @@ export function FiSection({
                   <ValueRow
                     key={row.age}
                     label={`Left at age ${row.age}`}
+                    // The year that age falls in — the balance is its year-end
+                    // bar in the chart below.
+                    note={plan.birthYear ? `Year: ${plan.birthYear + row.age}` : undefined}
                     value={row.cents == null ? "—" : formatMoneyWhole(Math.max(0, row.cents), currency)}
                   />
                 ))}
@@ -578,6 +589,11 @@ function niceStep(rough: number): number {
 // income, spending, saving and planned close without scrolling to the table.
 const PICKED_YEAR_KEY = "fi-chart:picked-year";
 
+// The Retire and Social Security marker lines, faded. Faded through the colour
+// rather than `opacity` on the marker: opacity opens a stacking context, which
+// trapped each label under the next marker's line where two crossed.
+const MARKER_LINE = "color-mix(in srgb, var(--foreground) 70%, transparent)";
+
 function FiChart({
   fi,
   thisYear,
@@ -634,6 +650,12 @@ function FiChart({
 
   // Only the bars are drawn, so only the bars set the scale.
   const max = Math.max(1, ...fi.years.map((y) => Math.max(0, y.endCents)));
+  // The top of the scale sits above the tallest bar, so the three marker
+  // labels (Financially free / Retire / Social Security, stacked 0–56px from
+  // the top of a 192px plot) always have clear space. Scaled to the tallest
+  // bar alone, the last bars ran up through the labels and the top axis
+  // figure poked out of the plot into the cards above it.
+  const top = max / 0.68;
 
   // Two or three gridlines: enough to size a bar by eye, few enough to stay
   // out of the way of the bars themselves.
@@ -693,19 +715,19 @@ function FiChart({
             <span
               key={v}
               className="absolute right-0 -translate-y-1/2 text-[11px] tabular-nums text-foreground/75"
-              style={{ bottom: `${(v / max) * 100}%` }}
+              style={{ bottom: `${(v / top) * 100}%` }}
             >
               {axisMoney(v)}
             </span>
           ))}
         </div>
 
-        <div className="relative h-40 min-w-0 flex-1">
+        <div className="relative h-48 min-w-0 flex-1">
           {gridlines.map((v) => (
             <span
               key={v}
               className="pointer-events-none absolute inset-x-0 border-t border-dashed"
-              style={{ bottom: `${(v / max) * 100}%`, borderColor: "var(--viz-grid)" }}
+              style={{ bottom: `${(v / top) * 100}%`, borderColor: "var(--viz-grid)" }}
             />
           ))}
 
@@ -724,7 +746,7 @@ function FiChart({
                   style={{
                     // A year that ends below zero gets a short red stub: the
                     // money has run out, and the size of the hole isn't the point.
-                    height: y.endCents < 0 ? "4%" : `${Math.max(1, (y.endCents / max) * 100)}%`,
+                    height: y.endCents < 0 ? "4%" : `${Math.max(1, (y.endCents / top) * 100)}%`,
                     backgroundColor:
                       y.endCents < 0 ? "var(--negative)" : y.independent ? "var(--viz-positive-soft)" : "var(--viz-soft)",
                     outline: i === selectedIndex ? "2px solid var(--foreground)" : undefined,
@@ -761,11 +783,11 @@ function FiChart({
           {/* Only when a target retirement year is actually set. */}
           {targetRow ? (
             <span
-              className="pointer-events-none absolute bottom-0 top-0 border-l border-dashed opacity-70"
-              style={{ left: `${centreOf(targetIndex)}%`, borderColor: "var(--foreground)" }}
+              className="pointer-events-none absolute bottom-0 top-0 border-l border-dashed"
+              style={{ left: `${centreOf(targetIndex)}%`, borderColor: MARKER_LINE }}
             >
               <span
-                className={`absolute top-5 whitespace-nowrap rounded bg-surface/90 px-1 text-[11px] font-semibold ${
+                className={`absolute z-10 top-5 whitespace-nowrap rounded bg-surface px-1 text-foreground/70 text-[11px] font-semibold ${
                   targetIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
@@ -777,11 +799,11 @@ function FiChart({
 
           {ssIndex >= 0 ? (
             <span
-              className="pointer-events-none absolute bottom-0 top-0 border-l border-dotted opacity-70"
-              style={{ left: `${centreOf(ssIndex)}%`, borderColor: "var(--foreground)" }}
+              className="pointer-events-none absolute bottom-0 top-0 border-l border-dotted"
+              style={{ left: `${centreOf(ssIndex)}%`, borderColor: MARKER_LINE }}
             >
               <span
-                className={`absolute top-10 whitespace-nowrap rounded bg-surface/90 px-1 text-[11px] font-semibold ${
+                className={`absolute z-10 top-10 whitespace-nowrap rounded bg-surface px-1 text-foreground/70 text-[11px] font-semibold ${
                   ssIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
@@ -1291,6 +1313,14 @@ function PlanModal({
             <span className="font-semibold">{formatMoneyWhole(estimate.grossTodayCents, currency)}/mo</span>{" "}
             in today&rsquo;s dollars
             {estimate.sbpTodayCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpTodayCents, currency)} SBP` : ""}, before tax.
+            {/* The same pay a year at a time — twelve of each monthly figure. */}
+            <span className="block">
+              <span className="font-semibold">Yearly: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}</span>{" "}
+              in {toYear(retireYear)} dollars ={" "}
+              <span className="font-semibold">{formatMoneyWhole(estimate.grossTodayCents * 12, currency)}</span>{" "}
+              in today&rsquo;s dollars
+              {estimate.sbpTodayCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpTodayCents * 12, currency)} SBP` : ""}, before tax.
+            </span>
           </p>
         ) : null}
 
@@ -1403,7 +1433,7 @@ function PlanModal({
         <Field label="Real return (%)" hint="Yearly growth of your investments, after inflation.">
           <input name="realReturnPct" inputMode="decimal" defaultValue={plan.realReturnPct} className={inputClass} />
         </Field>
-        <Field label="Withdrawal rate (%)" hint="Share of your savings you spend each year once retired. FI goal = yearly spending ÷ this rate.">
+        <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once retired. Needed = the yearly gap ÷ this rate.">
           <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
         </Field>
         <Field label="Inflation (%)" hint="Brings the High-3 back to today's dollars. Retired pay, VA and Social Security rise with it each year.">
@@ -1417,12 +1447,6 @@ function PlanModal({
         </Field>
         <Field label="Tax on retirement income (%)" hint="Default for every year. Change a single year in the Current and Projected Net Worth table. VA is never taxed.">
           <input name="retirementTaxPct" inputMode="decimal" defaultValue={plan.retirementTaxPct} className={inputClass} />
-        </Field>
-        <Field label="Income growth (%/yr)" hint="Yearly raise above inflation. 0 = keeps pace. Used by Fill forward in the Current and Projected Net Worth table.">
-          <input name="incomeGrowthPct" inputMode="decimal" defaultValue={plan.incomeGrowthPct} className={inputClass} />
-        </Field>
-        <Field label="Spending growth (%/yr)" hint="Yearly spending rise above inflation. 0 = keeps pace. Used by Fill forward in the Current and Projected Net Worth table.">
-          <input name="personalInflationPct" inputMode="decimal" defaultValue={plan.spendingGrowthPct} className={inputClass} />
         </Field>
 
         <h3 className={heading}>Other income</h3>

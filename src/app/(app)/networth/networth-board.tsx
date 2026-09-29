@@ -230,14 +230,6 @@ export function NetworthBoard({
         currency={currency}
         thisYear={thisYear}
         seed={projectionSeed}
-        // Fill forward runs on the same assumptions the FI chart compounds
-        // with — one return rate, so the two sections can't disagree about
-        // growth the way they did when the grid carried a flat figure.
-        rates={{
-          returnPct: fiPlan.realReturnPct,
-          incomeGrowthPct: fiPlan.incomeGrowthPct,
-          spendingGrowthPct: fiPlan.spendingGrowthPct,
-        }}
         militaryRetireYear={fiPlan.targetRetireYear}
         defaultTaxPct={fiPlan.retirementTaxPct}
         currentNwCents={fiMeasured.assetsCents}

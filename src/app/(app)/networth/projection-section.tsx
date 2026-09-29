@@ -7,7 +7,6 @@ import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoneyWhole } from "@/lib/money";
 import {
   appendProjectionYears,
-  fillProjectionForward,
   saveProjectionYear,
   seedProjection,
 } from "./actions";
@@ -86,15 +85,6 @@ export type ProjectionSeed = {
   toMonth: string;
 };
 
-/** The real (today's-money) rates Fill forward types with. Shown in the
- *  confirmation so the button is never a black box, and edited in the FI
- *  section's NW Assumptions modal. */
-export type ProjectionRates = {
-  returnPct: number;
-  incomeGrowthPct: number;
-  spendingGrowthPct: number;
-};
-
 // "At current pace": this year's real net-worth growth so far, carried on at
 // the same monthly rate for the months left. It replaced a forecast that added
 // whatever the PLAN still had to save on top of today's balance — in September
@@ -146,7 +136,6 @@ export function ProjectionSection({
   currency,
   thisYear,
   seed,
-  rates,
   militaryRetireYear,
   defaultTaxPct,
   currentNwCents,
@@ -155,7 +144,6 @@ export function ProjectionSection({
   currency: string;
   thisYear: number;
   seed: ProjectionSeed;
-  rates: ProjectionRates;
   militaryRetireYear: number | null;
   defaultTaxPct: number;
   /** Today's net worth — the same figure as the Retirement Financial Planner's card. */
@@ -184,11 +172,17 @@ export function ProjectionSection({
   // $26k ahead and coloured green. Two figures, one year, opposite answers.
   // The honest comparison at any point mid-year is forecast against plan; once
   // the year closes there is no forecast left and the actual is the answer.
+  //
+  // In January there is no finished month to take a pace from, and this
+  // year's "actual" is only January's live balance — measured against the
+  // whole year's plan it read as a large false "behind". So until the pace
+  // exists, the card shows last year's close against last year's plan.
+  const lastYear = years.find((y) => y.year === thisYear - 1) ?? null;
   const gap =
     forecast != null && current
       ? forecast - current.eoyCents
-      : current?.actualCents != null
-        ? current.actualCents - current.eoyCents
+      : lastYear?.actualCents != null
+        ? lastYear.actualCents - lastYear.eoyCents
         : null;
   const gapIsPace = forecast != null;
   const last = years.at(-1) ?? null;
@@ -196,7 +190,7 @@ export function ProjectionSection({
   // Adding years rewrites the grid in one press, so it asks first — in an
   // in-app dialog rather than window.confirm(), which some browsers and every
   // embedded/preview frame silently answer "cancel" for.
-  const [confirming, setConfirming] = useState<"add" | "fill" | null>(null);
+  const [confirming, setConfirming] = useState<"add" | null>(null);
 
   // Tacks five more years onto the end, carrying the last planned year
   // forward.
@@ -210,32 +204,6 @@ export function ProjectionSection({
       } else {
         setError(null);
         setNotice(last ? `Added 5 years — the plan now runs to ${last.year + 5}.` : "Added 5 years.");
-        router.refresh();
-      }
-    });
-  }
-
-  // Retypes every year after this one from the assumptions, in today's money:
-  // gains become the real return on each year's opening balance instead of a
-  // flat figure carried forward forever, which is what let the grid and the FI
-  // chart quote different numbers for the same year.
-  //
-  // This year itself is the anchor and is never touched — it holds figures the
-  // register can check.
-  const fillFrom = years.some((y) => y.year === thisYear) ? thisYear : years[0]?.year ?? null;
-  const fillableYears = fillFrom == null ? 0 : years.filter((y) => y.year > fillFrom).length;
-
-  function fillForward() {
-    setConfirming(null);
-    if (fillFrom == null) return;
-    start(async () => {
-      const result = await fillProjectionForward(fillFrom!);
-      if (result?.error) {
-        setError(result.error);
-        setNotice(null);
-      } else {
-        setError(null);
-        setNotice(`Rebuilt ${fillableYears} ${fillableYears === 1 ? "year" : "years"} after ${fillFrom}.`);
         router.refresh();
       }
     });
@@ -283,10 +251,14 @@ export function ProjectionSection({
           ) : null}
           {gap != null ? (
             <Figure
-              label={gapIsPace ? `${thisYear} at current pace` : `${thisYear} actual`}
-              value={formatMoneyWhole(gapIsPace ? forecast! : current!.actualCents!, currency)}
+              label={gapIsPace ? `${thisYear} Proj Forecast NW` : `${thisYear - 1} actual`}
+              value={formatMoneyWhole(gapIsPace ? forecast! : lastYear!.actualCents!, currency)}
               tone={gap >= 0 ? "text-positive" : "text-negative"}
-              sub={`${gap >= 0 ? "ahead of" : "behind"} projection by ${formatMoneyWhole(Math.abs(gap), currency)}`}
+              sub={
+                gapIsPace
+                  ? `Projected NW ${gap >= 0 ? "ahead" : "behind"} by ${formatMoneyWhole(Math.abs(gap), currency)}`
+                  : `${gap >= 0 ? "ahead of" : "behind"} projection by ${formatMoneyWhole(Math.abs(gap), currency)}`
+              }
               subClassName={`font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}
             />
           ) : null}
@@ -495,16 +467,6 @@ export function ProjectionSection({
 
           <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sm:px-6">
             <div className="flex flex-wrap items-center gap-2">
-              {fillFrom != null && fillableYears > 0 ? (
-                <button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => setConfirming("fill")}
-                  className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
-                >
-                  {pending ? "Working…" : `Fill forward from ${fillFrom}`}
-                </button>
-              ) : null}
               <button
                 type="button"
                 disabled={pending}
@@ -538,30 +500,6 @@ export function ProjectionSection({
         />
       ) : null}
 
-      {confirming === "fill" ? (
-        <ConfirmModal
-          title={`Rebuild ${fillableYears} ${fillableYears === 1 ? "year" : "years"} after ${fillFrom}?`}
-          body={
-            `Every year after ${fillFrom} is retyped from your assumptions: gains become ${rates.returnPct}% of ` +
-            `each year's opening balance, income drifts ${rates.incomeGrowthPct}% a year and spending ` +
-            `${rates.spendingGrowthPct}% a year — all above inflation, because the grid is in today's money. ` +
-            `${fillFrom} itself is left exactly as it is, and the shape of your later years is kept: their own ` +
-            `income and spending are scaled, not replaced.` +
-            // With any drift set, the scaling applies to the figures as they
-            // stand right now — so pressing twice drifts them twice. At 0%
-            // (the default) it is idempotent and there is nothing to warn
-            // about, so the sentence only appears when it is actually true.
-            (rates.incomeGrowthPct !== 0 || rates.spendingGrowthPct !== 0
-              ? " Because the drift applies to the years as they stand now, pressing this twice applies it twice."
-              : "") +
-            ` This cannot be undone. Change the rates under Edit assumptions.`
-          }
-          confirmLabel="Fill forward"
-          onConfirm={fillForward}
-          onClose={() => setConfirming(null)}
-        />
-      ) : null}
-
       {editing ? (
         <YearModal
           row={editing}
@@ -578,40 +516,62 @@ export function ProjectionSection({
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function ForecastBreakdown({
-  forecast: f,
-  year,
-  currency,
-}: {
-  forecast: YearForecast;
-  year: number;
-  currency: string;
-}) {
-  const $ = (cents: number) => formatMoneyWhole(cents, currency);
-  const grown = f.monthEndCents - f.startCents;
-  const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
-  const Line = ({ label, children }: { label: string; children: React.ReactNode }) => (
+// Module scope, not inside ForecastBreakdown: a component declared during
+// render is a new component every render, so React remounts its subtree.
+function Line({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
     <p>
       <span className="font-semibold text-foreground">{label}:</span> {children}
     </p>
   );
+}
+
+function ForecastBreakdown({
+  forecast: f,
+  year,
+  currency,
+  planCents,
+}: {
+  forecast: YearForecast;
+  year: number;
+  currency: string;
+  /** The year's Proj EOY NW — the forecast is green ahead of it, red behind. */
+  planCents: number;
+}) {
+  const $ = (cents: number) => formatMoneyWhole(cents, currency);
+  // Same colours as the rest of the popup: growth green, a fall or a cost red.
+  const sign = (cents: number) => (cents < 0 ? "text-negative" : "text-positive");
+  const grown = f.monthEndCents - f.startCents;
+  const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
   return (
     <div className="sm:col-span-2 space-y-0.5 rounded-md bg-black/5 px-3 py-2 text-xs tabular-nums text-foreground/80 dark:bg-white/10">
       <p className="pb-0.5 font-semibold text-foreground">
-        Forecast breakdown and the &quot;at current pace&quot; card:
+        Forecast breakdown and the &quot;Proj Forecast NW&quot; card:
       </p>
       <Line label={`Start of ${year}`}>{$(f.startCents)}</Line>
       <Line label={`End of ${MONTH_NAMES[f.monthsDone - 1]}`}>
-        {$(f.monthEndCents)} ({grown >= 0 ? "+" : "−"}
-        {$(Math.abs(grown))} in {months(f.monthsDone)})
+        {$(f.monthEndCents)} (
+        <span className={sign(grown)}>
+          {grown >= 0 ? "+" : "−"}
+          {$(Math.abs(grown))}
+        </span>{" "}
+        in {months(f.monthsDone)})
       </Line>
       <Line label="Pace">
-        {$(f.perMonthCents)} a month
+        <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> a month
       </Line>
       <Line label="Forecast">
-        {$(f.monthEndCents)} + {$(f.perMonthCents)} × {months(f.monthsLeft)}
-        {f.travelCents > 0 ? ` − ${$(f.travelCents)} planned trips` : ""} ={" "}
-        <span className="font-semibold text-foreground">{$(f.cents)}</span>
+        {$(f.monthEndCents)} + <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> ×{" "}
+        {months(f.monthsLeft)}
+        {f.travelCents > 0 ? (
+          <>
+            {" "}− <span className="text-negative">{$(f.travelCents)}</span> planned trips
+          </>
+        ) : null}{" "}
+        ={" "}
+        <span className={`font-semibold ${f.cents >= planCents ? "text-positive" : "text-negative"}`}>
+          {$(f.cents)}
+        </span>
       </Line>
     </div>
   );
@@ -814,18 +774,20 @@ function YearModal({
                 narrower question (`measured`), and tying the two together
                 blanked the "so far" lines for the year in progress, which is
                 the year you most want them for. */}
-            <Recorded label="Income" cents={row.actualIncomeCents} currency={currency} from="Transactions" />
+            <Recorded label="Income" cents={row.actualIncomeCents} currency={currency} from="Transactions" tone="income" />
             <Recorded
               label="Spending"
               cents={row.actualSpendingCents}
               currency={currency}
               from={row.actualKidsCents ? "Transactions + 529s" : "Transactions"}
+              tone="spending"
             />
             <Recorded
               label="Contributed"
               cents={row.actualInvestedCents}
               currency={currency}
               from="Invest / Savings"
+              tone="savings"
             />
             {/* The reviewed year-end figure when it exists, else what the
                 snapshots measure — and the source line says which, so a number
@@ -835,6 +797,7 @@ function YearModal({
               cents={row.actualGainsCents ?? row.runningGainsCents}
               currency={currency}
               from={row.actualGainsCents == null ? "From balances" : "Invest / Savings"}
+              tone="gains"
             />
             {/* The two added together — the "Currently" figure under Saved /
                 invested in the table, so it can be traced here. */}
@@ -843,6 +806,7 @@ function YearModal({
               cents={(row.actualSavedCents ?? 0) + (row.actualGainsCents ?? row.runningGainsCents ?? 0) || null}
               currency={currency}
               from="Contributed + Gains"
+              tone="savings"
               className="col-span-2 sm:col-span-1"
             />
           </div>
@@ -872,11 +836,16 @@ function YearModal({
               {row.actualCents == null ? "—" : formatMoneyWhole(row.actualCents, currency)}
             </span>
           </p>
-          {/* The same forecast as the "at current pace" card. */}
+          {/* The same forecast as the "Proj Forecast NW" card, coloured the same:
+              green ahead of the plan, red behind it. */}
           {forecastCents != null ? (
             <p>
               <span className="text-muted">Forecast: </span>
-              <span className="font-semibold text-foreground sm:block">
+              <span
+                className={`font-semibold sm:block ${
+                  forecastCents >= predictedEoyCents ? "text-positive" : "text-negative"
+                }`}
+              >
                 {formatMoneyWhole(forecastCents, currency)}
               </span>
               {forecast && forecast.travelCents > 0 ? (
@@ -924,7 +893,7 @@ function YearModal({
           {retired ? (
             <Field label="Est. Income" hint="Retired pay + income lines">
               <input type="hidden" name="income" value={income} />
-              <input value={formatMoneyWhole(row.incomeCents, currency)} readOnly disabled className={`${inputClass} opacity-60`} />
+              <input value={formatMoneyWhole(row.incomeCents, currency)} readOnly disabled className={`${inputClass} opacity-60 text-positive`} />
             </Field>
           ) : (
             <Field
@@ -936,7 +905,7 @@ function YearModal({
                 inputMode="numeric"
                 value={income}
                 onChange={(e) => setIncome(e.target.value)}
-                className={inputClass}
+                className={`${inputClass} text-positive`}
               />
             </Field>
           )}
@@ -953,7 +922,7 @@ function YearModal({
               inputMode="numeric"
               value={spending}
               onChange={(e) => setSpending(e.target.value)}
-              className={inputClass}
+              className={`${inputClass} text-negative`}
             />
           </Field>
           <Field label="Est. Saved / Invested">
@@ -961,7 +930,8 @@ function YearModal({
               value={formatMoneyWhole(savedCents, currency)}
               readOnly
               disabled
-              className={`${inputClass} opacity-60`}
+              className={`${inputClass} opacity-60 ${valueTone("savings", savedCents).className}`}
+              style={valueTone("savings", savedCents).style}
             />
           </Field>
           <Field label="Est. gains" hint={futureYear ? "Return on the start balance" : "Market growth"}>
@@ -971,7 +941,9 @@ function YearModal({
               value={gains}
               readOnly={futureYear}
               onChange={(e) => setGains(e.target.value)}
-              className={`${inputClass} ${futureYear ? "opacity-60" : ""}`}
+              className={`${inputClass} ${futureYear ? "opacity-60" : ""} ${
+                displayToCents(gains) < 0 ? "text-negative" : "text-positive"
+              }`}
             />
           </Field>
           {/* Signed, and one number rather than a purchase model: the net
@@ -1035,7 +1007,7 @@ function YearModal({
             footnotes (Victor, 2026-09-29). Month-end figures, so it only
             changes on the 1st. */}
         {forecast ? (
-          <ForecastBreakdown forecast={forecast} year={row.year} currency={currency} />
+          <ForecastBreakdown forecast={forecast} year={row.year} currency={currency} planCents={predictedEoyCents} />
         ) : null}
 
         {/* Exactly what would change, before it changes. */}
@@ -1238,24 +1210,39 @@ function Recorded({
   currency,
   from,
   className = "",
+  tone,
 }: {
   label: string;
   cents: number | null;
   currency: string;
   from: string;
   className?: string;
+  /** Colours the figure the way the grid colours its column. */
+  tone?: Tone;
 }) {
+  const t = valueTone(tone, cents);
   return (
     <span className={`block ${className}`}>
       <span className="block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
         {label}
       </span>
-      <span className="block font-semibold tabular-nums">
+      <span className={`block font-semibold tabular-nums ${t.className}`} style={t.style}>
         {cents ? formatMoneyWhole(cents, currency) : "—"}
       </span>
       <span className="block text-[11px] text-foreground/75">{from}</span>
     </span>
   );
+}
+
+// Money colours in the year popup: income and gains green, spending red,
+// saved / invested blue — and anything negative red (a loss, or a draw on
+// savings). Net worth stays plain.
+type Tone = "income" | "gains" | "spending" | "savings";
+function valueTone(tone: Tone | undefined, cents: number | null): { className: string; style?: React.CSSProperties } {
+  if (!tone || !cents) return { className: "" };
+  if (tone === "spending" || cents < 0) return { className: "text-negative" };
+  if (tone === "income" || tone === "gains") return { className: "text-positive" };
+  return { className: "", style: { color: "var(--viz-savings)" } };
 }
 
 const inputClass =

@@ -129,7 +129,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, personal_inflation_pct, income_growth_pct, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, sbp_enabled, sbp_pct, retirement_tax_pct, longevity_age, healthcare_annual_cents, health_plans, dental_vision_annual_cents, healthcare_start_age, healthcare_growth_pct")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, sbp_enabled, sbp_pct, retirement_tax_pct, longevity_age, healthcare_annual_cents, health_plans, dental_vision_annual_cents, healthcare_start_age, healthcare_growth_pct")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -811,12 +811,6 @@ export default async function NetworthPage() {
         realReturnPct: planRow?.real_return_pct == null ? 5 : Number(planRow.real_return_pct),
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
-        // Real (above-inflation) drift, which is why both default to zero —
-        // the grid these fill forward is in today's money.
-        spendingGrowthPct:
-          planRow?.personal_inflation_pct == null ? 0 : Number(planRow.personal_inflation_pct),
-        incomeGrowthPct:
-          planRow?.income_growth_pct == null ? 0 : Number(planRow.income_growth_pct),
         // A pension, VA, Social Security — income the portfolio never has to
         // fund, so the FI number stops pretending it does.
         guaranteedIncomeCents: planRow?.guaranteed_income_cents ?? null,

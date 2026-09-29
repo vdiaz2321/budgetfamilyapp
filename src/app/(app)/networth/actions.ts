@@ -374,9 +374,6 @@ export async function saveRetirementPlan(formData: FormData) {
     return { error: "Could not read the health plans." };
   }
   const healthGrowth = num("healthcareGrowthPct");
-  // The two drift rates the projection grid fills forward with.
-  const personalInflation = num("personalInflationPct");
-  const incomeGrowth = num("incomeGrowthPct");
 
   if (!year(birthYear)) return { error: "Enter a four-digit birth year." };
   if (!year(targetYear)) return { error: "Enter a four-digit military retirement year." };
@@ -405,12 +402,6 @@ export async function saveRetirementPlan(formData: FormData) {
   }
   if (longevity != null && (longevity < 50 || longevity > 120)) {
     return { error: "Plan until age has to be between 50 and 120." };
-  }
-  if (personalInflation != null && (personalInflation < -20 || personalInflation > 20)) {
-    return { error: "Spending growth has to be between -20% and 20%." };
-  }
-  if (incomeGrowth != null && (incomeGrowth < -20 || incomeGrowth > 20)) {
-    return { error: "Income growth has to be between -20% and 20%." };
   }
   if (healthStartAge != null && (healthStartAge < 18 || healthStartAge > 120)) {
     return { error: "Healthcare start age has to be between 18 and 120." };
@@ -577,8 +568,6 @@ export async function saveRetirementPlan(formData: FormData) {
       dental_vision_annual_cents: money("dentalVisionAnnual"),
       healthcare_start_age: healthStartAge ?? 65,
       healthcare_growth_pct: healthGrowth ?? 1.5,
-      personal_inflation_pct: personalInflation ?? 0,
-      income_growth_pct: incomeGrowth ?? 0,
       // Replaced by the Net Worth Plan table (spending, saving) and the income
       // lines (guaranteed income). Cleared so an old figure can't quietly win.
       annual_spend_cents: null,
@@ -1195,142 +1184,6 @@ export async function saveProjectionYear(formData: FormData) {
 
   revalidatePath("/networth");
   return { error: null };
-}
-
-// Regenerates every year after `fromYear` from the assumptions — income and
-// spending drift at their own rates, gains are the return applied to the
-// opening balance. This is the sheet's model doing the typing instead of
-// Victor doing it, and it deliberately overwrites hand-entered future years,
-// so the UI asks first.
-//
-// ---- Everything here is in TODAY'S MONEY, and that is the whole point.
-//
-// The grid is read as today's money everywhere else (the FI section feeds its
-// rows straight into a real-return projection without deflating them), so the
-// rates applied here have to be real ones too:
-//
-//   * gains use `real_return_pct` — the SAME knob the FI chart compounds with.
-//     It used to read a separate `projection_return_pct`, which is how the two
-//     halves of this page ended up quoting $926,835 and $1,516,822 for the
-//     same year 2041. One return, one answer.
-//   * income and spending drift at their rates ABOVE inflation, which is why
-//     both default to 0 — in today's money, a salary that merely keeps pace
-//     with inflation is a flat line.
-export async function fillProjectionForward(fromYear: number) {
-  const { supabase, householdId } = await requireHousehold();
-
-  const [{ data: plan }, { data: rows, error: rowsError }] = await Promise.all([
-    supabase
-      .from("retirement_plan")
-      .select("real_return_pct, personal_inflation_pct, income_growth_pct")
-      .eq("household_id", householdId)
-      .maybeSingle(),
-    supabase
-      .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, one_off_cents, eoy_cents")
-      .eq("household_id", householdId)
-      .order("year"),
-  ]);
-  if (rowsError) return { error: `Could not read the projection — ${rowsError.message}` };
-
-  const all = rows ?? [];
-  const base = all.find((r) => r.year === fromYear);
-  if (!base) return { error: `${fromYear} isn't in the projection yet.` };
-
-  const returnPct = Number(plan?.real_return_pct ?? 5);
-  const inflationPct = Number(plan?.personal_inflation_pct ?? 0);
-  const incomePct = Number(plan?.income_growth_pct ?? 0);
-
-  // The year you fill forward FROM is the anchor: its own figures are left
-  // exactly as typed, and the chain starts from the balance they actually
-  // land on. Recomputing its growth here (as this used to) produced a
-  // closing balance that disagreed with the row's own stored EOY, so the
-  // grid showed year N ending on one number and year N+1 opening on another.
-  const baseEoy =
-    base.boy_cents + base.income_cents - base.spending_cents + base.growth_cents +
-    (base.one_off_cents ?? 0);
-
-  let carry = baseEoy;
-
-  const updates: Array<Record<string, unknown>> = [];
-
-  // Only if the anchor's stored EOY drifted from its own columns.
-  if (base.eoy_cents !== baseEoy) {
-    updates.push({
-      household_id: householdId,
-      year: base.year,
-      age: base.age,
-      boy_cents: base.boy_cents,
-      income_cents: base.income_cents,
-      spending_cents: base.spending_cents,
-      growth_cents: base.growth_cents,
-      one_off_cents: base.one_off_cents ?? 0,
-      eoy_cents: baseEoy,
-      updated_at: new Date().toISOString(),
-    });
-  }
-
-  // ---- Each year keeps its OWN shape; the drift rates scale it.
-  //
-  // This used to take the anchor year's income and spending and walk them
-  // forward over every later row, which meant a 0% drift rate — the default,
-  // and the honest one in today's money — did not mean "leave them alone", it
-  // meant "copy 2026 over the next twenty-one years". Victor's plan steps
-  // down deliberately ($90k while the kids are home, $65k, then $45k once
-  // they've gone); one press flattened all of it to a single flat line and
-  // moved his FI date two years.
-  //
-  // So a row's own figures are the plan, and the rate is a multiplier on top:
-  // at 0% every typed year survives untouched, and at 2% the whole shape —
-  // steps included — rises 2% a year. Only the gains are always recomputed,
-  // because that is the column this exists to fix.
-  for (const row of all.filter((r) => r.year > fromYear)) {
-    const n = row.year - fromYear;
-    // Drift scales the typed pay; retirement income lines are re-added by the
-    // recompute below, so they are never drifted twice.
-    const income = Math.round((row.work_income_cents ?? row.income_cents) * Math.pow(1 + incomePct / 100, n));
-    // Scales the typed spending; healthcare is re-added by the recompute.
-    const spending = Math.round((row.base_spending_cents ?? row.spending_cents) * Math.pow(1 + inflationPct / 100, n));
-    const growth = Math.round((carry * returnPct) / 100);
-    // A one-off is kept exactly as typed and never scaled: the drift rates say
-    // how a salary or a grocery bill changes over time, and a house purchase
-    // is neither.
-    const oneOff = row.one_off_cents ?? 0;
-    const eoy = carry + income - spending + growth + oneOff;
-    updates.push({
-      household_id: householdId,
-      year: row.year,
-      age: row.age,
-      boy_cents: carry,
-      income_cents: income,
-      work_income_cents: income,
-      spending_cents: spending,
-      base_spending_cents: spending,
-      growth_cents: growth,
-      one_off_cents: oneOff,
-      eoy_cents: eoy,
-      updated_at: new Date().toISOString(),
-    });
-    carry = eoy;
-  }
-
-  if (updates.length > 0) {
-    const { error } = await supabase
-      .from("networth_projection")
-      .upsert(updates, { onConflict: "household_id,year" });
-    if (error) {
-      console.error("[fillProjectionForward]", error);
-      return { error: `Couldn't rebuild the projection — ${error.message}` };
-    }
-  }
-  try {
-    await recomputeRetirementIncome(supabase, householdId);
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Rebuilt, but couldn't add retirement income." };
-  }
-
-  revalidatePath("/networth");
-  return { error: null, updated: updates.length };
 }
 
 /**
