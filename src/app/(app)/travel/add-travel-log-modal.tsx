@@ -191,8 +191,9 @@ export function AddTravelLogModal({
         <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
           {defaultTripId ? null : (
             <>
-              <div className="w-full sm:w-64">
-                {/* The placeholder shows the naming pattern every trip follows. */}
+              <div className="relative w-full sm:w-64">
+                {/* The example under the box shows the naming pattern every trip
+                    follows — kept outside the box so it stays while typing. */}
                 <input
                   value={tripName}
                   onChange={(e) => typeTripName(e.target.value)}
@@ -201,17 +202,22 @@ export function AddTravelLogModal({
                   }}
                   autoComplete="off"
                   aria-label="Trip name"
-                  placeholder="Greece - May 2027"
                   className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
+                {/* Hangs under the box on wider screens so the dates stay level
+                    with it. A name matching a saved trip says so on the same line —
+                    beside the box it widened the header and knocked the row
+                    onto two lines as soon as a letter was typed. */}
+                <p className="mt-0.5 flex justify-between gap-2 text-xs text-muted sm:absolute sm:inset-x-0 sm:top-full">
+                  <span className="shrink-0 whitespace-nowrap">e.g. Greece - May 2027</span>
+                  {/* Only a name that matches a saved trip gets a word — that
+                      one files into the existing trip. A plain "New trip" on
+                      every other name was noise (Victor, 2026-09-30). */}
+                  {tripName.trim() && matched ? (
+                    <span className="truncate font-semibold text-positive">Saved trip</span>
+                  ) : null}
+                </p>
               </div>
-              {/* Says which it is, so a name that happens to match doesn't file
-                  into a saved trip without saying so. */}
-              {tripName.trim() ? (
-                <span className={`text-xs font-semibold ${matched ? "text-positive" : "text-muted"}`}>
-                  {matched ? `Adding to ${matched.name}` : "New trip"}
-                </span>
-              ) : null}
             </>
           )}
           {/* The trip's own span, typed once here rather than buried in the

@@ -42,7 +42,6 @@ export type CarPayload = {
   spent: string;
   spentForeign: string;
   foreignCurrency: string;
-  pocketCost: string;
   pointsUsed: boolean;
   points: string;
   /** Typed in cents per point: "1.2" = 1.2¢. */
@@ -86,19 +85,20 @@ export async function saveTravelCar(payload: CarPayload) {
   // Linked transactions set the pocket cost and mark it booked; a form save
   // keeps both rather than undoing what the payments did.
   const paid = payload.id ? await linkedPaidCents(supabase, householdId, "car", payload.id) : null;
-  // The cost columns hold what it costs now — the plan until it is booked —
-  // so every total that reads them is unchanged.
-  const cost = (isEstimate ? cents(payload.planned) : cents(payload.spent)) ?? 0;
-  const costForeign = isEstimate ? cents(payload.plannedForeign) : cents(payload.spentForeign);
   // The family car isn't paid for with points.
   const points = rental ? Math.max(0, Math.trunc(Number(payload.points.replace(/,/g, "")) || 0)) : 0;
   const pointsUsed = rental && payload.pointsUsed && points > 0;
+  // The cost columns hold what it costs now — the plan until it is booked —
+  // so every total that reads them is unchanged. Booked on points, its cost
+  // is the Planned figure (what the points stood in for) and Spent is the
+  // cash paid on top of the points.
+  const cost = (isEstimate || pointsUsed ? cents(payload.planned) : cents(payload.spent)) ?? 0;
+  const costForeign = isEstimate ? cents(payload.plannedForeign) : cents(payload.spentForeign);
   // Nothing leaves a card until a planned rental is booked.
   const drawPoints = pointsUsed && (!isEstimate || paid != null) ? points : 0;
-  // Left blank, what left the wallet is the cost — or nothing on points.
-  const pocketCost = payload.pocketCost.trim()
-    ? Math.max(0, displayToCents(payload.pocketCost))
-    : pointsUsed ? 0 : cost;
+  // What left the wallet: the cost, or on points only the cash paid on top.
+  // Linked transactions replace it (see `paid`).
+  const pocketCost = pointsUsed ? (isEstimate ? 0 : cents(payload.spent) ?? 0) : cost;
   const pointsValueMicros =
     centsPerPointToMicros(payload.pointsValueCents) ?? (points > 0 && cost > 0 ? Math.round((cost / points) * 10_000) : null);
 

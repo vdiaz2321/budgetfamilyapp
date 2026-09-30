@@ -13,6 +13,7 @@ import {
   type PlanSpent, type PlanSpentSlot,
 } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
+import { addDays } from "./trip-summary";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
 
@@ -147,6 +148,17 @@ export function StayModal({
   const [reservedOn, setReservedOn] = useState(base?.reservedOn ?? "");
   const [checkIn, setCheckIn] = useState(base?.checkIn ?? "");
   const datesOutOfOrder = Boolean(reservedOn && checkIn && checkIn < reservedOn);
+  // Nights is what's saved; Check-out is worked out from it, and picking a
+  // check-out date sets the nights. A new check-in keeps the nights, so the
+  // check-out moves with it.
+  const [nights, setNights] = useState(String(base?.nights ?? 1));
+  const nightsCount = Number(nights) >= 1 ? Math.floor(Number(nights)) : null;
+  const checkOut = checkIn && nightsCount ? addDays(checkIn, nightsCount) : "";
+  function pickCheckOut(value: string) {
+    if (!value || !checkIn) return;
+    const count = Math.round((Date.parse(value) - Date.parse(checkIn)) / 86_400_000);
+    if (count >= 1) setNights(String(count));
+  }
   // Live totals so the saving is visible while typing, not only after saving.
   const [hotelCost, setHotelCost] = useState(money(stay?.hotelCostCents));
   // Planned and Spent side by side. Spent is what left the wallet (the
@@ -305,9 +317,9 @@ export function StayModal({
           <input name="city" defaultValue={base?.city ?? ""} className={inputClass} />
         </Field>
 
-        {/* The two dates and the two counts on one row — none of the four
-             needs more than a quarter of the form. Two per row at 375px. */}
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4">
+        {/* The three dates and the two counts on one row — none of them
+             needs more than a fifth of the form. Two per row at 375px. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
           <Field label="Reservation made">
             <input
               type="date"
@@ -333,8 +345,27 @@ export function StayModal({
               <span className="mt-0.5 block text-[10px] font-medium text-negative">{tripNote}</span>
             ) : null}
           </Field>
+          <Field label="Check-out date">
+            <input
+              type="date"
+              value={checkOut}
+              min={checkIn ? addDays(checkIn, 1) : undefined}
+              disabled={!checkIn}
+              onChange={(e) => pickCheckOut(e.target.value)}
+              aria-label="Check-out date"
+              className={`${inputClass} disabled:opacity-50`}
+            />
+          </Field>
           <Field label="Nights">
-            <input type="number" name="nights" min="1" step="1" defaultValue={base?.nights ?? 1} className={inputClass} />
+            <input
+              type="number"
+              name="nights"
+              min="1"
+              step="1"
+              value={nights}
+              onChange={(e) => setNights(e.target.value)}
+              className={inputClass}
+            />
           </Field>
           <Field label="Total pax">
             <input type="number" name="pax" min="1" step="1" defaultValue={stay?.pax ?? ""} className={inputClass} />

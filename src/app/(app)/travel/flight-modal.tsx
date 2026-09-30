@@ -13,7 +13,7 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { CurrencySelect, Field, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
+import { CurrencySelect, Field, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -124,9 +124,11 @@ export function FlightModal({
           name: p.name,
           // A flight still planned keeps its plan in the fare columns too;
           // here it shows only under Planned.
-          planned: money(flight.isEstimate ? p.fareCents : p.plannedFareCents),
+          // A bought points seat: Planned is what it would have cost (its
+          // fare, if no plan was typed) and Spent is the cash paid on top.
+          planned: money(flight.isEstimate ? p.fareCents : p.pointsUsed ? (p.plannedFareCents ?? p.fareCents) : p.plannedFareCents),
           plannedForeign: money(flight.isEstimate ? p.fareEurCents : p.plannedFareForeignCents),
-          fare: flight.isEstimate ? "" : money(p.fareCents),
+          fare: flight.isEstimate ? "" : money(p.pointsUsed ? p.cashPaidCents : p.fareCents),
           fareEur: flight.isEstimate ? "" : money(p.fareEurCents),
           pointsUsed: p.pointsUsed,
           points: p.pointsCost ? String(p.pointsCost) : "",
@@ -145,15 +147,6 @@ export function FlightModal({
     const implied = flight.pointsCost > 0 && fares > 0 ? Math.round((fares / flight.pointsCost) * 10_000) : null;
     return flight.pointsValueMicros !== implied ? rateDisplay(flight.pointsValueMicros) : "";
   });
-  // Blank means "the cash tickets' fares". A saved figure that differs from
-  // that (taxes added on an award ticket) shows.
-  // Pocket cost is never typed: it is the linked transactions' total, or
-  // failing that the cash fares (a figure saved by hand earlier is kept).
-  const [pocketCost] = useState(() => {
-    if (!flight) return "";
-    const cashFares = flight.passengers.reduce((sum, p) => sum + (p.pointsUsed ? 0 : p.fareCents), 0);
-    return flight.pocketCostCents !== cashFares ? centsToDisplay(flight.pocketCostCents) : "";
-  });
   const [remarks, setRemarks] = useState(flight?.remarks ?? "");
   const [editingNames, setEditingNames] = useState(false);
 
@@ -161,15 +154,17 @@ export function FlightModal({
   // the first one still empty.
   const lastFare = useRef<{ key: number; slot: FareSlot } | null>(null);
 
+  const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Bought once a Spent fare or the booking date is in; a plan until then.
   const isEstimate = isPlannedOnly(passengers.some((p) => p.fare.trim() || p.fareEur.trim()), reservedOn);
   const total = (slot: FareSlot) => passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(p[slot])), 0);
-  // What the booking costs now: the plan until it is bought.
-  const effective = (p: PassengerDraft) => (isEstimate ? p.planned : p.fare);
+  // What the seat costs now: the plan until it is bought. A bought points
+  // seat's cost is its Planned fare (what the points stood in for); its
+  // Spent boxes are the cash paid on top of the points.
+  const effective = (p: PassengerDraft) => (isEstimate || passengerPoints(p) > 0 ? p.planned : p.fare);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const fareCents = passengers.reduce((sum, p) => sum + Math.max(0, displayToCents(effective(p))), 0);
-  const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Points on the booking are its points tickets added up; the fares of those
   // tickets are what the points bought, which is how they are valued.
   const pointsTyped = passengers.reduce((sum, p) => sum + passengerPoints(p), 0);
@@ -179,7 +174,6 @@ export function FlightModal({
   );
   const pointsUsed = pointsTyped > 0;
   const impliedMicros = pointsTyped > 0 && pointsFareCents > 0 ? Math.round((pointsFareCents / pointsTyped) * 10_000) : null;
-  const pocketCents = pocketCost.trim() ? displayToCents(pocketCost) : fareCents - pointsFareCents;
   const datesOutOfOrder = Boolean(reservedOn && legs[0]?.flightOn && legs.some((l) => l.flightOn && l.flightOn < reservedOn));
   const tripNote = outsideTripNote(trips, trip.tripId, legs.map((l) => l.flightOn));
 
@@ -264,7 +258,6 @@ export function FlightModal({
         cardLabel,
         holder,
         pointsValueCents: pointsValue,
-        pocketCost,
         remarks,
         foreignCurrency,
         legs: legs.map((l) => ({
@@ -278,7 +271,7 @@ export function FlightModal({
   });
 
   const ownEmpty = () =>
-    ![airline, bookingCode, reservedOn, accountId, cardLabel, holder, pocketCost, remarks].some((v) => v.trim()) &&
+    ![airline, bookingCode, reservedOn, accountId, cardLabel, holder, remarks].some((v) => v.trim()) &&
     legs.every((l) => ![l.flightOn, l.flightNumber, l.fromPlace, l.toPlace, l.departsAt, l.arrivesAt].some((v) => v.trim())) &&
     passengers.every((p) => !p.name && ![p.planned, p.plannedForeign, p.fare, p.fareEur, p.points].some((v) => v.trim()));
 
@@ -402,7 +395,7 @@ export function FlightModal({
               // ("Outbound date", "Return date"), so there is no heading row.
               <div
                 key={leg.key}
-                className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[9rem_5.5rem_1fr_1fr_6.5rem_6.5rem_auto]"
+                className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[9rem_5.5rem_1fr_1fr_8rem_8rem_auto]"
               >
                 <Field label={`${legs.length === 1 ? "Flight" : i === 0 ? "Outbound" : legs.length === 2 ? "Return" : `Flight ${i + 1}`} date`}>
                   <input
@@ -507,10 +500,10 @@ export function FlightModal({
             <CheckPicker
               label="Paid with points"
               align="left"
-              className="h-7"
+              className={`h-7 ${PILL_CONTROL}`}
               buttonText={
                 <>
-                  <span className="text-muted">Paid with points:</span>
+                  <span className="text-foreground/80">Paid with points:</span>
                   {pointsSummary}
                 </>
               }
@@ -613,6 +606,9 @@ export function FlightModal({
                     value={p[slot]}
                     onChange={(e) => updatePassenger(p.key, { [slot]: e.target.value })}
                     onFocus={() => (lastFare.current = { key: p.key, slot })}
+                    // On a points seat the Spent boxes take the cash paid on
+                    // top of the points (taxes, fees, a points + cash fare).
+                    placeholder={p.pointsUsed && n >= 2 ? "Cash paid" : undefined}
                     inputMode="decimal"
                     className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""}`}
                   />
@@ -699,7 +695,10 @@ export function FlightModal({
           </Field>
           <Field label={`Pocket cost (${currencySymbol(currency)})`}>
             <input
-              value={centsToDisplay(flight?.paidCents ?? pocketCents)}
+              // Only ever the linked payments — blank until one is linked,
+              // so it never shows a plan or a guess as money paid.
+              value={flight?.paidCents != null ? centsToDisplay(flight.paidCents) : ""}
+              placeholder="—"
               readOnly
               tabIndex={-1}
               className={`${inputClass} opacity-70`}

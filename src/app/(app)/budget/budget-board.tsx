@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchPlansToSpent, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
+import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchIrregularPlansToSpent, matchPlansToSpent, restoreIrregularPlansSnapshot, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
 import { advanceSubscriptionRenewal } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
@@ -374,17 +374,31 @@ export function BudgetBoard({
   const savings = kindTotals(["savings"]);
   const debt = kindTotals(["debt"]);
 
-  // Items the hero's "Match Spent Amount" would change: some spending, and a
-  // plan that differs from it. $0-spent items are left out on purpose — the
-  // month-end payroll deductions haven't posted yet and still need their plan.
+  // Items the hero's "Match Spent Amount" would change: a plan that differs
+  // from what was spent. Bills and expenses with nothing spent are listed too
+  // (Victor, 2026-09-30) but start unticked — a month-end payroll deduction
+  // that hasn't posted yet would otherwise have its plan wiped by "Match all".
   // It's a month-end tool, so it only appears from the 25th of the current
   // month on (and on any past month); earlier, the list stays empty.
   const matchWindowOpen = month.key < currentMonthKey || (isCurrentMonth && today.getDate() >= 25);
   const matchCandidates: MatchCandidate[] = !matchWindowOpen ? [] : groups
     .filter((g) => g.kind !== "income")
-    .flatMap((g) => g.rows.filter((r) => isVisibleRow(g.kind, r)))
-    .filter((r) => !r.autoPlanned && r.spentCents > 0 && r.spentCents !== r.plannedCents)
-    .map((r) => ({ subId: r.subId, name: r.name, plannedCents: r.plannedCents, spentCents: r.spentCents }));
+    .flatMap((g) => g.rows.filter((r) => isVisibleRow(g.kind, r)).map((r) => ({ r, spendKind: g.kind === "bills" || g.kind === "expenses" })))
+    .filter(({ r, spendKind }) => !r.autoPlanned && r.spentCents !== r.plannedCents && (r.spentCents > 0 || spendKind))
+    .map(({ r }): MatchCandidate => ({ subId: r.subId, name: r.name, plannedCents: r.plannedCents, spentCents: r.spentCents }))
+    // The Irregular Bills row is planned from its card, one plan per bill, so
+    // it is matched bill by bill: each bill whose spend differs from its plan.
+    .concat(
+      irregularBills
+        .filter((b) => (b.monthSpentCents ?? 0) !== (b.plannedCents ?? 0))
+        .map((b) => ({
+          subId: `bill:${b.id}`,
+          billId: b.id,
+          name: `${b.name} (Irregular Bills)`,
+          plannedCents: b.plannedCents ?? 0,
+          spentCents: b.monthSpentCents ?? 0,
+        })),
+    );
 
   // Re-derive the selected row from fresh data each render so the panel
   // reflects saved values (and clears if the row was deleted).
@@ -1138,7 +1152,9 @@ function AssignLeftover({
   );
 }
 
-export type MatchCandidate = { subId: string; name: string; plannedCents: number; spentCents: number };
+/** A budget item, or one Irregular Bills bill (then `billId` is set and
+ *  `subId` is just a unique key). */
+export type MatchCandidate = { subId: string; name: string; plannedCents: number; spentCents: number; billId?: string };
 
 // Month-end shortcut: set every item's plan to what it actually spent, instead
 // of editing each Planned cell by hand. The rule for which items qualify
@@ -1160,9 +1176,10 @@ function MatchSpentButton({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [undoPending, startUndo] = useTransition();
-  const [snapshot, setSnapshot] = useState<
-    Array<{ subcategory_id: string; planned_cents: number | null }> | null
-  >(null);
+  const [snapshot, setSnapshot] = useState<{
+    plans: Array<{ subcategory_id: string; planned_cents: number | null }>;
+    bills: Array<{ bill_id: string; planned_cents: number | null }>;
+  } | null>(null);
 
   useEffect(() => {
     if (!snapshot) return;
@@ -1193,7 +1210,8 @@ function MatchSpentButton({
         onClick={() => {
           const snap = snapshot;
           startUndo(async () => {
-            await restorePlansSnapshot(monthKey, snap);
+            if (snap.plans.length) await restorePlansSnapshot(monthKey, snap.plans);
+            if (snap.bills.length) await restoreIrregularPlansSnapshot(monthKey, snap.bills);
             setSnapshot(null);
           });
         }}
@@ -1215,7 +1233,8 @@ function MatchSpentButton({
     <>
       <button
         type="button"
-        onClick={() => { setError(null); setSkipped(new Set()); setOpen(true); }}
+        // Nothing-spent items start unticked; see matchCandidates.
+        onClick={() => { setError(null); setSkipped(new Set(candidates.filter((c) => c.spentCents === 0).map((c) => c.subId))); setOpen(true); }}
         className="mt-1.5 inline-flex w-fit cursor-pointer items-center whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
       >
         Match Spent Amount
@@ -1296,13 +1315,23 @@ function MatchSpentButton({
                   }
                   setError(null);
                   start(async () => {
-                    const res = await matchPlansToSpent(monthKey, picked.map((c) => c.subId));
-                    if (res.error) {
-                      setError(res.error);
+                    const items = picked.filter((c) => !c.billId);
+                    const bills = picked.filter((c) => c.billId);
+                    const res = items.length ? await matchPlansToSpent(monthKey, items.map((c) => c.subId)) : null;
+                    const billRes = bills.length
+                      ? await matchIrregularPlansToSpent(monthKey, bills.map((c) => ({ billId: c.billId!, cents: c.spentCents })))
+                      : null;
+                    const plans = res?.snapshot ?? [];
+                    const billSnap = billRes?.snapshot ?? [];
+                    // One half failing still keeps what the other half saved
+                    // (and its Undo); the error says what didn't go through.
+                    const failed = [res?.error, billRes?.error].filter(Boolean).join(" ");
+                    if (failed && !plans.length && !billSnap.length) {
+                      setError(failed);
                       return;
                     }
                     setOpen(false);
-                    if (res.snapshot?.length) setSnapshot(res.snapshot);
+                    if (plans.length || billSnap.length) setSnapshot({ plans, bills: billSnap });
                   });
                 }}
                 className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"

@@ -42,10 +42,17 @@ export function PlannedPointsNote({ show, what = "points" }: { show: boolean; wh
 }
 
 /** The booking's second currency — the one its foreign columns are in. */
+/** The outline for the small pill controls at the top of a booking's costs. */
+export const PILL_CONTROL =
+  "ring-1 ring-black/25! transition hover:bg-sky-100 hover:ring-sky-400! dark:ring-white/30! dark:hover:bg-sky-900/40 dark:hover:ring-sky-500!";
+
 export function CurrencySelect({ value, onChange }: { value: string; onChange: (code: string) => void }) {
   return (
-    <label className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold ring-1 ring-line">
-      <span className="text-muted">Other currency:</span>
+    // A stronger outline and a readable label — the faint ring-line and muted
+    // grey label read as disabled (Victor, 2026-09-30). Same look as the
+    // form's "Paid with points" picker beside it.
+    <label className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold ${PILL_CONTROL}`}>
+      <span className="text-foreground/80">Other currency:</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -76,6 +83,7 @@ export function PlanSpentFields({
   what = "cost",
   onFocusSlot,
   spentLocked = false,
+  spentOnPoints = false,
 }: {
   value: PlanSpent;
   onChange: (next: PlanSpent) => void;
@@ -87,14 +95,17 @@ export function PlanSpentFields({
   onFocusSlot?: (slot: PlanSpentSlot) => void;
   /** Spent comes from linked transactions: shown locked, not typed. */
   spentLocked?: boolean;
+  /** Paid with points: Spent is only the cash paid on top of the points, and
+   *  Planned is what it would have cost. The labels say so. */
+  spentOnPoints?: boolean;
 }) {
   const usd = currencySymbol(currency);
   const fx = foreignSymbol(foreignCurrency);
   const boxes: { slot: PlanSpentSlot; label: string }[] = [
     { slot: "planned", label: `Planned ${what} (${usd})` },
     { slot: "plannedForeign", label: `Planned ${what} (${fx})` },
-    { slot: "spent", label: `Spent ${what} (${usd})` },
-    { slot: "spentForeign", label: `Spent ${what} (${fx})` },
+    { slot: "spent", label: spentOnPoints ? `Cash paid with pts (${usd})` : `Spent ${what} (${usd})` },
+    { slot: "spentForeign", label: spentOnPoints ? `Cash paid with pts (${fx})` : `Spent ${what} (${fx})` },
   ];
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -119,11 +130,13 @@ export function PlanSpentFields({
   );
 }
 
-// Under a locked Pocket cost: where its figure comes from.
+// Under a locked Pocket cost: where its figure comes from. It shows only the
+// linked payments and stays blank until one is linked (Victor, 2026-09-30) —
+// the trip still counts the Spent figures typed here until then.
 export function PaidNote({ linked }: { linked: boolean }) {
   return (
     <span className="mt-0.5 block text-[10px] font-medium text-muted">
-      {linked ? "From linked transactions" : "Fills in from a linked transaction"}
+      {linked ? "From linked transactions" : "Fills in from linked transactions"}
     </span>
   );
 }

@@ -34,7 +34,6 @@ export type FlightPayload = {
   holder: string;
   /** Typed in cents per point: "1.2" = 1.2¢. */
   pointsValueCents: string;
-  pocketCost: string;
   remarks: string;
   /** The second currency the foreign figures are in ("EUR", "GBP", …). */
   foreignCurrency: string;
@@ -46,7 +45,9 @@ export type FlightPayload = {
     departsAt: string;
     arrivesAt: string;
   }>;
-  /** `fare` / `fareEur` are what was spent; `planned` / `plannedForeign` the plan. */
+  /** `fare` / `fareEur` are what was spent; `planned` / `plannedForeign` the plan.
+   *  On a points seat that is bought, `fare` / `fareEur` are the cash paid on
+   *  top of the points and `planned` is what the seat would have cost. */
   passengers: Array<{
     travellerId: string | null; name: string;
     planned: string; plannedForeign: string; fare: string; fareEur: string;
@@ -97,17 +98,23 @@ export async function saveTravelFlight(payload: FlightPayload) {
       const points = Math.max(0, Math.trunc(Number(p.points.replace(/,/g, "")) || 0));
       const plannedFareCents = cents(p.planned);
       const plannedFareForeignCents = cents(p.plannedForeign);
+      // A ticket is on points only when it has points on it.
+      const onPoints = p.pointsUsed && points > 0;
+      // A bought points seat: its Spent boxes are the cash paid on top of the
+      // points, and its fare — what the seat would have cost, which values
+      // the points — is its Planned fare.
+      const pointsBought = onPoints && !isEstimate;
       return {
         travellerId: p.travellerId || null,
         name: p.name.trim(),
         // The fare columns hold what the seat costs now — the plan until it
         // is bought — so every total that reads them is unchanged.
-        fareCents: (isEstimate ? plannedFareCents : cents(p.fare)) ?? 0,
+        fareCents: (isEstimate || pointsBought ? plannedFareCents : cents(p.fare)) ?? 0,
         fareEurCents: isEstimate ? plannedFareForeignCents : cents(p.fareEur),
         plannedFareCents,
         plannedFareForeignCents,
-        // A ticket is on points only when it has points on it.
-        pointsUsed: p.pointsUsed && points > 0,
+        cashPaidCents: pointsBought ? cents(p.fare) : null,
+        pointsUsed: onPoints,
         pointsCost: p.pointsUsed ? points : 0,
       };
     })
@@ -139,11 +146,10 @@ export async function saveTravelFlight(payload: FlightPayload) {
   const drawPoints = (isEstimate && paid == null) || !pointsUsed ? 0 : pointsCost;
   const flightCost = passengers.reduce((sum, p) => sum + p.fareCents, 0);
   const pointsFares = passengers.reduce((sum, p) => sum + (p.pointsUsed ? p.fareCents : 0), 0);
-  // Left blank, what came out of pocket is the cash tickets' fares. Typed, it
-  // is whatever was typed (adding the taxes on an award ticket, say).
-  const pocketCost = payload.pocketCost.trim()
-    ? Math.max(0, displayToCents(payload.pocketCost))
-    : flightCost - pointsFares;
+  // What came out of pocket: the cash tickets' fares plus any cash paid on
+  // the points tickets. Linked transactions replace it (see `paid`).
+  const pocketCost =
+    flightCost - pointsFares + passengers.reduce((sum, p) => sum + (p.cashPaidCents ?? 0), 0);
   // Typed, the rate is what was typed; blank, it is what the points tickets
   // would have cost in cash divided by the points they took.
   const pointsValueMicros =
@@ -286,6 +292,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
       planned_fare_foreign_cents: p.plannedFareForeignCents,
       points_used: p.pointsUsed,
       points_cost: p.pointsCost,
+      cash_paid_cents: p.cashPaidCents,
     })),
   );
   if (paxError) return fail(`Couldn't save the passengers — ${paxError.message}`);

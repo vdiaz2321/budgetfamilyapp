@@ -6,7 +6,7 @@ import { formatMoney, centsToDisplay, currencySymbol } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { DOT } from "./category-icons";
 import { reorderIrregularBills, reorderSubscriptions, setIrregularBillMonthPlan, updateSubscriptionAmount, updateSubscriptionDueDate } from "../subscriptions/actions";
-import { CYCLE_LABEL, SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
+import { SubscriptionForm, type CreditCardOption, usePointerReorder } from "../subscriptions/subscriptions-board";
 import { actualColorClass, remainingColorClass } from "./budget-row";
 import type { IrregularBillRow, SubscriptionRow } from "../subscriptions/types";
 import type { TxData, TxPrefill } from "./types";
@@ -17,7 +17,7 @@ import { MATCH_BTN_CLASS } from "./budget-row";
 // can't drift from the other. Mobile keeps Name / Plan / Left — Spent is the
 // one of the three that can be inferred from the other two.
 const ROW_COLS =
-  "grid-cols-[auto_minmax(0,1fr)_4.75rem_4.75rem] sm:grid-cols-[auto_minmax(0,1.5fr)_4.75rem_4.75rem_4.75rem_6.5rem_4rem_5.5rem_minmax(0,0.85fr)]";
+  "grid-cols-[auto_minmax(0,1fr)_4.75rem_4.75rem] sm:grid-cols-[auto_minmax(0,1.5fr)_4.75rem_4.75rem_4.75rem_6.5rem_5.5rem_minmax(0,0.85fr)]";
 
 // Weekly and monthly charges come first — they are the ones that repeat inside
 // the month you are looking at — then quarterly, then annual.
@@ -226,8 +226,11 @@ export function SubscriptionsSummaryCard({
             <>
               {overspentOnly ? null : (
                 <div className="grid grid-cols-3 divide-x divide-line border-b border-line bg-background/40">
-                  <SummaryMetric label="Monthly total" value={formatMoney(Math.round(monthlyTotal), currency)} />
-                  <SummaryMetric label="Annual Total" value={formatMoney(annualBilledTotal, currency)} />
+                  {/* The dots are the Due pills' colours — the key to which
+                      rows bill monthly and which yearly, now that the Cycle
+                      column is gone. */}
+                  <SummaryMetric label="Monthly total" dot={CYCLE_PILL.monthly} value={formatMoney(Math.round(monthlyTotal), currency)} />
+                  <SummaryMetric label="Annual Total" dot={CYCLE_PILL.other} value={formatMoney(annualBilledTotal, currency)} />
                   <SummaryMetric label="Total Combined Annual" value={formatMoney(annualizedTotal, currency)} />
                 </div>
               )}
@@ -238,7 +241,6 @@ export function SubscriptionsSummaryCard({
                 <span className="hidden text-center sm:inline">Spent</span>
                 <span className="text-center">Left</span>
                 <span className="hidden text-center sm:inline">Total Yr Spent</span>
-                <span className="hidden text-center sm:inline">Cycle</span>
                 <span className="hidden text-center sm:inline">Due</span>
                 <span className="hidden sm:inline">Card</span>
               </div>
@@ -248,10 +250,6 @@ export function SubscriptionsSummaryCard({
                 const planned = s.monthPlannedCents ?? 0;
                 const spent = s.monthSpentCents ?? 0;
                 const left = planned - spent;
-                // Paid = this month's charge has already landed as a transaction.
-                // The due badge goes quiet once it has; a date that is still
-                // days away is only "coming up" while the money hasn't moved.
-                const paid = planned > 0 && spent >= planned;
                 // An annual sub in one of its eleven quiet months has no
                 // figures for this month — "—" says that, where three $0.00s
                 // read like real amounts. Its due month shows the numbers,
@@ -292,7 +290,7 @@ export function SubscriptionsSummaryCard({
                           no extra row. On sm+ this hides and the dedicated
                           Due column to the right takes over. */}
                       <span className="shrink-0 sm:hidden" onClick={(event) => event.stopPropagation()}>
-                        <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} paid={paid} />
+                        <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
                       </span>
                     </div>
                     {/* Plan is this month's charge, not the sticker price: an
@@ -327,11 +325,8 @@ export function SubscriptionsSummaryCard({
                         {formatMoney(s.ytdSpentCents ?? 0, currency)}
                       </span>
                     </span>
-                    <span className="hidden text-center text-xs text-muted sm:inline">
-                      {CYCLE_LABEL[s.billingCycle] ?? s.billingCycle}
-                    </span>
                     <span className="hidden sm:flex sm:items-center sm:justify-center" onClick={(event) => event.stopPropagation()}>
-                      <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} paid={paid} />
+                      <DueCell id={s.id} name={s.name} date={s.nextRenewalDate} billingCycle={s.billingCycle} />
                     </span>
                     <span className="hidden min-w-0 truncate text-xs text-muted sm:inline">{cardName ?? "—"}</span>
                   </div>
@@ -386,10 +381,13 @@ export function SubscriptionsSummaryCard({
   );
 }
 
-function SummaryMetric({ label, value }: { label: string; value: string }) {
+function SummaryMetric({ label, value, dot }: { label: string; value: string; dot?: string }) {
   return (
     <div className="min-w-0 px-3 py-2 text-center">
-      <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted">
+        {dot ? <span aria-hidden className={`mr-1 inline-block h-2 w-2 rounded-full align-middle ring-1 ${dot}`} /> : null}
+        {label}
+      </p>
       <p className="mt-0.5 truncate text-sm font-bold tabular-nums text-foreground">{value}</p>
     </div>
   );
@@ -400,14 +398,11 @@ function DueCell({
   name,
   date,
   billingCycle,
-  paid,
 }: {
   id: string;
   name: string;
   date: string | null;
   billingCycle: SubscriptionRow["billingCycle"];
-  /** This month's charge has already been paid — the badge stops nagging. */
-  paid?: boolean;
 }) {
   const monthly = billingCycle === "monthly";
   const [editing, setEditing] = useState(false);
@@ -469,7 +464,6 @@ function DueCell({
         <RenewalBadge
           date={date}
           billingCycle={billingCycle}
-          paid={paid}
           label={monthly ? date.slice(8, 10) : undefined}
           onClick={beginEditing}
         />
@@ -750,35 +744,28 @@ export function IrregularBillsSummaryCard({
   );
 }
 
+const CYCLE_PILL = {
+  monthly: "bg-teal-100 text-teal-800 ring-teal-300 dark:bg-teal-900/50 dark:text-teal-200 dark:ring-teal-700",
+  other: "bg-sky-100 text-sky-800 ring-sky-300 dark:bg-sky-900/50 dark:text-sky-200 dark:ring-sky-700",
+} as const;
+
 function RenewalBadge({
   date,
   billingCycle,
-  paid,
   label,
   onClick,
 }: {
   date: string;
   billingCycle: SubscriptionRow["billingCycle"];
-  paid?: boolean;
   label?: string;
   onClick?: () => void;
 }) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(date + "T00:00:00");
-  const days = Math.round((target.getTime() - today.getTime()) / 86400000);
-  const dueSoon = billingCycle === "monthly" || (days >= 0 && days <= 30);
-  // Paid outranks the date. Claude renews on the 28th and was charged on the
-  // 28th; an amber "coming up" badge on money that has already left the account
-  // is telling you to act on something that is done.
+  // Two colours only, by how often it bills: teal every month (or week),
+  // sky once a year (or quarter). The Cycle column that spelled it out is
+  // gone (Victor, 2026-09-30); the dots on Monthly / Annual Total are the key.
+  // Paid and due-soon no longer recolour the pill.
   const className = `rounded-full px-2 py-0.5 text-xs font-medium ${
-    paid
-      ? "bg-black/[0.04] text-muted dark:bg-white/[0.06]"
-      : billingCycle === "monthly"
-        ? "bg-positive/10 text-positive dark:bg-positive/20"
-        : dueSoon
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-          : "bg-black/[0.04] text-muted dark:bg-white/[0.06]"
+    billingCycle === "monthly" || billingCycle === "weekly" ? CYCLE_PILL.monthly : CYCLE_PILL.other
   }`;
   const displayLabel = label ?? new Date(date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return onClick ? (

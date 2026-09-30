@@ -20,7 +20,6 @@ import {
 } from "./actions";
 import type { AccountOption, BucketOption, RowData, SubOption, TxData, TxPrefill } from "./types";
 import { DEBT_KINDS } from "./types";
-import { EXPENSE_CATEGORIES } from "@/app/(app)/travel/types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 
 const HEADER_ACCENT: Record<CategoryKind, string> = {
@@ -209,21 +208,19 @@ export function ItemPanel({
   // (it reaches it by `form={saveFormId}`), so `useFormStatus` can't see the
   // pending state and the click looked like it did nothing. Each editor form
   // reports its own write through these instead: the button says "Saving…"
-  // while it's in flight, and the panel closes once it lands.
+  // while it's in flight and goes back to "Save" once it lands. The panel
+  // stays open — Victor wants to keep working in it (2026-09-30).
   const [saving, setSaving] = useState(false);
   const onSaving = () => {
     // Everything happens on the next macrotask, not now. The browser submits
     // the form only AFTER the click handlers finish, and React commits state
     // set in a real click before that — so `setSaving(true)` here disabled the
     // Save button first, and a disabled button submits nothing (the panel
-    // closed, the pill said "Saving…" forever, and no write ran). Unmounting
-    // the panel now would kill the submit the same way. One tick later the
-    // action is already in flight and finishes on its own; the board carries
-    // the "Saving…" pill from here on.
+    // closed, the pill said "Saving…" forever, and no write ran). One tick
+    // later the action is already in flight and finishes on its own.
     setTimeout(() => {
       setSaving(true);
       onSaveStart();
-      onClose();
     }, 0);
   };
   // Every editor form runs its write through here, so neither a failure nor a
@@ -243,9 +240,15 @@ export function ItemPanel({
   const runSave = async (write: () => Promise<void>) => {
     try {
       await write();
-      setTimeout(() => onSaveDone(), 0);
+      setTimeout(() => {
+        setSaving(false);
+        onSaveDone();
+      }, 0);
     } catch (error) {
-      setTimeout(() => onSaveDone(error instanceof Error ? error.message : "Couldn't save — try again."), 0);
+      setTimeout(() => {
+        setSaving(false);
+        onSaveDone(error instanceof Error ? error.message : "Couldn't save — try again.");
+      }, 0);
     }
   };
   const isPlainForm = !(kind === "debt" && row.debt) && !(kind === "savings" && row.savings);
@@ -386,8 +389,6 @@ export function ItemPanel({
               dueDay={row.dueDay}
               paymentAccountId={row.paymentAccountId}
               paymentAccountOptions={paymentAccountOptions}
-              travelCategory={row.travelCategory}
-              showTravel={kind === "expenses" || kind === "bills"}
               hasDue={kind !== "debt" && KINDS_WITH_DUE.includes(kind)}
               autoPlanned={row.autoPlanned}
               showDetails={showItemDetails}
@@ -772,8 +773,6 @@ function PlannedForm({
   tripNames,
   paymentAccountId,
   paymentAccountOptions,
-  travelCategory,
-  showTravel,
   hasDue,
   autoPlanned,
   showDetails,
@@ -794,9 +793,6 @@ function PlannedForm({
   tripNames: string[];
   paymentAccountId: string | null;
   paymentAccountOptions: AccountOption[];
-  // The Travel Log spending row this item's trip-tagged purchases count in.
-  travelCategory?: string | null;
-  showTravel?: boolean;
   hasDue?: boolean;
   autoPlanned?: boolean;
   showDetails: boolean;
@@ -899,25 +895,10 @@ function PlannedForm({
             {tripNote}
           </Section>
         )}
-        {showTravel ? (
-          <Section title="Travel Log">
-            <label className="block">
-              <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted">Counts as trip spending under</span>
-              <select
-                key={travelCategory ?? "none"}
-                name="travelCategory"
-                defaultValue={travelCategory ?? ""}
-                className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-              >
-                <option value="">Not trip spending</option>
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </select>
-              <span className="mt-1 block text-[10px] text-muted">A purchase on this item tagged to a trip shows on that trip&apos;s Spending as Actual.</span>
-            </label>
-          </Section>
-        ) : null}
+        {/* The Travel Log row an item counts in (subcategories.travel_category)
+            is no longer set here — Victor found it out of place on a budget
+            item (2026-09-30). The rows already set keep routing trip
+            purchases; the save leaves them alone when the field isn't sent. */}
       </form>
 
       {showDetails ? (

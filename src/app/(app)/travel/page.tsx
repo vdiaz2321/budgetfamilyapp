@@ -40,7 +40,7 @@ export default async function TravelPage() {
       .order("sort_order"),
     supabase
       .from("travel_flight_passengers")
-      .select("flight_id, sort_order, traveller_id, name, fare_cents, fare_eur_cents, planned_fare_cents, planned_fare_foreign_cents, points_used, points_cost")
+      .select("flight_id, sort_order, traveller_id, name, fare_cents, fare_eur_cents, planned_fare_cents, planned_fare_foreign_cents, points_used, points_cost, cash_paid_cents")
       .eq("household_id", household.id)
       .order("sort_order"),
     supabase
@@ -265,6 +265,7 @@ export default async function TravelPage() {
         plannedFareForeignCents: p.planned_fare_foreign_cents == null ? null : Number(p.planned_fare_foreign_cents),
         pointsUsed: p.points_used ?? false,
         pointsCost: p.points_cost ?? 0,
+        cashPaidCents: p.cash_paid_cents == null ? null : Number(p.cash_paid_cents),
       })),
   }));
 

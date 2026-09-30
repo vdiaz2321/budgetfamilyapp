@@ -60,6 +60,37 @@ function KindChip({ kind, className = "" }: { kind: keyof typeof KIND_LABEL; cla
     </span>
   );
 }
+// A flight's seats, one line each, on the same planned / spent rule as the
+// flight itself: a flight not bought yet has only a plan.
+function flightSeats(b: Booking) {
+  if (b.kind !== "flight" || b.flight.passengers.length < 2) return [];
+  const f = b.flight;
+  return f.passengers.map((p, i) => {
+    const planned = f.isEstimate ? p.fareCents : p.plannedFareCents;
+    const plannedFx = f.isEstimate ? p.fareEurCents : p.plannedFareForeignCents;
+    // A points seat's cash is only what was paid on top of the points (taxes,
+    // fees); its fare is what the points stood in for.
+    const actual = f.isEstimate ? null : p.pointsUsed ? (p.cashPaidCents ?? 0) : p.fareCents;
+    const actualFx = f.isEstimate ? null : p.fareEurCents;
+    return {
+      key: `${i}-${p.name}`,
+      name: p.name || `Passenger ${i + 1}`,
+      planned,
+      plannedFx,
+      actual,
+      actualFx,
+      points: p.pointsUsed ? p.pointsCost : 0,
+      diff: planned != null && actual != null ? planned - actual : null,
+      code: f.foreignCurrency,
+    };
+  });
+}
+
+// The plan's figures in the header and the tiles: a clear sky blue, apart
+// from the red spent figures. --viz-savings read periwinkle on dark cards,
+// too close to the purple Victor rejects.
+const PLAN_BLUE = "text-sky-700 dark:text-sky-300";
+
 // A section's action, sat right beside its heading. Bordered and on the page
 // background so it reads as a button, not a faint outline. Hover is a light
 // blue wash — grey read as disabled, black as too heavy, and Victor rejects
@@ -99,6 +130,15 @@ export function TripDetailModal({
   const [matching, setMatching] = useState(false);
   // The Spending row whose tagged purchases are listed under it.
   const [openRow, setOpenRow] = useState<string | null>(null);
+  // Flights whose passengers are shown under them — all folded to start.
+  const [openSeats, setOpenSeats] = useState<Set<string>>(() => new Set());
+  const toggleSeats = (id: string) =>
+    setOpenSeats((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   // Purchases can only be matched once the trip has begun and has dates.
   const todayIso = new Date().toISOString().slice(0, 10);
   const canMatch = Boolean(t.start && t.end && t.start <= todayIso);
@@ -146,6 +186,9 @@ export function TripDetailModal({
   // The spending table rounds to whole units and keeps dollars and euros on
   // one line — "$507 / €428" — instead of stacking ".00" figures.
   const money = (cents: number | null | undefined) => (cents ? formatMoneyWhole(cents, currency) : DASH);
+  // Money spent reads red everywhere on the trip — tiles, rows and totals.
+  const redIfSpent = (cents: number | null | undefined) =>
+    cents && cents > 0 ? <span className="text-negative">{money(cents)}</span> : money(cents);
   // In the trip's own Spending currency — euros unless it was changed.
   const euros = (cents: number | null | undefined) => (cents != null ? formatForeignWhole(cents, t.trip.spendingCurrency) : "");
   // The euro side of a Total cell — only when some row has a euro figure.
@@ -158,6 +201,27 @@ export function TripDetailModal({
     if (field === "actualEurCents" && t.expenses.some((e) => e.txCount > 0)) return null;
     const values = t.expenses.map((e) => e[field]).filter((v): v is number => v != null);
     return values.length ? values.reduce((sum, v) => sum + v, 0) : null;
+  };
+
+  // Under each tile's spent figure: the whole plan, and what of it is still
+  // unbought when that differs — "Planned: $648" on a trip not bought yet,
+  // "Planned: $2,110 · left $1,300" once some of it is paid. "Plan left" on
+  // its own hid the plan's total (Victor, 2026-09-30).
+  // The plan's figures in PLAN_BLUE, so they read apart from the spent
+  // figure above them (red once anything is spent).
+  const planNote = (planned: number, left: number) => {
+    const total = Math.max(planned, left);
+    if (total <= 0) return undefined;
+    return (
+      <>
+        Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(total, currency)}</span>
+        {left > 0 && left !== total ? (
+          <>
+            {" "}· left <span className={PLAN_BLUE}>{formatMoneyWhole(left, currency)}</span>
+          </>
+        ) : null}
+      </>
+    );
   };
 
   // What this trip adds to the Budget (view v_trip_budget_plans): its spending
@@ -230,7 +294,7 @@ export function TripDetailModal({
           {t.pax ? <span>{t.pax} pax</span> : null}
           {budgetPlanCents > 0 ? (
             budgetMonth ? (
-              <span className="font-semibold text-foreground">{formatMoneyWhole(budgetPlanCents, currency)} planned</span>
+              <span className="font-semibold text-foreground">Total Estimated Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(budgetPlanCents, currency)}</span></span>
             ) : (
               <span className="font-semibold text-negative">Add dates to put its plan on the Budget</span>
             )
@@ -283,18 +347,20 @@ export function TripDetailModal({
           <Stat
             label="Flights/Stays/Rentals"
             value={formatMoneyWhole(t.flights + t.hotels + t.rentals - t.planOnly.bookings, currency)}
-            note={t.planOnly.bookings > 0 ? `Plan left: ${formatMoneyWhole(t.planOnly.bookings, currency)}` : "flights · stays · rental"}
+            className={t.flights + t.hotels + t.rentals - t.planOnly.bookings > 0 ? "text-negative" : undefined}
+            note={planNote(bookingTotals.planned, t.planOnly.bookings) ?? "flights · stays · rental"}
           />
           <Stat
             label="Spending"
             value={formatMoneyWhole(t.miscTotal - t.planOnly.miscTotal, currency)}
-            note={t.planOnly.miscTotal > 0 ? `Plan left: ${formatMoneyWhole(t.planOnly.miscTotal, currency)}` : "day to day"}
+            className={t.miscTotal - t.planOnly.miscTotal > 0 ? "text-negative" : undefined}
+            note={planNote(t.plannedMisc, t.planOnly.miscTotal) ?? "day to day"}
           />
           <Stat
             label="Total spent"
             value={formatMoneyWhole(t.spent, currency)}
-            className={t.spent > 0 ? "text-negative" : "text-muted"}
-            note={t.planOnly.total > 0 ? `Plan left: ${formatMoneyWhole(t.planOnly.total, currency)}` : undefined}
+            className={t.spent > 0 ? "text-negative" : undefined}
+            note={planNote(bookingTotals.planned + t.plannedMisc, t.planOnly.total)}
           />
           <Stat
             label={t.points > 0 ? "Pts used · saved" : "Saved"}
@@ -384,6 +450,36 @@ export function TripDetailModal({
                         diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
                       />
                     </button>
+                    {flightSeats(b).length ? (
+                      <div className="-mt-1 px-3 pb-2">
+                        <PaxToggle open={openSeats.has(b.id)} onClick={() => toggleSeats(b.id)} />
+                      </div>
+                    ) : null}
+                      {openSeats.has(b.id) ? (
+                        <span className="mx-3 mb-2 block space-y-0.5 border-t border-line/60 pt-1.5">
+                          {flightSeats(b).map((p) => (
+                            <span key={p.key} className="grid grid-cols-[minmax(0,1fr)_repeat(3,4.5rem)] items-baseline gap-1 text-[12px] tabular-nums">
+                              <span className="truncate text-muted">{p.name}</span>
+                              <span className="text-center">{p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}</span>
+                              <span className="text-center">
+                                {p.points > 0 ? (
+                                  <>
+                                    <span className="font-semibold" style={{ color: "var(--viz-savings)" }}>{p.points.toLocaleString()} pts</span>
+                                    {p.actual ? <span className="block text-negative">+ {formatMoneyWhole(p.actual, currency)}</span> : null}
+                                  </>
+                                ) : p.actual != null ? (
+                                  <span className={p.actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(p.actual, currency)}</span>
+                                ) : (
+                                  <span className="text-muted">{DASH}</span>
+                                )}
+                              </span>
+                              <span className={`text-center ${p.diff == null ? "text-muted" : p.diff >= 0 ? "text-positive" : "text-negative"}`}>
+                                {p.diff == null ? DASH : `${p.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(p.diff), currency)}`}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
                   </li>
                 );
               })}
@@ -404,7 +500,7 @@ export function TripDetailModal({
                     actual={
                       bookingTotals.actual ? (
                         <>
-                          {formatMoneyWhole(bookingTotals.actual, currency)}
+                          <span className="text-negative">{formatMoneyWhole(bookingTotals.actual, currency)}</span>
                           {bookingFxTotals?.actual ? (
                             <span className="block text-[11px] font-normal text-muted">{formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
                           ) : null}
@@ -444,13 +540,15 @@ export function TripDetailModal({
                     const fx = bookingForeign(b);
                     const diff = planned != null && actual != null ? planned - actual : null;
                     const remarks = bookingRemarks(b);
+                    const allSeats = flightSeats(b);
+                    const seats = openSeats.has(b.id) ? allSeats : [];
                     return (
                       <tbody
                         key={`${b.kind}-${b.id}`}
                         onClick={() => onEditBooking(b)}
                         className={`cursor-pointer border-b border-line/60 transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${b.cancelled ? "opacity-60" : ""}`}
                       >
-                      <tr className={remarks ? "[&>td]:pb-0" : ""}>
+                      <tr className={remarks || seats.length ? "[&>td]:pb-0" : ""}>
                         <td className="px-3 py-2 text-left">
                           <button type="button" onClick={(e) => { e.stopPropagation(); onEditBooking(b); }} className="flex min-w-0 items-start gap-2 text-left">
                             <KindDay booking={b} />
@@ -464,6 +562,11 @@ export function TripDetailModal({
                               </span>
                             </span>
                           </button>
+                          {allSeats.length ? (
+                            <span className="ml-[4.5rem] block" onClick={(e) => e.stopPropagation()}>
+                              <PaxToggle open={seats.length > 0} onClick={() => toggleSeats(b.id)} />
+                            </span>
+                          ) : null}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
                           {planned != null ? formatMoneyWhole(planned, currency) : DASH}
@@ -493,9 +596,41 @@ export function TripDetailModal({
                           ) : null}
                         </td>
                       </tr>
+                      {/* Each passenger's seat under the flight, in the same
+                          columns — so the total reads as the seats added up. */}
+                      {seats.map((p, i) => (
+                        // Reading the seats never opens the flight's form.
+                        <tr key={p.key} onClick={(e) => e.stopPropagation()} className={`cursor-default text-[12px] tabular-nums [&>td]:py-0.5 ${i === 0 ? "[&>td]:pt-1.5" : ""} ${i === seats.length - 1 && !remarks ? "[&>td]:pb-2" : ""}`}>
+                          <td className="truncate px-3 pl-[5.25rem] text-left text-muted">{p.name}</td>
+                          <td className="whitespace-nowrap px-3 text-center">
+                            {p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}
+                            {p.planned != null && p.plannedFx != null ? (
+                              <span className="text-muted"> / {formatForeignWhole(p.plannedFx, p.code)}</span>
+                            ) : null}
+                          </td>
+                          <td className="whitespace-nowrap px-3 text-center">
+                            {p.points > 0 ? (
+                              <>
+                                <span className="font-semibold" style={{ color: "var(--viz-savings)" }}>{p.points.toLocaleString()} pts</span>
+                                {p.actual ? <span className="text-negative"> + {formatMoneyWhole(p.actual, currency)}</span> : null}
+                              </>
+                            ) : p.actual != null ? (
+                              <>
+                                <span className={p.actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(p.actual, currency)}</span>
+                                {p.actualFx != null ? <span className="text-muted"> / {formatForeignWhole(p.actualFx, p.code)}</span> : null}
+                              </>
+                            ) : (
+                              <span className="text-muted">{DASH}</span>
+                            )}
+                          </td>
+                          <td className={`whitespace-nowrap px-3 text-center ${p.diff == null ? "text-muted" : p.diff >= 0 ? "text-positive" : "text-negative"}`}>
+                            {p.diff == null ? DASH : `${p.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(p.diff), currency)}`}
+                          </td>
+                        </tr>
+                      ))}
                       {remarks ? (
                         <tr>
-                          <td colSpan={4} className="whitespace-pre-line px-3 pb-2 pl-[5.25rem] text-[11px] text-foreground/80">
+                          <td colSpan={4} className={`whitespace-pre-line px-3 pb-2 pl-[5.25rem] text-[11px] text-foreground/80 ${seats.length ? "pt-1.5" : ""}`}>
                             {remarks}
                           </td>
                         </tr>
@@ -514,7 +649,7 @@ export function TripDetailModal({
                         ) : null}
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
-                        {bookingTotals.actual ? formatMoneyWhole(bookingTotals.actual, currency) : DASH}
+                        {bookingTotals.actual ? <span className="text-negative">{formatMoneyWhole(bookingTotals.actual, currency)}</span> : DASH}
                         {bookingTotals.actual && bookingFxTotals?.actual ? (
                           <span className="font-normal text-muted"> / {formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
                         ) : null}
@@ -576,7 +711,7 @@ export function TripDetailModal({
                       }
                       actual={
                         <>
-                          {money(actual)}
+                          {redIfSpent(actual)}
                           {actualEur(e) != null ? <span className="block text-[11px] font-normal text-muted">{euros(actualEur(e))}</span> : null}
                         </>
                       }
@@ -607,7 +742,7 @@ export function TripDetailModal({
                   }
                   actual={
                     <>
-                      {money(t.actualMisc)}
+                      {redIfSpent(t.actualMisc)}
                       {eurTotal("actualEurCents") != null ? <span className="block text-[11px] font-normal text-muted">{euros(eurTotal("actualEurCents"))}</span> : null}
                     </>
                   }
@@ -662,7 +797,7 @@ export function TripDetailModal({
                         {/* One line: the amount and "8 purchases ▾" side by side
                             (the Actual column is sized for it). */}
                         <td className="whitespace-nowrap px-3 py-1.5 text-center font-semibold tabular-nums">
-                          {money(actual)}
+                          {redIfSpent(actual)}
                           {actualEur(e) != null ? <span className="font-normal text-muted"> / {euros(actualEur(e))}</span> : null}
                           {/* From the Budget: how many tagged purchases make this
                               figure — click to list them under the row. */}
@@ -694,7 +829,7 @@ export function TripDetailModal({
                       {eurTotal("plannedEurCents") != null ? <span className="font-normal text-muted"> / {euros(eurTotal("plannedEurCents"))}</span> : null}
                     </td>
                     <td className="px-3 py-1.5 text-center tabular-nums">
-                      {money(t.actualMisc)}
+                      {redIfSpent(t.actualMisc)}
                       {eurTotal("actualEurCents") != null ? <span className="font-normal text-muted"> / {euros(eurTotal("actualEurCents"))}</span> : null}
                     </td>
                     {(() => {
@@ -759,12 +894,14 @@ export function TripDetailModal({
   );
 }
 
-function Stat({ label, value, className, note }: { label: string; value: string; className?: string; note?: string }) {
+function Stat({ label, value, className, note }: { label: string; value: string; className?: string; note?: React.ReactNode }) {
   return (
     <div className="rounded-lg bg-background/60 px-3 py-2 text-center ring-1 ring-line">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-normal text-foreground/75 sm:text-[11px] sm:tracking-wide">{label}</p>
       <p className={`text-base font-bold tabular-nums ${className ?? ""}`}>{value}</p>
-      {note ? <p className="text-[10px] font-semibold text-muted">{note}</p> : null}
+      {/* Readable, not a faint grey caption — the plan under the spent
+          figure was hard to see in dark mode (Victor, 2026-09-30). */}
+      {note ? <p className="mt-0.5 text-xs font-semibold tabular-nums text-foreground/90">{note}</p> : null}
     </div>
   );
 }
@@ -807,6 +944,23 @@ function MobileFigures({
 
 // "8 purchases ▾" beside a Spending row's actual — the purchases tagged to
 // the trip that make up that figure. (Was a bare "8 tx", which read as code.)
+// "Flight Pax Breakdown ▾" under a flight — folds its passengers' own lines out and back.
+function PaxToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      className="-ml-1 inline-flex items-center gap-0.5 rounded px-1 text-[11px] font-semibold text-sky-700 underline decoration-sky-700/40 underline-offset-2 transition hover:decoration-sky-700 dark:text-sky-300 dark:decoration-sky-300/40 dark:hover:decoration-sky-300"
+    >
+      Flight Pax Breakdown
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={open ? "rotate-180" : ""}>
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>
+  );
+}
+
 function PurchasesToggle({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
   return (
     <button

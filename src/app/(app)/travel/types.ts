@@ -145,6 +145,10 @@ export type FlightPassenger = {
   plannedFareForeignCents: number | null;
   pointsUsed: boolean;
   pointsCost: number;
+  /** Cash paid on a points seat — the taxes and fees on an award ticket, or
+   *  the cash half of a points + cash fare. Null on a cash seat. On a points
+   *  seat `fareCents` is what the seat would have cost in cash. */
+  cashPaidCents: number | null;
 };
 
 export type TravelFlight = {

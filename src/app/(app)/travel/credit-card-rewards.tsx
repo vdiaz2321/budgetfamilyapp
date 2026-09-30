@@ -729,7 +729,7 @@ function CreditCardSection({
               // beside it. Sharing the line squeezed the title to one word per
               // line on a phone, where the overflowing words then ran under
               // the chips, and to three cramped lines on a narrow desktop.
-              className="w-full min-w-0 text-left lg:w-auto lg:flex-1"
+              className="w-full min-w-0 text-left lg:w-auto"
               aria-expanded={open}
             >
               <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
@@ -765,7 +765,7 @@ function CreditCardSection({
             <button
               type="button"
               onClick={onToggle}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-foreground/75 transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+              className="grid h-8 w-8 shrink-0 lg:ml-auto place-items-center rounded-md text-foreground/75 transition hover:bg-slate-100 dark:hover:bg-neutral-800"
               aria-label={open ? "Collapse credit card rewards" : "Expand credit card rewards"}
             >
               <svg

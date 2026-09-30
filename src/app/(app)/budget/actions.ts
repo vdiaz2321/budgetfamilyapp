@@ -523,14 +523,16 @@ export async function matchPlansToSpent(
     (unwrap(plans, "budget_plans") ?? []).map((p) => [p.subcategory_id as string, p.planned_cents as number | null]),
   );
 
+  const kindOf = (s: { categories: unknown }) => {
+    const cat = s.categories as unknown as { kind: string } | { kind: string }[];
+    return Array.isArray(cat) ? cat[0]?.kind : cat?.kind;
+  };
+  // Nothing spent matches too, but only on bills and expenses — a plan the
+  // user ticked to drop to $0 (the board lists these unticked).
   const rows = (subRows ?? [])
-    .filter((s) => {
-      const cat = s.categories as unknown as { kind: string } | { kind: string }[];
-      const kind = Array.isArray(cat) ? cat[0]?.kind : cat?.kind;
-      return kind !== "income" && !cardOwned.has(s.id);
-    })
-    .map((s) => ({ id: s.id as string, spent: spentBySub.get(s.id) ?? 0 }))
-    .filter((r) => r.spent > 0 && r.spent !== plannedBySub.get(r.id));
+    .filter((s) => kindOf(s) !== "income" && !cardOwned.has(s.id))
+    .map((s) => ({ id: s.id as string, spent: spentBySub.get(s.id) ?? 0, spendKind: kindOf(s) === "bills" || kindOf(s) === "expenses" }))
+    .filter((r) => (r.spent > 0 || r.spendKind) && r.spent !== plannedBySub.get(r.id));
   if (rows.length === 0) return { error: "Every item already matches what it spent." };
 
   const snapshot = rows.map((r) => ({
@@ -551,6 +553,79 @@ export async function matchPlansToSpent(
   revalidatePath("/accounts");
   revalidatePath("/travel");
   return { snapshot };
+}
+
+// Match Spent for Irregular Bills. That budget row's plan is the sum of its
+// bills' own month plans (irregular_bill_plans), so matching it means setting
+// each picked bill's plan to what it spent this month. The spent figures come
+// from the board, which already matched each bill's transactions by payee.
+// Returns the plans as they were, so the board can offer an Undo.
+export async function matchIrregularPlansToSpent(
+  month: string,
+  items: Array<{ billId: string; cents: number }>,
+): Promise<{ error?: string; snapshot?: Array<{ bill_id: string; planned_cents: number | null }> }> {
+  const { supabase, householdId } = await requireHousehold();
+  const picked = items.filter((i) => i.billId && Number.isFinite(i.cents) && i.cents >= 0);
+  if (!/^\d{4}-\d{2}-01$/.test(month) || picked.length === 0) return { error: "Nothing to match." };
+
+  const [bills, plans] = await Promise.all([
+    supabase.from("irregular_bills").select("id").eq("household_id", householdId).in("id", picked.map((i) => i.billId)),
+    supabase.from("irregular_bill_plans").select("bill_id, planned_cents").eq("household_id", householdId).eq("month", month).in("bill_id", picked.map((i) => i.billId)),
+  ]);
+  const ours = new Set((unwrap(bills, "irregular_bills") ?? []).map((b) => b.id as string));
+  const before = new Map((unwrap(plans, "irregular_bill_plans") ?? []).map((p) => [p.bill_id as string, p.planned_cents as number]));
+  // A bill with no plan row plans $0, so matching $0 spent to it is no change.
+  const rows = picked.filter((i) => ours.has(i.billId) && (before.get(i.billId) ?? 0) !== i.cents);
+  if (rows.length === 0) return { error: "Every bill already matches what it spent." };
+
+  const snapshot = rows.map((r) => ({ bill_id: r.billId, planned_cents: before.get(r.billId) ?? null }));
+  const now = new Date().toISOString();
+  // $0 is stored as no row, the way the Irregular Bills card saves it.
+  const toSet = rows.filter((r) => r.cents > 0);
+  const toClear = rows.filter((r) => r.cents === 0).map((r) => r.billId);
+  if (toSet.length) {
+    const { error } = await supabase.from("irregular_bill_plans").upsert(
+      toSet.map((r) => ({ household_id: householdId, bill_id: r.billId, month, planned_cents: Math.round(r.cents), updated_at: now })),
+      { onConflict: "household_id,bill_id,month" },
+    );
+    if (error) return { error: "Couldn't save the new bill plans. Try again." };
+  }
+  if (toClear.length) {
+    const { error } = await supabase.from("irregular_bill_plans").delete().eq("household_id", householdId).eq("month", month).in("bill_id", toClear);
+    if (error) return { error: "Couldn't save the new bill plans. Try again." };
+  }
+
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  revalidatePath("/insights");
+  return { snapshot };
+}
+
+// Undo for matchIrregularPlansToSpent: a bill with no plan before goes back
+// to having none (= $0 planned), not to a $0 row.
+export async function restoreIrregularPlansSnapshot(
+  month: string,
+  snapshot: Array<{ bill_id: string; planned_cents: number | null }>,
+) {
+  const { supabase, householdId } = await requireHousehold();
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+  const toUpsert = snapshot
+    .filter((s) => s.planned_cents != null)
+    .map((s) => ({ household_id: householdId, bill_id: s.bill_id, month, planned_cents: s.planned_cents! }));
+  const toDelete = snapshot.filter((s) => s.planned_cents == null).map((s) => s.bill_id);
+  if (toUpsert.length > 0) {
+    unwrap(
+      await supabase.from("irregular_bill_plans").upsert(toUpsert, { onConflict: "household_id,bill_id,month" }),
+      "irregular_bill_plans undo",
+    );
+  }
+  if (toDelete.length > 0) {
+    unwrap(
+      await supabase.from("irregular_bill_plans").delete().eq("household_id", householdId).eq("month", month).in("bill_id", toDelete),
+      "irregular_bill_plans undo",
+    );
+  }
+  revalidatePath("/budget");
 }
 
 export async function upsertPlan(formData: FormData) {

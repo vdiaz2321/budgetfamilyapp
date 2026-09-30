@@ -62,9 +62,11 @@ export function CarModal({
   const [fig, setFig] = useState<PlanSpent>(() => {
     const show = (c: number | null | undefined) => (c ? centsToDisplay(c) : "");
     return {
-      planned: show(car?.isEstimate ? car.costCents : car?.plannedCostCents),
+      // Booked on points: Planned is what it would have cost (its cost, if
+      // no plan was typed) and Spent is the cash paid on top of the points.
+      planned: show(car?.isEstimate ? car.costCents : car?.pointsUsed ? (car.plannedCostCents ?? car.costCents) : car?.plannedCostCents),
       plannedForeign: show(car?.plannedCostForeignCents),
-      spent: car?.isEstimate ? "" : show(car?.costCents),
+      spent: car?.isEstimate ? "" : show(car?.pointsUsed ? car.pocketCostCents : car?.costCents),
       spentForeign: car?.isEstimate ? "" : show(car?.costEurCents),
     };
   });
@@ -77,26 +79,19 @@ export function CarModal({
     const implied = car.pointsCost > 0 && car.costCents > 0 ? Math.round((car.costCents / car.pointsCost) * 10_000) : null;
     return car.pointsValueMicros !== implied ? rateDisplay(car.pointsValueMicros) : "";
   });
-  // Pocket cost is never typed: it is the linked transactions' total, or
-  // failing that the cost (a figure saved by hand earlier is kept).
-  const [pocketCost] = useState(() => {
-    if (!car) return "";
-    const expected = car.pointsUsed ? 0 : car.costCents;
-    return car.pocketCostCents !== expected ? centsToDisplay(car.pocketCostCents) : "";
-  });
   const [remarks, setRemarks] = useState(car?.remarks ?? "");
   // Booked once a Spent figure or the booking date is in; a plan until then.
   const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
-  // What the rental costs now: the plan until it is booked.
-  const cost = isEstimate ? fig.planned : fig.spent;
+  const pointsTyped = Number(points.replace(/,/g, "")) || 0;
+  const onPoints = pointsUsed && pointsTyped > 0;
+  // What the rental costs now: the plan until it is booked. Booked on points
+  // it is the Planned figure — Spent is then the cash paid on top.
+  const cost = isEstimate || onPoints ? fig.planned : fig.spent;
   const tripNote = outsideTripNote(trips, trip.tripId, [pickupOn, returnOn]);
 
   const card = cards.find((c) => c.id === accountId) ?? null;
   const costCents = Math.max(0, displayToCents(cost));
-  const pointsTyped = Number(points.replace(/,/g, "")) || 0;
-  const onPoints = pointsUsed && pointsTyped > 0;
   const impliedMicros = pointsTyped > 0 && costCents > 0 ? Math.round((costCents / pointsTyped) * 10_000) : null;
-  const pocketCents = pocketCost.trim() ? displayToCents(pocketCost) : onPoints ? 0 : costCents;
   const days = pickupOn && returnOn && returnOn >= pickupOn
     ? Math.round((Date.parse(returnOn) - Date.parse(pickupOn)) / 86_400_000)
     : null;
@@ -116,14 +111,14 @@ export function CarModal({
     kind: "rental" as const,
     company, bookingCode, reservedOn,
     pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace,
-    accountId, cardLabel, holder, ...fig, foreignCurrency, pocketCost, pointsUsed, points, pointsValueCents: pointsValue, remarks,
+    accountId, cardLabel, holder, ...fig, foreignCurrency, pointsUsed, points, pointsValueCents: pointsValue, remarks,
   });
 
   useEffect(() => {
     if (!embed) return;
     embed.register({
       isEmpty: () =>
-        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, accountId, cardLabel, holder, fig.planned, fig.plannedForeign, fig.spent, fig.spentForeign, pocketCost, points, remarks].some((v) => v.trim()),
+        ![company, bookingCode, reservedOn, pickupOn, pickupTime, pickupPlace, returnOn, returnTime, returnPlace, accountId, cardLabel, holder, fig.planned, fig.plannedForeign, fig.spent, fig.spentForeign, points, remarks].some((v) => v.trim()),
       save: async () => {
         const result = await saveTravelCar(payload());
         return { error: result?.error ?? null };
@@ -239,6 +234,7 @@ export function CarModal({
             currency={currency}
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
+            spentOnPoints={onPoints}
           />
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
@@ -283,7 +279,9 @@ export function CarModal({
             </Field>
             <Field label={`Pocket cost (${currencySymbol(currency)})`}>
               <input
-                value={centsToDisplay(car?.paidCents ?? pocketCents)}
+                // Only ever the linked payments — blank until one is linked.
+                value={car?.paidCents != null ? centsToDisplay(car.paidCents) : ""}
+                placeholder="—"
                 readOnly
                 tabIndex={-1}
                 className={`${inputClass} opacity-70`}
@@ -318,7 +316,8 @@ export function CarModal({
         {embed ? null : (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
-            Pocket cost <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(car?.paidCents ?? pocketCents, currency)}</span>
+            {isEstimate ? "Planned rental cost" : "Rental cost"}{" "}
+            <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(costCents, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {car ? (

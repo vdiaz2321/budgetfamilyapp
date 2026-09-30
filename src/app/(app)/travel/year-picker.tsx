@@ -60,9 +60,17 @@ export function inYears(picked: string[], year: string | null | undefined): bool
 export function yearsLabel(picked: string[]): string {
   if (picked.length === 0) return "All years";
   const sorted = [...picked].sort();
-  // Only a single year is spelled out; two or more collapse to a count so the
-  // button keeps a fixed, narrow width in the card headers.
-  return sorted.length === 1 ? sorted[0] : `${sorted.length} years`;
+  // The years spelled out, back-to-back ones as a range: "2026–2027",
+  // "2022–2024, 2026". A count ("2 years") hid which years a total covered.
+  // Past two stretches it falls back to the count so the button stays narrow.
+  const runs: string[][] = [];
+  for (const y of sorted) {
+    const run = runs[runs.length - 1];
+    if (run && Number(y) === Number(run[run.length - 1]) + 1) run.push(y);
+    else runs.push([y]);
+  }
+  if (runs.length > 2) return `${sorted.length} years`;
+  return runs.map((r) => (r.length === 1 ? r[0] : `${r[0]}–${r[r.length - 1]}`)).join(", ");
 }
 
 /** The years spelled out — for prose, where "2 years" would read as a duration. */
