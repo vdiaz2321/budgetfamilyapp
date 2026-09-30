@@ -27,6 +27,8 @@ type Props = {
   compact?: boolean;
   detailsExpanded?: boolean;
   onFilter?: (kind: CategoryKind) => void;
+  /** Overspent view: just the item rows — no group header or subtotal. */
+  rowsOnly?: boolean;
 };
 
 // Per-kind accent for the "+ Add" pill so users can tell at a glance which
@@ -102,6 +104,7 @@ export function BudgetGroup({
   compact,
   detailsExpanded,
   onFilter,
+  rowsOnly = false,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const { dragOverId, startDrag, optimisticOrder } = usePointerReorder(group.categoryId, group.rows);
@@ -176,6 +179,7 @@ export function BudgetGroup({
           inline totals + kind-tinted "+ Add" pill (+ Snowball link for debt)
           on the right. Replaces both the old header AND the old footer. */}
       {/* Mobile header — flex layout */}
+      {rowsOnly ? null : (<>
       <div
         className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 bg-surface/90 px-4 py-2.5 dark:bg-brand-soft/20 @md:hidden"
         onClick={onToggle}
@@ -334,9 +338,10 @@ export function BudgetGroup({
           </span>
         </div>
       </div>
+      </>)}
 
-      {open ? (
-        <div className="border-t border-line">
+      {open || rowsOnly ? (
+        <div className={rowsOnly ? "" : "border-t border-line"}>
           {listedRows.length === 0 && !adding ? (
             <div className="flex flex-col items-center gap-1 px-4 py-8 text-center">
               <svg
@@ -418,7 +423,7 @@ export function BudgetGroup({
                   </ul>
                 );
 
-                if (!splitSavings) return renderRows(listedRows);
+                if (!splitSavings || rowsOnly) return renderRows(listedRows);
                 return (
                   <>
                     {subtotalRow("My Savings/Investments", mineRows)}
@@ -428,6 +433,7 @@ export function BudgetGroup({
                   </>
                 );
               })()}
+              {rowsOnly ? null : (<>
               {/* Mobile subtotal: keep the planned/spent pair, then name the
                   remaining figure explicitly so its meaning is unambiguous. */}
               {/* Clicking the subtotal collapses the group — it's the end of
@@ -496,6 +502,7 @@ export function BudgetGroup({
                   {formatMoney(groupYtdTotal, currency)}
                 </div>
               </div>
+              </>)}
             </>
           )}
 

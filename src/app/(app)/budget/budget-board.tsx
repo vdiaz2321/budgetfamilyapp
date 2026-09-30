@@ -618,6 +618,7 @@ export function BudgetBoard({
                 onToggle={() => toggleGroup(group.categoryId)}
                 compact={true}
                 detailsExpanded={detailsExpanded}
+                rowsOnly={showingOverspent}
                 onFilter={(kind) => {
                   toggleFilterKind(kind);
                   loadPayees();
