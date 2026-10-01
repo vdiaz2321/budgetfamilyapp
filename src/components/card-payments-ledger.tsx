@@ -237,7 +237,7 @@ export function CardPaymentsLedger({
                     >
                       {r.name}
                     </th>
-                    <td className={`${cell} border-r border-line font-bold`}>{money(r.total)}</td>
+                    <td className={`${cell} border-r border-line font-bold text-negative`}>{money(r.total)}</td>
                     {showPeriodColumns
                       ? columns.map((c) => {
                           const v = r.cells.get(c.key) ?? 0;
@@ -259,7 +259,7 @@ export function CardPaymentsLedger({
                   <th scope="row" className="sticky left-0 z-10 bg-surface px-2.5 py-2 text-left text-xs">
                     All cards
                   </th>
-                  <td className={`${cell} border-r border-line`} style={{ color: "var(--viz-savings)" }}>
+                  <td className={`${cell} border-r border-line text-negative`}>
                     {money(grandTotal)}
                   </td>
                   {showPeriodColumns

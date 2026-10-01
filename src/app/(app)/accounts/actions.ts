@@ -1364,3 +1364,77 @@ export async function updateBucketTaxTreatment(formData: FormData) {
 
 // ---- Points valuations measured from the Travel Log.
 //
+
+// "Match statement": set a card's owed figure to its real statement balance.
+// The gap between what the app computed (charges − payments) and the real
+// balance is stored on the card as a correction — no transaction is written,
+// so Budget, Transactions and Insights never see it, and Net Worth (which
+// reads the card's balance and snapshots, not v_card_balances) is untouched.
+// See migration 20261001130000.
+export async function matchCardStatement(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const cardId = String(formData.get("cardId") ?? "");
+  const raw = String(formData.get("statement") ?? "").trim();
+  if (!cardId) return { error: "Missing card." };
+  if (raw === "") return { error: "Enter the card's real balance." };
+  const targetCents = displayToCents(raw);
+
+  const card = unwrap(
+    await supabase
+      .from("accounts")
+      .select("kind, owed_adjustment_cents, owed_adjusted_on")
+      .eq("id", cardId)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "accounts",
+  );
+  if (!card || card.kind !== "credit_card") return { error: "That isn't a credit card." };
+
+  const debts = unwrap(
+    await supabase
+      .from("debts")
+      .select("current_balance_cents, paid_off_at")
+      .eq("household_id", householdId)
+      .eq("account_id", cardId),
+    "debts",
+  ) ?? [];
+  // While the card is carried as a payoff debt the register reads $0 by rule;
+  // its balance is the debt row, edited on Budget / Debt-Loan instead.
+  if (debts.some((d) => (d.current_balance_cents ?? 0) > 0)) {
+    return { error: "This card is tracked as a debt — update its balance on the Debt/Loan page." };
+  }
+
+  const owedRow = unwrap(
+    await supabase
+      .from("v_card_balances")
+      .select("owed_cents")
+      .eq("household_id", householdId)
+      .eq("account_id", cardId)
+      .maybeSingle(),
+    "v_card_balances",
+  );
+  const owedCents = Number(owedRow?.owed_cents ?? 0);
+
+  // The stored correction only counts if it was made after the card's last
+  // payoff (the view drops older ones), so only then is it already inside owed.
+  const clearedOn = debts.map((d) => d.paid_off_at as string | null).filter(Boolean).sort().pop() ?? null;
+  const adjustedOn = card.owed_adjusted_on as string | null;
+  const activeAdjustment = !clearedOn || (adjustedOn != null && adjustedOn > clearedOn)
+    ? Number(card.owed_adjustment_cents ?? 0)
+    : 0;
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const { error } = await supabase
+    .from("accounts")
+    .update({
+      owed_adjustment_cents: activeAdjustment + (targetCents - owedCents),
+      owed_adjusted_on: todayStr,
+    })
+    .eq("id", cardId)
+    .eq("household_id", householdId);
+  if (error) return { error: `Couldn't save: ${error.message}` };
+
+  revalidate();
+  return {};
+}

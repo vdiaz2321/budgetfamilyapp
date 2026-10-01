@@ -122,7 +122,9 @@ export function ModalShell({
             </button>
           </div>
         </div>
-        <div className="overflow-y-auto">{children}</div>
+        {/* Scopes column-wise Tab (Accounts balance grids) to this popup, so it
+            never jumps to an input on the page behind. */}
+        <div data-column-tab-scope className="overflow-y-auto">{children}</div>
       </div>
     </div>
   );

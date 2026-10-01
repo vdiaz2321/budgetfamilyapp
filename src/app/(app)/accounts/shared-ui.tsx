@@ -6,7 +6,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
-import { payCard } from "./actions";
+import { matchCardStatement, payCard } from "./actions";
 import type { AccountData, BucketData, NonCardAccount } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 
@@ -240,7 +240,7 @@ export function PayCardModal({
             ✕
           </button>
         </div>
-        {owedCents > 0 ? (
+        {owedCents !== 0 && debtBalanceCents === 0 ? (
           <p className="text-xs text-muted">
             Currently owed: <span className="font-semibold text-negative">{formatMoney(owedCents, currency)}</span>
           </p>
@@ -286,11 +286,11 @@ export function PayCardModal({
           />
           {owedCents > 0 ? (
             <p className="text-[10px] text-muted">
-              The full balance is prefilled. Recording this payment will bring the card to {formatMoney(0, currency)} while keeping the imported charges.
+              Full balance — pays the card to {formatMoney(0, currency)}.
             </p>
           ) : debtBalanceCents > 0 ? (
             <p className="text-[10px] text-muted">
-              {`${debtPlanCents > 0 ? "This month\u2019s Budget plan" : "The minimum payment"} is prefilled. It lowers the debt and counts as this month\u2019s payment on Budget.`}
+              {`${debtPlanCents > 0 ? "This month\u2019s Budget plan" : "Minimum payment"} — counts toward Budget.`}
             </p>
           ) : null}
           <LabeledInput label="Date" name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
@@ -354,8 +354,81 @@ export function PayCardModal({
             </button>
           </div>
         </form>
+        {debtBalanceCents === 0 && !details?.isRevolvingDebt ? (
+          <MatchStatement cardId={card.id} onDone={onClose} />
+        ) : null}
       </div>
     </div>
+  );
+}
+
+// When the app's owed figure drifts off the real statement (a missed charge, a
+// payment a few dollars over), this sets it to the real balance. It stores a
+// correction on the card — no transaction, so Budget and Net Worth don't move.
+function MatchStatement({ cardId, onDone }: { cardId: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <div className="border-t border-line pt-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="text-xs font-semibold text-brand hover:underline"
+        >
+          Balance wrong? Match statement
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        start(async () => {
+          setError(null);
+          const r = await matchCardStatement(fd);
+          if (r?.error) setError(r.error);
+          // Close so the card list and Total CC owed show the new figure.
+          else onDone();
+        });
+      }}
+      className="space-y-1.5 border-t border-line pt-2"
+    >
+      <input type="hidden" name="cardId" value={cardId} />
+      <p className="text-xs font-bold">Real statement balance</p>
+      <div className="flex items-center gap-2">
+        <input
+          name="statement"
+          type="text"
+          inputMode="decimal"
+          defaultValue="0.00"
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-28 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+        >
+          {pending ? "Setting…" : "Set"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); setError(null); }}
+          className="rounded-md px-2 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+        >
+          Cancel
+        </button>
+      </div>
+      <p className="text-xs text-muted">Sets what the card owes here. No transaction is added.</p>
+      {error ? <p className="text-xs text-negative">{error}</p> : null}
+    </form>
   );
 }
 

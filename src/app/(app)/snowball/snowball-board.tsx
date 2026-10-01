@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
 import { addMonths, monthsBetween, projectSnowball, type MonthlyEntry } from "@/lib/snowball";
 import { applyClassicPlan, applyPayoffPlan, recordDebtInterest } from "./actions";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { ItemPanel } from "../budget/item-panel";
+import { TransactionModal } from "../budget/transaction-modal";
+import { listPayees } from "../budget/actions";
+import type { AccountOption, RowData, SubOption, TxData, TxPrefill } from "../budget/types";
 
 const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // Debt card tints. Cool tones only — these sit behind money values, which
@@ -85,6 +89,16 @@ type Props = {
   classicPayoffMonth: Record<string, string | null>;
   classicLedger: Record<string, MonthlyEntry[]>;
   currency: string;
+  // Everything the Budget item panel needs, so a debt card opens it here.
+  itemPanel: {
+    rows: Record<string, RowData>;
+    groupOptions: { id: string; name: string; kind: "debt" }[];
+    subOptions: SubOption[];
+    paymentAccountOptions: AccountOption[];
+    debtAccountOptions: AccountOption[];
+    transactions: TxData[];
+    accountNames: Record<string, string>;
+  };
   settings: ReactNode;
 };
 
@@ -92,7 +106,7 @@ export function SnowballBoard(props: Props) {
   const {
     rows, promoOutlook = [], totalHistory = [], historyBySub = {}, startMonth, focusId, totalBalanceCents, totalMinCents, plannedTotalCents,
     currentExtraCents, monthlyAttackCents, plannedPayoffMonth, plannedLedger,
-    classicPayoffMonth, classicLedger, currency, settings,
+    classicPayoffMonth, classicLedger, currency, settings, itemPanel,
   } = props;
   const [mode, setMode] = useState<Mode>("planned");
   const [filter, setFilter] = useState<Filter>("all");
@@ -101,6 +115,18 @@ export function SnowballBoard(props: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
   const [progressOpen, setProgressOpen] = useState(true);
+  // A card click selects the debt (the chart follows) AND opens its Budget
+  // item panel. Closing the panel keeps the selection, so the chart stays on it.
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [txModal, setTxModal] = useState<{ edit: TxData | null; prefill?: TxPrefill } | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"saving" | { error: string } | null>(null);
+  const [payeeOptions, setPayeeOptions] = useState<{ id: string; name: string }[] | null>(null);
+  const loadPayees = () => {
+    if (payeeOptions) return;
+    setPayeeOptions([]);
+    void listPayees().then(setPayeeOptions);
+  };
+  useScrollLock(!!txModal);
   const payoffMonth = mode === "planned" ? plannedPayoffMonth : classicPayoffMonth;
   const ledger = mode === "planned" ? plannedLedger : classicLedger;
 
@@ -131,9 +157,68 @@ export function SnowballBoard(props: Props) {
   const cardCount = rows.filter((row) => row.accountKind === "credit_card" && row.balanceCents > 0).length;
   const loanCount = rows.filter((row) => row.accountKind !== "credit_card" && row.balanceCents > 0).length;
   const paidCount = rows.filter((row) => row.balanceCents <= 0).length;
+  const panelRow = panelOpen && selected ? itemPanel.rows[selected.subId] ?? null : null;
+
+  // Off-panel clicks and Escape close the panel (not the selection), same as
+  // Budget. Card clicks are left alone — they switch the selection themselves.
+  useEffect(() => {
+    if (!panelRow || txModal) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target || target.closest("[data-item-panel-root]") || target.closest("[data-debt-card]")) return;
+      setPanelOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setPanelOpen(false); };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [panelRow, txModal]);
+
+  // The desktop drawer sits over the page's right edge. While it's open the
+  // board gives up exactly the width it would cover, so the chart is never
+  // hidden behind the panel that's editing it.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [drawerGap, setDrawerGap] = useState(0);
+  useEffect(() => {
+    if (!panelRow) return;
+    const measure = () => {
+      const parent = boardRef.current?.parentElement;
+      if (!parent || window.innerWidth < 1024) return setDrawerGap(0);
+      const drawerLeft = window.innerWidth - DRAWER_WIDTH - 16 - 16;
+      setDrawerGap(Math.max(0, Math.ceil(parent.getBoundingClientRect().right - drawerLeft)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [panelRow]);
+
+  const panel = panelRow ? (
+    <ItemPanel
+      row={panelRow}
+      kind="debt"
+      currency={currency}
+      monthKey={startMonth}
+      subOptions={itemPanel.subOptions}
+      groupOptions={itemPanel.groupOptions}
+      paymentAccountOptions={itemPanel.paymentAccountOptions}
+      debtAccountOptions={itemPanel.debtAccountOptions}
+      bucketOptions={[]}
+      transactions={itemPanel.transactions}
+      accountNameById={new Map(Object.entries(itemPanel.accountNames))}
+      onClose={() => setPanelOpen(false)}
+      onAddTransaction={(prefill) => { loadPayees(); setTxModal({ edit: null, prefill }); }}
+      onEditTransaction={(tx) => { loadPayees(); setTxModal({ edit: tx }); }}
+      onOverspentCovered={() => {}}
+      onSaveStart={() => setSaveStatus("saving")}
+      onSaveDone={(error) => setSaveStatus(error ? { error } : null)}
+    />
+  ) : null;
 
   return (
-    <div className="space-y-3">
+    <div ref={boardRef} className="space-y-3" style={panelRow && drawerGap ? { marginRight: drawerGap } : undefined}>
       <div className="grid grid-cols-2 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
         <ModeButton active={mode === "planned"} onClick={() => setMode("planned")}>My Plan</ModeButton>
         <ModeButton active={mode === "classic"} onClick={() => setMode("classic")}>Classic Snowball</ModeButton>
@@ -192,7 +277,9 @@ export function SnowballBoard(props: Props) {
               months={ledger[row.subId] ?? []}
               currency={currency}
               onClick={() => {
-                setSelectedId((current) => current === row.subId ? null : row.subId);
+                const deselect = selected?.subId === row.subId;
+                setSelectedId(deselect ? null : row.subId);
+                setPanelOpen(!deselect);
                 setProgressOpen(true);
               }}
             />
@@ -261,9 +348,66 @@ export function SnowballBoard(props: Props) {
       {simulatorOpen && selected ? (
         <PayoffSimulator row={selected} startMonth={startMonth} currency={currency} onClose={() => setSimulatorOpen(false)} />
       ) : null}
+
+      {panel ? (
+        <>
+          {/* Desktop: a side drawer with no backdrop, so the chart stays in view. */}
+          <div data-item-panel-root style={{ width: DRAWER_WIDTH }} className="fixed bottom-4 right-4 top-4 z-[60] hidden overflow-y-auto overscroll-contain rounded-2xl shadow-2xl lg:block">
+            {panel}
+          </div>
+          {/* Mobile: the same top sheet Budget uses, clear of the notch. It
+              steps aside while the payment form is open, which is shorter
+              than the screen and would otherwise show the sheet beneath it. */}
+          <div className={txModal ? "hidden" : "lg:hidden"}>
+            <button type="button" aria-label="Close panel" onClick={() => setPanelOpen(false)} className="fixed inset-0 z-40 bg-black/30" />
+            <div data-item-panel-root className="fixed inset-x-0 top-0 z-[70] flex max-h-[85vh] flex-col rounded-b-2xl bg-background pt-[max(env(safe-area-inset-top),1.75rem)] shadow-xl">
+              <div className="min-h-0 overflow-y-auto overscroll-contain">
+                {panel}
+                <div className="mx-auto mb-2 mt-2 h-1 w-10 rounded-full bg-line" />
+              </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {txModal && selected ? (
+        <div className="fixed inset-0 z-[80] flex min-h-0 items-stretch justify-center overflow-hidden overscroll-none bg-black/40 sm:items-start sm:overflow-y-auto sm:px-4 sm:py-10">
+          <div className="w-full sm:max-w-[520px]">
+            <TransactionModal
+              editTx={txModal.edit}
+              monthKey={startMonth.slice(0, 7)}
+              firstOfMonth={startMonth}
+              subOptions={itemPanel.subOptions}
+              accountOptions={itemPanel.paymentAccountOptions}
+              payeeOptions={payeeOptions ?? []}
+              initialKind="debt"
+              initialSubId={selected.subId}
+              initialAccountId={txModal.prefill?.accountId ?? undefined}
+              initialAmountCents={txModal.prefill?.cents}
+              initialPayee={txModal.prefill?.payee ?? undefined}
+              onClose={() => setTxModal(null)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {saveStatus ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[90] flex justify-center px-4 sm:bottom-6">
+          {saveStatus === "saving" ? (
+            <p className="rounded-full bg-foreground/90 px-4 py-2 text-xs font-semibold text-background shadow-lg">Saving…</p>
+          ) : (
+            <p className="pointer-events-auto flex items-center gap-3 rounded-xl bg-negative px-4 py-2.5 text-xs font-semibold text-white shadow-lg">
+              {saveStatus.error}
+              <button type="button" onClick={() => setSaveStatus(null)} className="rounded px-1 text-white/80 hover:text-white">Dismiss</button>
+            </p>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
+
+const DRAWER_WIDTH = 380;
 
 function DebtCard({ row, color, selected, focus, classic, payoff, months, currency, onClick }: {
   row: Row; color: string; selected: boolean; focus: boolean; classic: boolean; payoff: string | null;
@@ -271,7 +415,7 @@ function DebtCard({ row, color, selected, focus, classic, payoff, months, curren
 }) {
   const paid = row.balanceCents <= 0;
   return (
-    <button type="button" onClick={onClick} aria-pressed={selected} className={`flex w-[184px] shrink-0 flex-col overflow-hidden rounded-2xl border-2 text-left shadow-sm transition ${selected || focus ? "border-brand" : "border-transparent ring-1 ring-black/5 dark:ring-white/10"}`}>
+    <button type="button" data-debt-card onClick={onClick} aria-pressed={selected} className={`flex w-[184px] shrink-0 flex-col overflow-hidden rounded-2xl border-2 text-left shadow-sm transition ${selected || focus ? "border-brand" : "border-transparent ring-1 ring-black/5 dark:ring-white/10"}`}>
       <div className={`px-3 py-2 ${color}`}>
         <div className="flex h-5 items-center justify-between text-[10px] font-bold uppercase tracking-wide text-foreground/70">
           <span>{row.accountKind === "credit_card" ? "Credit card" : humanizeDebtKind(row.debtKind)}</span>
@@ -486,7 +630,7 @@ function BalanceChart({ startingBalance, entries, history = [], comparisonEntrie
       : "-translate-x-1/2";
   return (
     <div className="overflow-x-auto">
-      <div className={`relative ${compact ? "min-w-0" : "min-w-0 sm:min-w-[560px]"}`}>
+      <div className={`relative ${compact ? "min-w-0" : "min-w-0 sm:min-w-[560px] lg:min-w-0"}`}>
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="w-full cursor-crosshair touch-none"

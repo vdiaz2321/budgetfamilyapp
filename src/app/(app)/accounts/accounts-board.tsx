@@ -82,31 +82,33 @@ function maskAccountNumber(accountNumber: string | null): string | null {
 
 // How many months the popup shows, newest first. Columns past the first
 // appear only as the popup gets wide enough for them — see MONTH_GRID below.
-const MONTH_COLUMNS = 5;
+const MONTH_COLUMNS = 7;
 // Column visibility, by index: month 0 always, 1-2 once the panel clears
-// 560px, 3-4 once it clears 860px. Kept as literal class strings because
+// 560px, 3-4 once it clears 860px, 5-6 once it clears 980px (columns narrow to
+// 6rem there so seven fit a laptop-width popup). Kept as literal class strings because
 // Tailwind only generates the arbitrary values it can see in the source.
 // Written out in full rather than built by string surgery: Tailwind only
 // emits the arbitrary variants it can literally see in the source, so a class
 // assembled at runtime silently never gets any CSS.
-const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents"] as const;
-const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block"] as const;
+const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents", "hidden @[980px]:contents"] as const;
+const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block", "hidden @[980px]:block"] as const;
 // Both take the column's DISTANCE FROM THE ANCHOR (the selected period), not
 // its raw index. Months read newest -> oldest (Victor wants the current month
 // first), so the anchor is column 0 and a narrow popup keeps the columns
 // nearest it.
 const monthTier = (distance: number) =>
-  distance === 0 ? MONTH_TIER[0] : distance <= 2 ? MONTH_TIER[1] : MONTH_TIER[2];
+  distance === 0 ? MONTH_TIER[0] : distance <= 2 ? MONTH_TIER[1] : distance <= 4 ? MONTH_TIER[2] : MONTH_TIER[3];
 const monthHeadTier = (distance: number) =>
-  distance === 0 ? MONTH_HEAD_TIER[0] : distance <= 2 ? MONTH_HEAD_TIER[1] : MONTH_HEAD_TIER[2];
+  distance === 0 ? MONTH_HEAD_TIER[0] : distance <= 2 ? MONTH_HEAD_TIER[1] : distance <= 4 ? MONTH_HEAD_TIER[2] : MONTH_HEAD_TIER[3];
 // The anchor is the newest column, i.e. the first one.
 // A column's index is therefore also its distance from the anchor.
 const ANCHOR_IDX = 0;
-// Row grids: name + 1 money column when narrow, + 3 at 560px, + 5 at 860px.
+// Row grids: name + 1 money column when narrow, + 3 at 560px, + 5 at 860px,
+// + 7 at 980px.
 const ROW_GRID =
-  "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem]";
+  "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem] @[980px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_6rem_6rem_6rem_6rem_6rem_6rem_6rem_1.25rem]";
 const DEBT_ROW_GRID =
-  "grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] @[860px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem]";
+  "grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] @[860px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem] @[980px]:grid-cols-[minmax(0,1fr)_6rem_6rem_6rem_6rem_6rem_6rem_6rem]";
 
 const SECTIONS: Section[] = [
   {
@@ -298,6 +300,15 @@ function FixedSubtypeSelect({
 
 /** Custom types already in use, so "Mortgage" only has to be typed once. */
 const SubtypeOptionsContext = React.createContext<string[]>([]);
+
+// Investments and Kids Funding read in whole dollars — cents are noise at
+// those sizes. Every amount inside those sections (tile, popup grid, inputs)
+// formats through useAmountText so the whole section follows the one switch.
+const WholeDollarsContext = React.createContext(false);
+function useAmountText() {
+  const whole = React.useContext(WholeDollarsContext);
+  return (cents: number) => whole ? centsToGroupedDisplay(Math.round(cents / 100) * 100).replace(/\.00$/, "") : centsToGroupedDisplay(cents);
+}
 
 /** Sections whose Type field is an account type. Debts keep DEBT_KINDS and
  *  credit cards keep the free-text bank name. */
@@ -1558,8 +1569,11 @@ function AccountSection({
     });
   };
   const { dragOverId, startDrag } = usePointerReorder("account", reorder);
+  const whole = section.key === "investments" || section.key === "kids";
+  const money = (cents: number) => whole ? formatMoney(Math.round(cents / 100) * 100, currency).replace(/\.00$/, "") : formatMoney(cents, currency);
 
   return (
+    <WholeDollarsContext.Provider value={whole}>
     <section>
       {/* Header */}
       {/* Full-row click target — tapping anywhere on the tile (label OR
@@ -1621,7 +1635,7 @@ function AccountSection({
             section.liability && total > 0 ? "text-negative" : ""
           }`}
         >
-          {formatMoney(total, currency)}
+          {money(total)}
         </span>
       </div>
 
@@ -1629,14 +1643,15 @@ function AccountSection({
         <ModalShell
           title={section.label}
           onClose={closePopup}
-          className="sm:max-w-5xl"
+          // Wide enough for all seven month columns on a laptop.
+          className="sm:max-w-6xl"
           headerExtra={
             sumPicks.size > 0 ? (
               <div className="flex items-center gap-1.5 whitespace-nowrap sm:gap-2">
                 <span className="text-xs font-bold">
                   Total<span className="hidden sm:inline"> of {sumPicks.size}</span>:
                 </span>
-                <span className="text-base font-bold tabular-nums">{formatMoney(sumTotal, currency)}</span>
+                <span className="text-base font-bold tabular-nums">{money(sumTotal)}</span>
                 <button
                   type="button"
                   onClick={() => setSumPicks(new Map())}
@@ -1753,13 +1768,15 @@ function AccountSection({
                 // A paid-off debt is listed for the months it still had a
                 // balance. Show its row only at widths where one of those
                 // months is on screen (1 column narrow, 3 from 560px, 5 from
-                // 860px) — otherwise a phone shows a bare "$0.00" row.
+                // 860px, 7 from 980px) — otherwise a phone shows a bare
+                // "$0.00" row.
                 const owedIn = (from: number, to: number) =>
                   historyMonths.slice(from, to).some((m) => (d.balancesByMonth?.[m] ?? 0) !== 0);
                 const display =
                   d.balanceCents !== 0 || owedIn(0, 1) ? "grid"
                     : owedIn(1, 3) ? "hidden @[560px]:grid"
-                      : "hidden @[860px]:grid";
+                      : owedIn(3, 5) ? "hidden @[860px]:grid"
+                        : "hidden @[980px]:grid";
                 return (
                 <li
                   key={`debt:${d.subcategoryId}`}
@@ -1814,6 +1831,7 @@ function AccountSection({
         </ModalShell>
       ) : null}
     </section>
+    </WholeDollarsContext.Provider>
   );
 }
 
@@ -1927,7 +1945,7 @@ function AccountRow({
               pickKey={`a:${account.id}:${historyMonths[ANCHOR_IDX]}`}
               cents={balanceFor(account, ANCHOR_IDX) ?? account.balanceCents}
             >
-              <DerivedBalance balanceCents={balanceFor(account, ANCHOR_IDX) ?? account.balanceCents} currency={currency} />
+              <DerivedBalance balanceCents={balanceFor(account, ANCHOR_IDX) ?? account.balanceCents} currency={currency} tabExpand />
             </SumCell>
             {historyMonths.slice(1).map((m, j) => (
               <div key={m} className={monthTier(j + 1)}>
@@ -1936,6 +1954,7 @@ function AccountRow({
                     balanceCents={balanceFor(account, j + 1) ?? 0}
                     currency={currency}
                     muted={balanceFor(account, j + 1) == null}
+                    tabExpand
                   />
                 </SumCell>
               </div>
@@ -2309,12 +2328,53 @@ function BucketEditPanel({
  * where the "$" sits. An invisible sizer holding the same string measures the
  * real thing instead of estimating it.
  */
+// Tab walks DOWN a month column (Shift+Tab walks up) instead of across the
+// row, so a month's balances can be keyed in one after another. Columns are
+// matched by their right edge — every balance cell is right-aligned in its
+// grid column. Past the last row, Tab falls back to its normal behaviour.
+//
+// A bucketed account's total is the sum of its buckets and can't be typed
+// in, so Tab doesn't stop on it — it opens the buckets (if collapsed) and lands
+// on the first one (Shift+Tab: the last), so TSP's buckets aren't skipped.
+function tabDownColumn(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
+  const current = e.currentTarget;
+  const scope = current.closest("[data-column-tab-scope]") ?? document;
+  const right = current.getBoundingClientRect().right;
+  const columnOf = () =>
+    Array.from(scope.querySelectorAll<HTMLElement>("input[data-column-tab], [data-column-tab-expand]"))
+      .map((el) => ({ el, rect: el.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width > 0 && Math.abs(rect.right - right) < 3)
+      .sort((a, b) => a.rect.top - b.rect.top)
+      .map(({ el }) => el);
+  const column = columnOf();
+  const step = e.shiftKey ? -1 : 1;
+  let index = column.indexOf(current) + step;
+  // Leaving a bucket upward passes its own account's total — skip that stop.
+  if (column[index] && !(column[index] instanceof HTMLInputElement) && column[index].closest("li")?.contains(current)) index += step;
+  const next = column[index];
+  if (!next) return;
+  e.preventDefault();
+  if (next instanceof HTMLInputElement) {
+    next.focus();
+    return;
+  }
+  const row = next.closest("li");
+  row?.querySelector<HTMLButtonElement>('button[aria-label="Show buckets"]')?.click();
+  // The bucket drawer renders on the next frame; then pick its first/last cell.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const buckets = columnOf().filter((el) => el instanceof HTMLInputElement && row?.contains(el));
+    (e.shiftKey ? buckets[buckets.length - 1] : buckets[0])?.focus();
+  }));
+}
+
 function AutoWidthAmountInput({
   sizeClass,
   className,
   defaultValue,
   placeholder,
   onInput,
+  onKeyDown,
   ...rest
 }: { sizeClass: string } & React.ComponentProps<"input">) {
   const sizerRef = useRef<HTMLSpanElement>(null);
@@ -2342,6 +2402,11 @@ function AutoWidthAmountInput({
           }
           onInput?.(e);
         }}
+        onKeyDown={(e) => {
+          onKeyDown?.(e);
+          if (!e.defaultPrevented) tabDownColumn(e);
+        }}
+        data-column-tab
         size={1}
         className={`absolute inset-0 h-full w-full min-w-0 ${sizeClass} ${className ?? ""}`}
       />
@@ -2360,7 +2425,8 @@ function BucketBalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = centsToGroupedDisplay(balanceCents);
+  const amountText = useAmountText();
+  const initial = amountText(balanceCents);
 
   return (
     <form
@@ -2405,7 +2471,8 @@ function HistoricBucketBalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = balanceCents == null ? "" : centsToGroupedDisplay(balanceCents);
+  const amountText = useAmountText();
+  const initial = balanceCents == null ? "" : amountText(balanceCents);
 
   return (
     <form
@@ -2504,15 +2571,20 @@ function DerivedBalance({
   balanceCents,
   currency,
   muted = false,
+  tabExpand = false,
 }: {
   balanceCents: number;
   currency: string;
   muted?: boolean;
+  // Marks this total as a stop for column-wise Tab (see tabDownColumn).
+  tabExpand?: boolean;
 }) {
   const negative = balanceCents < 0;
+  const amountText = useAmountText();
   if (muted) {
     return (
       <div
+        data-column-tab-expand={tabExpand || undefined}
         className="justify-self-end inline-flex items-center gap-0 py-1"
       >
         <span className="text-sm">—</span>
@@ -2521,11 +2593,12 @@ function DerivedBalance({
   }
   return (
     <div
+      data-column-tab-expand={tabExpand || undefined}
       className="justify-self-end inline-flex items-center gap-0 py-1"
     >
       <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
       <span className={`text-[0.9375rem] tabular-nums ${negative ? "text-negative font-semibold" : ""}`}>
-        {centsToGroupedDisplay(balanceCents)}
+        {amountText(balanceCents)}
       </span>
     </div>
   );
@@ -2549,7 +2622,8 @@ function HistoricBalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = balanceCents == null ? "" : centsToGroupedDisplay(balanceCents);
+  const amountText = useAmountText();
+  const initial = balanceCents == null ? "" : amountText(balanceCents);
 
   return (
     <form
@@ -2600,7 +2674,8 @@ function BalanceInput({
 }) {
   const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
-  const initial = centsToGroupedDisplay(balanceCents);
+  const amountText = useAmountText();
+  const initial = amountText(balanceCents);
 
   return (
     <div className="flex w-full items-center justify-end">

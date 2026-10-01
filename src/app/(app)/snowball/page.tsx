@@ -1,7 +1,7 @@
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
-import { projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, amortizingPayment, monthlyInterestCents } from "@/lib/snowball";
+import { addMonths, projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, amortizingPayment, monthlyInterestCents } from "@/lib/snowball";
 import { TransactionsPanel } from "../budget/transactions-panel";
-import type { AccountOption, SubOption, TxData } from "../budget/types";
+import type { AccountOption, RowData, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
 import { SnowballSettings } from "./snowball-settings";
 import { getSessionContext } from "@/lib/auth-context";
@@ -29,12 +29,13 @@ export default async function SnowballPage() {
     await Promise.all([
       supabase
         .from("debts")
-        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, post_promo_apr, promo_apr_ends_on, due_day, debt_kind, paid_off_at, term_months")
+        .select("id, subcategory_id, account_id, current_balance_cents, original_balance_cents, min_payment_cents, target_payment_cents, escrow_cents, interest_paid_cents, interest_method, apr, post_promo_apr, promo_apr_ends_on, due_day, debt_kind, paid_off_at, term_months, notes")
         .eq("household_id", household.id)
         .eq("tracking_enabled", true),
       supabase
         .from("subcategories")
-        .select("id, name")
+        // The rest feeds the Budget item panel that opens from a debt card.
+        .select("id, name, category_id, due_day, payment_account_id, is_recurring, travel_category, linked_bucket_id")
         .eq("household_id", household.id),
       // Recent months, not just the current one. Budget plans are entered
       // partway through a month, so on the 1st there is nothing planned yet —
@@ -87,6 +88,9 @@ export default async function SnowballPage() {
   // Actually paid into each debt THIS month, so the card's "Paid this month"
   // row reflects what really happened rather than the projected schedule.
   const paidThisMonthBySub = new Map<string, number>();
+  // Last month's figure drives the item panel's "Prev Mo Spent" prefill.
+  const prevMonth = addMonths(month, -1);
+  const paidPrevMonthBySub = new Map<string, number>();
   if (debtSubIds.length) {
     const { data: paidRows, error: paidRowsError } = await supabase
       .from("v_monthly_actuals")
@@ -96,6 +100,9 @@ export default async function SnowballPage() {
     throwIfAny({ paidRows: paidRowsError });
     for (const r of paidRows ?? []) {
       paidBySub.set(r.subcategory_id, (paidBySub.get(r.subcategory_id) ?? 0) + r.actual_cents);
+      if (r.month === prevMonth) {
+        paidPrevMonthBySub.set(r.subcategory_id, (paidPrevMonthBySub.get(r.subcategory_id) ?? 0) + r.actual_cents);
+      }
       if (r.month === month) {
         paidThisMonthBySub.set(
           r.subcategory_id,
@@ -110,9 +117,12 @@ export default async function SnowballPage() {
   // Every logged debt payment (all-time), newest first.
   let debtTxData: TxData[] = [];
   let accountOptions: AccountOption[] = [];
+  let debtAccountOptions: AccountOption[] = [];
+  let debtGroupOptions: { id: string; name: string; kind: "debt" }[] = [];
   const accountKindById = new Map<string, string>();
+  const accountNameById = new Map<string, string>();
   if (debtSubIds.length) {
-    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }] = await Promise.all([
+    const [{ data: txRows, error: txRowsError }, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: debtCategories, error: debtCategoriesError }] = await Promise.all([
       supabase
         .from("transactions")
         .select("id, occurred_on, amount_cents, memo, subcategory_id, payee_id, account_id, bucket_id, paid_to_account_id, movement_type, cleared, is_withdrawal")
@@ -127,10 +137,20 @@ export default async function SnowballPage() {
         .eq("household_id", household.id)
         .eq("active", true)
         .order("name"),
+      supabase
+        .from("categories")
+        .select("id, name, sort_order")
+        .eq("household_id", household.id)
+        .eq("kind", "debt")
+        .order("sort_order"),
     ]);
-    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError });
+    throwIfAny({ txRows: txRowsError, payees: payeesError, accounts: accountsError, debtCategories: debtCategoriesError });
     const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
-    const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
+    for (const a of accounts ?? []) accountNameById.set(a.id, a.name);
+    debtAccountOptions = (accounts ?? [])
+      .filter((a) => a.kind === "credit_card" || a.kind === "debt_loan")
+      .map((a) => ({ id: a.id, name: a.name }));
+    debtGroupOptions = (debtCategories ?? []).map((c) => ({ id: c.id, name: c.name, kind: "debt" as const }));
     const bankingKinds = new Set(["checking", "savings", "cash", "savings_bucket"]);
     accountOptions = (accounts ?? [])
       .filter((a) => !a.is_kids_account && (bankingKinds.has(a.kind) || a.kind === "credit_card"))
@@ -181,6 +201,46 @@ export default async function SnowballPage() {
     linkedBucketId: null,
     remainingCents: balanceBySub.get(id) ?? 0,
   }));
+
+  // Each debt as the Budget page sees it this month, so a card can open the
+  // same item panel Budget uses — plan, debt details and payments — in place.
+  const subById = new Map((subs ?? []).map((s) => [s.id, s]));
+  const prevTxBySub = new Map<string, TxData>();
+  for (const t of debtTxData) {
+    if (t.subId && t.date.startsWith(prevMonth.slice(0, 7)) && !prevTxBySub.has(t.subId)) prevTxBySub.set(t.subId, t);
+  }
+  const itemRows: Record<string, RowData> = {};
+  for (const d of debts ?? []) {
+    const s = subById.get(d.subcategory_id);
+    if (!s) continue;
+    itemRows[d.subcategory_id] = {
+      subId: s.id,
+      categoryId: s.category_id,
+      name: s.name,
+      dueDay: s.due_day,
+      paymentAccountId: s.payment_account_id ?? null,
+      paymentAccountName: s.payment_account_id ? accountNameById.get(s.payment_account_id) ?? null : null,
+      travelCategory: s.travel_category ?? null,
+      plannedCents: (plans ?? []).find((p) => p.subcategory_id === s.id && p.month === month)?.planned_cents ?? 0,
+      spentCents: paidThisMonthBySub.get(s.id) ?? 0,
+      prevSpentCents: paidPrevMonthBySub.get(s.id) ?? 0,
+      prevAccountId: prevTxBySub.get(s.id)?.accountId ?? null,
+      prevPayee: prevTxBySub.get(s.id)?.payee ?? null,
+      isRecurring: s.is_recurring ?? false,
+      savings: null,
+      debt: {
+        balanceCents: d.current_balance_cents ?? 0,
+        minCents: d.min_payment_cents ?? 0,
+        apr: Number(d.apr),
+        dueDay: d.due_day ?? s.due_day,
+        debtKind: d.debt_kind ?? null,
+        notes: d.notes ?? null,
+        promoAprEndsOn: d.promo_apr_ends_on ?? null,
+        accountId: d.account_id ?? null,
+        linkedBucketId: s.linked_bucket_id ?? null,
+      },
+    };
+  }
 
   const periods = (periodRows ?? []).map((p) => ({
     id: p.id as string,
@@ -411,6 +471,15 @@ export default async function SnowballPage() {
         classicPayoffMonth={Object.fromEntries(classicPayoff)}
         classicLedger={Object.fromEntries(classicLedger)}
         currency={currency}
+        itemPanel={{
+          rows: itemRows,
+          groupOptions: debtGroupOptions,
+          subOptions: debtSubOptions,
+          paymentAccountOptions: accountOptions,
+          debtAccountOptions,
+          transactions: debtTxData,
+          accountNames: Object.fromEntries(accountNameById),
+        }}
         settings={
           <SnowballSettings
             key="snowball-settings"
