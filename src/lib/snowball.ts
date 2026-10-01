@@ -187,6 +187,8 @@ export function projectSnowball(
     // what is left of it. Anything already paid beyond a debt's own minimum
     // came out of that same pot — without this the projection re-spends this
     // month's money and reports a payoff earlier than the plan can deliver.
+    // (The debt that receives the pot gets its own share back below, or its
+    // early payment would be counted twice.)
     if (i === 0) {
       let alreadySpentFromPool = 0;
       for (const id of order) {
@@ -209,13 +211,18 @@ export function projectSnowball(
       // the opening balance already reflects it. A debt whose payment is
       // fully made simply sits out its first month.
       const alreadyPaid = i === 0 ? Math.max(0, debt.paidThisMonthCents ?? 0) : 0;
-      const scheduled = Math.max(
-        0,
-        Math.max(0, debt.minCents) + (id === focusId ? extraPool : 0) - alreadyPaid,
-      );
+      const minCents = Math.max(0, debt.minCents);
+      // Snowball: the pot goes to the first open debt, and whatever it doesn't
+      // need once that debt clears rolls straight on to the next one in the
+      // same month — it used to vanish, making payoffs look later than they
+      // are. Without the waterfall only the original focus gets the pot.
+      const getsPool = extraPool > 0 && (noWaterfall ? id === focusId : true);
+      const ownExcess = i === 0 && getsPool ? Math.max(0, alreadyPaid - minCents) : 0;
+      const scheduled = Math.max(0, minCents + (getsPool ? extraPool + ownExcess : 0) - alreadyPaid);
       const payment = Math.min(scheduled, amountDue);
       const principal = payment - interest;
       const newBalance = Math.max(0, amountDue - payment);
+      if (getsPool) extraPool = noWaterfall ? 0 : Math.max(0, scheduled - payment);
 
       if (startingBalance > 0 && payment <= interest && effectiveApr > 0) {
         negativeAmortization.add(id);

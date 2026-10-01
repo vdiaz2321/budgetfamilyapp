@@ -136,3 +136,50 @@ export async function applyPayoffPlan(formData: FormData) {
   revalidatePath("/travel");
   return { error: null };
 }
+
+/**
+ * Put the Classic Snowball schedule into Budget: one plan per debt per month
+ * until it's paid off. Writing every month, not just this one, matters — the
+ * monthly auto roll-in copies last month's plan forward, so applying only
+ * October would carry VentureJ's $150 into November when Classic pays $817
+ * there. Months already written are overwritten; anything later is left alone.
+ */
+export async function applyClassicPlan(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  let plans: { subId: string; month: string; cents: number }[];
+  try {
+    plans = JSON.parse(String(formData.get("plans") ?? "[]"));
+  } catch {
+    return { error: "Couldn't read the plan." };
+  }
+  plans = plans.filter(
+    (p) => typeof p.subId === "string" && /^\d{4}-\d{2}-01$/.test(p.month) && Number.isInteger(p.cents) && p.cents >= 0,
+  );
+  if (!plans.length) return { error: "Nothing to apply." };
+
+  // Only debts that belong to this household.
+  const debts = unwrap(
+    await supabase
+      .from("debts")
+      .select("subcategory_id")
+      .eq("household_id", householdId)
+      .in("subcategory_id", [...new Set(plans.map((p) => p.subId))]),
+    "debts",
+  );
+  const ownSubIds = new Set((debts ?? []).map((d) => d.subcategory_id as string));
+  const now = new Date().toISOString();
+  const rows = plans
+    .filter((p) => ownSubIds.has(p.subId))
+    .map((p) => ({ household_id: householdId, month: p.month, subcategory_id: p.subId, planned_cents: p.cents, updated_at: now }));
+  if (!rows.length) return { error: "Nothing to apply." };
+
+  const { error } = await supabase.from("budget_plans").upsert(rows, { onConflict: "household_id,month,subcategory_id" });
+  if (error) return { error: "Couldn't update the budget plan." };
+
+  revalidatePath("/snowball");
+  revalidatePath("/budget");
+  revalidatePath("/annual");
+  revalidatePath("/accounts");
+  revalidatePath("/travel");
+  return { error: null };
+}

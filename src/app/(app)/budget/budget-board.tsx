@@ -58,8 +58,6 @@ type Props = {
   bucketOptions: BucketOption[];
   bucketsByAccount?: BucketsByAccount;
   payeeLineItems?: PayeeLineItem[];
-  snowballExtraCents: number;
-  snowballFocusSubId: string | null;
   transactions: TxData[];
   subscriptions: SubscriptionRow[];
   irregularBills: IrregularBillRow[];
@@ -92,8 +90,6 @@ export function BudgetBoard({
   bucketOptions,
   bucketsByAccount = {},
   payeeLineItems = [],
-  snowballExtraCents,
-  snowballFocusSubId,
   transactions,
   subscriptions,
   irregularBills,
@@ -418,8 +414,6 @@ export function BudgetBoard({
         paymentAccountOptions={paymentAccountOptions}
         debtAccountOptions={debtAccountOptions}
         bucketOptions={bucketOptions}
-        snowballExtraCents={snowballExtraCents}
-        isSnowballFocus={selected.subId === snowballFocusSubId}
         transactions={transactions}
         accountNameById={accountNameById}
         onClose={() => setSelected(null)}

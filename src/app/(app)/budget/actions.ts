@@ -9,6 +9,7 @@ import { adjustDebtBalance } from "@/lib/debts";
 import { saveDebt } from "@/lib/save-debt";
 import { adjustAccountLedger, categoryKindOf, ledgerDelta } from "@/lib/account-ledger";
 import { unwrap } from "@/lib/supabase-result";
+import { previousMonthPlanRows } from "@/lib/plan-roll-in";
 import { getSessionContext } from "@/lib/auth-context";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
@@ -2512,17 +2513,8 @@ export async function deleteSnowballPeriod(formData: FormData) {
 export async function updateGlobals(formData: FormData) {
   const { supabase, householdId } = await requireHousehold();
   const currency = String(formData.get("currency") ?? "$").trim() || "$";
-  const snowballStart = String(formData.get("snowballStartDate") ?? "").trim() || null;
-  const snowballExtra = displayToCents(String(formData.get("snowballMonthlyExtra") ?? "0"));
 
-  await supabase
-    .from("households")
-    .update({
-      currency,
-      snowball_start_date: snowballStart,
-      snowball_monthly_extra_cents: snowballExtra,
-    })
-    .eq("id", householdId);
+  await supabase.from("households").update({ currency }).eq("id", householdId);
 
   revalidatePath("/budget");
   revalidatePath("/snowball");
@@ -2546,62 +2538,7 @@ export async function copyPlansFromPreviousMonth(
   const month = String(formData.get("month") ?? ""); // YYYY-MM-01 (destination month)
   if (!/^\d{4}-\d{2}-01$/.test(month)) return { snapshot: [], touchedSubIds: [] };
 
-  const [y, m] = month.slice(0, 7).split("-").map(Number);
-  const prev = new Date(Date.UTC(y, m - 2, 1)); // JS month is 0-indexed; prev = m-2
-  const prevMonth = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}-01`;
-
-  const prevPlans = unwrap(
-    await supabase
-      .from("budget_plans")
-      .select("subcategory_id, planned_cents")
-      .eq("household_id", householdId)
-      .eq("month", prevMonth),
-    "budget_plans",
-  );
-
-  // Irregular bills are one-off by nature and are planned per month on their
-  // own card, so a roll-in must never carry their subcategory forward — a new
-  // month starts them at $0.
-  const irregularSubIdRows = unwrap(
-    await supabase
-      .from("irregular_bills")
-      .select("subcategory_id")
-      .eq("household_id", householdId)
-      .not("subcategory_id", "is", null),
-    "irregular_bills",
-  );
-  const irregularSubIds = new Set(
-    (irregularSubIdRows ?? []).map((r) => r.subcategory_id as string),
-  );
-
-  const positivePrevPlans = (prevPlans ?? [])
-    .filter((p) => (p.planned_cents ?? 0) > 0)
-    .filter((p) => !irregularSubIds.has(p.subcategory_id as string));
-  const candidateSubIds = positivePrevPlans.map((p) => p.subcategory_id as string);
-  let paidOffDebtSubIds = new Set<string>();
-  if (candidateSubIds.length > 0) {
-    const paidOffDebts = unwrap(
-      await supabase
-        .from("debts")
-        .select("subcategory_id")
-        .eq("household_id", householdId)
-        .in("subcategory_id", candidateSubIds)
-        .lte("current_balance_cents", 0),
-      "debts",
-    );
-    paidOffDebtSubIds = new Set((paidOffDebts ?? []).map((debt) => debt.subcategory_id as string));
-  }
-
-  // Once a card or loan reaches $0, its old payment plan must not silently
-  // reappear in a later month or cross into a new calendar year.
-  const rows = positivePrevPlans
-    .filter((p) => !paidOffDebtSubIds.has(p.subcategory_id as string))
-    .map((p) => ({
-      household_id: householdId,
-      month,
-      subcategory_id: p.subcategory_id,
-      planned_cents: p.planned_cents,
-    }));
+  const rows = await previousMonthPlanRows(supabase, householdId, month);
 
   // Snapshot the destination month's current plans for the sub-ids about to be
   // overwritten, so Undo can restore prior values (or delete rows that didn't

@@ -39,7 +39,6 @@ export default async function BudgetPage({
   const yearReadStart = prevFirstOfMonth < yearStart ? prevFirstOfMonth : yearStart;
 
   const { supabase, household } = await getSessionContext();
-  const snowballExtraCents = household.snowball_monthly_extra_cents ?? 0;
 
   // ---- One round trip for the whole page. `ensureCategories` and the
   // rollover reads below used to be awaited separately, which made three
@@ -496,14 +495,6 @@ export default async function BudgetPage({
     };
   });
 
-  // Same "smallest unpaid balance first" rule as the Snowball page, so the
-  // debt panel can show which debt is currently getting the extra payment.
-  const debtRows = groups.find((g) => g.kind === "debt")?.rows ?? [];
-  const snowballFocusSubId =
-    debtRows
-      .filter((r) => (r.debt?.balanceCents ?? 0) > 0)
-      .sort((a, b) => (a.debt?.balanceCents ?? 0) - (b.debt?.balanceCents ?? 0))[0]?.subId ?? null;
-
   const incomePlanned = groups
     .filter((g) => g.kind === "income")
     .reduce((sum, g) => sum + g.plannedTotal, 0);
@@ -870,8 +861,6 @@ export default async function BudgetPage({
       bucketOptions={bucketOptions}
       bucketsByAccount={bucketsByAccount}
       payeeLineItems={payeeLineItems}
-      snowballExtraCents={snowballExtraCents}
-      snowballFocusSubId={snowballFocusSubId}
       transactions={transactions}
       subscriptions={subscriptionRows}
       irregularBills={irregularBillRowsForYear}

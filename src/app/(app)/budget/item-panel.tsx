@@ -43,8 +43,6 @@ type Props = {
   paymentAccountOptions: AccountOption[];
   debtAccountOptions: AccountOption[];
   bucketOptions: BucketOption[];
-  snowballExtraCents: number;
-  isSnowballFocus: boolean;
   // Every tx already loaded on the Budget page; the panel filters to this
   // subcategory + month so the user can see what actually made up the Spent
   // figure without hopping to the Transactions page.
@@ -188,8 +186,6 @@ export function ItemPanel({
   paymentAccountOptions,
   debtAccountOptions,
   bucketOptions,
-  snowballExtraCents,
-  isSnowballFocus,
   transactions,
   accountNameById,
   onClose,
@@ -365,11 +361,8 @@ export function ItemPanel({
             <DebtForm
               key={row.subId}
               row={row}
-              currency={currency}
               monthKey={monthKey}
               accountOptions={debtAccountOptions}
-              snowballExtraCents={snowballExtraCents}
-              isSnowballFocus={isSnowballFocus}
               formId={saveFormId}
               runSave={runSave}
             />
@@ -1077,20 +1070,14 @@ function ItemDetailsPopover({
 
 function DebtForm({
   row,
-  currency,
   monthKey,
   accountOptions,
-  snowballExtraCents,
-  isSnowballFocus,
   formId,
   runSave,
 }: {
   row: RowData;
-  currency: string;
   monthKey: string;
   accountOptions: AccountOption[];
-  snowballExtraCents: number;
-  isSnowballFocus: boolean;
   formId: string;
   runSave: (write: () => Promise<void>) => Promise<void>;
 }) {
@@ -1098,11 +1085,6 @@ function DebtForm({
   const router = useRouter();
   const plannedRef = useRef<HTMLInputElement>(null);
   const d = row.debt!;
-  // What the Snowball page currently schedules for this debt this month —
-  // its min payment, plus the snowball extra if it's the focus debt. This is
-  // just informational: "Planned this month" is what YOU'RE budgeting to pay
-  // and can differ from the contractual "Min. payment" below it.
-  const scheduledCents = d.minCents + (isSnowballFocus ? snowballExtraCents : 0);
   return (
     <Section title="Debt details">
       <form
@@ -1127,7 +1109,6 @@ function DebtForm({
             className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
-        {isSnowballFocus ? <p className="text-[11px] text-muted">Snowball baseline this month: <span className="font-semibold tabular-nums text-brand">{formatMoney(scheduledCents, currency)}</span></p> : null}
         <Grid>
           <Labeled label="Balance" name="balance" type="number" step="0.01" defaultValue={centsToDisplay(d.balanceCents)} />
           <Labeled label="Min. payment" name="minPayment" type="number" step="0.01" defaultValue={centsToDisplay(d.minCents)} />

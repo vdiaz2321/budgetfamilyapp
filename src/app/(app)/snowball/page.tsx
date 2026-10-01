@@ -1,5 +1,5 @@
 import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
-import { projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, monthsBetweenKeys, amortizingPayment, monthlyInterestCents } from "@/lib/snowball";
+import { projectSnowball, balanceAtPromoEnd, paymentToClearByPromoEnd, amortizingPayment, monthlyInterestCents } from "@/lib/snowball";
 import { TransactionsPanel } from "../budget/transactions-panel";
 import type { AccountOption, SubOption, TxData } from "../budget/types";
 import { SnowballBoard } from "./snowball-board";
@@ -15,10 +15,6 @@ export default async function SnowballPage() {
   const { supabase, household } = await getSessionContext();
 
   const currency = household.currency;
-  // Manual top-up used ONLY by the classic textbook Snowball (below) — pure
-  // "pay minimums + throw this much extra at the smallest debt," independent
-  // of whatever's Planned per debt. Kept as a shareable reference method.
-  const manualExtraCents = household.snowball_monthly_extra_cents ?? 0;
   const month = currentMonthFirst();
 
   // Bring installment debts up to date on interest before anything is read.
@@ -284,7 +280,7 @@ export default async function SnowballPage() {
     );
   const monthlyAttack = totalMin + classicExtraForMonth(month);
   const classicExtraThisMonth = classicExtraForMonth(month);
-  const { payoffMonth: classicPayoff, ledger: classicLedger, totalInterestCents: classicTotalInterest } = projectSnowball(
+  const { payoffMonth: classicPayoff, ledger: classicLedger } = projectSnowball(
     unpaid.map((r) => ({
       id: r.subId,
       balanceCents: r.balanceCents,
@@ -325,50 +321,6 @@ export default async function SnowballPage() {
       arr.sort((a, b) => a.month.localeCompare(b.month)).slice(-12),
     ]),
   );
-
-  // ---- Avalanche comparison. Same debts, same monthly capacity, different
-  // attack order: highest rate first instead of smallest balance first. Where
-  // rates differ this is the cheapest possible ordering; where they're all
-  // equal (a set of 0% cards) the two are identical and the UI says so rather
-  // than manufacturing a win.
-  const avalanche = projectSnowball(
-    unpaid.map((r) => ({
-      id: r.subId,
-      balanceCents: r.balanceCents,
-      minCents: Math.max(0, r.minCents - r.escrowCents),
-      apr: r.apr,
-      promoEndsOn: r.promoEndsOn,
-      postPromoApr: r.postPromoApr,
-      paidThisMonthCents: r.paidThisMonthCents,
-    })),
-    classicExtraForMonth,
-    month,
-    480,
-    false,
-    {},
-    "avalanche",
-  );
-  const sumInterest = (m: Map<string, number>) => [...m.values()].reduce((s, v) => s + v, 0);
-  const lastPayoff = (m: Map<string, string | null>) => {
-    const months = [...m.values()].filter((v): v is string => !!v);
-    return months.length === [...m.keys()].length && months.length > 0
-      ? months.sort().at(-1)!
-      : null;
-  };
-  const classicInterest = sumInterest(classicTotalInterest);
-  const avalancheInterest = sumInterest(avalanche.totalInterestCents);
-  const classicFinish = lastPayoff(classicPayoff);
-  const avalancheFinish = lastPayoff(avalanche.payoffMonth);
-  const monthsDiff =
-    classicFinish && avalancheFinish ? monthsBetweenKeys(avalancheFinish, classicFinish) : 0;
-  const payoffComparison = {
-    snowballInterestCents: Math.round(classicInterest),
-    avalancheInterestCents: Math.round(avalancheInterest),
-    interestSavedCents: Math.round(classicInterest - avalancheInterest),
-    snowballFinish: classicFinish,
-    avalancheFinish,
-    monthsSaved: monthsDiff,
-  };
 
   // ---- Promotional-rate outlook. For each debt still inside a 0%/low-rate
   // window, work out what will still be owed the month the promo expires at
@@ -445,7 +397,6 @@ export default async function SnowballPage() {
           interestMethod: r.interestMethod as "monthly_estimate" | "statement_manual",
         }))}
         promoOutlook={promoOutlook}
-        payoffComparison={payoffComparison}
         totalHistory={totalHistory}
         historyBySub={historyBySubObj}
         startMonth={month}
@@ -464,8 +415,7 @@ export default async function SnowballPage() {
           <SnowballSettings
             key="snowball-settings"
             currency={currency}
-            snowballStartDate={household.snowball_start_date}
-            snowballMonthlyExtraCents={manualExtraCents}
+            baseExtraCents={classicExtraBaseline}
             periods={periods}
           />
         }

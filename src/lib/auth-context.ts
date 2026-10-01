@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { autoRollInPlans } from "@/lib/plan-roll-in";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -43,7 +44,7 @@ export const getSessionContext = cache(async () => {
   // foreign key), where it used to be two round trips back to back.
   const { data: row, error: profileError } = await supabase
     .from("profiles")
-    .select("household_id, display_name, avatar_url, households(id, name, currency, snowball_monthly_extra_cents, snowball_start_date)")
+    .select("household_id, display_name, avatar_url, households(id, name, currency, snowball_monthly_extra_cents, snowball_start_date, plans_rolled_month)")
     .eq("user_id", user.id)
     .maybeSingle();
   // A failed read is not "this user has no household" — redirecting on it
@@ -57,10 +58,21 @@ export const getSessionContext = cache(async () => {
     currency: string;
     snowball_monthly_extra_cents: number | null;
     snowball_start_date: string | null;
+    plans_rolled_month: string | null;
   };
   const joined = row.households as unknown as Household | Household[] | null;
   const household = Array.isArray(joined) ? joined[0] : joined;
   if (!household) redirect("/onboarding");
+
+  // A new month starts with last month's plan. Costs nothing on every other
+  // load: the household row above already says whether this month is done.
+  // A failed roll-in must not lock Victor out of every page; the Budget
+  // board's Roll-in button still works by hand.
+  try {
+    await autoRollInPlans(supabase, household.id, household.plans_rolled_month);
+  } catch (e) {
+    console.error("Auto roll-in of last month's plan failed:", e);
+  }
 
   const profile = { household_id: row.household_id as string, display_name: row.display_name, avatar_url: row.avatar_url };
   return { supabase, user, profile, household };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { centsToDisplay, formatMoney } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { addSnowballPeriod, deleteSnowballPeriod, updateGlobals } from "../budget/actions";
 
 const MONTHS_SHORT = [
@@ -22,15 +22,15 @@ type Period = {
 
 type Props = {
   currency: string;
-  snowballStartDate: string | null;
-  snowballMonthlyExtraCents: number;
+  // What Classic throws at the smallest debt each month before any periods:
+  // the Planned total minus every minimum, so both views spend the same money.
+  baseExtraCents: number;
   periods: Period[];
 };
 
 export function SnowballSettings({
   currency,
-  snowballStartDate,
-  snowballMonthlyExtraCents,
+  baseExtraCents,
   periods,
 }: Props) {
   const [pending, start] = useTransition();
@@ -39,12 +39,11 @@ export function SnowballSettings({
     <section className="rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <h2 className="text-sm font-semibold">Snowball settings</h2>
       <p className="mt-0.5 text-xs text-muted">
-        The extra you throw at your smallest debt each month, on top of every
-        minimum payment. Used by the Classic Snowball view.
+        Extra / mo: <span className="font-semibold tabular-nums text-foreground">{formatMoney(baseExtraCents, currency)}</span> (Planned total minus minimums)
       </p>
       <form
         action={(fd) => start(() => updateGlobals(fd))}
-        className="mt-4 grid gap-3 sm:grid-cols-3"
+        className="mt-4 flex flex-wrap items-end gap-3"
       >
         <Field label="Currency">
           <input
@@ -54,25 +53,7 @@ export function SnowballSettings({
             className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </Field>
-        <Field label="Snowball start date">
-          <input
-            name="snowballStartDate"
-            type="date"
-            defaultValue={snowballStartDate ?? ""}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
-        </Field>
-        <Field label="Monthly extra (base)">
-          <input
-            name="snowballMonthlyExtra"
-            type="number"
-            step="0.01"
-            defaultValue={centsToDisplay(snowballMonthlyExtraCents)}
-            onFocus={(e) => e.currentTarget.select()}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          />
-        </Field>
-        <div className="sm:col-span-3">
+        <div>
           <button
             type="submit"
             disabled={pending}
@@ -87,8 +68,7 @@ export function SnowballSettings({
       <div className="mt-6 border-t border-line pt-4">
         <h3 className="text-sm font-semibold">Extra payment periods</h3>
         <p className="mt-0.5 text-xs text-muted">
-          Optional. Add extra for a date range on top of the base above — e.g. pay more while a
-          0% promo is running, then stop. Leave the end date blank for ongoing.
+          Optional: more extra for a date range, on top of the above.
         </p>
 
         {periods.length > 0 ? (
