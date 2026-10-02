@@ -352,15 +352,6 @@ function ChartSection({
   showPlan: boolean;
   onTogglePlan: () => void;
 }) {
-  // Header cards over the whole history the chart draws: where it stands,
-  // where it started, its peak, and the last twelve months.
-  const latest = points.at(-1) ?? null;
-  const first = points[0] ?? null;
-  const peak = points.reduce<MonthPoint | null>((b, p) => (b == null || p.net > b.net ? p : b), null);
-  const yearAgo = points.length > 12 ? points[points.length - 13] : null;
-  const lastYear = latest && yearAgo ? latest.net - yearAgo.net : null;
-  const signed = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
-
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       <div className="flex flex-wrap items-center justify-between">
@@ -436,24 +427,6 @@ function ChartSection({
           </div>
         ) : null}
       </div>
-      {latest && first ? (
-        <div className="grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4">
-          <StatCard label="Net worth now" value={formatMoneyWhole(latest.net, currency)} sub={monthLabel(latest.month)} />
-          <StatCard label="Started at" value={formatMoneyWhole(first.net, currency)} sub={monthLabel(first.month)} />
-          <StatCard
-            label="All-time high"
-            value={peak ? formatMoneyWhole(peak.net, currency) : "—"}
-            sub={peak ? (peak.month === latest.month ? `${monthLabel(peak.month)} · this month` : monthLabel(peak.month)) : undefined}
-            subClass={peak?.month === latest.month ? "font-semibold text-positive" : "text-muted"}
-          />
-          <StatCard
-            label="Last 12 months"
-            value={lastYear == null ? "—" : signed(lastYear)}
-            valueClass={lastYear == null || lastYear === 0 ? "" : lastYear > 0 ? "text-positive" : "text-negative"}
-            sub={yearAgo ? `since ${monthLabel(yearAgo.month)}` : undefined}
-          />
-        </div>
-      ) : null}
       {open ? (
         points.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
@@ -990,7 +963,7 @@ function EditableBalanceCell({
           e.currentTarget.blur();
         }}
         onBlur={(e) => submitIfChanged(e.currentTarget.value)}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-right tabular-nums transition placeholder:text-muted hover:bg-black/5 focus:bg-surface focus:outline-none focus:ring-2 dark:hover:bg-white/10 ${
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center tabular-nums transition placeholder:text-muted hover:bg-black/5 focus:bg-surface focus:outline-none focus:ring-2 dark:hover:bg-white/10 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1241,10 +1214,15 @@ function BalanceGrid({
     return any ? sum : null;
   };
 
-  // Header cards: each section's total for the newest month on screen, and
-  // how it moved from the month before. Kids Funding stays out, as it does
-  // from every total.
+  // Header cards: each section's total for the newest FINISHED month on
+  // screen, and how it moved from the month before (Sep vs Aug while October
+  // is still in progress). The current month is skipped because its balances
+  // are mid-month and the comparison reads as a loss until month-end. Kids
+  // Funding stays out, as it does from every total.
   const shortMonth = (m: string) => monthLabel(m).split(" ")[0];
+  const closedIdx = months.findIndex((m) => m < lockedFromMonth);
+  const cardIdx = closedIdx === -1 ? 0 : closedIdx;
+  const hasBefore = months.length > cardIdx + 1;
   const headerCards =
     months.length === 0
       ? []
@@ -1253,11 +1231,16 @@ function BalanceGrid({
             .filter((g) => g.section !== "Kids Funding")
             .map((g) => ({
               label: g.section,
-              now: sectionTotal(g, 0),
-              before: months.length > 1 ? sectionTotal(g, 1) : null,
+              now: sectionTotal(g, cardIdx),
+              before: hasBefore ? sectionTotal(g, cardIdx + 1) : null,
               liability: g.rows[0]?.liability ?? false,
             })),
-          { label: "Total net worth", now: netAt(0), before: months.length > 1 ? netAt(1) : null, liability: false },
+          {
+            label: "Total net worth",
+            now: netAt(cardIdx),
+            before: hasBefore ? netAt(cardIdx + 1) : null,
+            liability: false,
+          },
         ];
 
   const readCell = (r: GridRow, i: number) => {
@@ -1384,9 +1367,9 @@ function BalanceGrid({
                 label={c.label}
                 value={c.now == null ? "—" : formatMoneyWhole(c.now, currency)}
                 valueClass={c.liability ? "text-negative" : ""}
-                sub={`${shortMonth(months[0])}${
-                  delta != null && months[1]
-                    ? ` · ${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(months[1])}`
+                sub={`${shortMonth(months[cardIdx])}${
+                  delta != null && months[cardIdx + 1]
+                    ? ` · ${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(months[cardIdx + 1])}`
                     : ""
                 }`}
                 subClass={good == null ? "text-muted" : good ? "font-semibold text-positive" : "font-semibold text-negative"}
@@ -1458,7 +1441,7 @@ function BalanceGrid({
                   {months.map((m, i) => {
                     const v = netTotals[i];
                     return (
-                      <td key={m} className="whitespace-nowrap px-2 py-2 text-right text-xs font-bold tabular-nums sm:px-3 sm:text-sm">
+                      <td key={m} className="whitespace-nowrap px-2 py-2 text-center text-xs font-bold tabular-nums sm:px-3 sm:text-sm">
                         {v == null ? (
                           <span className="text-muted">—</span>
                         ) : (
@@ -1519,7 +1502,7 @@ function BalanceGrid({
                       const total = sectionTotal(g, i);
                       const isLiabilitySection = g.rows[0]?.liability ?? false;
                       return (
-                        <td key={m} className="whitespace-nowrap px-2 py-2 text-right text-xs font-bold tabular-nums sm:px-3 sm:text-sm">
+                        <td key={m} className="whitespace-nowrap px-2 py-2 text-center text-xs font-bold tabular-nums sm:px-3 sm:text-sm">
                           {total == null ? (
                             <span className="text-muted">—</span>
                           ) : (
@@ -1628,7 +1611,7 @@ function BalanceGrid({
                                 )}
                               </td>
                               {months.map((m, i) => (
-                                <td key={m} className="whitespace-nowrap px-2 py-1 text-right tabular-nums sm:px-3">
+                                <td key={m} className="whitespace-nowrap px-2 py-1 text-center tabular-nums sm:px-3">
                                   {readCell(r, i)}
                                 </td>
                               ))}

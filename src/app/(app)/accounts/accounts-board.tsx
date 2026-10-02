@@ -41,6 +41,7 @@ import {
   type Section,
 } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
 
 // Re-exported so importers (page.tsx) keep one import site for the board and
 // the shapes it takes.
@@ -176,6 +177,8 @@ type Props = {
   // Last year's Dec net worth from the imported history; used only when no
   // Dec snapshots exist for that year.
   eoyHistoryNetCents?: number | null;
+  // Month-end update checkmarks for this month and last.
+  monthEndChecks?: MonthEndCheck[];
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -388,8 +391,10 @@ export function AccountsBoard({
   historyMonths,
   cardPayments = [],
   eoyHistoryNetCents = null,
+  monthEndChecks = [],
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
+  const [monthEndOpen, setMonthEndOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
   // Period picker on the Accounts header — same control as Insights. Local
@@ -671,6 +676,7 @@ export function AccountsBoard({
   );
 
   useRegisterMobilePageActions([
+    { label: "Month-end update", onSelect: () => setMonthEndOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
     { label: "Transfer Funds", onSelect: () => setTransferOpen(true) },
   ]);
@@ -699,6 +705,13 @@ export function AccountsBoard({
             into the ⋯ menu instead (registered above), so on a phone the
             header doesn't spend a whole row on two buttons. */}
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setMonthEndOpen(true)}
+            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+          >
+            Month-end update
+          </button>
           <button
             type="button"
             onClick={() => setTransferOpen(true)}
@@ -919,6 +932,14 @@ export function AccountsBoard({
         ) : null}
       </div>
       {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} /> : null}
+      {monthEndOpen ? (
+        <MonthEndUpdateModal
+          accounts={accounts}
+          currentMonth={historyMonths[0]}
+          checks={monthEndChecks}
+          onClose={() => setMonthEndOpen(false)}
+        />
+      ) : null}
       {transferOpen ? (
         <TransferModal
           accounts={accounts}

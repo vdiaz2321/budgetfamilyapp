@@ -1,5 +1,5 @@
 import { parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
-import { captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
+import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
 import { adoptClosedProjectionYears, anchorYearToActualStart } from "./actions";
@@ -31,7 +31,13 @@ export default async function NetworthPage() {
 
   // Refresh this month's snapshot on every visit — this is what freezes prior
   // months into history even if no balance was edited after a month rollover.
-  await captureSnapshots(supabase, household.id);
+  // Started beside the reads below rather than awaited first (that cost a
+  // round trip on every load); withCurrentMonth below shows the current month
+  // from live balances, which is exactly what this capture writes.
+  const capturePromise = captureSnapshots(supabase, household.id);
+  // Awaited (and so re-thrown) further down; this only stops a failure from
+  // counting as unhandled if a read below throws first.
+  capturePromise.catch(() => {});
 
   // Trips still ahead this year, planned but not paid — kept off the pace
   // forecast. Started now so it runs beside the reads below.
@@ -43,9 +49,9 @@ export default async function NetworthPage() {
   );
 
   const [
-    accSnaps,
-    debtSnaps,
-    bucketSnaps,
+    accSnapsRead,
+    debtSnapsRead,
+    bucketSnapsRead,
     { data: accountRows, error: accountRowsError },
     { data: bucketRows, error: bucketRowsError },
     { data: subRows, error: subRowsError },
@@ -102,7 +108,7 @@ export default async function NetworthPage() {
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, sort_order")
+      .select("id, account_id, name, sort_order, balance_cents")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -191,6 +197,25 @@ export default async function NetworthPage() {
       .lt("month", fiToMonth),
   ]);
   throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError });
+
+  // This month's rows as the capture started above writes them.
+  const accSnaps = withCurrentMonth(
+    accSnapsRead,
+    (balanceRows ?? [])
+      .filter((a) => a.active)
+      .map((a) => ({ month: fiToMonth, kind: a.kind as string, balance_cents: a.current_balance_cents ?? 0, account_id: a.id })),
+    (r) => r.account_id,
+  );
+  const debtSnaps = withCurrentMonth(
+    debtSnapsRead,
+    (debtRows ?? []).map((d) => ({ month: fiToMonth, balance_cents: d.current_balance_cents ?? 0, subcategory_id: d.subcategory_id })),
+    (r) => r.subcategory_id,
+  );
+  const bucketSnaps = withCurrentMonth(
+    bucketSnapsRead,
+    (bucketRows ?? []).map((b) => ({ month: fiToMonth, balance_cents: b.balance_cents ?? 0, bucket_id: b.id, account_id: b.account_id })),
+    (r) => r.bucket_id,
+  );
 
   // Once a property carries the home's value, the mortgage against it counts
   // as the liability it is — before that it stays out (lib/net-worth.ts).
@@ -734,6 +759,7 @@ export default async function NetworthPage() {
     household.id,
     thisYearNum,
     measuredByYear,
+    projectionRows ?? undefined,
   );
   // This year opens on last year's actual close, not the plan's.
   const anchored = await anchorYearToActualStart(
@@ -741,6 +767,11 @@ export default async function NetworthPage() {
     household.id,
     thisYearNum,
     netByYear.get(thisYearNum - 1) ?? null,
+    // Adopting re-walks the chain and can move this year's opening figure, so
+    // the already-read value only stands in when nothing was adopted.
+    adoptedYears.length === 0 && projectionRows
+      ? (projectionRows.find((r) => r.year === thisYearNum)?.boy_cents ?? null)
+      : undefined,
   );
   if (adoptedYears.length > 0 || anchored) {
     // The rows just changed underneath us; read them again so the table shows
@@ -755,6 +786,7 @@ export default async function NetworthPage() {
 
 
   const upcomingTravelCents = await upcomingTravelPromise;
+  await capturePromise;
 
   const projectionYears = (projectionRows ?? []).map((r) => ({
     year: r.year,

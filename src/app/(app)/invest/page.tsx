@@ -1,4 +1,4 @@
-import { captureSnapshots } from "@/lib/snapshots";
+import { withCurrentMonth, captureSnapshots } from "@/lib/snapshots";
 import {
   InvestBoard,
   type BoardTab,
@@ -51,7 +51,25 @@ export default async function InvestPage({
 
   // Freeze this month's balances into snapshots, same as Net Worth — that's the
   // series the year-end balances and the cash-reserve sparklines read from.
-  await captureSnapshots(supabase, household.id);
+  // Started beside the reads rather than awaited first (a round trip on every
+  // load); withCurrentMonth below shows this month from the live balances,
+  // which is exactly what the capture writes.
+  const capturePromise = captureSnapshots(supabase, household.id);
+  // Awaited (and so re-thrown) at the end; this only stops a failure from
+  // counting as unhandled if a read throws first.
+  capturePromise.catch(() => {});
+
+  // The imported-holdings batch list needs nothing but the household, so it
+  // starts now; its positions are fetched beside the main batch below.
+  const importBatchesPromise = supabase
+    .from("investment_import_batches")
+    .select(
+      "id, account_id, bucket_id, provider, import_kind, as_of_date, source_filename, row_count, created_at",
+    )
+    .eq("household_id", household.id)
+    .order("created_at", { ascending: false })
+    .limit(12)
+    .then((r) => r);
 
   const now = new Date();
   const nowYear = now.getFullYear();
@@ -64,7 +82,17 @@ export default async function InvestPage({
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
   })();
 
-  const categories = await ensureCategories(supabase, household.id);
+  // Categories and subcategories are read together — they used to be two
+  // back-to-back trips before the main batch.
+  const [categories, { data: subs, error: subsError }] = await Promise.all([
+    ensureCategories(supabase, household.id),
+    supabase
+      .from("subcategories")
+      .select("id, category_id, name, sort_order, linked_bucket_id, linked_account_id")
+      .eq("household_id", household.id)
+      .order("sort_order"),
+  ]);
+  throwIfAny({ subs: subsError });
   const savingsCategoryIds = categories.filter((c) => c.kind === "savings").map((c) => c.id);
   const incomeCategoryIds = categories.filter((c) => c.kind === "income").map((c) => c.id);
   // BILLS ONLY are the "essential monthly spend" an emergency fund has to
@@ -76,12 +104,6 @@ export default async function InvestPage({
     .filter((c) => c.kind === "bills")
     .map((c) => c.id);
 
-  const { data: subs, error: subsError } = await supabase
-    .from("subcategories")
-    .select("id, category_id, name, sort_order, linked_bucket_id, linked_account_id")
-    .eq("household_id", household.id)
-    .order("sort_order");
-  throwIfAny({ subs: subsError });
 
   const savingsSubs = (subs ?? []).filter((s) => savingsCategoryIds.includes(s.category_id));
   const savingsSubIds = savingsSubs.map((s) => s.id);
@@ -92,11 +114,38 @@ export default async function InvestPage({
     .filter((s) => essentialCategoryIds.includes(s.category_id))
     .map((s) => s.id);
 
+  const { data: importBatches, error: importBatchesError } = await importBatchesPromise;
+  throwIfAny({ importBatches: importBatchesError });
+  const batchIds = (importBatches ?? []).map((batch) => batch.id);
+  // Positions and performance for those batches, fetched beside the main batch.
+  const importDetailPromise = batchIds.length > 0
+    ? Promise.all([
+        supabase
+          .from("investment_position_snapshots")
+          .select(
+            "id, import_batch_id, as_of_date, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent, url",
+          )
+          .eq("household_id", household.id)
+          .in("import_batch_id", batchIds)
+          .order("market_value_cents", { ascending: false })
+          .limit(2000),
+        supabase
+          .from("investment_performance_snapshots")
+          .select(
+            "import_batch_id, as_of_date, entry_source, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents",
+          )
+          .eq("household_id", household.id)
+          .in("import_batch_id", batchIds)
+          .order("as_of_date", { ascending: false })
+          .limit(2000),
+      ])
+    : Promise.resolve([{ data: [], error: null }, { data: [], error: null }] as const);
+
   const [
     { data: allAccountRows, error: allAccountRowsError },
     { data: bucketRows, error: bucketRowsError },
-    accSnaps,
-    bucketSnaps,
+    accSnapsRead,
+    bucketSnapsRead,
     { data: contribRows, error: contribRowsError },
     { data: monthContribRows, error: monthContribRowsError },
     { data: yearRows, error: yearRowsError },
@@ -239,6 +288,20 @@ export default async function InvestPage({
     storedCapRows: storedCapRowsError,
     cardOwed: cardOwedError,
   });
+
+  // This month's rows as the capture started at the top writes them.
+  const accSnaps = withCurrentMonth(
+    accSnapsRead,
+    (allAccountRows ?? [])
+      .filter((a) => a.active)
+      .map((a) => ({ month: monthKey, account_id: a.id, balance_cents: a.current_balance_cents ?? 0 })),
+    (r) => r.account_id,
+  );
+  const bucketSnaps = withCurrentMonth(
+    bucketSnapsRead,
+    (bucketRows ?? []).map((b) => ({ month: monthKey, bucket_id: b.id, balance_cents: b.balance_cents ?? 0 })),
+    (r) => r.bucket_id,
+  );
 
   const allAccounts = allAccountRows ?? [];
   // Same set the board has always shown: investment accounts, plus kids
@@ -534,42 +597,10 @@ export default async function InvestPage({
 
   // ---- Imported holdings & performance -------------------------------------
 
-  const { data: importBatches, error: importBatchesError } = await supabase
-    .from("investment_import_batches")
-    .select(
-      "id, account_id, bucket_id, provider, import_kind, as_of_date, source_filename, row_count, created_at",
-    )
-    .eq("household_id", household.id)
-    .order("created_at", { ascending: false })
-    .limit(12);
-  throwIfAny({ importBatches: importBatchesError });
-
-  const batchIds = (importBatches ?? []).map((batch) => batch.id);
   const [
     { data: positionRows, error: positionRowsError },
     { data: performanceRows, error: performanceRowsError },
-  ] = batchIds.length > 0
-    ? await Promise.all([
-        supabase
-          .from("investment_position_snapshots")
-          .select(
-            "id, import_batch_id, as_of_date, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent, url",
-          )
-          .eq("household_id", household.id)
-          .in("import_batch_id", batchIds)
-          .order("market_value_cents", { ascending: false })
-          .limit(2000),
-        supabase
-          .from("investment_performance_snapshots")
-          .select(
-            "import_batch_id, as_of_date, entry_source, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents",
-          )
-          .eq("household_id", household.id)
-          .in("import_batch_id", batchIds)
-          .order("as_of_date", { ascending: false })
-          .limit(2000),
-      ])
-    : [{ data: [], error: null }, { data: [], error: null }];
+  ] = await importDetailPromise;
   throwIfAny({ positionRows: positionRowsError, performanceRows: performanceRowsError });
 
   const accountNameById = new Map(allAccounts.map((account) => [account.id, account.name]));
@@ -1014,6 +1045,8 @@ export default async function InvestPage({
   });
 
   const currentMonthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+
+  await capturePromise;
 
   return (
     <InvestBoard

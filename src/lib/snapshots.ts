@@ -123,3 +123,30 @@ export async function captureSnapshots(
     ),
   ]);
 }
+
+// Lay this month's snapshot rows over a history read, built from live balances
+// exactly as captureSnapshots writes them. Pages that start captureSnapshots
+// beside their reads (instead of awaiting it first, which cost a whole round
+// trip on every Net Worth / Invest load) use this so the current month shows
+// what the capture is about to store, whichever finishes first. Rows for other
+// months are untouched; a row with no live counterpart (an inactive account)
+// is kept as read, just as the capture's upsert leaves it.
+export function withCurrentMonth<T extends { month: string }>(
+  rows: T[],
+  live: T[],
+  key: (row: T) => string,
+): T[] {
+  const month = currentMonthFirst();
+  const liveByKey = new Map(live.map((r) => [key(r), r]));
+  const used = new Set<string>();
+  const out = rows.map((r) => {
+    if (r.month !== month) return r;
+    const k = key(r);
+    const fresh = liveByKey.get(k);
+    if (!fresh) return r;
+    used.add(k);
+    return fresh;
+  });
+  for (const [k, r] of liveByKey) if (!used.has(k)) out.push(r);
+  return out.sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
+}

@@ -2,10 +2,9 @@ import { currentMonthFirst } from "@/lib/snapshots";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type RewardActivity } from "./accounts-board";
 import type { CardPayment } from "@/components/card-payments-ledger";
-import { syncAllBucketedAccounts } from "./actions";
 import { getSessionContext } from "@/lib/auth-context";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
-import { throwIfAny } from "@/lib/supabase-result";
+import { throwIfAny, unwrap } from "@/lib/supabase-result";
 
 // N months before firstOfMonth, as YYYY-MM-01. n=1 → previous month.
 function monthsBefore(firstOfMonth: string, n: number): string {
@@ -19,14 +18,37 @@ export const metadata = { title: "Accounts · Capitall" };
 export default async function AccountsPage() {
   const { supabase, household } = await getSessionContext();
 
-  // Self-heal any account whose top-level balance drifted from its buckets'
-  // sum before this sync existed (e.g. a manually-entered total that never
-  // matched the buckets underneath it).
-  await syncAllBucketedAccounts(supabase, household.id);
-
   const currentMonth = currentMonthFirst();
   const prevMonth = monthsBefore(currentMonth, 1);
   const prev2Month = monthsBefore(currentMonth, 2);
+
+  // Month-end update checkmarks for this month and last — the two months the
+  // popup can close. A Supabase query only sends when it's awaited or
+  // .then()'d, so the .then here is what starts it now, alongside the reads
+  // below; without it the read waited for all of them and cost its own trip.
+  const monthEndChecksPromise = supabase
+    .from("month_end_checks")
+    .select("month, account_id, bucket_id")
+    .eq("household_id", household.id)
+    .in("month", [currentMonth, prevMonth])
+    .then((r) => r);
+
+  // Per-card owed and this month's spend, summed in Postgres by
+  // v_card_balances / v_card_month_spend (migration 20260826183000) rather
+  // than by adding up every charge here — one row per card, so it can't be
+  // truncated by the 1000-row response cap. Started now, beside the main reads;
+  // they used to wait for those to finish first, costing a round trip of their own.
+  const cardTotalsPromise = Promise.all([
+    supabase
+      .from("v_card_balances")
+      .select("account_id, owed_cents")
+      .eq("household_id", household.id),
+    supabase
+      .from("v_card_month_spend")
+      .select("account_id, spend_cents")
+      .eq("household_id", household.id)
+      .eq("month", currentMonth),
+  ]);
 
   const [
     { data: rows, error: rowsError },
@@ -150,6 +172,33 @@ export default async function AccountsPage() {
   // the two recoveries underneath were unreachable code. Every other read
   // still fails the page loudly rather than rendering a misleading $0.
   throwIfAny({ eoyHistory: eoyHistoryError, rows: rowsError, bucketRows: bucketRowsError, debtRows: debtRowsError, subRows: subRowsError, });
+
+  // Self-heal any account whose top-level balance drifted from its buckets'
+  // sum (e.g. a manually-entered total that never matched the buckets under
+  // it). Worked out from the rows just read instead of reading them again
+  // first — that extra read used to hold up every Accounts load. Writes only
+  // when something has actually drifted, which every bucket save now prevents.
+  const bucketSums = new Map<string, number>();
+  for (const b of bucketRows ?? []) {
+    bucketSums.set(b.account_id, (bucketSums.get(b.account_id) ?? 0) + (b.balance_cents ?? 0));
+  }
+  const drifted = (rows ?? []).filter(
+    (a) => bucketSums.has(a.id) && bucketSums.get(a.id) !== a.current_balance_cents,
+  );
+  if (drifted.length > 0) {
+    const results = await Promise.all(
+      drifted.map((a) =>
+        supabase
+          .from("accounts")
+          .update({ current_balance_cents: bucketSums.get(a.id), updated_at: new Date().toISOString() })
+          .eq("id", a.id)
+          .eq("household_id", household.id),
+      ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) throw new Error(`Could not sync account totals: ${failed.error.message}`);
+    for (const a of drifted) a.current_balance_cents = bucketSums.get(a.id) ?? a.current_balance_cents;
+  }
 
   // "That column/table isn't there yet" — the only failures these two reads
   // are allowed to swallow. Anything else (auth, network, RLS) still throws,
@@ -281,32 +330,11 @@ export default async function AccountsPage() {
   // minus sum(payments: paid_to_account_id = card)
   // CSV imports are historical budget records and are intentionally excluded
   // from the live card balance. Account balances/snapshots remain unchanged.
-  const creditCardIds = (rows ?? [])
-    .filter((a) => a.kind === "credit_card")
-    .map((a) => a.id);
-
   const cardOwed = new Map<string, number>();
   const cardMonthSpend = new Map<string, number>();
-  if (creditCardIds.length > 0) {
-    const now = new Date();
-    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-
-    // Summed in Postgres by v_card_balances / v_card_month_spend (migration
-    // 20260826183000) rather than by adding up every charge here. The response
-    // is one row per card, so this costs the same at 900 transactions or
-    // 900,000 — and it can't be silently truncated by the 1000-row response
-    // cap the way the old client-side tally was.
-    const [{ data: balanceRows, error: balanceRowsError }, { data: monthRows, error: monthRowsError }] = await Promise.all([
-      supabase
-        .from("v_card_balances")
-        .select("account_id, owed_cents")
-        .eq("household_id", household.id),
-      supabase
-        .from("v_card_month_spend")
-        .select("account_id, spend_cents")
-        .eq("household_id", household.id)
-        .eq("month", firstOfMonth),
-    ]);
+  {
+    const [{ data: balanceRows, error: balanceRowsError }, { data: monthRows, error: monthRowsError }] =
+      await cardTotalsPromise;
     throwIfAny({ balanceRows: balanceRowsError, monthRows: monthRowsError });
     for (const r of balanceRows ?? []) {
       cardOwed.set(r.account_id as string, (r.owed_cents as number) ?? 0);
@@ -408,8 +436,15 @@ export default async function AccountsPage() {
       memo: t.memo ?? null,
     }));
 
+  const monthEndChecks = (unwrap(await monthEndChecksPromise, "month_end_checks") ?? []).map((c) => ({
+    month: c.month as string,
+    accountId: (c.account_id as string | null) ?? null,
+    bucketId: (c.bucket_id as string | null) ?? null,
+  }));
+
   return (
     <AccountsBoard
+      monthEndChecks={monthEndChecks}
       accounts={accounts}
       budgetDebts={budgetDebts}
       currency={household.currency}

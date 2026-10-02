@@ -1208,14 +1208,21 @@ export async function adoptClosedProjectionYears(
     number,
     { income: number | null; spending: number | null; gains: number | null; months: number }
   >,
+  // The projection rows the caller already read, to skip reading them again —
+  // the Net Worth page has them in its main batch.
+  knownRows?: { year: number; income_cents: number | null; spending_cents: number | null; growth_cents: number | null }[],
 ): Promise<number[]> {
-  const { data: rows, error } = await supabase
-    .from("networth_projection")
-    .select("year, income_cents, spending_cents, growth_cents")
-    .eq("household_id", householdId)
-    .lt("year", thisYear)
-    .order("year");
-  if (error || !rows) return [];
+  let rows = knownRows?.filter((r) => r.year < thisYear).sort((a, b) => a.year - b.year) ?? null;
+  if (!rows) {
+    const { data, error } = await supabase
+      .from("networth_projection")
+      .select("year, income_cents, spending_cents, growth_cents")
+      .eq("household_id", householdId)
+      .lt("year", thisYear)
+      .order("year");
+    if (error || !data) return [];
+    rows = data;
+  }
 
   const adopted: number[] = [];
   let earliest: number | null = null;
@@ -1268,17 +1275,25 @@ export async function anchorYearToActualStart(
   householdId: string,
   year: number,
   actualStartCents: number | null,
+  // The year's current boy_cents if the caller already read it (undefined =
+  // read it here; null = there's no row for the year).
+  knownBoyCents?: number | null,
 ): Promise<boolean> {
   if (actualStartCents == null) return false;
-  const row = unwrap(
-    await supabase
-      .from("networth_projection")
-      .select("boy_cents")
-      .eq("household_id", householdId)
-      .eq("year", year)
-      .maybeSingle(),
-    "networth_projection",
-  );
+  const row =
+    knownBoyCents !== undefined
+      ? knownBoyCents == null
+        ? null
+        : { boy_cents: knownBoyCents }
+      : unwrap(
+          await supabase
+            .from("networth_projection")
+            .select("boy_cents")
+            .eq("household_id", householdId)
+            .eq("year", year)
+            .maybeSingle(),
+          "networth_projection",
+        );
   if (!row || row.boy_cents === actualStartCents) return false;
   const { error } = await supabase
     .from("networth_projection")
