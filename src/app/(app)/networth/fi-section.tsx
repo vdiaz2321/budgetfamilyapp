@@ -67,9 +67,12 @@ export type FiPlan = {
 };
 
 export type FiMeasured = {
-  /** Every asset on the Accounts page today (its Assets card: no kids
-   *  accounts, no cards or loans) — cash and savings included. */
+  /** Every asset on the Accounts page at the last finished month's close (its
+   *  Assets card: no kids accounts, no cards or loans, debts netted off) —
+   *  cash and savings included. */
   assetsCents: number;
+  /** The month `assetsCents` closed (YYYY-MM-01); null = live balances. */
+  asOfMonth: string | null;
   /** Bills + expenses over the last twelve months. */
   spendCents: number;
   /** Into savings and investments over the last twelve months. */
@@ -260,7 +263,7 @@ export function FiSection({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-4 py-3 sm:px-6">
+      <div className="px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -279,15 +282,19 @@ export function FiSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">Retirement Financial Planner</span>
+          <span className="text-sm font-semibold sm:text-base">Retirement Financial Planner</span>
         </button>
 
         {/* Today, growth to a picked year, and whether the plan works.
             The breakdown behind "On track" lives in the panels below. */}
         <div className={`mt-3 grid grid-cols-2 gap-2 ${nwRow ? "sm:grid-cols-3" : ""}`}>
-          {/* Always today's balance — the year picker lives on the Growth card. */}
+          {/* The last finished month's close — the year picker lives on the Growth card. */}
           <Figure
-            label={`Net worth: ${thisYear}`}
+            label={
+              measured.asOfMonth
+                ? `Net worth: ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(measured.asOfMonth.slice(5, 7)) - 1]} ${measured.asOfMonth.slice(0, 4)}`
+                : `Net worth: ${thisYear}`
+            }
             value={formatMoneyWhole(portfolioCents, currency)}
             tone="text-foreground"
             sub={prevNwCents != null ? `${thisYear - 1} NW: ${formatMoneyWhole(prevNwCents, currency)}` : "today"}
@@ -340,7 +347,11 @@ export function FiSection({
                 <>
                   <span className="font-semibold text-positive">{axisMoney(mile.endCents)} expected</span>
                   {" · "}
-                  <span className="font-semibold text-negative">{axisMoney(mile.targetCents)} needed</span>
+                  {/* The target, not a shortfall — blue, so "On track" doesn't
+                      sit beside a figure in alarm red. */}
+                  <span className="font-semibold" style={{ color: "var(--viz-savings)" }}>
+                    {axisMoney(mile.targetCents)} needed
+                  </span>
                 </>
               }
             />
@@ -356,7 +367,7 @@ export function FiSection({
       </div>
 
       {open ? (
-        <div className="px-4 pb-4 sm:px-6">
+        <div className="px-4 pb-4">
           {/* One plain line of assumptions, then the two years that matter
               side by side. This used to be two long sentences, and because
               the plan spends more at retirement than at FI they quoted two

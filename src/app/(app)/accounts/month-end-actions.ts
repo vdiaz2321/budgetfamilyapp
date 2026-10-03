@@ -16,6 +16,11 @@ import { unwrap } from "@/lib/supabase-result";
 // month too — unless this month's row is already ticked done, so a finished
 // value is never overwritten. That carry-forward is the fix for Oct 2026, when
 // Sep values typed on Oct 1 left October still showing August's.
+//
+// The carry keeps whatever this month has already done: the live balance is
+// set to last month's new close PLUS the movement since the old close (live −
+// old snapshot). Overwriting it outright would wipe an October contribution
+// logged before the September statement was typed in.
 
 const MONTH_RE = /^\d{4}-\d{2}-01$/;
 
@@ -53,6 +58,21 @@ async function resumAccountSnapshot(
     { onConflict: "household_id,month,account_id" },
   );
   if (upsertError) throw new Error(`Could not save the account total: ${upsertError.message}`);
+}
+
+// A month's recorded close for one account or bucket, before it is replaced.
+async function snapshotCents(
+  supabase: SupabaseClient,
+  householdId: string,
+  month: string,
+  target: { accountId?: string; bucketId?: string },
+): Promise<number | null> {
+  const q = target.bucketId
+    ? supabase.from("bucket_snapshots").select("balance_cents").eq("bucket_id", target.bucketId)
+    : supabase.from("account_snapshots").select("balance_cents").eq("account_id", target.accountId!);
+  const { data, error } = await q.eq("household_id", householdId).eq("month", month).maybeSingle();
+  if (error) throw new Error(`Could not read the month's balance: ${error.message}`);
+  return data?.balance_cents ?? null;
 }
 
 // Is this row already ticked done for `month`?
@@ -129,7 +149,10 @@ export async function saveMonthEndValue(input: {
     if (!bucket) return { error: "Bucket not found." };
 
     let moveLive = month === current;
+    let liveCents = balanceCents;
     if (month < current) {
+      const oldClose = await snapshotCents(supabase, householdId, month, { bucketId });
+      if (oldClose != null) liveCents = balanceCents + ((bucket.balance_cents ?? 0) - oldClose);
       const { error } = await supabase.from("bucket_snapshots").upsert(
         { household_id: householdId, month, bucket_id: bucketId, account_id: accountId, balance_cents: balanceCents, updated_at: now },
         { onConflict: "household_id,month,bucket_id" },
@@ -143,7 +166,7 @@ export async function saveMonthEndValue(input: {
     if (moveLive) {
       const { error } = await supabase
         .from("buckets")
-        .update({ balance_cents: balanceCents, updated_at: now })
+        .update({ balance_cents: liveCents, updated_at: now })
         .eq("id", bucketId)
         .eq("household_id", householdId);
       if (error) return { error: error.message };
@@ -152,7 +175,10 @@ export async function saveMonthEndValue(input: {
     }
   } else {
     let moveLive = month === current;
+    let liveCents = balanceCents;
     if (month < current) {
+      const oldClose = await snapshotCents(supabase, householdId, month, { accountId });
+      if (oldClose != null) liveCents = balanceCents + ((account.current_balance_cents ?? 0) - oldClose);
       const { error } = await supabase.from("account_snapshots").upsert(
         { household_id: householdId, month, account_id: accountId, kind: account.kind, balance_cents: balanceCents, updated_at: now },
         { onConflict: "household_id,month,account_id" },
@@ -164,7 +190,7 @@ export async function saveMonthEndValue(input: {
     if (moveLive) {
       const { error } = await supabase
         .from("accounts")
-        .update({ current_balance_cents: balanceCents, updated_at: now })
+        .update({ current_balance_cents: liveCents, updated_at: now })
         .eq("id", accountId)
         .eq("household_id", householdId);
       if (error) return { error: error.message };

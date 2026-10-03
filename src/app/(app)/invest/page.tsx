@@ -148,6 +148,7 @@ export default async function InvestPage({
     bucketSnapsRead,
     { data: contribRows, error: contribRowsError },
     { data: monthContribRows, error: monthContribRowsError },
+    { data: janContribRows, error: janContribRowsError },
     { data: yearRows, error: yearRowsError },
     { data: savingsGoals, error: savingsGoalsError },
     savingsTx,
@@ -205,6 +206,16 @@ export default async function InvestPage({
       .select("account_id, net_contribution_cents")
       .eq("household_id", household.id)
       .eq("month", monthKey),
+    // Each year's January contributions, per slot. When January's balance
+    // stands in as a year's opening it already holds them — see openedOnJanuary.
+    supabase
+      .from("v_investment_contributions_monthly")
+      .select("account_id, bucket_id, year, net_contribution_cents")
+      .eq("household_id", household.id)
+      .in(
+        "month",
+        Array.from({ length: nowYear - FLOOR_YEAR + 1 }, (_, i) => `${FLOOR_YEAR + i}-01-01`),
+      ),
     supabase
       .from("investment_years")
       .select("account_id, bucket_id, year, contributed_cents, accrued_cents, accrued_manual, start_cents, end_cents")
@@ -279,6 +290,7 @@ export default async function InvestPage({
     bucketRows: bucketRowsError,
     contribRows: contribRowsError,
     monthContribRows: monthContribRowsError,
+    janContribRows: janContribRowsError,
     yearRows: yearRowsError,
     savingsGoals: savingsGoalsError,
     plans: plansError,
@@ -395,6 +407,11 @@ export default async function InvestPage({
     const key = `${slotId}:${year}`;
     return firstMonth.get(key) === "01" ? firstBalance.get(key) ?? null : null;
   }
+  /** True when `openingCents` fell back to January's balance for the year. */
+  function openedOnJanuary(slotId: string, year: number): boolean {
+    if ((decBalance.get(`${slotId}:${year - 1}`) ?? endBalance.get(`${slotId}:${year - 1}`)) != null) return false;
+    return firstMonth.get(`${slotId}:${year}`) === "01";
+  }
 
   // Live-derived net contributions per (account, bucket, year).
   const contribBy = new Map<string, number>();
@@ -403,6 +420,15 @@ export default async function InvestPage({
       investSlotKey(c.account_id, c.bucket_id ?? null, c.year),
       c.net_contribution_cents ?? 0,
     );
+  }
+
+  // January's contributions per slot. A January balance is the close of
+  // January, so it already contains them: growth measured from it must leave
+  // them out, or January's deposits are subtracted twice.
+  const janContribBy = new Map<string, number>();
+  for (const c of janContribRows ?? []) {
+    const key = investSlotKey(c.account_id, c.bucket_id ?? null, c.year);
+    janContribBy.set(key, (janContribBy.get(key) ?? 0) + (c.net_contribution_cents ?? 0));
   }
 
   // Stored/reviewed rows.
@@ -475,9 +501,14 @@ export default async function InvestPage({
     // Growth is what the balance did beyond the money paid in:
     //   (what it's worth now) − (what it opened at) − (what was added).
     // A hand-typed figure pins the cell and this is skipped.
+    // Opening on January's close (the first year of history), January's own
+    // deposits are already in `start`, so only February onward counts here.
+    const janAlreadyIn =
+      stored?.start == null && snapshotId != null && openedOnJanuary(snapshotId, year)
+        ? janContribBy.get(key) ?? 0
+        : 0;
     const autoAccrued =
-      start != null && end != null ? end - start - contributed : 0;
-    const accrued = stored?.accruedManual ? stored.accrued : autoAccrued;
+      start != null && end != null ? end - start - (contributed - janAlreadyIn) : 0;    const accrued = stored?.accruedManual ? stored.accrued : autoAccrued;
 
     return {
       year,

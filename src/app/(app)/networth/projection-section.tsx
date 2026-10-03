@@ -139,6 +139,7 @@ export function ProjectionSection({
   militaryRetireYear,
   defaultTaxPct,
   currentNwCents,
+  currentNwMonth,
 }: {
   years: ProjectionYear[];
   currency: string;
@@ -148,6 +149,8 @@ export function ProjectionSection({
   defaultTaxPct: number;
   /** Today's net worth — the same figure as the Retirement Financial Planner's card. */
   currentNwCents: number;
+  /** The finished month that figure closed (YYYY-MM-01); null = live. */
+  currentNwMonth: string | null;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: false }));
@@ -215,7 +218,7 @@ export function ProjectionSection({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-4 py-3 sm:px-6">
+      <div className="px-4 py-3">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -234,7 +237,7 @@ export function ProjectionSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-bold">Current and Projected Net Worth</span>
+          <span className="text-sm font-semibold sm:text-base">Current and Projected Net Worth</span>
         </button>
 
         {/* Same treatment as the Retirement Financial Planner cards: the pace and how far
@@ -246,7 +249,7 @@ export function ProjectionSection({
               label={`${thisYear} projected NW`}
               value={formatMoneyWhole(current.eoyCents, currency)}
               tone="text-foreground"
-              sub={`Current NW: ${formatMoneyWhole(currentNwCents, currency)}`}
+              sub={`${currentNwMonth ? MONTH_NAMES[Number(currentNwMonth.slice(5, 7)) - 1] : "Current"} NW: ${formatMoneyWhole(currentNwCents, currency)}`}
             />
           ) : null}
           {gap != null ? (
@@ -282,7 +285,7 @@ export function ProjectionSection({
               against a bounded height, which is what gives the header row
               somewhere to freeze. Boxed like the stat cards above it, so the
               header cards and the table read as one set. */}
-          <div className="mx-4 overflow-hidden rounded-lg bg-background ring-1 ring-line sm:mx-6">
+          <div className="mx-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
           <div className="max-h-[70vh] overflow-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
@@ -408,7 +411,7 @@ export function ProjectionSection({
                             {formatMoneyWhole(y.actualCents, currency)}
                             {y.inProgress ? (
                               <span className="block text-[11px] font-normal text-foreground/75">
-                                Currently
+                                {y.monthsDone > 0 ? `${MONTH_NAMES[y.monthsDone - 1]} close` : "Currently"}
                               </span>
                             ) : null}
                           </>
@@ -465,7 +468,7 @@ export function ProjectionSection({
           </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center justify-end gap-2 px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -478,10 +481,10 @@ export function ProjectionSection({
             </div>
           </div>
           {error ? (
-            <p className="px-4 pb-3 text-sm font-medium text-negative sm:px-6">{error}</p>
+            <p className="px-4 pb-3 text-sm font-medium text-negative">{error}</p>
           ) : null}
           {!error && notice ? (
-            <p className="px-4 pb-3 text-sm font-medium text-muted sm:px-6">{notice}</p>
+            <p className="px-4 pb-3 text-sm font-medium text-muted">{notice}</p>
           ) : null}
         </>
       ) : null}
@@ -1108,8 +1111,8 @@ function ProjectionEmpty({
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-4 py-3 sm:px-6">
-        <p className="text-sm font-bold">Current and Projected Net Worth</p>
+      <div className="px-4 py-3">
+        <p className="text-sm font-semibold sm:text-base">Current and Projected Net Worth</p>
         <p className="mt-1 text-xs text-muted">
           Where your net worth is heading, year by year, and how each year turns
           out against the plan. Start it from what you have already recorded —

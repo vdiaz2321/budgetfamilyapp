@@ -67,6 +67,7 @@ export default async function NetworthPage() {
     { data: incomeLineRows, error: incomeLineError },
     { data: rentalRows, error: rentalError },
     { data: fiContribRows, error: fiContribError },
+    { data: janContribRows, error: janContribError },
   ] = await Promise.all([
     // Every snapshot ever taken — this page IS the history view, so none of
     // these can be date-bounded. They grow by one row per account/bucket/debt
@@ -195,8 +196,14 @@ export default async function NetworthPage() {
       .eq("household_id", household.id)
       .gte("month", fiFromMonth)
       .lt("month", fiToMonth),
+    // This January's contributions — already inside a January opening balance.
+    supabase
+      .from("v_investment_contributions_monthly")
+      .select("account_id, net_contribution_cents")
+      .eq("household_id", household.id)
+      .eq("month", `${fiToMonth.slice(0, 4)}-01-01`),
   ]);
-  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError });
+  throwIfAny({ accountRows: accountRowsError, bucketRows: bucketRowsError, subRows: subRowsError, debtRows: debtRowsError, retirementPlan: planError, fiFlows: flowError, fiBalances: balanceError, fiCategories: catError, projection: projectionError, investmentYears: gainError, investContributions: liveContribError, incomeLines: incomeLineError, rentals: rentalError, fiContributions: fiContribError, janContributions: janContribError });
 
   // This month's rows as the capture started above writes them.
   const accSnaps = withCurrentMonth(
@@ -591,6 +598,18 @@ export default async function NetworthPage() {
   }
   fiAssetsCents -= (points.at(-1)?.debt ?? 0) - linkedMortgageCents;
 
+  // Headline figures use the last FINISHED month. The month in progress is
+  // half-updated by design — investments only move at the month-end update,
+  // while checking accounts move every day — so October read as a $7,469
+  // fall against September that was only bills paid on the 1st. Same rule as
+  // the Monthly Actual Balances cards.
+  const closedPoints = points.filter((p) => p.month < fiToMonth);
+  const lastClosed = closedPoints.at(-1) ?? null;
+  if (lastClosed) {
+    // Same portfolio as above — no home value, debts netted off — at that close.
+    fiAssetsCents = lastClosed.net - lastClosed.property + linkedMortgageCents;
+  }
+
   // ---- NW Projections.
   //
   // The actual for a year is the last net worth the app recorded in it, taken
@@ -598,7 +617,7 @@ export default async function NetworthPage() {
   // never tell different stories. The current year is marked in-progress
   // because its "actual" is only the year so far.
   const netByYear = new Map<number, number>();
-  for (const point of points) {
+  for (const point of closedPoints) {
     netByYear.set(Number(point.month.slice(0, 4)), point.net);
   }
   const thisYearNum = Number(fiToMonth.slice(0, 4));
@@ -732,9 +751,18 @@ export default async function NetworthPage() {
         : undefined;
     const opening = priorDec ?? janStandIn;
 
+    // January's close already holds January's deposits, so when it stands in
+    // as the opening only February onward is subtracted — same rule as
+    // Invest / Savings.
+    const janAlreadyIn =
+      priorDec == null && janStandIn != null
+        ? (janContribRows ?? [])
+            .filter((r) => householdAccountIds.has(r.account_id))
+            .reduce((t, r) => t + (r.net_contribution_cents ?? 0), 0)
+        : 0;
     const contributed = investedByYear.get(thisYearNum);
     if (closing != null && opening != null && contributed != null) {
-      runningGainsByYear.set(thisYearNum, closing - opening - contributed);
+      runningGainsByYear.set(thisYearNum, closing - opening - (contributed - janAlreadyIn));
     }
   }
 
@@ -889,6 +917,7 @@ export default async function NetworthPage() {
       }}
       fiMeasured={{
         assetsCents: fiAssetsCents,
+        asOfMonth: lastClosed?.month ?? null,
         spendCents: fiSpendCents,
         contributionCents: fiContributionCents,
         fromMonth: fiFromMonth.slice(0, 7),
@@ -898,7 +927,7 @@ export default async function NetworthPage() {
       projectionYears={projectionYears}
       projectionSeed={{
         // Where the plan starts: net worth as it stands today.
-        boyCents: points.at(-1)?.net ?? 0,
+        boyCents: lastClosed?.net ?? points.at(-1)?.net ?? 0,
         incomeCents: fiIncomeCents,
         spendingCents: fiSpendCents,
         fromMonth: fiFromMonth.slice(0, 7),
