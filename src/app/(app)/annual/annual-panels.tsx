@@ -92,18 +92,13 @@ export function AnnualPanels({
     if (selected.size === 0) return null;
 
     const sums = { income: 0, spending: 0, savings: 0, debt: 0, net: 0 } as Record<CardId, number>;
-    // Months per card, kept as indexes so the caption reads in calendar order
-    // rather than click order.
+    // Distinct months per card, for the "N months selected" caption.
     const months: Record<CardId, Set<number>> = {
       income: new Set(), spending: new Set(), savings: new Set(),
       debt: new Set(), net: new Set(),
     };
-    const kindsUsed: Record<CardId, Set<string>> = {
-      income: new Set(), spending: new Set(), savings: new Set(),
-      debt: new Set(), net: new Set(),
-    };
     // Whole-year Total cells belong to no single month; they caption as
-    // "full year" instead of joining the month list.
+    // "full year" instead of counting as a month.
     const wholeYear = new Set<CardId>();
     const touched = new Set<CardId>();
 
@@ -113,7 +108,6 @@ export function AnnualPanels({
       touched.add(card);
       if (cell.monthIdx === null) wholeYear.add(card);
       else months[card].add(cell.monthIdx);
-      kindsUsed[card].add(cell.kind);
     }
 
     // Net is the point of the selection, not another column of it: whatever
@@ -123,20 +117,16 @@ export function AnnualPanels({
     // so it folds into the same sum rather than competing with it.
     sums.net += sums.income - sums.spending - sums.savings - sums.debt;
 
+    // A count, not a list: "Apr, May, Jun, Jul, Aug, Sep" wrapped the card to
+    // three lines, and the outlined cells already show which months they are.
     const captions = {} as Record<CardId, string>;
     for (const card of CARD_ORDER) {
-      const monthPart = [...months[card]]
-        .sort((a, b) => a - b)
-        .map((i) => MONTH_ABBR[i] ?? "")
-        .join(", ");
-      const parts = [wholeYear.has(card) ? "full year" : "", monthPart].filter(Boolean);
-      // Spending is the only card fed by two columns, so it is the only one
-      // that has to say which of them a total came from.
-      const kindPart =
-        card === "spending" && kindsUsed[card].size > 0
-          ? ` · ${[...kindsUsed[card]].sort().join(" + ")}`
-          : "";
-      captions[card] = parts.length ? `${parts.join(" + ")}${kindPart}` : "";
+      const n = months[card].size;
+      const parts = [
+        wholeYear.has(card) ? "full year" : "",
+        n ? `${n} month${n === 1 ? "" : "s"}` : "",
+      ].filter(Boolean);
+      captions[card] = parts.length ? `${parts.join(" + ")} selected` : "";
     }
     captions.net = `net of ${selected.size} selected cell${selected.size === 1 ? "" : "s"}`;
 
@@ -146,10 +136,36 @@ export function AnnualPanels({
     const filled = CARD_ORDER.filter((c) => c !== "net" && touched.has(c));
     const showNet = filled.length > 1 || touched.has("net");
 
+    // Difference: when one card's cells cover two or more months, the newest
+    // month less the oldest ("Sep vs Aug"). Only for a single card — across
+    // cards the Net card already answers the question, and subtracting Aug
+    // income from Sep groceries means nothing. Whole-year cells have no month
+    // to stand in, so they sit out.
+    let difference: HeroFilter["difference"] = null;
+    if (touched.size === 1) {
+      const [card] = touched;
+      const byMonth = new Map<number, number>();
+      for (const cell of selected.values()) {
+        if (cell.monthIdx === null) continue;
+        byMonth.set(cell.monthIdx, (byMonth.get(cell.monthIdx) ?? 0) + cell.amountCents);
+      }
+      if (byMonth.size >= 2) {
+        const ordered = [...byMonth.keys()].sort((a, b) => a - b);
+        const first = ordered[0];
+        const last = ordered[ordered.length - 1];
+        difference = {
+          cents: byMonth.get(last)! - byMonth.get(first)!,
+          caption: `${MONTH_ABBR[last]} vs ${MONTH_ABBR[first]}`,
+          upIsGood: card === "income" || card === "savings" || card === "net",
+        };
+      }
+    }
+
     return {
       cards: CARD_ORDER.filter((c) => (c === "net" ? showNet : touched.has(c))),
       sums,
       captions,
+      difference,
     };
   }, [selected]);
 
@@ -182,7 +198,6 @@ export function AnnualPanels({
             currency={currency}
             selected={selected}
             onToggleCell={toggleCell}
-            onClearSelection={clear}
           />
         </div>
         <div className="min-w-0">
@@ -193,7 +208,6 @@ export function AnnualPanels({
             currency={currency}
             selected={selected}
             onToggleCell={toggleCell}
-            onClearSelection={clear}
           />
         </div>
 

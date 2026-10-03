@@ -20,7 +20,9 @@ export function displayToCents(value: string | number | null | undefined): numbe
   // used to parse as NaN and save as 0, which silently zeroed the Irregular
   // Bills planned amounts the moment one was edited.
   const n =
-    typeof value === "number" ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ""));
+    typeof value === "number"
+      ? value
+      : parseFloat(String(value).replace(/\u2060/g, "").replace(/\u2212/g, "-").replace(/[^0-9.-]/g, ""));
   if (Number.isNaN(n)) return 0;
   return Math.round(n * 100);
 }
@@ -32,7 +34,7 @@ export function displayToCents(value: string | number | null | undefined): numbe
 export function moneyExpressionToCents(value: string | number | null | undefined): number {
   if (value == null || value === "") return 0;
   if (typeof value === "number") return Math.round(value * 100);
-  const source = value.replace(/[$€,\s]/g, "");
+  const source = value.replace(/\u2060/g, "").replace(/\u2212/g, "-").replace(/[$€,\s]/g, "");
   if (!source || !/^[0-9.+\-*/()]+$/.test(source)) return displayToCents(value);
 
   let index = 0;
@@ -118,13 +120,25 @@ export function foreignSymbol(code: string): string {
   }
 }
 
+// Display minus for money: U+2212, not the hyphen. Money is set in tabular
+// figures, which widen the hyphen to a full digit width and leave a visible
+// gap before the "$" ("- $576.68"); the true minus is drawn to that width.
+// Inputs keep the hyphen (centsToGroupedDisplay) since people type one, and
+// the parsers below accept either.
+//
+// The trailing U+2060 (word joiner) is load-bearing: unlike the hyphen, the
+// true minus allows a line break after it, so a narrow cell split
+// "−$1,887.27" into a lone "−" over "$1,887.27". The joiner is invisible and
+// glues the sign to the amount.
+export const MINUS = "\u2212\u2060";
+
 export function formatMoney(cents: number, currency = "$"): string {
   const symbol = currencySymbol(currency);
   const abs = Math.abs(cents);
   const whole = Math.floor(abs / 100);
   const frac = String(abs % 100).padStart(2, "0");
   const withCommas = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const sign = cents < 0 ? "-" : "";
+  const sign = cents < 0 ? MINUS : "";
   return `${sign}${symbol}${withCommas}.${frac}`;
 }
 
@@ -138,12 +152,12 @@ export function formatMoney(cents: number, currency = "$"): string {
 /** Whole units in any ISO currency — "€700", "CHF700", "Kč700". */
 export function formatForeignWhole(cents: number, code: string): string {
   const units = Math.round(Math.abs(cents) / 100);
-  return `${cents < 0 ? "-" : ""}${foreignSymbol(code)}${units.toLocaleString("en-US")}`;
+  return `${cents < 0 ? MINUS : ""}${foreignSymbol(code)}${units.toLocaleString("en-US")}`;
 }
 
 export function formatMoneyWhole(cents: number, currency = "$"): string {
   const symbol = currencySymbol(currency);
   const dollars = Math.round(Math.abs(cents) / 100);
   const withCommas = dollars.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${cents < 0 ? "-" : ""}${symbol}${withCommas}`;
+  return `${cents < 0 ? MINUS : ""}${symbol}${withCommas}`;
 }

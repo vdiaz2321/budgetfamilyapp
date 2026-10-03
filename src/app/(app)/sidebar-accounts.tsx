@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { MINUS } from "@/lib/money";
 
 export type SidebarAccount = {
   id: string;
@@ -46,7 +47,7 @@ function dotColorFor(name: string) {
 }
 
 function formatWhole(cents: number): string {
-  const sign = cents < 0 ? "-" : "";
+  const sign = cents < 0 ? MINUS : "";
   const dollars = Math.round(Math.abs(cents) / 100);
   return `${sign}$${dollars.toLocaleString("en-US")}`;
 }

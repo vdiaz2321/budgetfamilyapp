@@ -61,18 +61,19 @@ export default async function AccountsPage() {
     bktSnapshotRows,
     debtSnapshotRows,
     cardPaymentRows,
+    debtPaymentRows,
     { data: eoyHistoryRow, error: eoyHistoryError },
     debtMonth,
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, tax_treatment, retirement_kind")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, tax_treatment, retirement_kind, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, bank_group, tax_treatment, retirement_kind, holder")
+      .select("id, account_id, name, balance_cents, bank_group, tax_treatment, retirement_kind, holder, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -143,13 +144,27 @@ export default async function AccountsPage() {
     // the register. Read-only; nothing here writes back to balances.
     fetchAllRows<{
       id: string; occurred_on: string; amount_cents: number; memo: string | null;
-      account_id: string | null; paid_to_account_id: string | null; movement_type: string | null;
+      account_id: string | null; bucket_id: string | null; paid_to_account_id: string | null; movement_type: string | null;
+      reimbursed_cents: number; created_at: string; updated_at: string;
     }>((from, to) =>
       supabase
         .from("transactions")
-        .select("id, occurred_on, amount_cents, memo, account_id, paid_to_account_id, movement_type")
+        .select("id, occurred_on, amount_cents, reimbursed_cents, memo, account_id, bucket_id, paid_to_account_id, movement_type, created_at, updated_at")
         .eq("household_id", household.id)
         .not("paid_to_account_id", "is", null)
+        .order("occurred_on", { ascending: false })
+        .order("id")
+        .range(from, to),
+    ),
+    // Debt payments — every transaction filed under a debt's budget item (the
+    // same rows the Debt page lists), for the Debt Payments report. The inner
+    // join keeps only items that have a `debts` row, so no second round trip
+    // waits on the debts read above.
+    fetchAllRows<{ id: string; occurred_on: string; amount_cents: number; memo: string | null; account_id: string | null; bucket_id: string | null; subcategory_id: string; paid_to_account_id: string | null; reimbursed_cents: number; created_at: string; updated_at: string }>((from, to) =>
+      supabase
+        .from("transactions")
+        .select("id, occurred_on, amount_cents, reimbursed_cents, memo, account_id, bucket_id, subcategory_id, paid_to_account_id, created_at, updated_at, subcategories!inner(debts!inner(id))")
+        .eq("household_id", household.id)
         .order("occurred_on", { ascending: false })
         .order("id")
         .range(from, to),
@@ -360,6 +375,7 @@ export default async function AccountsPage() {
     taxTreatment: (a.tax_treatment as string | null) ?? null,
     retirementKind: (a.retirement_kind as string | null) ?? null,
     balanceCents: a.current_balance_cents ?? 0,
+    balanceUpdatedAt: a.balance_updated_at,
     annualFeeCents: a.annual_fee_cents ?? null,
     feeWaived: a.fee_waived ?? false,
     dateOpened: a.date_opened ?? null,
@@ -391,6 +407,7 @@ export default async function AccountsPage() {
         taxTreatment: (b.tax_treatment as string | null) ?? null,
         retirementKind: (b.retirement_kind as string | null) ?? null,
         holder: (b.holder as string | null) ?? null,
+        balanceUpdatedAt: b.balance_updated_at,
         // Keyed "YYYY-MM-01", so a bucket row can show (and write) the month
         // the period picker is pointing at rather than only the last three.
         balancesByMonth: (() => {
@@ -420,6 +437,43 @@ export default async function AccountsPage() {
   // null on rows written before that column existed, so fall back to the same
   // rule the register uses: destination account is a credit card.
   const cardIds = new Set((rows ?? []).filter((a) => a.kind === "credit_card").map((a) => a.id));
+  // What removing a payment would put back, for the Remove warning — mirrors
+  // deleteTransaction exactly. Card payments refund the bucket they came from,
+  // else the bank account; a plain debt payment refunds the account. Either
+  // way only a running-ledger account moves (not an investment or bucketed
+  // one — adjustAccountLedger skips those). Any debt tracked on the item goes
+  // back up by the amount.
+  const accountById = new Map((rows ?? []).map((a) => [a.id, a]));
+  const bucketById = new Map((bucketRows ?? []).map((b) => [b.id, b]));
+  const bucketedAccountIds = new Set((bucketRows ?? []).map((b) => b.account_id));
+  const subNameOf = (subId: string) => subName.get(subId) ?? "Debt";
+  const debtBySub = new Map((debtRows ?? []).map((d) => [d.subcategory_id as string, d]));
+  const debtByCard = new Map((debtRows ?? []).filter((d) => d.account_id).map((d) => [d.account_id as string, d]));
+  const undoOf = (
+    accountId: string | null,
+    bucketId: string | null,
+    debt: { subcategory_id: string; current_balance_cents: number | null } | undefined,
+  ): CardPayment["undo"] => {
+    let refund: { name: string; balanceCents: number } | null = null;
+    const bucket = bucketId ? bucketById.get(bucketId) : null;
+    const account = accountId ? accountById.get(accountId) : null;
+    if (bucket) {
+      refund = { name: `${accountById.get(bucket.account_id)?.name ?? "Account"} · ${bucket.name}`, balanceCents: bucket.balance_cents ?? 0 };
+    } else if (account && account.kind !== "investment" && !bucketedAccountIds.has(account.id)) {
+      refund = { name: account.name, balanceCents: account.current_balance_cents ?? 0 };
+    }
+    return {
+      refund,
+      debt: debt ? { name: subNameOf(debt.subcategory_id), owedCents: debt.current_balance_cents ?? 0 } : null,
+    };
+  };
+
+  // When a payment was changed after it was logged (amount, date, reimbursed…),
+  // from the trigger in migration 20261003150000. A minute's grace so the save
+  // that created a row never reads as an edit.
+  const editedAtOf = (t: { created_at: string; updated_at: string }) =>
+    new Date(t.updated_at).getTime() - new Date(t.created_at).getTime() > 60_000 ? t.updated_at : null;
+
   const cardPayments: CardPayment[] = (cardPaymentRows ?? [])
     .filter(
       (t) =>
@@ -432,9 +486,56 @@ export default async function AccountsPage() {
       date: t.occurred_on,
       amountCents: t.amount_cents,
       cardId: t.paid_to_account_id as string,
+      reimbursedCents: t.reimbursed_cents ?? 0,
+      editedAt: editedAtOf(t),
       fromAccountId: t.account_id ?? null,
       memo: t.memo ?? null,
+      undo: undoOf(t.account_id, t.bucket_id, debtByCard.get(t.paid_to_account_id as string)),
     }));
+
+  // A debt tracked against a credit card is paid on Budget as a debt payment,
+  // not through Pay Card — count those toward the card too, so the card's row
+  // isn't $0 while its debt row shows the money. Pay Card rows on a debt card
+  // already have paid_to_account_id and are in the list above, so skipped here.
+  const cardIdByDebtSub = new Map(
+    (debtRows ?? [])
+      .filter((d) => d.account_id && cardIds.has(d.account_id))
+      .map((d) => [d.subcategory_id as string, d.account_id as string]),
+  );
+  for (const t of debtPaymentRows ?? []) {
+    const cardId = cardIdByDebtSub.get(t.subcategory_id);
+    if (!cardId || t.paid_to_account_id) continue;
+    cardPayments.push({
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: t.amount_cents,
+      cardId,
+      reimbursedCents: t.reimbursed_cents ?? 0,
+      editedAt: editedAtOf(t),
+      fromAccountId: t.account_id ?? null,
+      memo: t.memo ?? null,
+      undo: undoOf(t.account_id, null, debtBySub.get(t.subcategory_id)),
+    });
+  }
+
+  const debtPayments: CardPayment[] = (debtPaymentRows ?? []).map((t) => ({
+    id: t.id,
+    date: t.occurred_on,
+    amountCents: t.amount_cents,
+    cardId: t.subcategory_id,
+    reimbursedCents: t.reimbursed_cents ?? 0,
+    editedAt: editedAtOf(t),
+    fromAccountId: t.account_id ?? null,
+    memo: t.memo ?? null,
+    // A Pay Card row on a debt card refunds like a card payment.
+    undo: t.paid_to_account_id
+      ? undoOf(t.account_id, t.bucket_id, debtByCard.get(t.paid_to_account_id))
+      : undoOf(t.account_id, null, debtBySub.get(t.subcategory_id)),
+  }));
+  // Every debt's name (paid-off ones too, so their old payments still read
+  // right); debts still owing get a row even in a month with no payment.
+  const debtNames = Object.fromEntries((debtRows ?? []).map((d) => [d.subcategory_id, subName.get(d.subcategory_id) ?? "Debt"]));
+  const owingDebtIds = (debtRows ?? []).filter((d) => (d.current_balance_cents ?? 0) > 0).map((d) => d.subcategory_id as string);
 
   const monthEndChecks = (unwrap(await monthEndChecksPromise, "month_end_checks") ?? []).map((c) => ({
     month: c.month as string,
@@ -451,6 +552,9 @@ export default async function AccountsPage() {
       nonCardAccounts={nonCardAccounts}
       historyMonths={[currentMonth, prevMonth, prev2Month]}
       cardPayments={cardPayments}
+      debtPayments={debtPayments}
+      debtNames={debtNames}
+      owingDebtIds={owingDebtIds}
       eoyHistoryNetCents={
         eoyHistoryRow
           ? eoyHistoryRow.savings_cents + eoyHistoryRow.bank_cents + eoyHistoryRow.stocks_cents - eoyHistoryRow.debt_cents

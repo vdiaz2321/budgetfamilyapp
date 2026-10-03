@@ -8,12 +8,16 @@ import type { CardId } from "./annual-selection";
  * When cells are selected in the Months table, the hero stops showing the
  * year and shows the selection instead: only the cards those cells feed, each
  * summing just those cells. `sums` carries the money, `captions` the
- * "Jul, Aug · bills + expenses" line that replaces "% of income".
+ * "2 months selected" line that replaces "% of income".
  */
 export type HeroFilter = {
   cards: CardId[];
   sums: Record<CardId, number>;
   captions: Record<CardId, string>;
+  /** Newest selected month less the oldest, when the selection spans two or
+   *  more months of one card. `upIsGood` sets the tone: spending up is bad,
+   *  income up is good. */
+  difference: { cents: number; caption: string; upIsGood: boolean } | null;
 };
 
 type Props = {
@@ -73,7 +77,7 @@ export function AnnualHero({
       case "spending":
         return (
           <Stat
-            label={`${year} Spent (Bills/Expenses)`}
+            label={`${year} Bills/Expenses`}
             value={val("spending", spendingTotal)}
             currency={currency}
             tone="text-negative"
@@ -108,14 +112,14 @@ export function AnnualHero({
         const p = pct(netTotal);
         return (
           <Stat
-            label={`${year} Net`}
+            label={`${year} Remaining`}
             value={v}
             currency={currency}
             tone={v >= 0 ? "text-positive" : "text-negative"}
             subtitleTone={v >= 0 ? "text-positive" : "text-negative"}
             subtitle={cap(
               "net",
-              p === null ? null : `${p.toFixed(1)}% of income remaining`,
+              p === null ? null : `${p.toFixed(1)}% of income`,
             )}
           />
         );
@@ -126,7 +130,10 @@ export function AnnualHero({
   // Cards that drop out of a filtered view leave their grid slot behind rather
   // than collapsing it: clicking a second cell must not move the row the
   // pointer is already over. The first freed slot carries the way back.
-  const clearSlot = CARD_ORDER.find((id) => !shows(id));
+  const freeSlots = CARD_ORDER.filter((id) => !shows(id));
+  const clearSlot = freeSlots[0];
+  // The difference rides in the next freed slot, beside the card it compares.
+  const diffSlot = active?.difference ? freeSlots[1] : undefined;
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -138,13 +145,30 @@ export function AnnualHero({
               key={id}
               type="button"
               onClick={onClear}
-              className="rounded-2xl border border-dashed border-line px-4 py-3 text-center text-[12px] font-semibold text-muted transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              // Same sky treatment as the Clear button by the table, so the way
+              // back reads as a control rather than an empty slot.
+              className="rounded-2xl border border-sky-400 bg-sky-100 px-4 py-3 text-center text-sm font-bold uppercase tracking-wide text-foreground transition hover:bg-sky-200 dark:border-sky-500 dark:bg-sky-900/40 dark:hover:bg-sky-900/60"
             >
-              Showing selected cells only
-              <span className="mt-1 block font-bold text-foreground">
-                Back to the full year
-              </span>
+              Clear
             </button>
+          );
+        }
+        if (id === diffSlot && active?.difference) {
+          const { cents, caption, upIsGood } = active.difference;
+          const good = cents === 0 ? null : cents > 0 === upIsGood;
+          const tone = good === null ? "text-foreground" : good ? "text-positive" : "text-negative";
+          return (
+            <div key={id}>
+              <Stat
+                label="Difference"
+                value={cents}
+                signed
+                currency={currency}
+                tone={tone}
+                subtitle={caption}
+                subtitleTone={tone}
+              />
+            </div>
           );
         }
         return <div key={id} aria-hidden />;
@@ -156,6 +180,7 @@ export function AnnualHero({
 function Stat({
   label,
   value,
+  signed,
   currency,
   tone,
   color,
@@ -165,6 +190,8 @@ function Stat({
 }: {
   label: string;
   value: number;
+  /** Prefix "+" on a positive value, for a change rather than an amount. */
+  signed?: boolean;
   currency: string;
   // Either `tone` (Tailwind semantic class like text-positive) or `color`
   // (an explicit CSS var / hex — used when the color isn't a semantic token
@@ -179,16 +206,17 @@ function Stat({
   subtitleColor?: string;
 }) {
   return (
-    <div className="h-full rounded-2xl bg-surface px-4 py-3 text-center shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
+    <div className="h-full rounded-2xl bg-surface px-3 py-3 text-center xl:px-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
       <p
-        className={`mt-0.5 text-lg font-bold tabular-nums ${tone ?? ""}`}
+        className={`mt-0.5 text-lg font-bold tabular-nums tracking-[-0.01em] ${tone ?? ""}`}
         style={color ? { color } : undefined}
       >
+        {signed && value > 0 ? "+" : ""}
         {formatMoney(value, currency)}
       </p>
       {subtitle ? (
-        // Wraps rather than runs on: "1.3% of income remaining" is wider than
+        // Wraps rather than runs on: a long caption like "Jan, Feb, Mar" is wider than
         // a fifth of the row, and holding it on one line pushed the whole hero
         // grid past the page edge — with nothing to scroll it back into view.
         <p

@@ -4,8 +4,7 @@ import { useMemo, useRef } from "react";
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { usePersistentCollapse } from "@/lib/use-session-collapse";
-import { MoneyCell, periodHeaderClass } from "./annual-cell";
-import { ClearSelectionButton } from "./clear-selection-button";
+import { MoneyCell, PeriodHeader } from "./annual-cell";
 import {
   KIND_COLOR,
   categoryCellKey,
@@ -52,7 +51,6 @@ type Props = {
   /** Cells currently driving the hero cards, across both tables. */
   selected: Selection;
   onToggleCell: (key: string, cell: SelectedCell) => void;
-  onClearSelection: () => void;
 };
 
 // Months run newest-first, left to right: the panel is half a screen wide, so
@@ -89,7 +87,6 @@ export function CategoryMonthsTable({
   currency,
   selected,
   onToggleCell,
-  onClearSelection,
 }: Props) {
   // Open by default, and persistent: this panel is the year read line by
   // line, so it should be found as it was left rather than collapsed on
@@ -135,30 +132,21 @@ export function CategoryMonthsTable({
             minWidth: `calc(${14 + 8 + 7 * monthCount}rem + 24px)`,
           }}
         >
-          {/* Clear drops under the title: beside it, it would run into the
-              Total column (this column is sized to line up, not to fit it). */}
           <span className="sticky left-0 z-10 -my-2.5 flex flex-col justify-center gap-1 self-stretch bg-surface py-2.5 pl-4">
             <span className="flex items-center gap-2.5">
               <Chevron open={open} />
               <span className="whitespace-nowrap font-semibold">Category by Months</span>
             </span>
-            {selected.size > 0 ? (
-              <span className="pl-[25px]">
-                <ClearSelectionButton onClear={onClearSelection} />
-              </span>
-            ) : null}
           </span>
           {open && groups.length ? (
             <>
               <YearBand pad="-my-2.5">
-                <span className="w-full text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
+                <span className="w-full text-center text-[15px] font-semibold uppercase tracking-wide text-muted">
                   Total
                 </span>
               </YearBand>
               {visibleMonths(monthLabels, monthCount).map((m) => (
-                <span key={m} className={periodHeaderClass(m === currentMonthLabel)}>
-                  {m}
-                </span>
+                <PeriodHeader key={m} label={m} current={m === currentMonthLabel} />
               ))}
             </>
           ) : null}

@@ -1885,7 +1885,9 @@ type MonthlyRow = {
 
 function downloadMonthlyNetWorthCsv(rows: MonthlyRow[], currency: string) {
   const money = (n: number | null | undefined) =>
-    n == null ? "" : `"${formatMoneyWhole(n, currency).replace(/"/g, '""')}"`;
+    // Plain hyphen in the file: spreadsheets read "-$1,234" as a negative
+    // number but treat the display minus (U+2212, plus its joiner) as text.
+    n == null ? "" : `"${formatMoneyWhole(n, currency).replace(/\u2060/g, "").replace(/\u2212/g, "-").replace(/"/g, '""')}"`;
   const pct = (p: number | null) => (p == null ? "" : `${(p * 100).toFixed(2)}%`);
   const header = [
     "Date",

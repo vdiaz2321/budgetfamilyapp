@@ -12,6 +12,7 @@ import { adjustAccountLedger } from "@/lib/account-ledger";
 import { adjustDebtBalance } from "@/lib/debts";
 import { unwrap } from "@/lib/supabase-result";
 import { isRetirementKind } from "@/lib/retirement-kind";
+import { updateTransactionAmount } from "@/app/(app)/budget/actions";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
 // ordinary cards unless payoff tracking is explicitly enabled in Edit details.
@@ -499,7 +500,12 @@ export async function updateBalance(formData: FormData) {
 
   await supabase
     .from("accounts")
-    .update({ current_balance_cents: balanceCents, updated_at: new Date().toISOString() })
+    .update({
+      current_balance_cents: balanceCents,
+      updated_at: new Date().toISOString(),
+      // A balance typed by hand — drives "updated … days ago" on Accounts.
+      balance_updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
     .eq("household_id", householdId);
 
@@ -1234,7 +1240,12 @@ export async function updateBucketBalance(formData: FormData) {
   const bucket = unwrap(
     await supabase
       .from("buckets")
-      .update({ balance_cents: balanceCents, updated_at: new Date().toISOString() })
+      .update({
+        balance_cents: balanceCents,
+        updated_at: new Date().toISOString(),
+        // A balance typed by hand — drives "updated … days ago" on Accounts.
+        balance_updated_at: new Date().toISOString(),
+      })
       .eq("id", id)
       .eq("household_id", householdId)
       .select("account_id")
@@ -1322,6 +1333,97 @@ async function saveAccountTransfer(formData: FormData, action: "create" | "updat
   revalidate();
   revalidatePath("/transactions");
   revalidatePath("/networth");
+  return { error: null };
+}
+
+// Edit a card or debt payment from the Accounts payment popups: its date, the
+// amount paid, and how much of it was reimbursed. A new date moves nothing —
+// balances were adjusted when the payment was logged and don't depend on it (a
+// split moves as one, like every other edit). amount_cents holds the NET
+// (paid − reimbursed), which is what every balance reads, so a change to
+// either figure moves the balances by the change in the net.
+export async function updatePayment(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  const date = String(formData.get("date") ?? "").trim();
+  if (!id) return { error: "Missing payment." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { error: "Pick a date." };
+  const paidCents = displayToCents(String(formData.get("paid") ?? "0"));
+  const reimbursedCents = displayToCents(String(formData.get("reimbursed") ?? "0") || "0");
+  if (paidCents <= 0) return { error: "Enter an amount above $0." };
+  if (reimbursedCents < 0) return { error: "Reimbursed can't be below $0." };
+  if (reimbursedCents >= paidCents) return { error: "Reimbursed must be less than paid — use Remove instead." };
+  const amountCents = paidCents - reimbursedCents;
+  const amountRaw = (amountCents / 100).toFixed(2);
+
+  const tx = unwrap(
+    await supabase
+      .from("transactions")
+      .select("id, split_group_id, occurred_on, amount_cents, reimbursed_cents, account_id, bucket_id, paid_to_account_id, movement_type")
+      .eq("id", id)
+      .eq("household_id", householdId)
+      .maybeSingle(),
+    "transactions",
+  );
+  if (!tx) return { error: "That payment no longer exists." };
+
+  if (date !== tx.occurred_on) {
+    const update = supabase.from("transactions").update({ occurred_on: date }).eq("household_id", householdId);
+    const { error } = await (tx.split_group_id ? update.eq("split_group_id", tx.split_group_id) : update.eq("id", id));
+    if (error) return { error: `Couldn't change the date — ${error.message}` };
+  }
+
+  if (amountCents !== tx.amount_cents) {
+    const delta = amountCents - tx.amount_cents;
+    if (tx.movement_type === "card_payment") {
+      // Same legs payCard writes, by the difference: the source pays `delta`
+      // more (bucket when it came from one, else the account ledger), and a
+      // debt tracked on the card drops by it. The card's owed is summed from
+      // the payment rows, so the new amount on the row covers that side.
+      const { error } = await supabase
+        .from("transactions")
+        .update({ amount_cents: amountCents })
+        .eq("id", id)
+        .eq("household_id", householdId);
+      if (error) return { error: `Couldn't change the amount — ${error.message}` };
+      if (tx.bucket_id) await adjustBucketBalance(supabase, householdId, tx.bucket_id, -delta);
+      else if (tx.account_id) await adjustAccountLedger(supabase, householdId, tx.account_id, -delta);
+      if (tx.paid_to_account_id) {
+        const linkedDebt = unwrap(
+          await supabase
+            .from("debts")
+            .select("subcategory_id")
+            .eq("household_id", householdId)
+            .eq("account_id", tx.paid_to_account_id)
+            .maybeSingle(),
+          "debts",
+        );
+        if (linkedDebt?.subcategory_id) await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, -delta);
+      }
+      await captureSnapshots(supabase, householdId, { force: true });
+    } else {
+      // A debt payment logged on Budget: the register's inline amount edit
+      // already moves its ledger, bucket and debt by the difference.
+      const fd = new FormData();
+      fd.set("id", id);
+      fd.set("amount", amountRaw);
+      await updateTransactionAmount(fd);
+    }
+  }
+
+  if (reimbursedCents !== (tx.reimbursed_cents ?? 0)) {
+    const { error } = await supabase
+      .from("transactions")
+      .update({ reimbursed_cents: reimbursedCents })
+      .eq("id", id)
+      .eq("household_id", householdId);
+    if (error) return { error: `Couldn't save the reimbursement — ${error.message}` };
+  }
+
+  revalidate();
+  revalidatePath("/transactions");
+  revalidatePath("/insights");
+  revalidatePath("/annual");
   return { error: null };
 }
 

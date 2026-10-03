@@ -1,20 +1,54 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { formatMoney } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { ModalShell } from "@/components/modal-shell";
+import { updatePayment } from "@/app/(app)/accounts/actions";
+import { deleteTransaction } from "@/app/(app)/budget/actions";
+
+// The payment popup's columns, with the headers once above the list rather
+// than on every row. Wide: Date · Paid · Reimbursed · From · buttons on one
+// line. Phone: Date · Paid · Reimbursed, then From and the buttons under them.
+const PAYMENT_GRID =
+  "grid grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] items-center gap-x-2 sm:grid-cols-[9.5rem_7rem_7rem_var(--from-w)_8.5rem] sm:gap-x-3";
 
 const PAYMENT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** One payment made toward a credit card. Charges ON the card are not here. */
+/**
+ * One payment made toward a credit card (or, in the Debt Payments copy of this
+ * table, toward a debt). Charges ON the card are not here.
+ */
 export type CardPayment = {
   id: string;
   // YYYY-MM-DD
   date: string;
   amountCents: number;
+  // The card's account id — or the debt's subcategory id in the debt table.
   cardId: string;
+  // How much of it came back. amountCents is the NET (paid − reimbursed).
+  reimbursedCents: number;
+  // When it was last changed after being logged; null if never edited.
+  editedAt: string | null;
   fromAccountId: string | null;
   memo: string | null;
+  // What Remove would put back, worked out on the server from the same rules
+  // deleteTransaction follows. `refund` is null when no bank balance moves.
+  undo?: {
+    refund: { name: string; balanceCents: number } | null;
+    debt: { name: string; owedCents: number } | null;
+  };
+};
+
+// Wording for each copy of the table: credit cards (default) or debts.
+export type PaymentsLedgerLabels = { title: string; item: string; all: string; empty: string; closed: string };
+const CARD_LABELS: PaymentsLedgerLabels = {
+  title: "Credit Card Payments",
+  item: "Card",
+  all: "All cards",
+  empty: "No card payments recorded",
+  closed: "Closed card",
 };
 
 /**
@@ -30,15 +64,25 @@ export type CardPayment = {
 export function CardPaymentsLedger({
   payments,
   cardNames,
+  openCardIds,
+  accountNames,
   currency,
   storageKey,
+  labels = CARD_LABELS,
 }: {
   payments: CardPayment[];
   cardNames: Record<string, string>;
+  /** Open cards — each gets a row even with no payment, so a missed one shows. */
+  openCardIds: string[];
+  /** Any account id -> name, for the "From" column of a card's payment list. */
+  accountNames: Record<string, string>;
   currency: string;
   storageKey: string;
+  labels?: PaymentsLedgerLabels;
 }) {
   const [view, setView] = useState<"month" | "year">("month");
+  // The card whose payment history popup is open.
+  const [detailCardId, setDetailCardId] = useState<string | null>(null);
   // Open on a fresh login, and holds whatever it was last set to while moving
   // around the app inside one session.
   const [openState, setOpenState] = useSessionCollapse(storageKey, () => ({ open: true }));
@@ -71,7 +115,10 @@ export function CardPaymentsLedger({
   const showPeriodColumns = !(view === "year" && columns.length <= 1);
 
   // cardId -> column key -> cents.
-  const byCard = new Map<string, Map<string, number>>();
+  // Every open card gets a row up front, so a card with no payment (or one
+  // that's never charged) still shows up instead of vanishing. Months with no
+  // payment stay blank — Victor rejected any "Not paid" wording.
+  const byCard = new Map<string, Map<string, number>>(openCardIds.map((id) => [id, new Map()]));
   for (const p of inScope) {
     const row = byCard.get(p.cardId) ?? new Map<string, number>();
     row.set(columnOf(p), (row.get(columnOf(p)) ?? 0) + p.amountCents);
@@ -80,11 +127,12 @@ export function CardPaymentsLedger({
   const rows = [...byCard.entries()]
     .map(([cardId, cells]) => ({
       cardId,
-      name: nameById.get(cardId) ?? "Closed card",
+      name: nameById.get(cardId) ?? labels.closed,
       cells,
       total: [...cells.values()].reduce((sum, v) => sum + v, 0),
     }))
-    .sort((a, b) => b.total - a.total);
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+
 
   const columnTotal = (key: string) => rows.reduce((sum, r) => sum + (r.cells.get(key) ?? 0), 0);
   const grandTotal = rows.reduce((sum, r) => sum + r.total, 0);
@@ -146,7 +194,7 @@ export function CardPaymentsLedger({
             >
               <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="min-w-0 text-sm font-bold">Credit Card Payments Made</span>
+            <span className="min-w-0 text-sm font-bold">{labels.title}</span>
           </button>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-0.5 rounded-lg bg-black/5 p-0.5 dark:bg-white/10">
@@ -205,7 +253,7 @@ export function CardPaymentsLedger({
 
       {!open ? null : rows.length === 0 ? (
         <p className="px-4 py-4 text-sm text-muted">
-          No card payments recorded{view === "month" ? ` in ${year}` : ""} yet. Use “Pay card” on a card to log one.
+          {labels.empty}{view === "month" ? ` in ${year}` : ""} yet.
         </p>
       ) : (
         <>
@@ -219,7 +267,7 @@ export function CardPaymentsLedger({
             <table className={`w-full border-collapse text-xs ${columns.length > 3 ? "min-w-[42rem]" : ""}`}>
               <thead>
                 <tr className="border-b border-line bg-surface">
-                  <th className={`${headBase} sticky left-0 z-10 bg-surface text-center`}>Card</th>
+                  <th className={`${headBase} sticky left-0 z-10 bg-surface text-center`}>{labels.item}</th>
                   {/* By year this column spans every year, so "Annual" only fits by month. */}
                   <th className={head}>{view === "month" ? "Annual Total" : "Total"}</th>
                   {showPeriodColumns
@@ -230,14 +278,25 @@ export function CardPaymentsLedger({
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.cardId} className="border-b border-line last:border-0">
+                  // The whole row opens that card's payment list — the place to
+                  // fix a date or remove a payment without leaving Accounts.
+                  <tr
+                    key={r.cardId}
+                    onClick={() => setDetailCardId(r.cardId)}
+                    className="group cursor-pointer border-b border-line last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+                  >
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 max-w-[11rem] truncate bg-surface px-2.5 py-1.5 text-left text-xs font-semibold"
+                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)]"
                     >
-                      {r.name}
+                      <span className="flex items-center gap-1">
+                        <span className="truncate">{r.name}</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 -rotate-90 text-muted" aria-hidden>
+                          <path d="M6 9l6 6 6-6" />
+                        </svg>
+                      </span>
                     </th>
-                    <td className={`${cell} border-r border-line font-bold text-negative`}>{money(r.total)}</td>
+                    <td className={`${cell} border-r border-line font-bold ${r.total ? "text-negative" : "text-muted"}`}>{money(r.total)}</td>
                     {showPeriodColumns
                       ? columns.map((c) => {
                           const v = r.cells.get(c.key) ?? 0;
@@ -257,7 +316,7 @@ export function CardPaymentsLedger({
               <tfoot>
                 <tr className="border-t-2 border-foreground/20 bg-surface font-bold">
                   <th scope="row" className="sticky left-0 z-10 bg-surface px-2.5 py-2 text-left text-xs">
-                    All cards
+                    {labels.all}
                   </th>
                   <td className={`${cell} border-r border-line text-negative`}>
                     {money(grandTotal)}
@@ -283,6 +342,407 @@ export function CardPaymentsLedger({
           </div>
         </>
       )}
+      {detailCardId ? (
+        <CardPaymentsDetail
+          cardName={nameById.get(detailCardId) ?? labels.closed}
+          // One calendar year — the one picked above (this year by default) —
+          // so the list starts fresh every January instead of growing forever.
+          year={year}
+          payments={payments.filter((p) => p.cardId === detailCardId && p.date.slice(0, 4) === year)}
+          accountNames={accountNames}
+          currency={currency}
+          onClose={() => setDetailCardId(null)}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/** Every payment made to one card, newest first — date editable, removable. */
+function CardPaymentsDetail({
+  cardName,
+  year,
+  payments,
+  accountNames,
+  currency,
+  onClose,
+}: {
+  cardName: string;
+  year: string;
+  payments: CardPayment[];
+  accountNames: Record<string, string>;
+  currency: string;
+  onClose: () => void;
+}) {
+  const sorted = [...payments].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const total = payments.reduce((sum, p) => sum + p.amountCents, 0);
+  return (
+    <ModalShell
+      title={`${cardName} · ${year}`}
+      onClose={onClose}
+      // As wide as its rows and no wider: the From column is sized to the longest
+      // account name (--from-w below), so there's no empty band on a big screen.
+      className="sm:w-fit sm:max-w-[95vw]"
+      mobileAlign="top"
+      headerExtra={
+        <span className="text-sm text-muted">
+          {payments.some((p) => p.reimbursedCents > 0) ? "Net paid" : "Paid"} <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>{formatMoney(total, currency)}</span>
+        </span>
+      }
+    >
+      <div className="px-5 py-3">
+        {sorted.length === 0 ? (
+          <p className="py-2 text-sm text-muted">No payments in {year}.</p>
+        ) : (
+          <div
+            // Every row is its own grid, so the From column's width is set once
+            // here — the longest name at roughly 0.47rem per character.
+            style={{ ["--from-w" as string]: `${Math.max(3, ...sorted.map((p) => (p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : "").length + (p.editedAt ? 16 : 0))) * 0.47 + 0.5}rem` }}
+          >
+          <div className={`border-b border-line pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted ${PAYMENT_GRID}`}>
+            <span className="text-center">Date</span>
+            <span className="text-center">Paid</span>
+            <span className="text-center">Reimbursed</span>
+            <span className="hidden sm:block">From</span>
+          </div>
+          <ul className="divide-y divide-line">
+            {sorted.map((p) => (
+              <PaymentRow
+                key={p.id}
+                payment={p}
+                itemName={cardName}
+                // CSV-imported rows carry no account — show nothing rather than a dash.
+                fromName={p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : null}
+                currency={currency}
+              />
+            ))}
+          </ul>
+          </div>
+        )}
+        <p className="pt-3 text-xs text-muted">
+          Changing a date doesn&rsquo;t change balances.
+        </p>
+      </div>
+    </ModalShell>
+  );
+}
+
+function PaymentRow({
+  payment,
+  itemName,
+  fromName,
+  currency,
+}: {
+  payment: CardPayment;
+  itemName: string;
+  fromName: string | null;
+  currency: string;
+}) {
+  const router = useRouter();
+  const toInput = (cents: number) => (cents ? (cents / 100).toFixed(2) : "");
+  const startPaid = toInput(payment.amountCents + payment.reimbursedCents);
+  const startReimbursed = toInput(payment.reimbursedCents);
+  const [date, setDate] = useState(payment.date);
+  const [paid, setPaid] = useState(startPaid);
+  const [reimbursed, setReimbursed] = useState(startReimbursed);
+  // Which confirmation is open: removing the payment, or saving a new amount.
+  const [confirm, setConfirm] = useState<"remove" | "amount" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const cents = (v: string) => Math.round(Number(v.replace(/[$,\s]/g, "") || "0") * 100);
+  const paidCents = cents(paid);
+  const reimbursedCents = cents(reimbursed);
+  // The net is what balances count, so only a change to it needs the check.
+  const newCents = paidCents - reimbursedCents;
+  const amountChanged = Number.isFinite(newCents) && newCents !== payment.amountCents;
+  const changed = date !== payment.date || paid !== startPaid || reimbursed !== startReimbursed;
+
+  const reset = () => {
+    setDate(payment.date);
+    setPaid(startPaid);
+    setReimbursed(startReimbursed);
+    setError(null);
+  };
+  const save = () => {
+    const fd = new FormData();
+    fd.set("id", payment.id);
+    fd.set("date", date);
+    fd.set("paid", paid);
+    fd.set("reimbursed", reimbursed || "0");
+    startTransition(async () => {
+      const res = await updatePayment(fd);
+      setError(res?.error ?? null);
+      if (!res?.error) {
+        setConfirm(null);
+        // Normalize what was typed ("3" → "3.00") so it matches the saved
+        // figures once the page refreshes and the row reads as unchanged.
+        setPaid(toInput(paidCents));
+        setReimbursed(toInput(reimbursedCents));
+        router.refresh();
+      }
+    });
+  };
+  // A new amount moves balances, so it gets the same Now / After check as
+  // Remove first; a date-only change saves straight away.
+  const onSave = () => {
+    if (!Number.isFinite(paidCents) || paidCents <= 0) {
+      setError("Enter an amount above $0.");
+      return;
+    }
+    if (!Number.isFinite(reimbursedCents) || reimbursedCents < 0 || reimbursedCents >= paidCents) {
+      setError("Reimbursed must be less than paid — use Remove instead.");
+      return;
+    }
+    if (amountChanged) setConfirm("amount");
+    else save();
+  };
+  const remove = () => {
+    const fd = new FormData();
+    fd.set("id", payment.id);
+    startTransition(async () => {
+      const res = await deleteTransaction(fd);
+      setError(res?.error ?? null);
+      if (!res?.error) router.refresh();
+    });
+  };
+
+  return (
+    <li className="py-1.5">
+      <div className={`gap-y-1 ${PAYMENT_GRID}`}>
+        <label className="block min-w-0">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            aria-label="Payment date"
+            className="w-full rounded-md bg-background px-1.5 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-2"
+          />
+        </label>
+        <MoneyBox label="Paid" value={paid} onChange={setPaid} bold />
+        <MoneyBox label="Reimbursed" value={reimbursed} onChange={setReimbursed} placeholder="0.00" />
+        {/* From + buttons: their own columns on a wide screen (`contents`),
+            one shared line under the boxes on a phone. */}
+        <div className="col-span-3 flex items-center gap-2 sm:contents">
+        <div className="min-w-0 flex-1 text-xs text-muted">
+          {fromName || payment.editedAt ? (
+            <div className="truncate whitespace-nowrap">
+              {fromName}
+              {payment.editedAt ? (
+                <span className="text-muted/80">
+                  {fromName ? " · " : ""}edited{" "}
+                  {new Date(payment.editedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {payment.reimbursedCents > 0 ? (
+            <div className="tabular-nums">
+              Net <span className="font-semibold text-foreground">{formatMoney(payment.amountCents, currency)}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center justify-end gap-2 sm:ml-0 sm:justify-center">
+          {changed ? (
+            <>
+              <button
+                type="button"
+                onClick={reset}
+                disabled={pending}
+                className="rounded-md px-2.5 py-1 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={pending}
+                className="rounded-md bg-brand px-3 py-1 text-xs font-semibold text-white hover:bg-brand-strong disabled:opacity-60"
+              >
+                {pending ? "Saving…" : "Save"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirm("remove")}
+              className="rounded-md px-2.5 py-1 text-xs font-semibold text-negative hover:bg-negative/10"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        </div>
+      </div>
+      {error && !confirm ? <p className="mt-1 text-xs text-negative">{error}</p> : null}
+      {confirm ? (
+        <BalanceChangeWarning
+          payment={payment}
+          itemName={itemName}
+          currency={currency}
+          // Money that goes back to the bank: all of it on Remove, the
+          // difference on a smaller amount (negative when the amount grows).
+          backCents={confirm === "remove" ? payment.amountCents : payment.amountCents - newCents}
+          mode={confirm}
+          newCents={newCents}
+          pending={pending}
+          error={error}
+          onCancel={() => {
+            setConfirm(null);
+            setError(null);
+          }}
+          onConfirm={confirm === "remove" ? remove : save}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * The confirmation before Remove or a new amount: a Now / After table of each
+ * balance that moves, because either one changes today's balances — ones
+ * Victor may already have typed in by hand.
+ */
+function BalanceChangeWarning({
+  payment,
+  itemName,
+  currency,
+  backCents,
+  mode,
+  newCents,
+  pending,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  payment: CardPayment;
+  itemName: string;
+  currency: string;
+  backCents: number;
+  mode: "remove" | "amount";
+  newCents: number;
+  pending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const money = (cents: number) => formatMoney(cents, currency);
+  const refund = payment.undo?.refund ?? null;
+  const debt = payment.undo?.debt ?? null;
+  const when = new Date(`${payment.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const back = Math.abs(backCents);
+  const owed = (cents: number) => (cents <= 0 ? "Paid off" : money(cents));
+  return (
+    <ModalShell
+      title={mode === "remove" ? "Remove this payment?" : "Change this payment?"}
+      onClose={onCancel}
+      className="sm:max-w-md"
+      mobileAlign="top"
+    >
+      <div className="space-y-3 px-5 py-4 text-sm">
+        <p>
+          {mode === "remove" ? (
+            <>
+              <span className="font-semibold tabular-nums">{money(payment.amountCents)}</span> paid to {itemName} on {when}.
+            </>
+          ) : (
+            <>
+              {itemName} on {when}. Net paid: <span className="font-semibold tabular-nums">{money(payment.amountCents)}</span> →{" "}
+              <span className="font-semibold tabular-nums">{money(newCents)}</span>
+            </>
+          )}
+        </p>
+        {/* One row per balance that moves; a payment with no bank account on
+            record simply has no bank row. */}
+        {refund || debt ? (
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-wide text-muted">
+                <th className="py-1.5 text-left font-semibold">What changes</th>
+                <th className="px-2 py-1.5 text-center font-semibold">Now</th>
+                <th className="px-2 py-1.5 text-center font-semibold">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              {refund ? (
+                <tr className="border-b border-line last:border-0">
+                  <td className="py-2 pr-2">
+                    <div className="font-semibold">{refund.name}</div>
+                    <div className="text-xs text-muted">{backCents >= 0 ? `gets ${money(back)} back` : `pays ${money(back)} more`}</div>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{money(refund.balanceCents)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums">{money(refund.balanceCents + backCents)}</td>
+                </tr>
+              ) : null}
+              {debt ? (
+                <tr className="border-b border-line last:border-0">
+                  <td className="py-2 pr-2">
+                    <div className="font-semibold">{debt.name}</div>
+                    <div className="text-xs text-muted">you&rsquo;d owe {money(back)} {backCents >= 0 ? "more" : "less"}</div>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{owed(debt.owedCents)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums text-negative">{owed(debt.owedCents + backCents)}</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        ) : null}
+        {mode === "remove" ? (
+          <p className="text-xs font-semibold text-negative">Remove only to make an adjustment or reimbursement.</p>
+        ) : null}
+        {error ? <p className="text-xs text-negative">{error}</p> : null}
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={pending}
+            className="rounded-md px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/10"
+          >
+            {mode === "remove" ? "Keep payment" : "Cancel"}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={pending}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60 ${
+              mode === "remove" ? "bg-negative" : "bg-brand hover:bg-brand-strong"
+            }`}
+          >
+            {pending ? "Saving…" : mode === "remove" ? "Remove payment" : "Save change"}
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+// A small money input with its label above it: Paid / Reimbursed on a payment.
+function MoneyBox({
+  label,
+  value,
+  onChange,
+  placeholder,
+  bold,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  bold?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="flex w-full items-center gap-1 rounded-md bg-background px-1 py-1 text-[14px] ring-1 sm:px-2 sm:text-sm ring-line focus-within:ring-2 focus-within:ring-brand">
+        <span className="hidden text-muted sm:inline">$</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={label}
+          className={`w-20 min-w-0 flex-1 bg-transparent text-center tabular-nums focus:outline-none ${bold ? "font-semibold" : ""}`}
+        />
+      </span>
+    </label>
   );
 }

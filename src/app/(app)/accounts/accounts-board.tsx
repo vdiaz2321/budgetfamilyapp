@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState, useTransition } from "
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
+import { describeUpdate } from "@/lib/updated-ago";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -174,6 +175,9 @@ type Props = {
   // Payments made TO cards — feeds the read-only "Card payments" report at
   // the bottom of the Credit Cards section. Never used for balances.
   cardPayments?: CardPayment[];
+  debtPayments?: CardPayment[];
+  debtNames?: Record<string, string>;
+  owingDebtIds?: string[];
   // Last year's Dec net worth from the imported history; used only when no
   // Dec snapshots exist for that year.
   eoyHistoryNetCents?: number | null;
@@ -390,6 +394,9 @@ export function AccountsBoard({
   nonCardAccounts = [],
   historyMonths,
   cardPayments = [],
+  debtPayments = [],
+  debtNames = {},
+  owingDebtIds = [],
   eoyHistoryNetCents = null,
   monthEndChecks = [],
 }: Props) {
@@ -925,8 +932,25 @@ export function AccountsBoard({
             <CardPaymentsLedger
               payments={cardPayments}
               cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
+              openCardIds={creditCards.filter((c) => c.active).map((c) => c.id)}
+              accountNames={Object.fromEntries(accounts.map((a) => [a.id, a.name]))}
               currency={currency}
               storageKey="accounts-card-payments-open"
+            />
+          </div>
+        ) : null}
+        {/* Same report for debts — every payment filed under a debt's budget
+            item, so the history is here rather than only on the Debt page. */}
+        {debtPayments.length > 0 || owingDebtIds.length > 0 ? (
+          <div className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+            <CardPaymentsLedger
+              payments={debtPayments}
+              cardNames={debtNames}
+              openCardIds={owingDebtIds}
+              accountNames={Object.fromEntries(accounts.map((a) => [a.id, a.name]))}
+              currency={currency}
+              storageKey="accounts-debt-payments-open"
+              labels={{ title: "Debt Payments", item: "Debt", all: "All debts", empty: "No debt payments recorded", closed: "Removed debt" }}
             />
           </div>
         ) : null}
@@ -1572,6 +1596,20 @@ function AccountSection({
   // other groups show no share line — Victor removed the "% of Assets" text.
   const kidsNote = section.kidsGroup ? { long: "Not in Net Worth", short: "Not in NW" } : null;
 
+  // When this group's balances were last typed in. A bucketed account is as
+  // fresh as its least-recently checked bucket (each is entered on its own),
+  // and the group as its stalest account — that one is what needs updating.
+  // Cards and debts skip it: transactions and Budget keep those current.
+  // Banking skips it too — Victor removed it there.
+  const tracksFreshness = section.key === "investments" || section.key === "kids";
+  const stalestUpdate = tracksFreshness
+    ? localAccounts
+        .filter((a) => a.active)
+        .flatMap((a) => (a.buckets.length > 0 ? a.buckets.map((b) => b.balanceUpdatedAt) : [a.balanceUpdatedAt]))
+        .sort()[0] ?? null
+    : null;
+  const freshness = stalestUpdate ? describeUpdate(stalestUpdate) : null;
+
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
   const reorder = (fromId: string, toId: string) => {
@@ -1621,7 +1659,16 @@ function AccountSection({
             gives way first. On a narrow tile (link hidden) the name is what
             gives, so "Kids Funding" + "Not in NW" still fit on one line. */}
         <div className="flex min-w-0 flex-1 items-center gap-1 @[17rem]:gap-2">
-          <span className="min-w-0 truncate text-sm font-semibold leading-tight @[17rem]:text-base @[24rem]:shrink-0">{section.label}</span>
+          <span className="flex min-w-0 flex-col @[24rem]:shrink-0">
+            <span className="truncate text-sm font-semibold leading-tight @[17rem]:text-base">{section.label}</span>
+            {freshness ? (
+              // Wraps rather than truncates: on a phone Banking's wide total
+              // leaves too little room, and "3 days a…" hides the part that matters.
+              <span className={`text-[11px] leading-tight ${freshness.stale ? "font-semibold text-negative" : "text-muted"}`}>
+                updated {freshness.label}
+              </span>
+            ) : null}
+          </span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"

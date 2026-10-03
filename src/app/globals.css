@@ -68,6 +68,9 @@
 
   /* Near-black navy sidebar; white text lives on it in both themes. */
   --sidebar: #0B0E1B;
+  /* Active nav item on the sidebar: the soft steel blue, since the sidebar is
+     dark in both themes and light --brand is too dim on it. */
+  --sidebar-active: #8aa9d8;
 }
 
 /* Dark theme: neutral charcoal, modeled on Google's dark surfaces
@@ -120,6 +123,7 @@
   --viz-sel: #33353a;
 
   --sidebar: #18191b; /* a step darker than the canvas, no blue */
+  --sidebar-active: #8aa9d8;
 }
 
 /* Dark mode's brand is a light steel blue, so the white label every primary
@@ -171,6 +175,7 @@
      width utility, so the color never applies and borders fall back to black. */
   --color-line: var(--border);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-active: var(--sidebar-active);
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);

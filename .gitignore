@@ -41,5 +41,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# claude code local settings
-/.claude
+# claude code local settings — ignored, except the project skills (instructions
+# only, no personal numbers) so they reach both machines through git
+/.claude/*
+!/.claude/skills/

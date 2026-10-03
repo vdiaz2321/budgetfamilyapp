@@ -3,7 +3,7 @@
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { periodHeaderClass } from "./annual-cell";
+import { PeriodHeader } from "./annual-cell";
 
 /** One Budget line's share of a property's year. */
 export type PropertyLine = {
@@ -171,19 +171,14 @@ function PropertyCard({
                 className="grid items-center gap-2 border-b border-line py-2 pr-3"
                 style={gridStyle(monthCount)}
               >
-                <span className="sticky left-0 z-10 bg-surface pl-3 text-[15px] font-bold uppercase tracking-wide text-foreground">
+                <span className="sticky left-0 z-10 bg-surface pl-3 text-[15px] font-semibold uppercase tracking-wide text-muted">
                   Category
                 </span>
-                <span className="text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
+                <span className="text-center text-[15px] font-semibold uppercase tracking-wide text-muted">
                   Total
                 </span>
                 {monthLabels.map((m) => (
-                  <span
-                    key={m}
-                    className={periodHeaderClass(m === currentMonthLabel)}
-                  >
-                    {m}
-                  </span>
+                  <PeriodHeader key={m} label={m} current={m === currentMonthLabel} />
                 ))}
               </div>
 
@@ -221,7 +216,7 @@ function PropertyCard({
               >
                 <span className="sticky left-0 z-10 bg-background pl-3 text-[15px] font-bold">Net</span>
                 <span
-                  className="text-center text-[18px] font-bold tabular-nums"
+                  className="text-center text-[18px] font-bold tabular-nums tracking-[-0.01em]"
                   style={{ color: property.netTotal >= 0 ? "var(--positive)" : "var(--negative)" }}
                 >
                   {formatMoney(property.netTotal, currency)}
@@ -229,8 +224,14 @@ function PropertyCard({
                 {property.netMonths.slice(0, monthCount).map((v, i) => (
                   <span
                     key={i}
-                    className="text-center text-[18px] tabular-nums"
-                    style={v === 0 ? undefined : { color: v > 0 ? "var(--positive)" : "var(--negative)" }}
+                    className={`text-center text-[18px] tabular-nums ${
+                      monthLabels[i] === currentMonthLabel ? "text-muted" : ""
+                    }`}
+                    style={
+                      v === 0 || monthLabels[i] === currentMonthLabel
+                        ? undefined
+                        : { color: v > 0 ? "var(--positive)" : "var(--negative)" }
+                    }
                   >
                     {v !== 0 ? formatMoney(v, currency) : <span className="text-muted">—</span>}
                   </span>
@@ -267,7 +268,7 @@ function SummaryRow({
       >
         {label}
       </span>
-      <span className="text-center text-[18px] font-bold tabular-nums" style={{ color }}>
+      <span className="text-center text-[18px] font-bold tabular-nums tracking-[-0.01em]" style={{ color }}>
         {total !== 0 ? formatMoney(total, currency) : <span className="text-muted">—</span>}
       </span>
       {months.slice(0, monthCount).map((v, i) => (
@@ -293,7 +294,7 @@ function LineRow({
       <span className="sticky left-0 z-10 truncate bg-surface pl-6 text-[13px] text-muted">
         {line.name}
       </span>
-      <span className="text-center text-[18px] font-medium tabular-nums">
+      <span className="text-center text-[18px] font-medium tabular-nums tracking-[-0.01em]">
         {line.total !== 0 ? formatMoney(line.total, currency) : <span className="text-muted">—</span>}
       </span>
       {line.months.slice(0, monthCount).map((v, i) => (

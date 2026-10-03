@@ -1,6 +1,6 @@
 "use client";
 import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { centsToGroupedDisplay, currencySymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
+import { MINUS, centsToGroupedDisplay, currencySymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import {
   TAX_COLOR,
@@ -13,6 +13,7 @@ import { setInvestmentYear, transferFromInvestment } from "./actions";
 import { ImportInvestmentModal } from "./import-modal";
 import { AddMonthForm, AddHoldingsForm } from "./manual-entry";
 import { AllHoldingsTable } from "./holdings-rollup";
+import { describeUpdate } from "@/lib/updated-ago";
 import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { SavingsPanel, type SavingsPanelProps } from "./savings-panel";
@@ -69,6 +70,9 @@ export type InvestmentPositionImportRow = {
   unrealizedGainCents: number | null;
   unrealizedGainPercent: number | null;
   url: string | null;
+  /** When the row was last written (added, imported or edited) — drives the
+   *  "Updated … days ago" line. Not the statement date; that's asOfDate. */
+  updatedAt: string;
 };
 
 export type InvestmentPerformanceImportRow = {
@@ -81,6 +85,9 @@ export type InvestmentPerformanceImportRow = {
   feesCents: number | null;
   marketChangeCents: number | null;
   endingBalanceCents: number;
+  /** When the month was last written. Saving a month replaces its row, so
+   *  created_at is that time — no separate updated_at is needed here. */
+  updatedAt: string;
 };
 
 /** A bucket already names its brokerage, so it stands alone; otherwise the account does. */
@@ -801,10 +808,11 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
           ) : null}
           {ledger ? (
             <>
-              <div className="px-4 py-2.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-4 py-2.5">
                 <span className="text-xs lg:text-sm text-muted">
                   {ledgerLabel(ledger.accountName, ledger.bucketName)} · {ledger.performance.length} month{ledger.performance.length === 1 ? "" : "s"}
                 </span>
+                <PerformanceFreshness rows={ledger.performance} />
               </div>
               <ImportedPerformanceTable rows={ledger.performance} currency={currency} />
             </>
@@ -816,6 +824,18 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
         </>
       )}
     </section>
+  );
+}
+
+/** Same "updated … days ago" line as Holdings, for one account's months. */
+function PerformanceFreshness({ rows }: { rows: InvestmentPerformanceImportRow[] }) {
+  const latest = rows.reduce<string | null>((max, row) => (max && max > row.updatedAt ? max : row.updatedAt), null);
+  if (!latest) return null;
+  const { label, stale } = describeUpdate(latest);
+  return (
+    <span className={`text-xs ${stale ? "font-semibold text-negative" : "text-muted"}`}>
+      updated {label}
+    </span>
   );
 }
 
@@ -969,7 +989,7 @@ function PerformanceChart({
   // Compact money formatter: input is CENTS, output uses $k for anything >= $1,000.
   const compactMoney = (cents: number) => {
     const dollars = Math.abs(cents) / 100;
-    const sign = cents < 0 ? "-" : "";
+    const sign = cents < 0 ? MINUS : "";
     if (dollars >= 1000) return `${sign}$${(dollars / 1000).toFixed(dollars >= 10000 ? 0 : 1)}k`;
     return `${sign}$${dollars.toFixed(0)}`;
   };
@@ -1721,7 +1741,7 @@ function EditCell({
       className="flex w-full items-center justify-center gap-px"
     >
       {negative && !editing ? (
-        <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} ${tone}`}>-</span>
+        <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} ${tone}`}>{MINUS}</span>
       ) : null}
       <span className={`pointer-events-none select-none text-muted ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"}`}>{currencySymbol(currency)}</span>
       <input type="hidden" name="accountId" value={accountId} />

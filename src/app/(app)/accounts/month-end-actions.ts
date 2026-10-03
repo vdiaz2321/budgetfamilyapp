@@ -198,6 +198,13 @@ export async function saveMonthEndValue(input: {
     }
   }
 
+  // A typed balance, for this month or last month's close: either way the
+  // figure was just checked, which is what "updated … days ago" reports.
+  const { error: stampError } = bucketId
+    ? await supabase.from("buckets").update({ balance_updated_at: now }).eq("id", bucketId).eq("household_id", householdId)
+    : await supabase.from("accounts").update({ balance_updated_at: now }).eq("id", accountId).eq("household_id", householdId);
+  if (stampError) return { error: stampError.message };
+
   await tick(supabase, householdId, month, { accountId, bucketId });
   revalidate();
   return { error: null };

@@ -241,10 +241,10 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
             >
               <div style={{ minWidth: minW }}>
                 <div className="grid items-center gap-2 border-b border-line bg-black/[0.05] pr-4 py-2 dark:bg-white/[0.08]" style={gridStyle}>
-                  <span className="pl-4 text-[15px] font-bold uppercase tracking-wide text-foreground">
+                  <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-muted">
                     Category
                   </span>
-                  <TotalBand pad="-my-2" plain><span className="text-center text-[15px] font-bold uppercase tracking-wide text-foreground">Total</span></TotalBand>
+                  <TotalBand pad="-my-2" plain><span className="text-center text-[15px] font-semibold uppercase tracking-wide text-muted">Total</span></TotalBand>
                   {years.map((y) => (
                     <span key={y} className={periodHeaderClass(y === CURRENT_YEAR)}>
                       {y}
@@ -267,16 +267,16 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
                 ))}
                 {/* Net (unallocated) — Income − Expenses − Savings − Investment */}
                 <div className="grid items-center gap-2 border-t border-line pr-4 py-2" style={gridStyle}>
-                  <span className="pl-4 text-[15px] font-bold">Net</span>
+                  <span className="pl-4 text-[15px] font-bold">Remaining</span>
                   {(() => { const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0); return (
-                    <TotalBand pad="-my-2"><span className={`text-center text-[18px] font-bold tabular-nums ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span></TotalBand>
+                    <TotalBand pad="-my-2"><span className={`text-center text-[18px] font-bold tabular-nums tracking-[-0.01em] ${netTotal < 0 ? "text-negative" : "text-positive"}`}>{formatMoney(netTotal, currency)}</span></TotalBand>
                   ); })()}
                   {years.map((y) => {
                     const v = netByYear[y] ?? 0;
                     return (
                       <span
                         key={y}
-                        className={`text-center text-[18px] font-bold tabular-nums ${v < 0 ? "text-negative" : "text-positive"}`}
+                        className={`text-center text-[18px] font-bold tabular-nums tracking-[-0.01em] ${v < 0 ? "text-negative" : "text-positive"}`}
                       >
                         {formatMoney(v, currency)}
                       </span>
@@ -362,7 +362,7 @@ function downloadBreakdownCsv(
   const sum = (rec: Record<number, number>) => sumOverYears(rec, years);
   for (const k of kinds) push("Summary", "", k.label, "", sum(k.totalByYear), k.totalByYear);
   const netTotal = years.reduce((sum, y) => sum + (netByYear[y] ?? 0), 0);
-  push("Summary", "", "Net", "", netTotal, netByYear);
+  push("Summary", "", "Remaining", "", netTotal, netByYear);
 
   for (const k of kinds) {
     for (const g of k.groups) {
@@ -409,7 +409,7 @@ function SummaryRow({
   return (
     <div className="grid items-center gap-2 pr-4 py-1.5" style={gridStyle}>
       <span className="pl-4 text-[15px] font-semibold">{label}</span>
-      <TotalBand pad="-my-1.5"><span className={`text-center text-[18px] font-bold tabular-nums ${totalColor}`}>{formatMoney(total, currency)}</span></TotalBand>
+      <TotalBand pad="-my-1.5"><span className={`text-center text-[18px] font-bold tabular-nums tracking-[-0.01em] ${totalColor}`}>{formatMoney(total, currency)}</span></TotalBand>
       {/* The summary strip's figures select too — a whole section's year is as
           legitimate a thing to add up as one line item's. */}
       {years.map((y) => {
@@ -484,10 +484,10 @@ function KindBlock({
           >
             <div style={{ minWidth: minW }}>
               <div className="grid items-center gap-2 pr-4 py-2" style={gridStyle}>
-                <span className="pl-4 text-[15px] font-bold uppercase tracking-wide text-foreground">
+                <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-muted">
                   Category
                 </span>
-                <span className="text-center text-[15px] font-bold uppercase tracking-wide text-foreground">Total</span>
+                <span className="text-center text-[15px] font-semibold uppercase tracking-wide text-muted">Total</span>
                 {years.map((y) => (
                   <span key={y} className={periodHeaderClass(y === CURRENT_YEAR)}>
                     {y}
@@ -549,7 +549,7 @@ function Group({
             {group.label}
           </span>
           <TotalBand pad="-my-1.5">
-            <span className="text-center text-[18px] font-bold tabular-nums">
+            <span className="text-center text-[18px] font-bold tabular-nums tracking-[-0.01em]">
               {formatMoney(sumOverYears(group.subtotalByYear, years), currency)}
             </span>
           </TotalBand>
@@ -728,7 +728,7 @@ function SelectionRow({
         ) : null}
       </span>
       <TotalBand pad="-my-2">
-        <span className={`text-center text-[18px] font-bold tabular-nums ${tint(total)}`}>
+        <span className={`text-center text-[18px] font-bold tabular-nums tracking-[-0.01em] ${tint(total)}`}>
           {formatMoney(total, currency)}
         </span>
       </TotalBand>
@@ -737,7 +737,7 @@ function SelectionRow({
         return (
           <span
             key={y}
-            className={`text-center text-[18px] font-semibold tabular-nums ${v === 0 ? "text-muted" : tint(v)}`}
+            className={`text-center text-[18px] font-semibold tabular-nums tracking-[-0.01em] ${v === 0 ? "text-muted" : tint(v)}`}
           >
             {v !== 0 ? formatMoney(v, currency) : "—"}
           </span>

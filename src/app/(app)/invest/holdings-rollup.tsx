@@ -1,6 +1,7 @@
 "use client";
 import { useMemo, useState, useTransition } from "react";
 import { formatMoney, centsToGroupedDisplay } from "@/lib/money";
+import { describeUpdate } from "@/lib/updated-ago";
 import { ModalShell } from "@/components/modal-shell";
 import { deleteHolding, saveHolding } from "./import-actions";
 import { ledgerLabel } from "./invest-board";
@@ -274,6 +275,17 @@ export function AllHoldingsTable({
     );
   const totalCents = visible.reduce((sum, row) => sum + row.marketValueCents, 0);
 
+  // How fresh the figures are. An account counts as updated when any of its
+  // holdings was last written; across several accounts the stalest one is the
+  // one shown, since that is the one needing attention.
+  const lastUpdateByAccount = new Map<string, string>();
+  for (const row of filtered) {
+    const current = lastUpdateByAccount.get(row.accountLabel);
+    if (!current || row.updatedAt > current) lastUpdateByAccount.set(row.accountLabel, row.updatedAt);
+  }
+  const stalest = [...lastUpdateByAccount.entries()].sort((a, b) => a[1].localeCompare(b[1]))[0] ?? null;
+  const freshness = stalest ? describeUpdate(stalest[1]) : null;
+
   if (rows.length === 0) {
     return (
       <p className="px-4 py-5 text-sm lg:text-base text-muted">
@@ -298,9 +310,16 @@ export function AllHoldingsTable({
             </select>
           ) : null}
         </div>
-        <span className="ml-auto text-base lg:text-lg font-bold tabular-nums">
-          {visible.length} holding{visible.length === 1 ? "" : "s"} · {formatMoney(totalCents, currency)}
-        </span>
+        <div className="ml-auto flex flex-col items-end text-right">
+          <span className="text-base lg:text-lg font-bold tabular-nums">
+            {visible.length} holding{visible.length === 1 ? "" : "s"} · {formatMoney(totalCents, currency)}
+          </span>
+          {freshness && stalest ? (
+            <span className={`text-xs ${freshness.stale ? "font-semibold text-negative" : "text-muted"}`}>
+              {lastUpdateByAccount.size > 1 ? `${stalest[0]} ` : ""}updated {freshness.label}
+            </span>
+          ) : null}
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-xs lg:text-sm">

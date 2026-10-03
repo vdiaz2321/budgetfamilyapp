@@ -37,13 +37,13 @@ export async function loadCreditCardBoardData(
     await Promise.all([
       supabase
         .from("accounts")
-        .select("id, name, kind, subtype, holder, institution, account_number, ownership, active, is_kids_account, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed")
+        .select("id, name, kind, subtype, holder, institution, account_number, ownership, active, is_kids_account, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, balance_updated_at")
         .eq("household_id", householdId)
         .order("sort_order")
         .order("name"),
       supabase
         .from("buckets")
-        .select("id, account_id, name, balance_cents")
+        .select("id, account_id, name, balance_cents, balance_updated_at")
         .eq("household_id", householdId)
         .order("sort_order")
         .order("name"),
@@ -180,6 +180,7 @@ export async function loadCreditCardBoardData(
     taxTreatment: null,
     retirementKind: null,
     holder: null,
+    balanceUpdatedAt: b.balance_updated_at,
     balancesByMonth: {},
   }));
   const bucketAccountIds = new Set(allBuckets.map((b) => b.accountId));
@@ -215,6 +216,7 @@ export async function loadCreditCardBoardData(
       prev2MonthCents: null,
       balancesByMonth: {},
       buckets: [],
+      balanceUpdatedAt: a.balance_updated_at,
     }));
 
   const nonCardAccounts: NonCardAccount[] = rows

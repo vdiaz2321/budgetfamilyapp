@@ -96,7 +96,7 @@ export default function SidebarNav({
               collapsed ? "justify-center px-0" : "mx-3 px-4"
             } ${
               active
-                ? "bg-[#1E1F42] text-[#8B80F9] font-semibold border border-[#2F3061]/50 shadow-sm dark:bg-white/10 dark:border-white/10"
+                ? "bg-white/10 text-sidebar-active font-semibold border border-white/10 shadow-sm"
                 : "text-slate-400 hover:bg-[#141A2E] hover:text-slate-100 dark:text-neutral-400 dark:hover:bg-white/5 dark:hover:text-neutral-100"
             }`}
           >

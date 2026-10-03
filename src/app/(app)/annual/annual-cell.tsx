@@ -4,8 +4,23 @@
  *  so "now" is easy to find across every table on the page. */
 export function periodHeaderClass(current: boolean) {
   return `text-center text-[15px] uppercase tracking-wide ${
-    current ? "font-bold text-foreground" : "font-medium text-muted"
+    current ? "font-bold text-foreground" : "font-semibold text-muted"
   }`;
+}
+
+/** A month/year column header. The month still under way gets a "(so far)"
+ *  line under it: its figures are partial (pay lands near month end), so they
+ *  shouldn't be read against the finished months beside it. Two lines rather
+ *  than "OCT (SO FAR)" inline, which would overflow the 7rem month column. */
+export function PeriodHeader({ label, current }: { label: string; current: boolean }) {
+  return (
+    <span className={`flex flex-col items-center ${periodHeaderClass(current)}`}>
+      {label}
+      {current ? (
+        <span className="text-[11px] font-medium normal-case tracking-normal text-muted">(so far)</span>
+      ) : null}
+    </span>
+  );
 }
 
 /**
@@ -45,8 +60,11 @@ export function MoneyCell({
         onToggle();
       }}
       aria-pressed={active}
-      className={`mx-auto w-full rounded-md px-1 py-0.5 text-center text-[18px] tabular-nums transition hover:bg-black/[0.06] dark:hover:bg-white/[0.10] ${
-        active ? "font-semibold" : ""
+      className={`mx-auto w-full rounded-md px-1 py-0.5 text-center text-[18px] tabular-nums tracking-[-0.01em] transition hover:bg-black/[0.06] dark:hover:bg-white/[0.10] ${
+        // One weight class only: two competing ones resolve by stylesheet
+        // order, not by which is listed last. Medium by default (regular reads
+        // thin at 18px); a caller's own weight, e.g. the bold Remaining row, wins.
+        active ? "font-semibold" : className?.includes("font-") ? "" : "font-medium"
       } ${className ?? ""}`}
       style={active ? { boxShadow: `inset 0 0 0 1.5px ${color}`, color } : undefined}
     >

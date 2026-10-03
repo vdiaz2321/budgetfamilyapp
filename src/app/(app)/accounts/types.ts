@@ -20,6 +20,8 @@ export type BucketData = {
   // Roth for each spouse alongside a taxable bucket.
   retirementKind: string | null;
   holder: string | null;
+  /** Same as AccountData.balanceUpdatedAt, for this bucket's own balance. */
+  balanceUpdatedAt: string;
   // Every recorded month of bucket_snapshots, keyed "YYYY-MM-01" (a missing
   // month = never recorded). Lets a bucket row follow the header's period
   // picker instead of being pinned to the last three months.
@@ -128,6 +130,9 @@ export type AccountData = {
   // historical month/quarter/year without another round trip.
   balancesByMonth?: Record<string, number>;
   buckets: BucketData[];
+  /** When a balance was last typed by hand (inline edit or Month-end
+   *  update) — not renames or automatic syncs. Drives "updated … days ago". */
+  balanceUpdatedAt: string;
 };
 
 // Non-CC accounts, passed in for the Pay Card modal's "From" dropdown.

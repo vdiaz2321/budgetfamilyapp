@@ -3,8 +3,7 @@
 import { formatMoney } from "@/lib/money";
 import type { CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { MoneyCell, periodHeaderClass } from "./annual-cell";
-import { ClearSelectionButton } from "./clear-selection-button";
+import { MoneyCell, PeriodHeader } from "./annual-cell";
 import { YearBand } from "./category-months-table";
 import {
   KIND_COLOR,
@@ -31,7 +30,6 @@ type Props = {
   /** Cells currently driving the hero cards, across both tables. */
   selected: Selection;
   onToggleCell: (key: string, cell: SelectedCell) => void;
-  onClearSelection: () => void;
 };
 
 export function MonthsTable({
@@ -42,7 +40,6 @@ export function MonthsTable({
   currency,
   selected,
   onToggleCell,
-  onClearSelection,
 }: Props) {
   // Default expanded on fresh login; toggle state survives within-session nav.
   const [collapse, setCollapse] = useSessionCollapse("annual-months", () => ({ open: true }));
@@ -81,7 +78,6 @@ export function MonthsTable({
           <path d="M6 9l6 6 6-6" />
         </svg>
         <span className="font-semibold">Months</span>
-        {selected.size > 0 ? <ClearSelectionButton onClear={onClearSelection} /> : null}
       </button>
 
       {open ? (
@@ -89,21 +85,16 @@ export function MonthsTable({
           <div style={track}>
             {/* Header */}
             <div className="grid items-center gap-2 border-b border-line py-2 pr-7" style={grid}>
-              <span className="sticky left-0 z-10 bg-surface pl-7 text-[15px] font-bold uppercase tracking-wide text-foreground">
+              <span className="sticky left-0 z-10 bg-surface pl-7 text-[15px] font-semibold uppercase tracking-wide text-muted">
                 Category
               </span>
               <YearBand pad="-my-2">
-                <span className="w-full text-center text-[15px] font-bold uppercase tracking-wide text-foreground">
+                <span className="w-full text-center text-[15px] font-semibold uppercase tracking-wide text-muted">
                   Year total
                 </span>
               </YearBand>
               {months.map((m) => (
-                <span
-                  key={m.idx}
-                  className={periodHeaderClass(m.status === "current")}
-                >
-                  {m.name.slice(0, 3)}
-                </span>
+                <PeriodHeader key={m.idx} label={m.name.slice(0, 3)} current={m.status === "current"} />
               ))}
             </div>
 
@@ -112,12 +103,12 @@ export function MonthsTable({
                 const percent = shareOfIncome(totals[c.kind]);
                 return (
                   <li key={c.kind} className="grid items-center gap-2 py-2 pr-7" style={grid}>
-                    <span className="sticky left-0 z-10 bg-surface pl-7 text-[18px] font-medium">
+                    <span className="sticky left-0 z-10 bg-surface pl-7 text-[18px] font-semibold">
                       {c.label}
                     </span>
                     <YearBand pad="-my-2">
                       <span className="flex w-full flex-col items-center py-1">
-                        <span className="text-[18px] font-bold tabular-nums">
+                        <span className="text-[18px] font-bold tabular-nums tracking-[-0.01em]">
                           {formatMoney(totals[c.kind], currency)}
                         </span>
                         {c.kind === "income" ? null : (
@@ -152,14 +143,14 @@ export function MonthsTable({
 
             {/* Net */}
             <div className="grid items-center gap-2 border-t border-line py-2 pr-7" style={grid}>
-              <span className="sticky left-0 z-10 bg-surface pl-7 text-[18px] font-bold">Net</span>
+              <span className="sticky left-0 z-10 bg-surface pl-7 text-[18px] font-bold">Remaining</span>
               <YearBand pad="-my-2">
                 <span
                   className={`flex w-full flex-col items-center py-1 ${
                     totalNet >= 0 ? "text-positive" : "text-negative"
                   }`}
                 >
-                  <span className="text-[18px] font-bold tabular-nums">
+                  <span className="text-[18px] font-bold tabular-nums tracking-[-0.01em]">
                     {formatMoney(totalNet, currency)}
                   </span>
                   <span className="text-[11px] font-semibold">
@@ -169,12 +160,19 @@ export function MonthsTable({
                   </span>
                 </span>
               </YearBand>
-              {months.map((m) => (
+              {months.map((m) => {
+                // A month still under way has no paycheck in yet, so its net
+                // stays grey rather than reading as a red (or green) result.
+                const tone =
+                  m.status === "current" ? "muted" : m.net >= 0 ? "positive" : "negative";
+                return (
                 <MoneyCell
                   key={m.idx}
                   empty={!m.hasData}
-                  color={m.net >= 0 ? "var(--positive)" : "var(--negative)"}
-                  className={`font-bold ${m.net >= 0 ? "text-positive" : "text-negative"}`}
+                  color={`var(--${tone})`}
+                  className={`font-bold ${
+                    tone === "muted" ? "text-muted" : tone === "positive" ? "text-positive" : "text-negative"
+                  }`}
                   active={selected.has(monthsCellKey(m.idx, "net"))}
                   onToggle={() =>
                     onToggleCell(monthsCellKey(m.idx, "net"), {
@@ -187,7 +185,8 @@ export function MonthsTable({
                 >
                   {formatMoney(m.net, currency)}
                 </MoneyCell>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

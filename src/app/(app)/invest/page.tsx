@@ -123,7 +123,7 @@ export default async function InvestPage({
         supabase
           .from("investment_position_snapshots")
           .select(
-            "id, import_batch_id, as_of_date, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent, url",
+            "id, import_batch_id, as_of_date, symbol, security_name, quantity, price_cents, market_value_cents, cost_basis_cents, unrealized_gain_cents, unrealized_gain_percent, url, updated_at",
           )
           .eq("household_id", household.id)
           .in("import_batch_id", batchIds)
@@ -132,7 +132,7 @@ export default async function InvestPage({
         supabase
           .from("investment_performance_snapshots")
           .select(
-            "import_batch_id, as_of_date, entry_source, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents",
+            "import_batch_id, as_of_date, entry_source, beginning_balance_cents, contributions_cents, withdrawals_cents, dividends_cents, fees_cents, market_change_cents, ending_balance_cents, created_at",
           )
           .eq("household_id", household.id)
           .in("import_batch_id", batchIds)
@@ -651,6 +651,7 @@ export default async function InvestPage({
       unrealizedGainCents: row.unrealized_gain_cents ?? null,
       unrealizedGainPercent: row.unrealized_gain_percent ?? null,
       url: row.url ?? null,
+      updatedAt: row.updated_at,
     });
     positionsByBatch.set(row.import_batch_id, values);
   }
@@ -667,6 +668,7 @@ export default async function InvestPage({
       feesCents: row.fees_cents ?? null,
       marketChangeCents: row.market_change_cents ?? null,
       endingBalanceCents: row.ending_balance_cents ?? 0,
+      updatedAt: row.created_at,
     });
     performanceByBatch.set(row.import_batch_id, values);
   }
