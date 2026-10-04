@@ -3,6 +3,7 @@ import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { AccountsBoard, type AccountData, type BudgetDebt, type CardDetails, type RewardActivity } from "./accounts-board";
 import type { CardPayment } from "@/components/card-payments-ledger";
 import { getSessionContext } from "@/lib/auth-context";
+import type { EstateData } from "./estate-guide";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 
@@ -32,6 +33,24 @@ export default async function AccountsPage() {
     .eq("household_id", household.id)
     .in("month", [currentMonth, prevMonth])
     .then((r) => r);
+
+  // Estate guide: each account's estate fields, the household's own page, and
+  // the insurance / benefit rows. Started here so it rides alongside the rest.
+  const estatePromise = Promise.all([
+    supabase
+      .from("accounts")
+      .select("id, estate_beneficiary, estate_transfer, estate_contact, estate_notes, estate_hidden")
+      .eq("household_id", household.id)
+      .then((r) => r),
+    supabase.from("estate_guides").select("executor, will_location, attorney, power_of_attorney, instructions").eq("household_id", household.id).maybeSingle().then((r) => r),
+    supabase
+      .from("estate_items")
+      .select("id, kind, name, amount_cents, beneficiary, contact, notes")
+      .eq("household_id", household.id)
+      .order("sort_order")
+      .order("created_at")
+      .then((r) => r),
+  ]);
 
   // Per-card owed and this month's spend, summed in Postgres by
   // v_card_balances / v_card_month_spend (migration 20260826183000) rather
@@ -543,8 +562,42 @@ export default async function AccountsPage() {
     bucketId: (c.bucket_id as string | null) ?? null,
   }));
 
+  const [estateAccountsRes, estateGuideRes, estateItemsRes] = await estatePromise;
+  const estateGuide = unwrap(estateGuideRes, "estate guide");
+  const estate: EstateData = {
+    accounts: Object.fromEntries(
+      (unwrap(estateAccountsRes, "estate accounts") ?? []).map((a) => [
+        a.id as string,
+        {
+          beneficiary: (a.estate_beneficiary as string | null) ?? null,
+          transfer: (a.estate_transfer as string | null) ?? null,
+          contact: (a.estate_contact as string | null) ?? null,
+          notes: (a.estate_notes as string | null) ?? null,
+          hidden: !!a.estate_hidden,
+        },
+      ]),
+    ),
+    guide: {
+      executor: estateGuide?.executor ?? null,
+      willLocation: estateGuide?.will_location ?? null,
+      attorney: estateGuide?.attorney ?? null,
+      powerOfAttorney: estateGuide?.power_of_attorney ?? null,
+      instructions: estateGuide?.instructions ?? null,
+    },
+    items: (unwrap(estateItemsRes, "estate items") ?? []).map((i) => ({
+      id: i.id as string,
+      kind: i.kind as string,
+      name: i.name as string,
+      amountCents: (i.amount_cents as number | null) ?? null,
+      beneficiary: (i.beneficiary as string | null) ?? null,
+      contact: (i.contact as string | null) ?? null,
+      notes: (i.notes as string | null) ?? null,
+    })),
+  };
+
   return (
     <AccountsBoard
+      estate={estate}
       monthEndChecks={monthEndChecks}
       accounts={accounts}
       budgetDebts={budgetDebts}

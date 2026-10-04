@@ -34,6 +34,35 @@ export function remainingColorClass(kind: CategoryKind, remaining: number, plann
   return "text-positive";
 }
 
+// Income that came in over plan reads as a bonus, not a minus: "+$70.50
+// extra" instead of "−$70.50". `short` drops the word where the column is
+// too narrow for it (the mobile row).
+export function remainingText(kind: CategoryKind, remaining: number, currency: string, short = false): string {
+  if (kind === "income" && remaining < 0) return `+${formatMoney(-remaining, currency)}${short ? "" : " extra"}`;
+  return formatMoney(remaining, currency);
+}
+
+// A pill behind Remaining when plan and actual don't line up, so the gap is
+// easy to spot. Money that came in or went toward a goal over plan (income
+// extra, extra saved, extra paid) is green and shows any time. Coming up
+// short — income not all received, a bill under its plan — only shows from
+// the month-end window on (the 25th, or any past month, same as the Match
+// button): mid-month every row is "short" because the month isn't done.
+// Overspent bills/expenses keep their own red pill and aren't handled here.
+export const PILL_BASE = "inline-flex rounded-full py-0.5 ring-1";
+export function mismatchPillClass(kind: CategoryKind, remaining: number, monthKey: string): string | null {
+  if (remaining === 0) return null;
+  const good = "bg-positive/20 text-positive ring-positive/30";
+  const bad = "bg-negative/15 text-foreground ring-negative/15";
+  if (remaining < 0) return kind === "bills" || kind === "expenses" ? null : good;
+  const now = new Date();
+  const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const monthEnd = monthKey < currentKey || (monthKey === currentKey && now.getDate() >= 25);
+  if (!monthEnd) return null;
+  // Under plan: left over on a bill is good; income or savings short is not.
+  return kind === "bills" || kind === "expenses" ? good : bad;
+}
+
 // The Actual column takes the kind's accent so a scan of the column reads
 // as "money in" / "money out" instantly, matching the group dot colors.
 export function actualColorClass(kind: CategoryKind, spentCents: number): string {
@@ -132,6 +161,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
     ? row.plannedCents <= 0 ? 0 : (row.plannedCents / row.spentCents) * 100
     : pct;
   const redBarPct = overBudget ? 100 - greenBarPct : 0;
+  const pill = overBudget ? null : mismatchPillClass(kind, remaining, monthKey);
 
   // No zebra striping: the rows are separated by a divider and each carries a
   // progress bar, so the alternating wash was a third separator doing the same
@@ -182,7 +212,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
           type="button"
           onClick={onSelect}
           className={`text-[15px] font-semibold tabular-nums ${
-            remaining < 0 ? "text-negative" : actualColorClass(kind, row.spentCents)
+            remaining < 0 && kind !== "income" ? "text-negative" : actualColorClass(kind, row.spentCents)
           }`}
         >
           / {formatMoney(row.spentCents, currency)}
@@ -200,9 +230,11 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
             <span className="inline-flex rounded-full bg-negative/15 px-1.5 py-0.5 text-foreground ring-1 ring-negative/15">
               {formatMoney(remaining, currency)}
             </span>
+          ) : pill ? (
+            <span className={`${PILL_BASE} whitespace-nowrap px-1.5 ${pill}`}>{remainingText(kind, remaining, currency, true)}</span>
           ) : (
             <span className={remainingColorClass(kind, remaining, row.plannedCents)}>
-              {formatMoney(remaining, currency)}
+              {remainingText(kind, remaining, currency, true)}
             </span>
           )}
         </button>
@@ -299,15 +331,16 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden @md:col-span-2 @md:text-center @md:text-sm @md:font-semibold @md:tabular-nums ${overBudget ? "@md:flex @md:justify-center" : "@md:block"}`}
-        title={overBudget ? `Overspent by ${formatMoney(Math.abs(remaining), currency)}` : undefined}
+        className={`hidden @md:col-span-2 @md:text-center @md:text-sm @md:font-semibold @md:tabular-nums ${overBudget || pill ? "@md:flex @md:justify-center" : "@md:block"}`}
       >
         {overBudget ? (
           <span className="inline-flex rounded-full bg-negative/15 px-2 py-0.5 text-foreground ring-1 ring-negative/15">
             {formatMoney(remaining, currency)}
           </span>
+        ) : pill ? (
+          <span className={`${PILL_BASE} whitespace-nowrap px-2 ${pill}`}>{remainingText(kind, remaining, currency, true)}</span>
         ) : (
-          <span className={remainingColorClass(kind, remaining, row.plannedCents)}>{formatMoney(remaining, currency)}</span>
+          <span className={remainingColorClass(kind, remaining, row.plannedCents)}>{remainingText(kind, remaining, currency)}</span>
         )}
       </button>
 

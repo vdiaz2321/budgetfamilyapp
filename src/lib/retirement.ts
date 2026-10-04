@@ -63,6 +63,15 @@ export type FiInputs = {
    * spending drops to zero.
    */
   schedule?: FiScheduleYear[];
+  /**
+   * A bad-market test: in `year` the portfolio loses `pct`% instead of
+   * growing. Years after it grow at the real return on what is actually
+   * left — the table's own gains were worked out on the un-dropped balance.
+   */
+  shock?: { year: number; pct: number } | null;
+  /** From this year on, grow at the real return on the actual balance rather
+   *  than the table's gains: for a what-if whose balance has left the plan's. */
+  ownGrowthFrom?: number | null;
 };
 
 export type FiYear = {
@@ -115,7 +124,10 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     guaranteedIncomeCents = 0,
     guaranteedIncomeStartYear = null,
     untilYear = null,
+    shock = null,
+    ownGrowthFrom = null,
   } = inputs;
+  const ownFrom = shock?.year ?? ownGrowthFrom;
 
   const byYear = new Map((schedule ?? []).map((y) => [y.year, y]));
   const lastScheduled = (schedule ?? []).reduce<FiScheduleYear | null>(
@@ -181,8 +193,11 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     // shortfall to flag, not a loan the plan pays interest on.
     // Only an exact year's gains: a carried-forward last year must not repeat
     // one year's dollar gains forever.
-    const scheduled = byYear.get(year)?.growthCents;
-    const growth = scheduled ?? (start > 0 ? Math.round((start * realReturnPct) / 100) : 0);
+    const scheduled = ownFrom != null && year >= ownFrom ? undefined : byYear.get(year)?.growthCents;
+    const growth =
+      shock && year === shock.year
+        ? start > 0 ? -Math.round((start * shock.pct) / 100) : 0
+        : scheduled ?? (start > 0 ? Math.round((start * realReturnPct) / 100) : 0);
     const end = start + growth + contributionCents;
     balance = end;
     if (end < 0 && runsOutYear == null) runsOutYear = year;
@@ -376,6 +391,54 @@ export function incomeForYear(
     if (!active(year, line.startYear, line.endYear) || line.monthlyCents <= 0) continue;
     parts.push({
       name: line.name,
+      kind: line.kind,
+      monthlyAfterTaxCents: Math.round(line.monthlyCents * (line.taxable ? keep : 1)),
+      monthlyBeforeTaxCents: line.monthlyCents,
+    });
+  }
+  const afterTaxCents = parts.reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
+  const guaranteedCents = parts
+    .filter((p) => GUARANTEED_KINDS.has(p.kind))
+    .reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
+  return { parts, afterTaxCents, guaranteedCents };
+}
+
+/**
+ * The same year's income if Victor has died and Jo is the survivor:
+ * - retired pay becomes the SBP annuity, 55% of gross retired pay (taxable),
+ *   or nothing when SBP wasn't elected;
+ * - VA disability and a second job stop — they were his;
+ * - of the Social Security lines only the largest is kept, because a survivor
+ *   receives the higher of her own and his benefit, not both;
+ * - a spouse's own income and anything else carries on.
+ */
+export function survivorIncomeForYear(
+  year: number,
+  pension: PensionEstimate | null,
+  pensionStartYear: number | null,
+  sbpEnabled: boolean,
+  lines: IncomeLine[],
+  taxPct: number,
+): YearIncome {
+  const keep = 1 - taxPct / 100;
+  const parts: IncomePart[] = [];
+  if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
+    const annuity = Math.round(pension.grossTodayCents * 0.55);
+    parts.push({
+      name: "SBP annuity (55%)",
+      kind: "pension",
+      monthlyAfterTaxCents: Math.round(annuity * keep),
+      monthlyBeforeTaxCents: annuity,
+    });
+  }
+  const live = lines.filter((l) => active(year, l.startYear, l.endYear) && l.monthlyCents > 0);
+  const ss = live.filter((l) => l.kind === "social_security");
+  const largestSs = ss.reduce<IncomeLine | null>((best, l) => (best == null || l.monthlyCents > best.monthlyCents ? l : best), null);
+  for (const line of live) {
+    if (line.kind === "va" || line.kind === "job") continue;
+    if (line.kind === "social_security" && line !== largestSs) continue;
+    parts.push({
+      name: line.kind === "social_security" ? "Social Security (survivor)" : line.name,
       kind: line.kind,
       monthlyAfterTaxCents: Math.round(line.monthlyCents * (line.taxable ? keep : 1)),
       monthlyBeforeTaxCents: line.monthlyCents,

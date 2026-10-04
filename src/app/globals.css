@@ -255,3 +255,13 @@ input[type="number"] {
     font-size: 12px;
   }
 }
+
+/* Estate guide printout (Accounts → Estate guide → Print). While printing,
+   only the read-only guide shows — black on white whatever the theme. */
+#estate-print { display: none; }
+@media print {
+  body.printing-estate > *:not(#estate-print) { display: none !important; }
+  body.printing-estate { background: #fff !important; }
+  body.printing-estate #estate-print { display: block !important; color: #000; background: #fff; padding: 0; }
+  @page { margin: 12mm; }
+}

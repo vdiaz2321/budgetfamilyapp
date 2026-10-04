@@ -6,7 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { KINDS_WITH_DUE, type CategoryKind } from "@/lib/categories";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { addToPlan, copyPlansFromPreviousMonth, listPayees, matchIrregularPlansToSpent, matchPlansToSpent, restoreIrregularPlansSnapshot, restorePlansSnapshot, setRollover, setRolloverOverride, trimFromPlan } from "./actions";
-import { advanceSubscriptionRenewal } from "../subscriptions/actions";
+import { advanceSubscriptionRenewal, matchSubscriptionPlansToSpent, restoreSubscriptionPlansSnapshot, skipSubscriptionCycle } from "../subscriptions/actions";
 import { BudgetGroup } from "./budget-group";
 import { MonthPicker } from "./month-picker";
 import { ItemPanel } from "./item-panel";
@@ -252,6 +252,15 @@ export function BudgetBoard({
     loadPayees();
     setDuePayment(amountOverride != null ? { ...item, amountCents: amountOverride } : item);
   };
+  // A free or skipped month: no charge to log, just roll the subscription to
+  // its next renewal and plan $0 for this one.
+  const handleSkipDue = async (item: DueItem) => {
+    const fd = new FormData();
+    fd.set("id", item.id);
+    fd.set("dueDate", item.dueDate);
+    await skipSubscriptionCycle(fd);
+    router.refresh();
+  };
 
   // Precompute account_id → name so the item panel's tx list can render each
   // row's account without re-scanning accountOptions on every entry.
@@ -377,11 +386,12 @@ export function BudgetBoard({
   // It's a month-end tool, so it only appears from the 25th of the current
   // month on (and on any past month); earlier, the list stays empty.
   const matchWindowOpen = month.key < currentMonthKey || (isCurrentMonth && today.getDate() >= 25);
+  // Income rows join in as "Match received": their plan rises (or drops) to
+  // what actually came in, which moves Income left to budget the other way.
   const matchCandidates: MatchCandidate[] = !matchWindowOpen ? [] : groups
-    .filter((g) => g.kind !== "income")
-    .flatMap((g) => g.rows.filter((r) => isVisibleRow(g.kind, r)).map((r) => ({ r, spendKind: g.kind === "bills" || g.kind === "expenses" })))
+    .flatMap((g) => g.rows.filter((r) => isVisibleRow(g.kind, r)).map((r) => ({ r, kind: g.kind, spendKind: g.kind === "bills" || g.kind === "expenses" })))
     .filter(({ r, spendKind }) => !r.autoPlanned && r.spentCents !== r.plannedCents && (r.spentCents > 0 || spendKind))
-    .map(({ r }): MatchCandidate => ({ subId: r.subId, name: r.name, plannedCents: r.plannedCents, spentCents: r.spentCents }))
+    .map(({ r, kind }): MatchCandidate => ({ subId: r.subId, name: r.name, plannedCents: r.plannedCents, spentCents: r.spentCents, income: kind === "income" }))
     // The Irregular Bills row is planned from its card, one plan per bill, so
     // it is matched bill by bill: each bill whose spend differs from its plan.
     .concat(
@@ -393,6 +403,19 @@ export function BudgetBoard({
           name: `${b.name} (Irregular Bills)`,
           plannedCents: b.plannedCents ?? 0,
           spentCents: b.monthSpentCents ?? 0,
+        })),
+    )
+    // Subscriptions too: that row is the sum of each subscription's month
+    // plan, so each one whose charge differs from its plan is listed.
+    .concat(
+      subscriptions
+        .filter((s) => (s.monthSpentCents ?? 0) !== (s.monthPlannedCents ?? 0))
+        .map((s) => ({
+          subId: `subscription:${s.id}`,
+          subscriptionId: s.id,
+          name: `${s.name} (Subscriptions)`,
+          plannedCents: s.monthPlannedCents ?? 0,
+          spentCents: s.monthSpentCents ?? 0,
         })),
     );
 
@@ -609,7 +632,7 @@ export function BudgetBoard({
           </div>
 
           {showDue && dueThisWeek.length > 0 && (
-            <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} onOpen={handleOpenDue} />
+            <DueItemsList dueItems={dueThisWeek} currency={currency} onPayDue={handlePayDue} onSkipDue={handleSkipDue} onOpen={handleOpenDue} />
           )}
 
           {/* Groups */}
@@ -1148,11 +1171,11 @@ function AssignLeftover({
 
 /** A budget item, or one Irregular Bills bill (then `billId` is set and
  *  `subId` is just a unique key). */
-export type MatchCandidate = { subId: string; name: string; plannedCents: number; spentCents: number; billId?: string };
+export type MatchCandidate = { subId: string; name: string; plannedCents: number; spentCents: number; billId?: string; subscriptionId?: string; income?: boolean };
 
 // Month-end shortcut: set every item's plan to what it actually spent, instead
 // of editing each Planned cell by hand. The rule for which items qualify
-// (spent > $0, not income, not a card-owned row) lives in BudgetBoard and is
+// (spent or received > $0, not a card-owned row) lives in BudgetBoard and is
 // re-checked by matchPlansToSpent. It asks first — listing each change — and
 // offers Undo for 30s afterwards, the same way the plan roll-in does.
 function MatchSpentButton({
@@ -1173,6 +1196,7 @@ function MatchSpentButton({
   const [snapshot, setSnapshot] = useState<{
     plans: Array<{ subcategory_id: string; planned_cents: number | null }>;
     bills: Array<{ bill_id: string; planned_cents: number | null }>;
+    subs: Array<{ subscription_id: string; planned_cents: number | null }>;
   } | null>(null);
 
   useEffect(() => {
@@ -1193,8 +1217,14 @@ function MatchSpentButton({
       else next.add(id);
       return next;
     });
-  const netChange = picked.reduce((sum, c) => sum + (c.spentCents - c.plannedCents), 0);
-  const newLeft = leftCents - netChange;
+  // How much each match moves Income left to budget: a spending plan raised
+  // takes money away; an income plan raised adds it.
+  const leftDelta = (c: MatchCandidate) => (c.income ? 1 : -1) * (c.spentCents - c.plannedCents);
+  const netChange = picked.reduce((sum, c) => sum + leftDelta(c), 0);
+  const newLeft = leftCents + netChange;
+  const hasIncome = candidates.some((c) => c.income);
+  const hasSpend = candidates.some((c) => !c.income);
+  const label = hasIncome && hasSpend ? "Match Spent & Received" : hasIncome ? "Match Received Amount" : "Match Spent Amount";
 
   if (snapshot) {
     return (
@@ -1206,12 +1236,13 @@ function MatchSpentButton({
           startUndo(async () => {
             if (snap.plans.length) await restorePlansSnapshot(monthKey, snap.plans);
             if (snap.bills.length) await restoreIrregularPlansSnapshot(monthKey, snap.bills);
+            if (snap.subs.length) await restoreSubscriptionPlansSnapshot(monthKey, snap.subs);
             setSnapshot(null);
           });
         }}
         className="mt-1.5 inline-flex w-fit whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
       >
-        {undoPending ? "Undoing…" : "↩ Undo Match Spent"}
+        {undoPending ? "Undoing…" : "↩ Undo Match"}
       </button>
     );
   }
@@ -1231,11 +1262,11 @@ function MatchSpentButton({
         onClick={() => { setError(null); setSkipped(new Set(candidates.filter((c) => c.spentCents === 0).map((c) => c.subId))); setOpen(true); }}
         className="mt-1.5 inline-flex w-fit cursor-pointer items-center whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
       >
-        Match Spent Amount
+        {label}
       </button>
 
       {open ? (
-        <ModalShell title="Match plans to spent" onClose={() => setOpen(false)} className="sm:max-w-2xl" mobileAlign="top">
+        <ModalShell title={!hasIncome ? "Match plans to spent" : !hasSpend ? "Match plans to received" : "Match plans to actual"} onClose={() => setOpen(false)} className="sm:max-w-2xl" mobileAlign="top">
           <div className="space-y-4 px-3 py-4 sm:px-5">
             <div className="max-h-80 overflow-y-auto rounded-xl ring-1 ring-line">
               <label className={`${rowGrid} sticky top-0 z-10 cursor-pointer bg-background px-2 py-1.5 sm:px-3 text-center text-[10px] font-semibold uppercase tracking-wide text-muted`}>
@@ -1248,13 +1279,13 @@ function MatchSpentButton({
                 />
                 <span className="hidden text-left sm:block">Item</span>
                 <span>Planned</span>
-                <span>Spent</span>
+                <span>{hasIncome && hasSpend ? "Actual" : hasIncome ? "Received" : "Spent"}</span>
                 <span>Diff</span>
               </label>
               {candidates.map((c) => {
                 const on = !skipped.has(c.subId);
-                // Spent − planned: green when the plan drops, red when it was overspent.
-                const diff = c.spentCents - c.plannedCents;
+                // The change to Income left to budget: green adds to it, red takes from it.
+                const diff = leftDelta(c);
                 return (
                   <label key={c.subId} className={`${rowGrid} cursor-pointer gap-y-0.5 border-t border-line px-2 py-1.5 text-xs transition sm:px-3 sm:text-sm hover:bg-black/5 dark:hover:bg-white/10`}>
                     <input
@@ -1265,15 +1296,15 @@ function MatchSpentButton({
                     />
                     <span className={`col-span-3 min-w-0 truncate sm:col-span-1 ${on ? "" : "text-muted"}`}>{c.name}</span>
                     <span className={`text-center tabular-nums text-muted ${on ? "line-through" : ""}`}>{formatMoney(c.plannedCents, currency)}</span>
-                    <span className="text-center tabular-nums text-negative">{formatMoney(c.spentCents, currency)}</span>
-                    <span className={`text-center font-semibold tabular-nums ${!on ? "text-muted" : diff <= 0 ? "text-positive" : "text-negative"}`}>
-                      {diff > 0 ? "−" : diff < 0 ? "+" : ""}{formatMoney(Math.abs(diff), currency)}
+                    <span className={`text-center tabular-nums ${c.income ? "text-positive" : "text-negative"}`}>{formatMoney(c.spentCents, currency)}</span>
+                    <span className={`text-center font-semibold tabular-nums ${!on ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
+                      {diff < 0 ? "−" : diff > 0 ? "+" : ""}{formatMoney(Math.abs(diff), currency)}
                     </span>
                   </label>
                 );
               })}
             </div>
-            {/* Lowering a plan by X hands X back to Income left to budget. */}
+            {/* Lowering a spending plan, or raising an income plan, adds to Income left to budget. */}
             <div className="space-y-1 text-sm">
               <p className="flex justify-between gap-3">
                 <span>Income left to budget now</span>
@@ -1281,8 +1312,8 @@ function MatchSpentButton({
               </p>
               <p className="flex justify-between gap-3">
                 <span>Total amount returned or deducted</span>
-                <span className={`font-semibold tabular-nums ${netChange <= 0 ? "text-positive" : "text-negative"}`}>
-                  {netChange > 0 ? "−" : "+"}{formatMoney(Math.abs(netChange), currency)}
+                <span className={`font-semibold tabular-nums ${netChange >= 0 ? "text-positive" : "text-negative"}`}>
+                  {netChange < 0 ? "−" : "+"}{formatMoney(Math.abs(netChange), currency)}
                 </span>
               </p>
               <p className="flex justify-between gap-3 border-t border-line pt-1 font-semibold">
@@ -1309,23 +1340,28 @@ function MatchSpentButton({
                   }
                   setError(null);
                   start(async () => {
-                    const items = picked.filter((c) => !c.billId);
+                    const items = picked.filter((c) => !c.billId && !c.subscriptionId);
                     const bills = picked.filter((c) => c.billId);
+                    const subs = picked.filter((c) => c.subscriptionId);
                     const res = items.length ? await matchPlansToSpent(monthKey, items.map((c) => c.subId)) : null;
                     const billRes = bills.length
                       ? await matchIrregularPlansToSpent(monthKey, bills.map((c) => ({ billId: c.billId!, cents: c.spentCents })))
                       : null;
+                    const subRes = subs.length
+                      ? await matchSubscriptionPlansToSpent(monthKey, subs.map((c) => ({ subscriptionId: c.subscriptionId!, cents: c.spentCents })))
+                      : null;
                     const plans = res?.snapshot ?? [];
                     const billSnap = billRes?.snapshot ?? [];
+                    const subSnap = subRes?.snapshot ?? [];
                     // One half failing still keeps what the other half saved
                     // (and its Undo); the error says what didn't go through.
-                    const failed = [res?.error, billRes?.error].filter(Boolean).join(" ");
-                    if (failed && !plans.length && !billSnap.length) {
+                    const failed = [res?.error, billRes?.error, subRes?.error].filter(Boolean).join(" ");
+                    if (failed && !plans.length && !billSnap.length && !subSnap.length) {
                       setError(failed);
                       return;
                     }
                     setOpen(false);
-                    if (plans.length || billSnap.length) setSnapshot({ plans, bills: billSnap });
+                    if (plans.length || billSnap.length || subSnap.length) setSnapshot({ plans, bills: billSnap, subs: subSnap });
                   });
                 }}
                 className="rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
@@ -1567,13 +1603,19 @@ function DueItemsList({
   dueItems,
   currency,
   onPayDue,
+  onSkipDue,
   onOpen,
 }: {
   dueItems: DueItem[];
   currency: string;
   onPayDue?: (item: DueItem, amountOverride?: number) => void;
+  onSkipDue?: (item: DueItem) => Promise<void>;
   onOpen?: (item: DueItem) => void;
 }) {
+  // The subscription being skipped. The button reads "Saving…" until the save
+  // and the refresh that drops the row from the list have both finished.
+  const [skippingId, setSkippingId] = useState<string | null>(null);
+  const [, startSkip] = useTransition();
   return (
     <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
       {dueItems.map((item) => {
@@ -1631,7 +1673,8 @@ function DueItemsList({
                   {formatMoney(item.amountCents, currency)}
                 </p>
               ) : (
-                <p className="text-[11px] font-semibold text-muted">Amount not set</p>
+                // Phones drop it: with Skip and Pay beside it, the name had no room left.
+                <p className="hidden text-[11px] font-semibold text-muted sm:block">Amount not set</p>
               )}
               {onPayDue && (
                 <>
@@ -1646,6 +1689,22 @@ function DueItemsList({
                       className="whitespace-nowrap rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/[0.08] dark:hover:bg-white/15"
                     >
                       <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
+                    </button>
+                  ) : null}
+                  {item.source === "subscription" && onSkipDue ? (
+                    <button
+                      type="button"
+                      disabled={skippingId === item.id}
+                      onClick={() => {
+                        setSkippingId(item.id);
+                        startSkip(async () => {
+                          await onSkipDue(item);
+                          setSkippingId(null);
+                        });
+                      }}
+                      className="whitespace-nowrap rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 disabled:opacity-60 dark:bg-white/[0.08] dark:hover:bg-white/15"
+                    >
+                      {skippingId === item.id ? "Saving…" : <>Skip<span className="hidden sm:inline"> month</span></>}
                     </button>
                   ) : null}
                   <button

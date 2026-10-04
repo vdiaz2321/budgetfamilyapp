@@ -492,8 +492,9 @@ export async function trimFromPlan(formData: FormData) {
  * Only items that have spending count. An item at $0 spent is usually one
  * that hasn't posted yet — the payroll deductions (taxes, TSP, SGLV) land with
  * the month-end paycheck — so zeroing it would wipe a plan that is still
- * right. Income, Subscriptions and Irregular Bills are skipped: income isn't
- * spending, and the other two are planned on their own cards. Spent is re-read
+ * right. Income matches too ("Match received"): its plan becomes what came in.
+ * Subscriptions and Irregular Bills are skipped, being planned on their own
+ * cards. Spent is re-read
  * here rather than trusted from the page, and the old plans come back as a
  * snapshot so the board can offer Undo through restorePlansSnapshot.
  */
@@ -531,7 +532,7 @@ export async function matchPlansToSpent(
   // Nothing spent matches too, but only on bills and expenses — a plan the
   // user ticked to drop to $0 (the board lists these unticked).
   const rows = (subRows ?? [])
-    .filter((s) => kindOf(s) !== "income" && !cardOwned.has(s.id))
+    .filter((s) => !cardOwned.has(s.id))
     .map((s) => ({ id: s.id as string, spent: spentBySub.get(s.id) ?? 0, spendKind: kindOf(s) === "bills" || kindOf(s) === "expenses" }))
     .filter((r) => (r.spent > 0 || r.spendKind) && r.spent !== plannedBySub.get(r.id));
   if (rows.length === 0) return { error: "Every item already matches what it spent." };

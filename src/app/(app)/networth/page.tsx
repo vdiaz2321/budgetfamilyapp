@@ -7,7 +7,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { fetchAllRows } from "@/lib/fetch-all-rows";
 import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
 import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
-import { throwIfAny } from "@/lib/supabase-result";
+import { throwIfAny, unwrap } from "@/lib/supabase-result";
 import { loadUpcomingTravelPlanCents } from "../travel/upcoming-plan";
 
 export const metadata = { title: "Net Worth · Capitall" };
@@ -47,6 +47,15 @@ export default async function NetworthPage() {
     new Date().toISOString().slice(0, 10),
     Number(fiToMonth.slice(0, 4)),
   );
+
+  // The Estate guide's life insurance and survivor benefits, for the
+  // planner's "If Victor dies first" view.
+  const estateItemsPromise = supabase
+    .from("estate_items")
+    .select("kind, name, amount_cents")
+    .eq("household_id", household.id)
+    .in("kind", ["insurance", "benefit"])
+    .then((r) => r);
 
   const [
     accSnapsRead,
@@ -855,6 +864,14 @@ export default async function NetworthPage() {
     monthsDone: r.year === thisYearNum ? monthsDone : 0,
   }));
 
+  // Payouts come in once; benefits are monthly. SBP and Social Security are
+  // left out here because the planner works those out from the plan itself.
+  const estateItems = unwrap(await estateItemsPromise, "estate items") ?? [];
+  const insurance = estateItems.filter((i) => i.kind === "insurance" && (i.amount_cents ?? 0) > 0);
+  const benefits = estateItems.filter(
+    (i) => i.kind === "benefit" && (i.amount_cents ?? 0) > 0 && !/sbp|survivor benefit plan|social security/i.test(i.name),
+  );
+
   return (
     <NetworthBoard
       points={points}
@@ -905,6 +922,10 @@ export default async function NetworthPage() {
             valueCents: (balanceRows ?? []).find((b) => b.id === a.id)?.current_balance_cents ?? 0,
             loanCents: loanByProperty.get(a.id) ?? null,
           })),
+        survivorExtras: {
+          insurance: insurance.map((i) => ({ name: i.name as string, cents: i.amount_cents as number })),
+          benefits: benefits.map((i) => ({ name: i.name as string, monthlyCents: i.amount_cents as number })),
+        },
         incomeLines: (incomeLineRows ?? []).map((l) => ({
           id: l.id,
           name: l.name,

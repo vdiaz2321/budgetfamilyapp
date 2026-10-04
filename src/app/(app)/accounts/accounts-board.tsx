@@ -43,6 +43,7 @@ import {
 } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
+import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
 
 // Re-exported so importers (page.tsx) keep one import site for the board and
 // the shapes it takes.
@@ -183,6 +184,7 @@ type Props = {
   eoyHistoryNetCents?: number | null;
   // Month-end update checkmarks for this month and last.
   monthEndChecks?: MonthEndCheck[];
+  estate?: EstateData;
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -399,8 +401,11 @@ export function AccountsBoard({
   owingDebtIds = [],
   eoyHistoryNetCents = null,
   monthEndChecks = [],
+  estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
+  const [estateOpen, setEstateOpen] = useState(false);
+  const estateToFill = estateToFillCount(accounts, estate);
   const [monthEndOpen, setMonthEndOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
@@ -684,6 +689,7 @@ export function AccountsBoard({
 
   useRegisterMobilePageActions([
     { label: "Month-end update", onSelect: () => setMonthEndOpen(true) },
+    { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
     { label: "Transfer Funds", onSelect: () => setTransferOpen(true) },
   ]);
@@ -718,6 +724,18 @@ export function AccountsBoard({
             className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
           >
             Month-end update
+          </button>
+          <button
+            type="button"
+            onClick={() => setEstateOpen(true)}
+            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+          >
+            Estate guide
+            {/* Accounts still to fill in — a new account shows up here, so
+                it can't be forgotten. */}
+            {estateToFill > 0 ? (
+              <span className="rounded-full bg-negative/15 px-1.5 text-[10px] font-bold text-foreground ring-1 ring-negative/15">{estateToFill}</span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -955,13 +973,22 @@ export function AccountsBoard({
           </div>
         ) : null}
       </div>
-      {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} /> : null}
+      {addOpen ? <AddAccountModal estateNames={estateNames(accounts, estate)} onClose={() => setAddOpen(false)} /> : null}
       {monthEndOpen ? (
         <MonthEndUpdateModal
           accounts={accounts}
           currentMonth={historyMonths[0]}
           checks={monthEndChecks}
           onClose={() => setMonthEndOpen(false)}
+        />
+      ) : null}
+      {estateOpen ? (
+        <EstateGuideModal
+          accounts={accounts}
+          debts={budgetDebts}
+          estate={estate}
+          currency={currency}
+          onClose={() => setEstateOpen(false)}
         />
       ) : null}
       {transferOpen ? (
@@ -2779,7 +2806,7 @@ function BalanceInput({
   );
 }
 
-function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?: string | null) => void }) {
+function AddAccountForm({ section, onDone, estateNames: names = [] }: { section: Section; onDone: (newId?: string | null) => void; estateNames?: string[] }) {
   const [pending, start] = useTransition();
   const router = useRouter();
   // The form closes in the same transition as the refresh, so it stays on
@@ -2899,6 +2926,10 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
               </div>
               <p className="text-[11px] text-muted">APR % should be 0 during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.</p>
             </div>
+          </div>
+          {/* Below the tabs so it's there whichever tab is open. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2">
+            <EstateAddFields names={names} />
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -3078,6 +3109,8 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
             </p>
           </>
         ) : null}
+        {/* The Estate guide's fields, filled in at creation. */}
+        <EstateAddFields names={names} />
         <div className="flex items-center gap-2 sm:col-span-2">
           <button
             type="submit"
@@ -3103,7 +3136,7 @@ function AddAccountForm({ section, onDone }: { section: Section; onDone: (newId?
   );
 }
 
-function AddAccountModal({ onClose }: { onClose: () => void }) {
+function AddAccountModal({ onClose, estateNames = [] }: { onClose: () => void; estateNames?: string[] }) {
   useScrollLock();
   const [sectionKey, setSectionKey] = useState<string | null>(null);
   const choices = SECTIONS.filter((section) =>
@@ -3155,7 +3188,7 @@ function AddAccountModal({ onClose }: { onClose: () => void }) {
             <div className="px-5 pt-4">
               <button type="button" onClick={() => setSectionKey(null)} className="text-sm font-medium text-brand hover:text-brand-strong">← Choose another type</button>
             </div>
-            <AddAccountForm section={section} onDone={() => onClose()} />
+            <AddAccountForm section={section} estateNames={estateNames} onDone={() => onClose()} />
             {section.key !== "credit" && section.key !== "loans" ? (
               <p className="px-5 pb-5 text-xs leading-relaxed text-muted">
                 You can add buckets after the account is created. Account totals will always be calculated from their buckets.

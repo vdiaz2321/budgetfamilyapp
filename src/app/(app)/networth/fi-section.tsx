@@ -13,6 +13,7 @@ import {
   projectFi,
   rentalForYear,
   rentalsForYear,
+  survivorIncomeForYear,
   type FiScheduleYear,
   type HealthPlan,
   type HealthPlanKind,
@@ -64,6 +65,12 @@ export type FiPlan = {
   rentals: RentalProperty[];
   /** What a rental can link to on Accounts. */
   propertyAccounts: { id: string; name: string; valueCents: number; loanCents: number | null }[];
+  /** From the Estate guide: life insurance payouts (once) and survivor
+   *  benefits like VA DIC (monthly, tax-free). */
+  survivorExtras: {
+    insurance: { name: string; cents: number }[];
+    benefits: { name: string; monthlyCents: number }[];
+  };
 };
 
 export type FiMeasured = {
@@ -260,6 +267,82 @@ export function FiSection({
     : 0;
   const retireSpendMonthly = Math.round(retireSpendYearly / 12);
   const ssLine = plan.incomeLines.find((l) => l.kind === "social_security" && l.startYear != null) ?? null;
+
+  // ---- Bad-market test: the same plan, but the portfolio drops in the year
+  // retirement starts, the worst year for it to happen.
+  const [dropPct, setDropPct] = useState(30);
+  const shockYear = Math.max(thisYear + 1, plan.targetRetireYear ?? fi.fiYear ?? thisYear + 1);
+  const baseInputs = {
+    portfolioCents: startCents,
+    annualContributionCents: measured.contributionCents,
+    annualSpendCents: measured.spendCents,
+    realReturnPct: plan.realReturnPct,
+    withdrawalRatePct: plan.withdrawalRatePct,
+    untilYear,
+  };
+  const stressed = useMemo(
+    () => projectFi({ ...baseInputs, schedule, shock: { year: shockYear, pct: dropPct } }, thisYear),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [startCents, measured.contributionCents, measured.spendCents, plan.realReturnPct, plan.withdrawalRatePct, schedule, untilYear, thisYear, shockYear, dropPct],
+  );
+  const endOf = (years: { year: number; endCents: number }[]) =>
+    untilYear == null ? null : years.find((y) => y.year === untilYear)?.endCents ?? null;
+  const shockRow = stressed.years.find((y) => y.year === shockYear) ?? null;
+  const planEnd = endOf(fi.years);
+  const stressEnd = endOf(stressed.years);
+
+  // ---- Survivor view: the plan from `deathYear` on, if Victor dies first.
+  // Only from military retirement on: before it, the plan's income is his
+  // active-duty pay, which the table doesn't split out.
+  const survivorFirst = Math.max(thisYear + 1, plan.targetRetireYear ?? thisYear + 1);
+  const [deathYearPick, setDeathYear] = useState<number | null>(null);
+  const deathYear = Math.max(survivorFirst, deathYearPick ?? survivorFirst);
+  const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
+  const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
+  const taxFor = (year: number) => projection.find((p) => p.year === year)?.taxPct ?? null;
+  const survIn = (year: number) =>
+    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, taxFor(year) ?? plan.retirementTaxPct);
+  const survivor = useMemo(() => {
+    if (!usingGrid || untilYear == null) return null;
+    // The plan's years carried forward to the plan-until year, so a death
+    // after the table ends still changes something.
+    const full: FiScheduleYear[] = [...schedule];
+    const last = full.at(-1);
+    if (last) for (let y = last.year + 1; y <= untilYear; y++) full.push({ ...last, year: y, growthCents: undefined });
+    const survSchedule = full.map((y) => {
+      if (y.year < deathYear) return y;
+      const tax = taxFor(y.year);
+      const base = incomeIn(y.year, tax);
+      const surv = survIn(y.year);
+      const rent = Math.max(0, rentIn(y.year, tax).cashAfterTaxCents);
+      return {
+        year: y.year,
+        spendCents: y.spendCents,
+        // Same spending; his income out, the survivor's in, the payout once.
+        contributionCents:
+          y.contributionCents - base.afterTaxCents + surv.afterTaxCents + benefitsMonthly * 12 + (y.year === deathYear ? insuranceCents : 0),
+        guaranteedCents: surv.guaranteedCents + benefitsMonthly * 12 + rent,
+      };
+    });
+    return projectFi({ ...baseInputs, schedule: survSchedule, ownGrowthFrom: deathYear }, thisYear);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedule, usingGrid, untilYear, deathYear, insuranceCents, benefitsMonthly, plan, projection, thisYear, startCents]);
+  // The first survivor year, month by month, for the card.
+  const survivorYear = (() => {
+    const surv = survIn(deathYear);
+    const spendYearly = projection.find((p) => p.year === deathYear)?.spendingCents ?? schedule.at(-1)?.spendCents ?? 0;
+    const beforeTax = surv.parts.reduce((t, p) => t + p.monthlyBeforeTaxCents, 0);
+    const afterTax = surv.parts.reduce((t, p) => t + p.monthlyAfterTaxCents, 0);
+    return {
+      tax: taxFor(deathYear) ?? plan.retirementTaxPct,
+      parts: surv.parts,
+      taxMonthly: beforeTax - afterTax,
+      afterTaxMonthly: afterTax + benefitsMonthly,
+      spendMonthly: Math.round(spendYearly / 12),
+    };
+  })();
+  const yearOptions =
+    untilYear == null ? [] : Array.from({ length: Math.max(0, untilYear - survivorFirst + 1) }, (_, i) => survivorFirst + i);
 
   return (
     <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
@@ -545,6 +628,157 @@ export function FiSection({
                   />
                 ))}
               </ul>
+            </div>
+          </div>
+
+          {/* What-ifs: a bad market at retirement, and the family's income if
+              Victor dies first. Each reruns the same plan with one thing changed. */}
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+              <p className="text-center text-sm font-bold">Bad-market test</p>
+              <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-xs">
+                <span className="text-foreground/80">Drop in {shockYear}:</span>
+                {[20, 30, 40].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => setDropPct(pct)}
+                    aria-pressed={dropPct === pct}
+                    className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${
+                      dropPct === pct
+                        ? "bg-negative/15 text-foreground ring-negative/30"
+                        : "bg-surface text-foreground/80 ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-white/10"
+                    }`}
+                  >
+                    −{pct}%
+                  </button>
+                ))}
+              </div>
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm">
+                <ValueRow
+                  label={`Lost in ${shockYear}`}
+                  value={shockRow ? `−${formatMoneyWhole(Math.abs(shockRow.growthCents), currency)}` : "—"}
+                  tone="text-negative"
+                />
+                <ValueRow
+                  label="Money lasts"
+                  value={
+                    untilYear == null
+                      ? "Add birth year"
+                      : stressed.runsOutYear
+                        ? `Runs out at age ${stressed.runsOutYear - (plan.birthYear ?? 0)}`
+                        : `To age ${plan.longevityAge}`
+                  }
+                  tone={untilYear == null ? "" : stressed.runsOutYear ? "text-negative" : "text-positive"}
+                  bold
+                />
+                <ValueRow
+                  label={`Left at age ${plan.longevityAge}`}
+                  note={planEnd != null ? `Without the drop: ${formatMoneyWhole(Math.max(0, planEnd), currency)}` : undefined}
+                  value={stressEnd == null ? "—" : formatMoneyWhole(Math.max(0, stressEnd), currency)}
+                />
+              </ul>
+            </div>
+
+            <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
+              <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold">
+                If you die first, in
+                <select
+                  value={deathYear}
+                  onChange={(e) => setDeathYear(Number(e.target.value))}
+                  aria-label="Year"
+                  disabled={yearOptions.length === 0}
+                  className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  {(yearOptions.length ? yearOptions : [deathYear]).map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </p>
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm">
+                <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+                  <span>Family income</span>
+                  <span className="flex shrink-0">
+                    <span className="w-[4.5rem] text-right sm:w-20">Monthly</span>
+                    <span className="w-[5.75rem] text-right sm:w-24">Yearly</span>
+                  </span>
+                </li>
+                {survivorYear.parts.map((part, i) => (
+                  <IncomeRow
+                    key={i}
+                    label={part.name}
+                    note={part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : undefined}
+                    monthly={part.monthlyBeforeTaxCents}
+                    yearly={part.monthlyBeforeTaxCents * 12}
+                    currency={currency}
+                  />
+                ))}
+                {plan.survivorExtras.benefits.map((b) => (
+                  <IncomeRow key={b.name} label={b.name} note="from Estate guide" monthly={b.monthlyCents} yearly={b.monthlyCents * 12} currency={currency} />
+                ))}
+                {survivorYear.taxMonthly > 0 ? (
+                  <IncomeRow
+                    label={`Tax (${survivorYear.tax}%)`}
+                    monthly={-survivorYear.taxMonthly}
+                    yearly={-survivorYear.taxMonthly * 12}
+                    currency={currency}
+                    tone="text-negative"
+                  />
+                ) : null}
+                <IncomeRow
+                  label="Income after tax"
+                  monthly={survivorYear.afterTaxMonthly}
+                  yearly={survivorYear.afterTaxMonthly * 12}
+                  currency={currency}
+                  tone="text-positive"
+                  bold
+                />
+                <IncomeRow
+                  label="Planned spending"
+                  monthly={-survivorYear.spendMonthly}
+                  yearly={-survivorYear.spendMonthly * 12}
+                  currency={currency}
+                />
+                {(() => {
+                  const net = survivorYear.afterTaxMonthly - survivorYear.spendMonthly;
+                  return (
+                    <IncomeRow
+                      label={net >= 0 ? "Left to save" : "Gap from savings"}
+                      monthly={Math.abs(net)}
+                      yearly={Math.abs(net) * 12}
+                      currency={currency}
+                      tone={net >= 0 ? "text-positive" : "text-negative"}
+                      bold
+                    />
+                  );
+                })()}
+                {insuranceCents > 0 ? (
+                  <ValueRow
+                    label="Life insurance payout"
+                    note={plan.survivorExtras.insurance.map((i) => i.name).join(" · ")}
+                    value={`+${formatMoneyWhole(insuranceCents, currency)}`}
+                    tone="text-positive"
+                  />
+                ) : null}
+                <ValueRow
+                  label="Money lasts"
+                  value={
+                    !survivor
+                      ? untilYear == null ? "Add birth year" : "Add a plan above"
+                      : survivor.runsOutYear
+                        ? `Runs out in ${survivor.runsOutYear}`
+                        : `Through ${untilYear}`
+                  }
+                  tone={!survivor ? "" : survivor.runsOutYear ? "text-negative" : "text-positive"}
+                  bold
+                />
+              </ul>
+              <p className="mt-1.5 text-center text-xs text-foreground/80">
+                {plan.sbpEnabled ? "SBP: 55% of retired pay" : "No SBP: retired pay stops"} · VA and second job stop · larger Social Security kept
+              </p>
+              {insuranceCents === 0 && plan.survivorExtras.benefits.length === 0 ? (
+                <p className="mt-0.5 text-center text-xs text-foreground/80">Life insurance: add it in Accounts → Estate guide</p>
+              ) : null}
             </div>
           </div>
 

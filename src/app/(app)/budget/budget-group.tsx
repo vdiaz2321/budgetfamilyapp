@@ -11,7 +11,7 @@ import {
   reorderSubcategories,
 } from "./actions";
 import { ModalShell } from "@/components/modal-shell";
-import { ACTUAL_LABEL, actualColorClass, BudgetRow, remainingColorClass } from "./budget-row";
+import { ACTUAL_LABEL, actualColorClass, BudgetRow, mismatchPillClass, PILL_BASE, remainingColorClass, remainingText } from "./budget-row";
 import { DOT } from "./category-icons";
 import type { GroupData, RowData } from "./types";
 import { isHiddenPaidOffDebt } from "./types";
@@ -168,6 +168,7 @@ export function BudgetGroup({
   };
   const countLabel = leftOnly ? `${listedRows.length} of ${visibleRows.length}` : `${visibleRows.length}`;
   const subtotalOverspent = (group.kind === "bills" || group.kind === "expenses") && remainingTotal < 0;
+  const totalPill = subtotalOverspent ? null : mismatchPillClass(group.kind, remainingTotal, monthKey);
 
   return (
     // @container: the two headers below swap on the width of THIS card, not
@@ -322,7 +323,11 @@ export function BudgetGroup({
         >
           <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">Remaining</span>
           <span className={`block text-[12px] font-semibold @xl:text-[13px] @2xl:text-sm ${remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-            {formatMoney(remainingTotal, currency)}
+            {totalPill ? (
+              <span className={`${PILL_BASE} whitespace-nowrap px-1.5 ${totalPill}`}>{remainingText(group.kind, remainingTotal, currency, true)}</span>
+            ) : (
+              remainingText(group.kind, remainingTotal, currency)
+            )}
           </span>
         </button>
         <div className="col-span-2 min-w-0 px-0 py-1 text-center leading-tight tabular-nums">
@@ -388,7 +393,12 @@ export function BudgetGroup({
                         <div className="col-span-5 pl-6 sm:col-span-4">{label}</div>
                         <div className="col-span-2 text-center tabular-nums text-foreground">{formatMoney(planned, currency)}</div>
                         <div className={`col-span-2 text-center tabular-nums ${actualColorClass(group.kind, spent)}`}>{formatMoney(spent, currency)}</div>
-                        <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{formatMoney(remaining, currency)}</div>
+                        <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>
+                          {(() => {
+                            const pill = mismatchPillClass(group.kind, remaining, monthKey);
+                            return pill ? <span className={`${PILL_BASE} whitespace-nowrap px-2 ${pill}`}>{remainingText(group.kind, remaining, currency, true)}</span> : remainingText(group.kind, remaining, currency);
+                          })()}
+                        </div>
                         <div className={`col-span-2 text-center tabular-nums ${remainingColorClass(group.kind, remaining, planned)}`}>{progressLabel(group.kind, spent, planned)}</div>
                         <div className="col-span-2 text-center tabular-nums text-foreground">{formatMoney(ytd, currency)}</div>
                       </div>
@@ -459,8 +469,8 @@ export function BudgetGroup({
                   </div>
                   <div className="mt-0.5 text-[10px]">
                     <span className="font-medium text-muted">Remaining: </span>
-                    <span className={`inline-flex font-semibold ${subtotalOverspent ? "rounded-full bg-negative/15 px-1.5 py-0.5 text-foreground ring-1 ring-negative/15" : remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
-                      {formatMoney(remainingTotal, currency)}
+                    <span className={`inline-flex font-semibold ${subtotalOverspent ? "rounded-full bg-negative/15 px-1.5 py-0.5 text-foreground ring-1 ring-negative/15" : totalPill ? `${PILL_BASE} whitespace-nowrap px-1.5 ${totalPill}` : remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}`}>
+                      {remainingText(group.kind, remainingTotal, currency, Boolean(totalPill))}
                     </span>
                   </div>
                 </div>
@@ -487,11 +497,11 @@ export function BudgetGroup({
                 <div className="col-span-2 flex justify-center text-center text-sm font-semibold tabular-nums">
                   {subtotalOverspent ? (
                     <span className="inline-flex rounded-full bg-negative/15 px-2 py-0.5 text-foreground ring-1 ring-negative/15">
-                      {formatMoney(remainingTotal, currency)}
+                      {remainingText(group.kind, remainingTotal, currency)}
                     </span>
                   ) : (
-                    <span className={remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}>
-                      {formatMoney(remainingTotal, currency)}
+                    <span className={totalPill ? `${PILL_BASE} whitespace-nowrap px-2 ${totalPill}` : remainingColorClass(group.kind, remainingTotal, visiblePlannedTotal)}>
+                      {remainingText(group.kind, remainingTotal, currency, Boolean(totalPill))}
                     </span>
                   )}
                 </div>

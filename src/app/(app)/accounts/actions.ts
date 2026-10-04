@@ -267,6 +267,17 @@ export async function addAccount(formData: FormData) {
     sort_order: sortOrder,
     bank_group: bankGroup,
   };
+  // Estate guide fields, when "+ Add estate details" was opened.
+  const estateTransfer = String(formData.get("estateTransfer") ?? "").trim();
+  if (["beneficiary", "pod", "tod", "joint", "will", "close"].includes(estateTransfer)) row.estate_transfer = estateTransfer;
+  for (const [field, column] of [
+    ["estateBeneficiary", "estate_beneficiary"],
+    ["estateContact", "estate_contact"],
+    ["estateNotes", "estate_notes"],
+  ] as const) {
+    const v = String(formData.get(field) ?? "").trim();
+    if (v) row[column] = v;
+  }
 
   // Investment/kids accounts pick their tax treatment at creation rather than
   // having it guessed from the account name afterwards.

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { unwrap } from "@/lib/supabase-result";
+import { subscriptionChargesIn } from "@/lib/planned-by-sub";
 
 async function requireHousehold() {
   const supabase = await createClient();
@@ -272,7 +273,24 @@ export async function updateSubscriptionAmount(formData: FormData) {
   const perMonth =
     validMonth && (formData.get("perMonth") === "1" || month < currentMonth || hasOverride);
   if (perMonth) {
-    if (amountCents === 0) {
+    // $0 only clears the override where the month wouldn't bill anyway. In a
+    // month the sub does charge (a free month, a skipped bill), deleting would
+    // fall back to the sticker price — so a $0 there is saved as its own plan.
+    const chargesThisMonth =
+      amountCents === 0 &&
+      subscriptionChargesIn(
+        unwrap(
+          await supabase
+            .from("subscriptions")
+            .select("subcategory_id, is_active, next_renewal_date, billing_cycle")
+            .eq("id", id)
+            .eq("household_id", householdId)
+            .maybeSingle(),
+          "subscription",
+        ) ?? { subcategory_id: null, is_active: false, next_renewal_date: null, billing_cycle: "monthly" },
+        month,
+      );
+    if (amountCents === 0 && !chargesThisMonth) {
       await supabase
         .from("subscription_plans")
         .delete()
@@ -494,4 +512,90 @@ export async function reorderIrregularBills(orderedIds: string[]) {
     ),
   );
   revalidate();
+}
+
+// Match Spent for Subscriptions. That budget row's plan is the sum of each
+// subscription's month plan, so matching it sets each picked subscription's
+// plan for this one month (a subscription_plans row) to what it was charged —
+// never its price, so next month still plans the usual amount. A $0 is saved
+// as its own row, since deleting would fall back to the price. The spent
+// figures come from the board's payee matcher. Returns the month's old
+// override rows (null = there wasn't one) so the board can offer Undo.
+export async function matchSubscriptionPlansToSpent(
+  month: string,
+  items: Array<{ subscriptionId: string; cents: number }>,
+): Promise<{ error?: string; snapshot?: Array<{ subscription_id: string; planned_cents: number | null }> }> {
+  const { supabase, householdId } = await requireHousehold();
+  const picked = items.filter((i) => i.subscriptionId && Number.isFinite(i.cents) && i.cents >= 0);
+  if (!/^\d{4}-\d{2}-01$/.test(month) || picked.length === 0) return { error: "Nothing to match." };
+  const ids = picked.map((i) => i.subscriptionId);
+
+  const [subs, plans] = await Promise.all([
+    supabase.from("subscriptions").select("id").eq("household_id", householdId).in("id", ids),
+    supabase.from("subscription_plans").select("subscription_id, planned_cents").eq("household_id", householdId).eq("month", month).in("subscription_id", ids),
+  ]);
+  const ours = new Set((unwrap(subs, "subscriptions") ?? []).map((s) => s.id as string));
+  const before = new Map((unwrap(plans, "subscription_plans") ?? []).map((p) => [p.subscription_id as string, p.planned_cents as number]));
+  const rows = picked.filter((i) => ours.has(i.subscriptionId));
+  if (rows.length === 0) return { error: "Nothing to match." };
+
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("subscription_plans").upsert(
+    rows.map((r) => ({ household_id: householdId, subscription_id: r.subscriptionId, month, planned_cents: Math.round(r.cents), updated_at: now })),
+    { onConflict: "household_id,subscription_id,month" },
+  );
+  if (error) return { error: "Couldn't save the new subscription plans. Try again." };
+
+  revalidate();
+  return { snapshot: rows.map((r) => ({ subscription_id: r.subscriptionId, planned_cents: before.get(r.subscriptionId) ?? null })) };
+}
+
+export async function restoreSubscriptionPlansSnapshot(
+  month: string,
+  snapshot: Array<{ subscription_id: string; planned_cents: number | null }>,
+) {
+  const { supabase, householdId } = await requireHousehold();
+  if (!/^\d{4}-\d{2}-01$/.test(month)) return;
+  const toUpsert = snapshot
+    .filter((s) => s.planned_cents != null)
+    .map((s) => ({ household_id: householdId, subscription_id: s.subscription_id, month, planned_cents: s.planned_cents! }));
+  const toDelete = snapshot.filter((s) => s.planned_cents == null).map((s) => s.subscription_id);
+  if (toUpsert.length > 0) {
+    unwrap(
+      await supabase.from("subscription_plans").upsert(toUpsert, { onConflict: "household_id,subscription_id,month" }),
+      "subscription_plans undo",
+    );
+  }
+  if (toDelete.length > 0) {
+    unwrap(
+      await supabase.from("subscription_plans").delete().eq("household_id", householdId).eq("month", month).in("subscription_id", toDelete),
+      "subscription_plans undo",
+    );
+  }
+  revalidate();
+}
+
+// "Skip" on a Due-this-week subscription: a free or skipped month. Nothing was
+// charged, so no transaction is logged — the renewal date just moves to the
+// next cycle (same as Pay does) and the month it was due in plans $0, so the
+// budget doesn't wait on a charge that won't come.
+export async function skipSubscriptionCycle(formData: FormData) {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "").trim();
+  const dueDate = String(formData.get("dueDate") ?? "").trim(); // YYYY-MM-DD
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return;
+  unwrap(
+    await supabase.from("subscription_plans").upsert(
+      {
+        household_id: householdId,
+        subscription_id: id,
+        month: `${dueDate.slice(0, 7)}-01`,
+        planned_cents: 0,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "household_id,subscription_id,month" },
+    ),
+    "skipping subscription month",
+  );
+  await advanceSubscriptionRenewal(formData);
 }
