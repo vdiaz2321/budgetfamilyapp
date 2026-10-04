@@ -84,6 +84,7 @@ export function PlanSpentFields({
   onFocusSlot,
   spentLocked = false,
   spentOnPoints = false,
+  showForeign = true,
 }: {
   value: PlanSpent;
   onChange: (next: PlanSpent) => void;
@@ -98,15 +99,19 @@ export function PlanSpentFields({
   /** Paid with points: Spent is only the cash paid on top of the points, and
    *  Planned is what it would have cost. The labels say so. */
   spentOnPoints?: boolean;
+  /** False hides the second-currency boxes (kept in state, still saved) —
+   *  the short form shows only the home-currency figures. */
+  showForeign?: boolean;
 }) {
   const usd = currencySymbol(currency);
   const fx = foreignSymbol(foreignCurrency);
-  const boxes: { slot: PlanSpentSlot; label: string }[] = [
+  const allBoxes: { slot: PlanSpentSlot; label: string }[] = [
     { slot: "planned", label: `Planned ${what} (${usd})` },
     { slot: "plannedForeign", label: `Planned ${what} (${fx})` },
     { slot: "spent", label: spentOnPoints ? `Cash paid with pts (${usd})` : `Spent ${what} (${usd})` },
     { slot: "spentForeign", label: spentOnPoints ? `Cash paid with pts (${fx})` : `Spent ${what} (${fx})` },
   ];
+  const boxes = allBoxes.filter((b) => showForeign || !b.slot.endsWith("Foreign"));
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {boxes.map((b) => {
@@ -163,5 +168,35 @@ export function Field({ label, className, children }: { label: string; className
       <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+/**
+ * The line between a booking form's basics and the rest (points, credits,
+ * the second currency, card owner, remarks). The rest stays mounted while
+ * hidden, so nothing typed there is lost or left out of the save.
+ */
+export function MoreDetailsToggle({ open, onToggle, className }: { open: boolean; onToggle: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      className={`flex w-full items-center gap-2 rounded-md border border-dashed border-line px-3 py-2 text-left text-xs font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 ${className ?? ""}`}
+    >
+      <svg
+        aria-hidden
+        viewBox="0 0 20 20"
+        className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M5 7.5 10 12.5 15 7.5" />
+      </svg>
+      {open ? "Fewer details" : "More details: points, credits, other currency, card owner, remarks"}
+    </button>
   );
 }

@@ -5,14 +5,15 @@ import { SearchBox } from "./search-box";
 import { useMemo, useState } from "react";
 import { formatMoneyWhole } from "@/lib/money";
 import { ModalShell } from "@/components/modal-shell";
-import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { CardLinkModal, type CardLabelRow } from "./card-link-modal";
 import { CreditCardRewardsProvider, CreditCardSections, RewardsPointsLog } from "./credit-card-rewards";
 import type { CreditCardBoardData } from "@/lib/credit-card-data";
 import { StayModal } from "./stay-modal";
 import { FlightModal } from "./flight-modal";
 import { CarModal } from "./car-modal";
-import { TransportLogPanel } from "./transport-log-panel";
+import { FlightsList } from "./flights-panel";
+import { CarsList } from "./cars-panel";
+import { TripCards } from "./trip-cards";
 import { TripLogPanel } from "./trip-log-panel";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
@@ -38,13 +39,31 @@ import {
 
 const ALL = "__all__";
 
-// The three "what's still ahead" buttons in the page header, each opening its
-// own full-width popup. A kind with nothing ahead of it shows no button.
-const UPCOMING_BUTTONS: { key: "hotels" | "flights" | "cars"; label: string }[] = [
-  { key: "hotels", label: "Hotel Reservations" },
-  { key: "flights", label: "Flight Reservations" },
-  { key: "cars", label: "Rental Reservations" },
+// The Bookings log's three filters: one log, one kind of booking at a time.
+type BookingKind = "hotels" | "flights" | "rentals";
+const BOOKING_KINDS: { key: BookingKind; label: string }[] = [
+  { key: "hotels", label: "Hotels" },
+  { key: "flights", label: "Flights" },
+  { key: "rentals", label: "Rentals" },
 ];
+
+// What the search matches on a flight: airline, booking code, flight numbers,
+// airports and who flew.
+function flightText(f: TravelFlight): string {
+  return [
+    f.airline,
+    f.bookingCode,
+    ...f.legs.flatMap((l) => [l.flightNumber, l.fromPlace, l.toPlace]),
+    ...f.passengers.map((p) => p.name),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function carText(c: TravelCar): string {
+  return [c.company, c.bookingCode, c.pickupPlace, c.returnPlace].filter(Boolean).join(" ").toLowerCase();
+}
 
 // The sheet writes dates as 12-Sep-25 and says how a room was covered instead
 // of printing $0.00. These keep the table reading the way the spreadsheet did.
@@ -195,6 +214,8 @@ export function TravelBoard({
     pickYear([y]);
     setBrand(ALL);
     setQuery("");
+    setLogKind("hotels");
+    setUpcomingOnly(false);
     setExpanded(true);
   };
   const [bfastOnly, setBfastOnly] = useState(false);
@@ -203,28 +224,20 @@ export function TravelBoard({
     key: "checkIn",
     dir: "desc",
   });
-  // One period for the two side-by-side tallies (brand and card): they answer
-  // the same question two ways, so reading them against different years was
-  // never what was wanted. Independent of the Reservations filter above them.
-  // Both tallies open on this year plus any later year with a booking.
+  // One period for the stays tally, whichever way it is cut (brand or card).
+  // Independent of the Bookings log's year. Opens on this year plus any later
+  // year with a booking.
   const [tallyYear, setTallyYear] = useSessionYears("travel-brand-tally-years", () =>
     thisAndFutureYears(stays.map(stayYear), today.slice(0, 4)),
   );
-  const [cardYear, setCardYear] = useSessionYears("travel-card-tally-years", () =>
-    thisAndFutureYears(stays.map(stayYear), today.slice(0, 4)),
-  );
-  // The log starts collapsed on a fresh login — it's the longest section on
-  // the page — but sessionStorage carries whatever you last set for as long as
-  // you're still moving around the app.
-  const [listState, setListState] = useSessionCollapse("travel-reservations-log", () => ({ open: false }));
-  const openList = !!listState.open;
-  const setOpenList = (fn: (v: boolean) => boolean) =>
-    setListState((s) => ({ open: fn(!!s.open) }));
-  // The reservations log opened in a popup, where the sheet's full column set
-  // has room. Desktop only — see the button in the panel header.
+  // The Bookings log opens in a popup, where the hotel sheet's full column set
+  // has room. Which kind it shows, and whether only what's still ahead.
   const [expanded, setExpanded] = useState(false);
-  const [expandedTally, setExpandedTally] = useState<"brands" | "cards" | null>(null);
-  const [expandedUpcoming, setExpandedUpcoming] = useState<"hotels" | "flights" | "cars" | null>(null);
+  const [logKind, setLogKind] = useState<BookingKind>("hotels");
+  const [upcomingOnly, setUpcomingOnly] = useState(false);
+  // The stays tally: one panel, cut by brand or by the card that paid.
+  const [tallyBy, setTallyBy] = useState<"brands" | "cards">("brands");
+  const [expandedTally, setExpandedTally] = useState(false);
   const [editing, setEditing] = useState<TravelStay | null>(null);
   const [adding, setAdding] = useState(false);
   // A trip row's "edit spending" opens the Misc form on its own, not the
@@ -280,6 +293,27 @@ export function TravelBoard({
     () => Array.from(new Set(stays.map(stayYear))).sort().reverse(),
     [stays],
   );
+  // The Bookings log's year picker covers every kind, so it offers any year
+  // with a hotel, a flight or a rental.
+  const logYears = useMemo(
+    () =>
+      Array.from(
+        new Set([...stays.map(stayYear), ...flights.map((f) => f.firstFlightOn.slice(0, 4)), ...carList.map((c) => c.pickupOn.slice(0, 4))]),
+      )
+        .sort()
+        .reverse(),
+    [stays, flights, carList],
+  );
+  // Flights and rentals under the same year and search as the hotels.
+  const needle = query.trim().toLowerCase();
+  const shownFlights = flights.filter(
+    (f) => inYears(year, f.firstFlightOn.slice(0, 4)) && (!needle || flightText(f).includes(needle)),
+  );
+  const shownCars = carList.filter(
+    (c) => inYears(year, c.pickupOn.slice(0, 4)) && (!needle || carText(c).includes(needle)),
+  );
+  const flightsSpent = shownFlights.filter((f) => !f.cancelledAt).reduce((sum, f) => sum + f.pocketCostCents, 0);
+  const carsSpent = shownCars.filter((c) => !c.cancelledAt).reduce((sum, c) => sum + c.pocketCostCents, 0);
   const brands = useMemo(
     () => Array.from(new Set(stays.map((s) => s.brand).filter(Boolean) as string[])).sort(),
     [stays],
@@ -432,20 +466,6 @@ export function TravelBoard({
     }
     return { spent, saved };
   }, [tallyStays]);
-  // The card tally has its own year, so brand and card can be read for
-  // different years side by side.
-  const cardStays = useMemo(
-    () => live.filter((s) => inYears(cardYear, stayYear(s))),
-    [live, cardYear],
-  );
-  const cardTotals = useMemo(() => {
-    let spent = 0, saved = 0;
-    for (const s of cardStays) {
-      spent += s.pocketCostCents;
-      saved += savedCents(s);
-    }
-    return { spent, saved };
-  }, [cardStays]);
   const tallyPeriod = (value: string[], onChange: (v: string[]) => void, label: string) => (
     <YearPicker years={years} value={value} onChange={onChange} label={label} />
   );
@@ -454,7 +474,7 @@ export function TravelBoard({
   // labels are linked, which is what the Link cards button is for.
   const cardTally = useMemo(() => {
     const map = new Map<string, { stays: number; spent: number; saved: number; points: number }>();
-    for (const s of cardStays) {
+    for (const s of tallyStays) {
       const key = (s.accountId ? cardName.get(s.accountId) : null) ?? "Not linked";
       const row = map.get(key) ?? { stays: 0, spent: 0, saved: 0, points: 0 };
       row.stays += 1;
@@ -464,7 +484,7 @@ export function TravelBoard({
       map.set(key, row);
     }
     return Array.from(map.entries()).sort((a, b) => b[1].stays - a[1].stays || a[0].localeCompare(b[0]));
-  }, [cardStays, cardName]);
+  }, [tallyStays, cardName]);
   const brandTally = useMemo(() => {
     const map = new Map<string, { stays: number; spent: number; saved: number; points: number }>();
     for (const s of tallyStays) {
@@ -500,7 +520,7 @@ export function TravelBoard({
   // The year picker sits in the log's header, beside Open full width — the
   // same place the Travel Log keeps its own.
   const yearSelect = (
-    <YearPicker years={years} value={year} onChange={pickYear} label="Hotel Log year" />
+    <YearPicker years={logYears} value={year} onChange={pickYear} label="Bookings Log year" />
   );
 
   const reservations = (
@@ -510,7 +530,6 @@ export function TravelBoard({
                   repeated here. */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-6">
                 <div className="flex flex-wrap items-center gap-2">
-                  <SearchBox value={query} onChange={setQuery} placeholder="Search hotel, city…" label="Search hotels" className="w-52" />
                   {/* Breakfast is the one perk worth pulling a list on, so it
                       filters from here instead of only being readable per row. */}
                   <button
@@ -812,7 +831,7 @@ export function TravelBoard({
               Royal" rendered as "Hot…". The name owns its line
               and the details sit under it, the way the mobile
               card already reads. */}
-          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:min-w-[16rem] sm:basis-0">
             <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
               <span className="min-w-0 text-sm font-semibold sm:truncate">{s.propertyName}</span>
               {/* Same chip as the card panel's "Owner:" / "Bank:". */}
@@ -884,7 +903,7 @@ export function TravelBoard({
             onClick={() => setEditingFlight(f)}
             className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
           >
-            <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+            <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:min-w-[16rem] sm:basis-0">
               <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
                 <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
                 <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
@@ -936,7 +955,7 @@ export function TravelBoard({
           onClick={() => setEditingCar(c)}
           className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
         >
-          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0">
+          <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:min-w-[16rem] sm:basis-0">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
               {c.bookingCode ? (
@@ -981,6 +1000,111 @@ export function TravelBoard({
       </li>
     ))}
   </ul>
+  );
+
+  // ---- The Bookings log: one kind at a time, picked by these chips. On the
+  // page header a chip also opens the log; inside the popup it just switches.
+  const kindChips = (opens: boolean) => (
+    <span className="inline-flex rounded-lg bg-black/5 p-0.5 dark:bg-white/10" role="group" aria-label="Booking kind">
+      {BOOKING_KINDS.map(({ key, label }) => {
+        const active = logKind === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => {
+              setLogKind(key);
+              if (opens) setExpanded(true);
+            }}
+            aria-pressed={active}
+            className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+              active ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </span>
+  );
+
+  // The figures for the kind on show: how many, what left the wallet, and
+  // (hotels only) what points and credits saved. Upcoming only counts what's ahead.
+  const logFigures = (cols?: readonly string[]) => {
+    const slot = (i: number) => cols?.[i];
+    if (upcomingOnly) {
+      const n = logKind === "hotels" ? upcomingCounts.hotels : logKind === "flights" ? upcomingCounts.flights : upcomingCounts.cars;
+      return <Figure label="Upcoming" value={String(n)} tone="" className={slot(0)} />;
+    }
+    if (logKind === "hotels") {
+      return (
+        <HeaderTotals
+          countLabel="Total hotels"
+          count={filtered.length}
+          spent={shownTotals.pocket}
+          saved={shownTotals.saved}
+          currency={currency}
+          figureClassNames={cols}
+        />
+      );
+    }
+    const isFlights = logKind === "flights";
+    return (
+      <>
+        <Figure
+          label={isFlights ? "Total flights" : "Total rentals"}
+          value={String(isFlights ? shownFlights.length : shownCars.length)}
+          tone=""
+          className={slot(0)}
+        />
+        <Figure
+          label="Total spent"
+          value={formatMoneyWhole(isFlights ? flightsSpent : carsSpent, currency)}
+          tone="text-negative"
+          className={slot(1)}
+        />
+      </>
+    );
+  };
+
+  const emptyLog = (text: string) => <p className="px-4 py-8 text-center text-sm text-muted sm:px-6">{text}</p>;
+  const logBody =
+    logKind === "hotels"
+      ? upcomingOnly
+        ? upcoming.length > 0 ? hotelRows : emptyLog("No hotels ahead.")
+        : reservations
+      : logKind === "flights"
+        ? upcomingOnly
+          ? upcomingFlights.length > 0 ? flightRows : emptyLog("No flights ahead.")
+          : shownFlights.length > 0
+            ? <FlightsList flights={shownFlights} currency={currency} onEdit={setEditingFlight} />
+            : emptyLog("No flights match.")
+        : upcomingOnly
+          ? upcomingCars.length > 0 ? carRows : emptyLog("No rentals ahead.")
+          : shownCars.length > 0
+            ? <CarsList cars={shownCars} currency={currency} onEdit={setEditingCar} />
+            : emptyLog("No rentals match.");
+
+  // The stays tally's Brand / Card switch.
+  const tallySwitch = (opens: boolean) => (
+    <span className="inline-flex rounded-lg bg-black/5 p-0.5 dark:bg-white/10" role="group" aria-label="Tally by">
+      {(["brands", "cards"] as const).map((key) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => {
+            setTallyBy(key);
+            if (opens) setExpandedTally(true);
+          }}
+          aria-pressed={tallyBy === key}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+            tallyBy === key ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          {key === "brands" ? "By brand" : "By card"}
+        </button>
+      ))}
+    </span>
   );
 
   // The year rollup's table, shared by the inline panel and its full-width
@@ -1184,35 +1308,6 @@ export function TravelBoard({
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
                 it stays out of the way until a new unlinked stay appears. */}
-            {/* What's still ahead. These used to be two collapsible cards
-                halfway down the page; they are what you come here to check, so
-                they sit in the header and open straight into the full-width
-                popup — no expanding a narrow column first. */}
-            {/* Boxed together so the label reads as the heading of these
-                buttons, not as one more control in the row. */}
-            {UPCOMING_BUTTONS.some(({ key }) => upcomingCounts[key] > 0) ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/15 py-0.5 pl-3 pr-1 dark:border-white/20">
-              <span className="whitespace-nowrap text-base font-bold sm:text-lg">Upcoming Travel/Trips:</span>
-            {UPCOMING_BUTTONS.map(({ key, label }) =>
-              upcomingCounts[key] > 0 ? (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setExpandedUpcoming(key)}
-                  className="flex items-center gap-2 rounded-lg border border-black/25 bg-background px-3 py-1.5 text-sm font-bold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
-                >
-                  <span>{label}:</span>
-                  {/* The count reads as part of the button, not as a muted
-                      chip bolted onto it — a grey pill here was all weight and
-                      no colour. */}
-                  <span className="tabular-nums text-sky-700 dark:text-sky-400">
-                    {upcomingCounts[key]}
-                  </span>
-                </button>
-              ) : null,
-            )}
-            </div>
-            ) : null}
             {unlinked > 0 ? (
               <button
                 type="button"
@@ -1256,16 +1351,14 @@ export function TravelBoard({
           // cents-per-point has nothing to check itself against otherwise.
           redemptions={redemptions}
         >
-          {/* ---- Travel & Credit Card Rewards: the points that pay for the
-               stays below. Moved here from /accounts — Accounts keeps the
-               plain card list and the Pay Card flow. */}
+          {/* ---- Rewards first, shut to its headline tiles: what points are
+               left, and which cards are due an update after their anniversary.
+               Moved here from /accounts — Accounts keeps the plain card list
+               and the Pay Card flow. */}
           <CreditCardSections />
 
-          {/* ---- The three logs, stacked at every width. Each header opens its
-               own full-width popup. Stacked, their headers carry the open log's
-               figures in shared columns (LOG_TITLE_COL / LOG_FIGURE_COL) that
-               line up down the page; three across, a third of the column could
-               not hold them and each header wrapped to a different height. */}
+          {/* ---- Then the trips: what's coming up, then every trip as a table. */}
+          <TripCards summaries={tripSummaries} today={today} currency={currency} onOpenTrip={setOpenTripId} />
           <div className="grid items-start gap-3">
           {trips.length > 0 ? (
             <TripLogPanel
@@ -1277,89 +1370,63 @@ export function TravelBoard({
             />
           ) : null}
 
-          {/* ---- The reservations themselves, with the filters that drive them
-               and what the current selection adds up to. The same body is
-               rendered twice: inline in the page column, and — on a wide
-               screen — inside a popup that is not boxed in by the sidebar.
-               The sheet's 14 columns need ~1275px and the page column gives
-               them 780, so six of them (City, Brand, CC info, Pax, Nights,
-               Remarks) were only reachable by scrolling the table sideways.
-               The popup is where they actually fit; no column was dropped to
-               make the inline view work. */}
+          {/* ---- One Bookings log for hotels, flights and rentals. A kind chip
+               opens it full width on that kind; the hotel sheet's 14 columns
+               only fit there. */}
           <Panel
-            title="Hotel Log"
-            /* Collapsed it carries the open log's figures — only the search
-               stays inside, since it filters the table. */
-            titleClassName={LOG_TITLE_COL}
-            meta={
-              <HeaderTotals
-                countLabel="Total hotels"
-                count={filtered.length}
-                spent={shownTotals.pocket}
-                saved={shownTotals.saved}
-                currency={currency}
-                figureClassName={LOG_FIGURE_COL}
-              />
+            title="Bookings Log"
+            titleClassName={HEAD_TITLE_COL}
+            meta={logFigures(HEAD_FIGURE_COLS)}
+            control={
+              <span className="flex flex-wrap items-center gap-2">
+                {kindChips(true)}
+                {yearSelect}
+              </span>
             }
-            control={yearSelect}
-            open={openList}
-            onToggle={() => setOpenList((v) => !v)}
+            open={false}
+            onToggle={() => setExpanded(true)}
             onExpand={() => setExpanded(true)}
           >
-            {reservations}
+            {null}
           </Panel>
-
-          {flights.length + carList.length > 0 ? (
-            <TransportLogPanel
-              flights={flights}
-              cars={carList}
-              currency={currency}
-              onEditFlight={setEditingFlight}
-              onEditCar={setEditingCar}
-            />
-          ) : null}
           </div>
 
-          {/* ---- The two charts beside the points ledger, three across from
-               xl up. The charts are drawn narrow by design, so a third of a
-               row suits them; the ledger opens full width for its columns. */}
+          {/* ---- The two charts beside the stays tally, three across from xl
+               up. The charts are drawn narrow by design. */}
           <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-                <h2 className="mb-3 text-center text-sm font-bold">Hotel cost vs pocket cost</h2>
+                <h2 className="mb-3 text-center text-sm font-bold sm:text-base">Hotel cost vs pocket cost</h2>
                 <CostBars years={yearPoints} currency={currency} selected={yearPicked || yearRestored ? year : undefined} onPick={openLogForYear} />
               </div>
               {/* Stretched to the bar chart's height (it carries a legend this
                   one doesn't); the line sits at the bottom so both year rows line up. */}
               <div className="flex flex-col self-stretch rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
-                <h2 className="mb-3 text-center text-sm font-bold">Total saved per year</h2>
+                <h2 className="mb-3 text-center text-sm font-bold sm:text-base">Total saved per year</h2>
                 <div className="flex flex-1 flex-col justify-end">
                   <SavedLine years={yearPoints} currency={currency} selected={yearPicked || yearRestored ? year : undefined} onPick={openLogForYear} />
                 </div>
               </div>
-              <div className="space-y-3 lg:col-span-2 xl:col-span-1">
+              <div className="lg:col-span-2 xl:col-span-1">
                 <Panel
-                  title="Total Stays by Brand"
-                  meta={<Figure label="Saved" value={formatMoneyWhole(tallyTotals.saved, currency)} tone="text-positive" />}
-                  control={tallyPeriod(tallyYear, setTallyYear, "Brand tally year")}
+                  title="Stays History"
+                  meta={<Figure label="Total cash saved" value={formatMoneyWhole(tallyTotals.saved, currency)} tone="text-positive" />}
+                  control={
+                    <span className="flex flex-wrap items-center gap-2">
+                      {tallySwitch(true)}
+                      {tallyPeriod(tallyYear, setTallyYear, "Stays history year")}
+                    </span>
+                  }
                   open={false}
-                  onToggle={() => setExpandedTally("brands")}
-                  onExpand={() => setExpandedTally("brands")}
+                  onToggle={() => setExpandedTally(true)}
+                  onExpand={() => setExpandedTally(true)}
                 >
                   {null}
                 </Panel>
-                <Panel
-                  title="Total Stays by Rewards Card"
-                  meta={<Figure label="Saved" value={formatMoneyWhole(cardTotals.saved, currency)} tone="text-positive" />}
-                  control={tallyPeriod(cardYear, setCardYear, "Card tally year")}
-                  open={false}
-                  onToggle={() => setExpandedTally("cards")}
-                  onExpand={() => setExpandedTally("cards")}
-                >
-                  {null}
-                </Panel>
-                <RewardsPointsLog />
               </div>
           </section>
+
+          {/* ---- The points ledger, under everything it records. */}
+          <RewardsPointsLog />
 
 
         </CreditCardRewardsProvider>
@@ -1370,60 +1437,55 @@ export function TravelBoard({
           still hide the last columns on a laptop. */}
       {expanded ? (
         <ModalShell
-          title="Hotel Log"
+          title="Bookings Log"
           onClose={() => setExpanded(false)}
           className="sm:max-w-[96vw]"
           headerExtra={
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <HeaderTotals
-                countLabel="Total hotels"
-                count={filtered.length}
-                spent={shownTotals.pocket}
-                saved={shownTotals.saved}
-                currency={currency}
-              />
-              {/* On the title's own line, not a strip of its own below it. */}
-              {yearSelect}
+              {kindChips(false)}
+              <button
+                type="button"
+                onClick={() => setUpcomingOnly((v) => !v)}
+                aria-pressed={upcomingOnly}
+                className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 transition ${
+                  upcomingOnly ? "text-white ring-transparent" : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                }`}
+                style={upcomingOnly ? { backgroundColor: "var(--viz-savings)" } : undefined}
+              >
+                Upcoming only
+              </button>
+              {logFigures()}
+              {upcomingOnly ? null : (
+                <>
+                  <SearchBox value={query} onChange={setQuery} placeholder="Search…" label="Search bookings" className="w-44" />
+                  {yearSelect}
+                </>
+              )}
             </span>
           }
         >
-          {reservations}
-        </ModalShell>
-      ) : null}
-
-      {expandedUpcoming ? (
-        <ModalShell
-          title={
-            expandedUpcoming === "hotels" ? "Hotel Reservations" : expandedUpcoming === "flights" ? "Flight Reservations" : "Rental Reservations"
-          }
-          onClose={() => setExpandedUpcoming(null)}
-          // Room for the name + its chip on one line beside four figure
-          // columns; grows with the window up to 72rem.
-          className="sm:max-w-[min(94vw,72rem)]"
-        >
-          {expandedUpcoming === "hotels" ? hotelRows : expandedUpcoming === "flights" ? flightRows : carRows}
+          {logBody}
         </ModalShell>
       ) : null}
 
       {expandedTally ? (
         <ModalShell
-          title={expandedTally === "brands" ? "Total Stays by Brand" : "Total Stays by Rewards Card"}
-          onClose={() => setExpandedTally(null)}
+          title="Stays History"
+          onClose={() => setExpandedTally(false)}
           className="sm:max-w-5xl"
           headerExtra={
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {expandedTally === "brands" ? (
+              {tallySwitch(false)}
+              {tallyBy === "brands" ? (
                 <HeaderTotals countLabel="Total brands" count={brandTally.length} spent={tallyTotals.spent} saved={tallyTotals.saved} currency={currency} />
               ) : (
-                <HeaderTotals countLabel="Total cards" count={cardTally.length} spent={cardTotals.spent} saved={cardTotals.saved} currency={currency} />
+                <HeaderTotals countLabel="Total cards" count={cardTally.length} spent={tallyTotals.spent} saved={tallyTotals.saved} currency={currency} />
               )}
-              {expandedTally === "brands"
-                ? tallyPeriod(tallyYear, setTallyYear, "Brand tally year")
-                : tallyPeriod(cardYear, setCardYear, "Card tally year")}
+              {tallyPeriod(tallyYear, setTallyYear, "Stays history year")}
             </span>
           }
         >
-          {expandedTally === "brands" ? brandTable : cardTable}
+          {tallyBy === "brands" ? brandTable : cardTable}
         </ModalShell>
       ) : null}
 
@@ -1561,7 +1623,7 @@ function Panel({
            twice and land back where it started. */
         onClick={(e) => { e.stopPropagation(); (onExpand ?? onToggle)(); }}
         aria-expanded={onExpand ? undefined : open}
-        className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-left ${onExpand ? "" : "flex-1 px-4 py-3 sm:px-5"} ${control ? (onExpand ? "pr-3" : "pr-2") : ""}`}
+        className={`flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-left ${onExpand ? "" : "flex-1 px-4 py-3 sm:px-5"} ${control ? (onExpand ? "pr-3" : "pr-2") : ""}`}
       >
         <span className={`flex min-w-0 items-center gap-2 ${titleClassName ?? ""}`}>
           {onExpand ? (
@@ -1580,10 +1642,10 @@ function Panel({
               <path d="M5 7.5 10 12.5 15 7.5" />
             </svg>
           )}
-          <span className="truncate text-sm font-bold">{title}</span>
+          <span className="truncate text-sm font-bold sm:text-base">{title}</span>
         </span>
         {meta ? (
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">{meta}</span>
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{meta}</span>
         ) : null}
       </button>
       {/* Pinned to the far right edge, so the year pickers of the stacked
@@ -1607,13 +1669,11 @@ function Panel({
   );
 }
 
-/** Column widths shared by the three stacked log headers (Travel Combined,
- *  Hotel, Flights & Rentals) so their titles, figures and year pickers line
- *  up down the page — and with the rewards rows above, whose title slot is
- *  15.5rem (this row's wider gap-x-3 eats the other 0.25rem), so every
- *  header's first figure starts in one column. */
-export const LOG_TITLE_COL = "sm:w-[15.25rem]";
-export const LOG_FIGURE_COL = "sm:min-w-[9.5rem]";
+/** Column widths shared by the Upcoming trips, All Trips and Bookings Log
+ *  headers, so their titles and first three figures line up down the page.
+ *  Each is a minimum sized to its widest figure today, with a little room. */
+export const HEAD_TITLE_COL = "sm:w-[9.5rem]";
+export const HEAD_FIGURE_COLS = ["sm:min-w-[7.75rem]", "sm:min-w-[10.25rem]", "sm:min-w-[11.75rem]"] as const;
 
 /** The two diagonal arrows: this header opens a full-width popup. */
 export function ExpandIcon() {
@@ -1667,20 +1727,20 @@ function HeaderTotals({
   spent,
   saved,
   currency,
-  figureClassName,
+  figureClassNames,
 }: {
   countLabel: string;
   count: number;
   spent: number;
   saved: number;
   currency: string;
-  figureClassName?: string;
+  figureClassNames?: readonly string[];
 }) {
   return (
     <>
-      <Figure label={countLabel} value={String(count)} tone="" className={figureClassName} />
-      <Figure label="Total spent" value={formatMoneyWhole(spent, currency)} tone="text-negative" className={figureClassName} />
-      <Figure label="Total saved" value={formatMoneyWhole(saved, currency)} tone="text-positive" className={figureClassName} />
+      <Figure label={countLabel} value={String(count)} tone="" className={figureClassNames?.[0]} />
+      <Figure label="Total spent" value={formatMoneyWhole(spent, currency)} tone="text-negative" className={figureClassNames?.[1]} />
+      <Figure label="Total cash saved" value={formatMoneyWhole(saved, currency)} tone="text-positive" className={figureClassNames?.[2]} />
     </>
   );
 }
@@ -1701,7 +1761,7 @@ export function Figure({
   return (
     <span className={`flex shrink-0 items-baseline gap-1.5 ${className ?? ""}`}>
       <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
-      <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>{value}</span>
+      <span className={`text-sm font-semibold tabular-nums ${tone}`} style={style}>{value}</span>
     </span>
   );
 }

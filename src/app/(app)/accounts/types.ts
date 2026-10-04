@@ -62,6 +62,9 @@ export type CardDetails = {
   debtSubcategoryId: string | null;
   cardUrl: string | null;
   benefitCadence: string | null;
+  /** Last time the card's details row changed — a typed edit or a logged
+   *  points entry (the ledger trigger rewrites the balance). */
+  updatedAt?: string | null;
   payoffBalanceCents: number;
   payoffMinimumCents: number;
   payoffPlannedCents: number;

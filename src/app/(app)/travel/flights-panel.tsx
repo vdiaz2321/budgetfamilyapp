@@ -101,7 +101,7 @@ function Figure({
   return (
     <span className="flex items-baseline gap-1.5">
       <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
-      <span className={`text-sm font-bold tabular-nums ${className ?? ""}`} style={style}>{value}</span>
+      <span className={`text-sm font-semibold tabular-nums ${className ?? ""}`} style={style}>{value}</span>
     </span>
   );
 }

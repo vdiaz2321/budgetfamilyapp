@@ -14,7 +14,7 @@ import React, { useEffect, useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoneyWhole } from "@/lib/money";
 import { evaluateExpression, hasOperator } from "@/lib/math-expression";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, StatTile, usePointerReorder } from "../accounts/shared-ui";
+import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "../accounts/shared-ui";
 import {
   CREDIT_SECTIONS,
   type AccountData,
@@ -33,6 +33,7 @@ import {
   reorderAccounts,
   updateAccount,
   upsertCardDetails,
+  markCardDetailsUpdated,
 } from "../accounts/actions";
 import { ModalShell } from "@/components/modal-shell";
 import { ExpandIcon } from "./travel-board";
@@ -65,6 +66,40 @@ function daysUntil(iso: string, today: string): number {
  * silently turns into nothing if it isn't watched.
  */
 const EXPIRY_SOON_DAYS = 90;
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/**
+ * The anniversary (the opened date's month and day) most recently passed —
+ * when the fee posts, a new certificate or credit lands and the points
+ * usually change. A card not updated since then is probably stale.
+ */
+function lastAnniversaryOn(opened: string, today: string): string {
+  const md = opened.slice(4);
+  const thisYear = `${today.slice(0, 4)}${md}`;
+  return thisYear <= today ? thisYear : `${Number(today.slice(0, 4)) - 1}${md}`;
+}
+function isAnniversaryDue(a: AccountData, today: string): boolean {
+  if (a.dateClosed || !a.dateOpened || !a.cardDetails?.updatedAt) return false;
+  // Nothing renews on the anniversary of a no-fee card with no points or
+  // night credit (e.g. a card kept only for its debt), so there is nothing
+  // to check.
+  const d = a.cardDetails;
+  const hasSomethingToCheck =
+    (a.annualFeeCents ?? 0) > 0 ||
+    d.currentPoints > 0 ||
+    Boolean(d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightCategoryMax || d.freeNightExpiresOn);
+  if (!hasSomethingToCheck) return false;
+  const anniv = lastAnniversaryOn(a.dateOpened, today);
+  // A card younger than a year has had no anniversary yet.
+  if (anniv <= a.dateOpened) return false;
+  return a.cardDetails.updatedAt.slice(0, 10) < anniv;
+}
+
+// "2-Oct", the way the travel sheet writes a date without its year.
+function shortDate(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return `${Number(d)}-${SHORT_MONTHS[Number(m) - 1]}`;
+}
 
 /** "12 days left" / "in 3 months" — the number the date alone doesn't give. */
 function expiryLabel(days: number): string {
@@ -140,10 +175,11 @@ export function CreditCardRewardsProvider({
 }) {
   const [focusCardId, setFocusCardId] = useState<string | null>(null);
   // Each card section remembers its own open/closed state for the session.
-  // "credit" starts open; the two closed-card sections start shut.
+  // Every section starts shut: the rewards sit at the foot of the page, under
+  // the trips and bookings, and open when asked for.
   const [collapsed, setCollapsed] = useSessionCollapse(
-    "travel-credit-sections-collapsed",
-    () => ({ credit: false, credit_closed: true, credit_archived: true }),
+    "travel-credit-sections-collapsed-v2",
+    () => ({ credit: true, credit_closed: true, credit_archived: true }),
   );
   const toggleSection = (key: string) =>
     setCollapsed((state) => ({ ...state, [key]: !state[key] }));
@@ -297,6 +333,8 @@ function CreditCardSection({
   const [showOnlyUnvalued, setShowOnlyUnvalued] = useState(false);
   // Cards whose unspent benefit runs out soon.
   const [showOnlyExpiring, setShowOnlyExpiring] = useState(false);
+  // Cards whose anniversary has come round since they were last updated.
+  const [showOnlyAnnivDue, setShowOnlyAnnivDue] = useState(false);
   // The holder / bank / opened controls, shut until asked for.
   const [filtersOpen, setFiltersOpen] = useState(false);
   // Opened-on range. Answers "which cards did we open in this window" — the
@@ -347,6 +385,8 @@ function CreditCardSection({
     const days = daysUntil(d.freeNightExpiresOn, sectionToday);
     return days >= 0 && days <= EXPIRY_SOON_DAYS;
   };
+  const anniversaryDue = (a: AccountData) => isAnniversaryDue(a, sectionToday);
+  const lastAnniversary = (opened: string) => lastAnniversaryOn(opened, sectionToday);
   /** The card's annual credit, counted only while it can still be spent. */
   const liveCreditCents = (d: AccountData["cardDetails"]) =>
     benefitLive(d) ? annualCreditCents(d) : 0;
@@ -433,6 +473,11 @@ function CreditCardSection({
   const bankFilterFn = (a: AccountData) => !bankFilter || cardBank(a) === bankFilter;
   const unvaluedFilter = (a: AccountData) => !showOnlyUnvalued || unvaluedPointsOn(a) > 0;
   const expiringFilter = (a: AccountData) => !showOnlyExpiring || expiringSoon(a);
+  // On only while a card is still due: marking the last one updated removes
+  // the chip, and a filter with no chip left to switch it off would hide
+  // every card.
+  const annivOn = showOnlyAnnivDue && localAccounts.some(anniversaryDue);
+  const annivFilter = (a: AccountData) => !annivOn || anniversaryDue(a);
   // A card with no opened date is out as soon as a range is set: the filter
   // asks what was opened when, and "unknown" isn't an answer to that.
   const openedFilterFn = (a: AccountData) => {
@@ -449,7 +494,7 @@ function CreditCardSection({
   const passesFilters = (a: AccountData) =>
     isFocused(a)
     || (feeFilter(a) && owedFilter(a) && ptsFilter(a) && holderFilterFn(a) && bankFilterFn(a)
-      && unvaluedFilter(a) && openedFilterFn(a) && expiringFilter(a));
+      && unvaluedFilter(a) && openedFilterFn(a) && expiringFilter(a) && annivFilter(a));
   // Per-category "contributes to Redeemable" filters — scoped to their own
   // section so clicking Travel Redeemable doesn't empty the Hotel list.
   const travelCards = localAccounts.filter((a) =>
@@ -481,9 +526,11 @@ function CreditCardSection({
   const toggleGroup = (key: string) =>
     setGroupOpen((state) => ({ ...state, [key]: state[key] === false }));
 
-  const travelOpen = groupOpen.travel !== false || focusedCategory === "travel";
-  const hotelOpen = groupOpen.hotel !== false || focusedCategory === "hotel";
-  const otherOpen = groupOpen.other !== false || focusedCategory === "other";
+  // "Update due" opens whichever groups hold a card it found, so the click
+  // lands on the cards rather than on folded headers.
+  const travelOpen = groupOpen.travel !== false || focusedCategory === "travel" || (annivOn && travelCards.length > 0);
+  const hotelOpen = groupOpen.hotel !== false || focusedCategory === "hotel" || (annivOn && hotelCards.length > 0);
+  const otherOpen = groupOpen.other !== false || focusedCategory === "other" || (annivOn && otherCards.length > 0);
   const travelOwed = travelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   const hotelOwed = hotelCards.reduce((sum, a) => sum + (a.owedCents ?? 0), 0);
   // The group's share of the stat tiles above: points held, what they are
@@ -501,38 +548,26 @@ function CreditCardSection({
     }
     return { points, value, redeemable, unvalued };
   };
-  const groupFigures = (cards: AccountData[], cat: "travel" | "hotel") => {
+  // Figure chips for a group's dark banner. Colours are lifted versions of
+  // the data palette so they read on the dark fill.
+  const bannerChip = (label: string, text: string, valueClass: string, extra = "") => (
+    <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${extra || "bg-white/[0.06] ring-white/10"}`}>
+      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}:</span>
+      <span className={`whitespace-nowrap text-sm font-semibold tabular-nums ${valueClass}`}>{text}</span>
+    </span>
+  );
+  const groupFigures = (cards: AccountData[], cat: "travel" | "hotel", owed: number) => {
     const { points, value, redeemable, unvalued } = groupRewards(cards);
-    // Fixed-width slots from sm up, so the Travel and Hotel rows line their
-    // figures up in columns; a slot with nothing to show still holds its
-    // place so the ones after it don't shift. Empty slots at the end hold
-    // nothing up, so they're dropped — they were what pushed the Unused chip
-    // onto a line of its own. Slots are minimums sized to today's figures, so
-    // the two rows line up yet a longer number widens its slot instead of
-    // spilling into the next; the row, chip included, fits an 872px row.
-    const slots = [
-      { show: points > 0, width: "sm:min-w-[7.25rem]", label: "Pts", text: points.toLocaleString(), className: "" },
-      { show: value > 0, width: "sm:min-w-28", label: "Value", text: formatMoneyWhole(value, currency), className: "text-positive" },
-      // Named for its group and shown on both rows, so the two line up and
-      // the Unused chip after it sits in one column.
-      { show: redeemable > 0, width: "sm:min-w-[11.5rem]", label: cat === "travel" ? "Travel Redeemable" : "Hotel Redeemable", text: formatMoneyWhole(redeemable, currency), className: "text-positive" },
-      // The figure beside it is only as complete as the cents-per-point
-      // typed on the cards, so say how much of the balance isn't in it.
-      { show: unvalued > 0, width: "sm:min-w-40", label: "No value set", text: `${compactNum(unvalued)} pts`, className: "text-negative" },
-    ];
-    const lastShown = slots.map((f) => f.show).lastIndexOf(true);
     return (
       <>
-        {slots.slice(0, lastShown + 1).map((f) =>
-          f.show ? (
-            <span key={f.label} className={`flex shrink-0 items-baseline gap-1.5 ${f.width}`}>
-              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">{f.label}:</span>
-              <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${f.className}`}>{f.text}</span>
-            </span>
-          ) : (
-            <span key={f.label} aria-hidden className={`hidden shrink-0 sm:block ${f.width}`} />
-          ),
-        )}
+        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-rose-300" : "text-slate-300")}
+        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-emerald-300") : null}
+        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-emerald-300") : null}
+        {redeemable > 0
+          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-200", "bg-sky-400/15 ring-sky-300/30")
+          : null}
+        {/* Only as complete as the cents-per-point typed on the cards. */}
+        {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-rose-300") : null}
       </>
     );
   };
@@ -557,15 +592,13 @@ function CreditCardSection({
           setUnusedGroup((prev) => (prev === cat ? null : cat));
           if (!active) setGroupOpen((state) => ({ ...state, [cat]: true }));
         }}
-        className={`ml-auto shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+        // A teal wash at rest marks it as a filter control on the dark
+        // banner; switched on it fills solid.
+        className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition lg:ml-auto ${
           active
-            ? "border-transparent text-white"
-            // A pale cool-blue wash at rest marks it as a filter control; the
-            // stronger sky-100 fill it had read as a filter already switched
-            // on. On is the solid blue above.
-            : "border-sky-200 bg-sky-50 text-foreground hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:hover:bg-sky-900/40"
+            ? "bg-teal-400 text-slate-900 ring-teal-300"
+            : "bg-teal-400/15 text-teal-200 ring-teal-300/30 hover:bg-teal-400/25"
         }`}
-        style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
       >
         {/* A group usually holds one kind of benefit; "0 free nights" beside
             it is noise. Both halves show only when both are there. */}
@@ -576,7 +609,51 @@ function CreditCardSection({
       </button>
     );
   };
+  // A group's header: a dark banner with the name, a one-line description and
+  // the group's figures as chips. Clicking anywhere on it folds the group.
+  const groupBanner = (cat: "travel" | "hotel", isOpen: boolean, owed: number, cards: AccountData[]) => (
+    <div className="px-4 pt-4 sm:px-6">
+      <div
+        onClick={() => toggleGroup(cat)}
+        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 rounded-2xl bg-slate-900 px-4 py-3.5 text-white shadow-md ring-1 ring-white/10 sm:px-5 dark:bg-neutral-800"
+      >
+        <button type="button" aria-expanded={isOpen} className="flex min-w-0 items-center gap-3 text-left lg:mr-3">
+          <span className="text-slate-400"><GroupChevron open={isOpen} /></span>
+          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ${cat === "travel" ? "bg-sky-400/15 text-sky-300 ring-sky-300/30" : "bg-teal-400/15 text-teal-300 ring-teal-300/30"}`}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {cat === "travel" ? (
+                <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
+              ) : (
+                <>
+                  <path d="M3 21V7l7-4v4h11v14" />
+                  <path d="M7 10h.01M11 10h.01M15 14h.01M11 14h.01M7 14h.01M15 18h.01M11 18h.01M7 18h.01" />
+                </>
+              )}
+            </svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block whitespace-nowrap text-sm font-bold sm:text-base">{cat === "travel" ? "Travel Rewards" : "Hotel Rewards"}</span>
+            <span className="block text-[11px] text-slate-400">{cat === "travel" ? "Airline & bank points, travel credits" : "Hotel points & free-night credits"}</span>
+          </span>
+        </button>
+        {/* Two per row on a phone, one line from sm up. */}
+        <span className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+          {groupFigures(cards, cat, owed)}
+        </span>
+        {groupUnusedChip(cat)}
+      </div>
+    </div>
+  );
+  // A group's cards sit in their own rounded box under its banner.
+  const groupList = (list: React.ReactNode) => (
+    // Full width on a phone, where the stacked card rows need every pixel.
+    <div className="pt-3 sm:px-6">
+      <div className="overflow-hidden border-y border-line bg-background sm:rounded-2xl sm:border-0 sm:ring-1 sm:ring-line">{list}</div>
+    </div>
+  );
   const renderCards = (cards: AccountData[]) => (
+    <>
+    <CardTableHeader />
     <ul className="divide-y divide-line">
       {cards.map((a) => (
         <CreditCardPanel
@@ -591,6 +668,7 @@ function CreditCardSection({
         />
       ))}
     </ul>
+    </>
   );
 
   // Every headline figure and count respects both people-and-bank filters, so
@@ -685,6 +763,7 @@ function CreditCardSection({
       totalLimitCents,
       utilisationPct: totalLimitCents > 0 ? (owedOnLimitedCards / totalLimitCents) * 100 : null,
       expiringSoon: open.filter(expiringSoon).length,
+      anniversaryDue: open.filter(anniversaryDue),
     };
   };
   // With nothing narrowing the card list, the tiles speak for the whole
@@ -729,10 +808,24 @@ function CreditCardSection({
               // beside it. Sharing the line squeezed the title to one word per
               // line on a phone, where the overflowing words then ran under
               // the chips, and to three cramped lines on a narrow desktop.
-              className="w-full min-w-0 text-left lg:w-auto"
+              className="flex w-full min-w-0 items-center gap-3 text-left lg:w-auto"
               aria-expanded={open}
             >
-              <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
+              <span aria-hidden className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand text-white shadow-sm">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 22h20" />
+                  <path d="M6.36 17.4 4 17l-2-4 1.1-.55a2 2 0 0 1 1.8 0l.17.1a2 2 0 0 0 1.8 0L8 12 5 6l.9-.45a2 2 0 0 1 2.09.2l4.02 3a2 2 0 0 0 2.1.2l4.19-2.06a2.41 2.41 0 0 1 1.73-.17L21 7a1.4 1.4 0 0 1 .87 1.99l-.38.76c-.23.46-.6.84-1.07 1.08L7.58 17.2a2 2 0 0 1-1.22.18Z" />
+                </svg>
+              </span>
+              <span className="min-w-0">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
+                  <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-[11px] font-semibold text-foreground/80 ring-1 ring-line dark:bg-white/10">
+                    {allStats.openCards.length} active cards
+                  </span>
+                </span>
+                <span className="mt-0.5 block text-xs text-muted">Point balances, redemption values, fees and travel credits</span>
+              </span>
             </button>
             {/* The one thing on this board that stops existing if it isn't
                 acted on. It gets its own control, in the warning colour, and
@@ -752,11 +845,39 @@ function CreditCardSection({
                 {EXPIRY_SOON_DAYS} days
               </button>
             ) : null}
+            {/* A card whose anniversary passed since it was last touched: its
+                points, fee and benefit dates are probably stale. Tapping it
+                narrows the list to those cards. */}
+            {allStats.anniversaryDue.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  // The filtered list only shows in the open section.
+                  if (!showOnlyAnnivDue && !open) onToggle();
+                  setShowOnlyAnnivDue((v) => !v);
+                }}
+                aria-pressed={showOnlyAnnivDue}
+                className={`shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-bold transition ${
+                  showOnlyAnnivDue
+                    ? "border-transparent text-white"
+                    : "bg-background hover:bg-black/5 dark:hover:bg-white/10"
+                }`}
+                style={
+                  showOnlyAnnivDue
+                    ? { backgroundColor: "var(--viz-savings)" }
+                    : { borderColor: "var(--viz-savings)", color: "var(--viz-savings)" }
+                }
+              >
+                {allStats.anniversaryDue.length === 1
+                  ? `Update due: ${allStats.anniversaryDue[0].name} (anniversary ${shortDate(lastAnniversary(allStats.anniversaryDue[0].dateOpened ?? ""))})`
+                  : `Update due: ${allStats.anniversaryDue.length} cards past anniversary`}
+              </button>
+            ) : null}
             <a
               href="https://www.dailydrop.com/calculator"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-neutral-950"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-sky-700/20 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 lg:ml-auto dark:border-sky-400/20 dark:bg-sky-950/40 dark:text-sky-400 dark:hover:bg-sky-900/40"
             >
               <span className="sm:hidden">Calculator</span>
               <span className="hidden sm:inline">Pts value calculator</span>
@@ -765,7 +886,7 @@ function CreditCardSection({
             <button
               type="button"
               onClick={onToggle}
-              className="grid h-8 w-8 shrink-0 lg:ml-auto place-items-center rounded-md text-foreground/75 transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-foreground/75 transition hover:bg-slate-100 dark:hover:bg-neutral-800"
               aria-label={open ? "Collapse credit card rewards" : "Expand credit card rewards"}
             >
               <svg
@@ -784,10 +905,12 @@ function CreditCardSection({
               Only the grid is gated on that — the filter row below is what
               clears the filter, so it must never be hidden by it. */}
           {(allStats.totalPoints > 0 || allStats.travelRedeemable > 0 || allStats.hotelRedeemable > 0 || allStats.feesPaid > 0 || allStats.totalOwed > 0) ? (
-            <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="mt-5 grid grid-cols-2 items-stretch gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {allStats.totalPoints > 0 ? (
-                <StatTile
+                <RewardTile
                   label="Current Pts"
+                  tone="positive"
+                  icon="coins"
                   value={totalPoints.toLocaleString()}
                   sub={(() => {
                     const other = Math.max(0, totalPoints - travelPoints - hotelPoints);
@@ -797,14 +920,15 @@ function CreditCardSection({
                     if (other > 0) parts.push(`Other ${compactNum(other)}`);
                     return parts.length ? parts.join(" · ") : undefined;
                   })()}
-                  tone="emerald"
                   onClick={() => setShowOnlyPtsCards((v) => !v)}
                   active={showOnlyPtsCards}
                 />
               ) : null}
               {allStats.totalCardValueCents > 0 ? (
-                <StatTile
+                <RewardTile
                   label="Total Pts Value"
+                  tone="ink"
+                  icon="dollar"
                   value={formatMoneyWhole(totalCardValueCents, currency)}
                   // The tile is only as true as the cents-per-point behind it.
                   // Where a balance has none, say so here rather than letting
@@ -816,34 +940,37 @@ function CreditCardSection({
                       : "All cards"
                   }
                   subColor={unvaluedPoints > 0 ? "var(--negative)" : undefined}
-                  tone="emerald"
                   onClick={unvaluedPoints > 0 ? () => setShowOnlyUnvalued((v) => !v) : undefined}
                   active={showOnlyUnvalued}
                 />
               ) : null}
               {allStats.travelRedeemable > 0 ? (
-                <StatTile
+                <RewardTile
                   label="Travel Pts Value"
+                  tone="travel"
+                  icon="plane"
                   value={formatMoneyWhole(travelPtsValue, currency)}
                   sub={categorySub(travelPtsValue, travelCredits, travelNights)}
-                  tone="sky"
                   onClick={() => setShowOnlyTravelRedeem((v) => !v)}
                   active={showOnlyTravelRedeem}
                 />
               ) : null}
               {allStats.hotelRedeemable > 0 ? (
-                <StatTile
+                <RewardTile
                   label="Hotel Pts Value"
+                  tone="hotel"
+                  icon="hotel"
                   value={formatMoneyWhole(hotelPtsValue, currency)}
                   sub={categorySub(hotelPtsValue, hotelCredits, hotelNights)}
-                  tone="teal"
                   onClick={() => setShowOnlyHotelRedeem((v) => !v)}
                   active={showOnlyHotelRedeem}
                 />
               ) : null}
               {allStats.totalOwed > 0 ? (
-                <StatTile
+                <RewardTile
                   label="Total CC Owed"
+                  tone="owed"
+                  icon="card"
                   value={formatMoneyWhole(totalOwed, currency)}
                   sub={
                     utilisationPct != null
@@ -858,7 +985,6 @@ function CreditCardSection({
                         ? "var(--positive)"
                         : "var(--negative)"
                   }
-                  tone="rose"
                   onClick={() => setShowOnlyOwedCards((v) => !v)}
                   active={showOnlyOwedCards}
                 />
@@ -874,28 +1000,27 @@ function CreditCardSection({
               — four controls had accreted onto this line, and the figures
               worth reading were competing with the knobs for the same width. */}
           {open ? (
-            <div className="mt-3 border-t border-line pt-3 text-xs text-foreground/75">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="mt-4 rounded-2xl bg-black/[0.03] p-3 text-xs text-foreground/75 ring-1 ring-line dark:bg-white/[0.04]">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {allStats.feesPaid > 0 ? (
                 <button
                   type="button"
                   onClick={() => setShowOnlyFeeCards((v) => !v)}
-                  className={`rounded-md px-2 py-1 font-semibold transition ${showOnlyFeeCards ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground hover:bg-slate-100 dark:hover:bg-neutral-800"}`}
+                  className={`rounded-xl px-3 py-1.5 font-semibold shadow-sm ring-1 transition ${showOnlyFeeCards ? "bg-negative/10 ring-negative/40" : "bg-background ring-line hover:ring-negative/40"}`}
                 >
-                  Active fees <span className="tabular-nums text-negative">{formatMoneyWhole(feesPaid, currency)}/yr</span>
+                  <span className="text-negative">Active fees:</span> <span className="tabular-nums text-foreground">{formatMoneyWhole(feesPaid, currency)}/yr</span>
                 </button>
               ) : null}
               {allStats.feesAll > 0 ? (
                 <span>
-                  Total fees w/out waiver <span className="font-semibold tabular-nums text-foreground">{formatMoneyWhole(feesAll, currency)}/yr</span>
+                  Total fees w/out waiver: <span className="font-semibold tabular-nums text-foreground">{formatMoneyWhole(feesAll, currency)}/yr</span>
                 </span>
               ) : null}
               {/* One control in place of four. Closed it still says what is
                   narrowing the list, so a filter left on is never invisible —
                   that, not the space, is what a hidden filter row costs. */}
               {(() => {
-                const on = [holderFilter, bankFilter, openedFrom || openedTo ? "opened" : null]
-                  .filter(Boolean) as string[];
+                const on = [openedFrom || openedTo ? "opened" : null].filter(Boolean) as string[];
                 return (
                   <span className="flex items-center gap-1">
                     <button
@@ -934,8 +1059,6 @@ function CreditCardSection({
                       <button
                         type="button"
                         onClick={() => {
-                          setHolderFilter(null);
-                          setBankFilter(null);
                           setOpenedFrom("");
                           setOpenedTo("");
                         }}
@@ -944,6 +1067,37 @@ function CreditCardSection({
                         Clear
                       </button>
                     ) : null}
+                  </span>
+                );
+              })()}
+              {/* Bank and owner pills, always in view — the two filters used
+                  most, so they don't hide behind the Filters panel. */}
+              {(() => {
+                const banks = [...new Set(allCreditCards.map(cardBank).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+                const holders = [...new Set(allCreditCards.map((x) => (x.holder ?? "").trim()).filter(Boolean))].sort();
+                const group = (label: string, options: string[], value: string | null, set: (v: string | null) => void) =>
+                  options.length < 2 ? null : (
+                    <span role="group" aria-label={label} className="inline-flex rounded-xl bg-background p-1 shadow-sm ring-1 ring-line">
+                      {[null, ...options].map((o) => {
+                        const on = value === o;
+                        return (
+                          <button
+                            key={o ?? "all"}
+                            type="button"
+                            onClick={() => set(o)}
+                            aria-pressed={on}
+                            className={`rounded-lg px-2.5 py-1 font-semibold transition ${on ? "bg-brand text-white shadow-sm" : "text-foreground/75 hover:text-foreground"}`}
+                          >
+                            {o ?? "All"}
+                          </button>
+                        );
+                      })}
+                    </span>
+                  );
+                return (
+                  <span className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                    {group("Filter by bank", banks, bankFilter, setBankFilter)}
+                    {group("Filter by owner", holders, holderFilter, setHolderFilter)}
                   </span>
                 );
               })()}
@@ -984,7 +1138,7 @@ function CreditCardSection({
                   );
                 };
                 return (
-                  <span className="flex items-center gap-1 sm:ml-auto">
+                  <span className="flex items-center gap-1">
                     {countChip("travel", "travel")}
                     {countChip("hotel", "hotel")}
                     {countChip(null, "total")}
@@ -996,68 +1150,6 @@ function CreditCardSection({
                   named on the button above, so closing never hides state. */}
               {filtersOpen ? (
               <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
-              {/* Holder filter — chip per unique cardholder plus an "All" reset.
-                  Clicking narrows every card list (Travel / Hotel / Other) to
-                  that person's cards. */}
-              {(() => {
-                const holders = Array.from(
-                  new Set(
-                    allCreditCards
-                      .map((a) => (a.holder ?? "").trim())
-                      .filter(Boolean),
-                  ),
-                ).sort();
-                if (holders.length < 2) return null;
-                const chip = (active: boolean) =>
-                  `rounded-md px-2 py-1 font-semibold transition ${
-                    active
-                      ? "text-white"
-                      : "text-foreground hover:bg-slate-100 dark:hover:bg-neutral-800"
-                  }`;
-                return (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setHolderFilter(null)}
-                      className={chip(holderFilter == null)}
-                      style={holderFilter == null ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                    >
-                      All
-                    </button>
-                    {holders.map((h) => (
-                      <button
-                        key={h}
-                        type="button"
-                        onClick={() =>
-                          setHolderFilter((prev) => (prev === h ? null : h))
-                        }
-                        className={chip(holderFilter === h)}
-                        style={holderFilter === h ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                      >
-                        {h}
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
-              {/* Bank filter — a dropdown rather than a chip row: there are
-                  more issuers than people, and they read as a list. */}
-              {(() => {
-                const banks = [...new Set(allCreditCards.map(cardBank).filter(Boolean))]
-                  .sort((a, b) => a.localeCompare(b));
-                if (banks.length < 2) return null;
-                return (
-                  <select
-                    value={bankFilter ?? ""}
-                    onChange={(e) => setBankFilter(e.target.value || null)}
-                    aria-label="Filter by bank"
-                    className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  >
-                    <option value="">All banks</option>
-                    {banks.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </select>
-                );
-              })()}
               {/* Opened-on range. Application spacing is the one card question
                   this board couldn't answer — "what did we open between these
                   dates" — and the dates are already on every card. */}
@@ -1157,71 +1249,17 @@ function CreditCardSection({
               {/* Travel stacks above Hotel at every width. Side-by-side halves
                   squeezed each card's badges into a 3-4 line pile; full width
                   lets the per-card metrics line up in columns left-to-right. */}
-              <div className="grid grid-cols-1 divide-y divide-line">
+              <div className="grid grid-cols-1">
                 {hideTravelColumn ? null : (
                 <section>
-                  <div
-                    onClick={() => toggleGroup("travel")}
-                    className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3"
-                  >
-                    <button
-                      type="button"
-                      aria-expanded={travelOpen}
-                      className="flex items-center gap-2 text-left sm:min-w-[15.5rem]"
-                    >
-                    <GroupChevron open={travelOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
-                      </svg>
-                    </span>
-                    <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Travel Rewards</span>
-                    </button>
-                    {/* Right beside the group name, not flung to the far edge:
-                        on a wide screen the figure was a screen away from the
-                        name it belongs to. */}
-                    <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[9rem]">
-                      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Total owed:</span>
-                      <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${travelOwed > 0 ? "text-negative" : "text-foreground/75"}`}>
-                        {formatMoneyWhole(travelOwed, currency)}
-                      </span>
-                    </span>
-                    {groupFigures(travelCards, "travel")}
-                    {groupUnusedChip("travel")}
-                  </div>
-                  {!travelOpen ? null : travelCards.length > 0 ? renderCards(travelCards) : <p className="px-4 py-4 text-sm text-foreground/75">No travel cards yet.</p>}
+                  {groupBanner("travel", travelOpen, travelOwed, travelCards)}
+                  {!travelOpen ? null : travelCards.length > 0 ? groupList(renderCards(travelCards)) : <p className="px-6 py-4 text-sm text-foreground/75">No travel cards yet.</p>}
                 </section>
                 )}
                 {hideHotelColumn ? null : (
                 <section>
-                  <div
-                    onClick={() => toggleGroup("hotel")}
-                    className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-line bg-background/60 px-4 py-3"
-                  >
-                    <button
-                      type="button"
-                      aria-expanded={hotelOpen}
-                      className="flex items-center gap-2 text-left sm:min-w-[15.5rem]"
-                    >
-                    <GroupChevron open={hotelOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-500/15 text-teal-600 dark:text-teal-400">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="M3 21V7l7-4v4h11v14" />
-                        <path d="M7 10h.01M11 10h.01M15 14h.01M11 14h.01M7 14h.01M15 18h.01M11 18h.01M7 18h.01" />
-                      </svg>
-                    </span>
-                    <span className="shrink-0 whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Hotel Rewards</span>
-                    </button>
-                    <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[9rem]">
-                      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Total owed:</span>
-                      <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${hotelOwed > 0 ? "text-negative" : "text-foreground/75"}`}>
-                        {formatMoneyWhole(hotelOwed, currency)}
-                      </span>
-                    </span>
-                    {groupFigures(hotelCards, "hotel")}
-                    {groupUnusedChip("hotel")}
-                  </div>
-                  {!hotelOpen ? null : hotelCards.length > 0 ? renderCards(hotelCards) : <p className="px-4 py-4 text-sm text-foreground/75">No hotel cards yet.</p>}
+                  {groupBanner("hotel", hotelOpen, hotelOwed, hotelCards)}
+                  {!hotelOpen ? null : hotelCards.length > 0 ? groupList(renderCards(hotelCards)) : <p className="px-6 py-4 text-sm text-foreground/75">No hotel cards yet.</p>}
                 </section>
                 )}
               </div>
@@ -1342,6 +1380,86 @@ function CreditCardSection({
 // under it, so the same metric lands at the same x across every card. Empty
 // values print an em dash rather than collapsing the cell.
 // Disclosure caret for the rewards group headers (Travel / Hotel / Other).
+type RewardTileTone = "positive" | "ink" | "travel" | "hotel" | "owed";
+type RewardTileIcon = "coins" | "dollar" | "plane" | "hotel" | "card";
+
+// Value colour per tile — the --viz palette for data, never brand purple or
+// amber (CLAUDE.md). Owed also gets a faint red wash, like the mockup.
+const REWARD_TILE_TONES: Record<RewardTileTone, { color: string; wash?: string }> = {
+  positive: { color: "var(--positive)" },
+  ink: { color: "var(--foreground)" },
+  travel: { color: "var(--viz-savings)" },
+  hotel: { color: "var(--viz-bills)" },
+  owed: { color: "var(--negative)", wash: "color-mix(in srgb, var(--negative) 6%, var(--background))" },
+};
+
+const REWARD_TILE_ICONS: Record<RewardTileIcon, React.ReactNode> = {
+  coins: <><circle cx="8" cy="8" r="6" /><path d="M18.09 10.37A6 6 0 1 1 10.34 18" /><path d="M7 6h1v4" /></>,
+  dollar: <><path d="M12 2v20" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>,
+  plane: <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />,
+  hotel: <><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01" /></>,
+  card: <><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>,
+};
+
+/** A headline figure for the rewards board: label + icon on top, the figure
+ *  large, a short breakdown under it. Pressable ones filter the card list. */
+function RewardTile({
+  label,
+  value,
+  sub,
+  subColor,
+  tone,
+  icon,
+  onClick,
+  active,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  subColor?: string;
+  tone: RewardTileTone;
+  icon: RewardTileIcon;
+  onClick?: () => void;
+  active?: boolean;
+}) {
+  const t = REWARD_TILE_TONES[tone];
+  const base = `flex flex-col rounded-2xl p-3 text-left ring-1 transition sm:p-4 ${
+    active ? "ring-2" : "ring-line"
+  }`;
+  const style: React.CSSProperties = {
+    backgroundColor: t.wash ?? "var(--background)",
+    ...(active ? { ["--tw-ring-color" as string]: t.color } : {}),
+  };
+  const inner = (
+    <>
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted sm:text-[11px]" style={tone === "owed" ? { color: t.color } : undefined}>
+          {label}
+        </span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: t.color }} aria-hidden>
+          {REWARD_TILE_ICONS[icon]}
+        </svg>
+      </span>
+      <span className="mt-1 text-lg font-bold tabular-nums tracking-tight sm:text-2xl" style={{ color: t.color }}>
+        {value}
+      </span>
+      {sub ? (
+        <span className="mt-1 text-[11px] font-medium tabular-nums text-muted" style={subColor ? { color: subColor } : undefined}>
+          {sub}
+        </span>
+      ) : null}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} aria-pressed={active} className={`${base} hover:-translate-y-0.5 hover:shadow-md hover:shadow-black/5`} style={style}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={base} style={style}>{inner}</div>;
+}
+
 function GroupChevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -1539,7 +1657,7 @@ function PointsByCard({
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">
                 Total pts used:
               </span>
-              <span className="whitespace-nowrap text-sm font-bold tabular-nums">
+              <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
                 {total.redeemed.points.toLocaleString()}
               </span>
             </span>
@@ -1547,7 +1665,7 @@ function PointsByCard({
               <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">
                 Total cash saved:
               </span>
-              <span className="whitespace-nowrap text-sm font-bold tabular-nums">
+              <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
                 {formatMoneyWhole(total.redeemed.valueCents, currency)}
               </span>
             </span>
@@ -1724,7 +1842,7 @@ function RewardsActivityLedger({
           className="flex min-w-0 items-center gap-2 text-left"
         >
           <ExpandIcon />
-          <span className="text-sm font-bold">Rewards Points Transactions Log</span>
+          <span className="text-sm font-bold sm:text-base">Rewards Points Transactions Log</span>
         </button>
         <span className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {entryCount}
@@ -1950,6 +2068,51 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
 
 // The card row opens a compact action tray first. Editing is an explicit choice,
 // which keeps routine browsing from unexpectedly dropping a long form into view.
+/** Desktop (xl+) card table: one grid template shared by the column header
+ *  and every card row so the columns line up. Phones keep the stacked row. */
+const CARD_TABLE_COLS =
+  "xl:grid xl:grid-cols-[minmax(15.5rem,2.4fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_7rem] xl:items-center xl:gap-x-3";
+
+function CardTableHeader() {
+  return (
+    <div className={`hidden border-b border-line bg-black/[0.03] px-4 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wide text-muted dark:bg-white/[0.04] ${CARD_TABLE_COLS}`}>
+      <span className="pl-6 text-left">Card / Account</span>
+      <span>Charging</span>
+      <span>Current pts</span>
+      <span>Pts value</span>
+      <span>Value rate</span>
+      <span>Night credit</span>
+      <span>Benefit status</span>
+      <span>Owed</span>
+      <span>Actions</span>
+    </div>
+  );
+}
+
+// One colour per issuer, used by both the little card icon and the bank tag
+// so the two always match. Blues, slate and a red for Capital One — no purple
+// or amber (CLAUDE.md).
+const BANK_STYLES = {
+  chase: { chip: "from-blue-700 to-blue-950", tag: "bg-blue-50 text-blue-800 ring-blue-300 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-800" },
+  amex: { chip: "from-sky-400 to-sky-700", tag: "bg-sky-50 text-sky-800 ring-sky-300 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-800" },
+  cap1: { chip: "from-rose-600 to-rose-900", tag: "bg-rose-50 text-rose-800 ring-rose-300 dark:bg-rose-950/50 dark:text-rose-300 dark:ring-rose-800" },
+  citi: { chip: "from-cyan-600 to-cyan-900", tag: "bg-cyan-50 text-cyan-800 ring-cyan-300 dark:bg-cyan-950/50 dark:text-cyan-300 dark:ring-cyan-800" },
+  other: { chip: "from-slate-500 to-slate-800", tag: "bg-slate-100 text-slate-700 ring-slate-300 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700" },
+} as const;
+
+// Capital One cards are the debt cards: red while their Budget debt still has
+// a balance, slate once it's paid off (Victor, 2026-10-04).
+function bankStyle(bank: string | null, carryingDebt = false) {
+  const b = (bank ?? "").toLowerCase();
+  if (b.includes("chase")) return BANK_STYLES.chase;
+  if (b.includes("amex") || b.includes("american")) return BANK_STYLES.amex;
+  if (b.includes("cap")) return carryingDebt ? BANK_STYLES.cap1 : BANK_STYLES.other;
+  if (b.includes("citi")) return BANK_STYLES.citi;
+  return BANK_STYLES.other;
+}
+
+const DASH_CELL = <span className="text-foreground/30">—</span>;
+
 function CreditCardPanel({
   card,
   currency,
@@ -1968,6 +2131,11 @@ function CreditCardPanel({
   isDragOver?: boolean;
 }) {
   const [expandedState, setExpanded] = useState(false);
+  const anniversaryDue = isAnniversaryDue(card, new Date().toISOString().slice(0, 10));
+  const router = useRouter();
+  const [marking, startMarking] = useTransition();
+  const [markError, setMarkError] = useState<string | null>(null);
+  const [confirmMark, setConfirmMark] = useState(false);
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
   const [stayOpen, setStayOpen] = useState(false);
@@ -2027,6 +2195,9 @@ function CreditCardPanel({
     };
   })();
   const bank = cardBank(card) || null;
+  // Linked to a Budget debt that still has a balance. Drives the Debt tag and
+  // the Cap 1 red; both drop once the debt is paid down to $0.
+  const carryingDebt = Boolean(d?.isRevolvingDebt && d.payoffBalanceCents > 0);
   // One card showing any reward figure turns the metric grid on for that row;
   // plain cards (no points, no night credit) keep the single identity line.
   // "Booked" stays out of sight until a date is filled in — a "Booked —" on
@@ -2040,14 +2211,87 @@ function CreditCardPanel({
       || d.freeNightExpiresOn || d.benefitUsedOn || d.charging)),
   );
 
+  // Anniversary passed since the card was last touched. Nothing may need
+  // changing — Mark updated says so and clears the warning. Shown under the
+  // card row when collapsed; below the action buttons when the card is open.
+  const anniversaryBanner = anniversaryDue ? (
+    <div
+      className="mx-3 mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border-l-4 px-3 py-2 text-xs"
+      style={{ borderColor: "var(--viz-savings)", backgroundColor: "color-mix(in srgb, var(--viz-savings) 12%, transparent)" }}
+    >
+      <span className="font-bold" style={{ color: "var(--viz-savings)" }}>
+        {`Anniversary ${shortDate(lastAnniversaryOn(card.dateOpened ?? "", new Date().toISOString().slice(0, 10)))} passed — check points & benefits`}
+      </span>
+      {confirmMark ? (
+        <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <span className="mr-auto font-semibold text-foreground">
+            Hides this reminder until next anniversary. Points &amp; benefits stay as they are.
+          </span>
+          <button
+            type="button"
+            disabled={marking}
+            onClick={() =>
+              startMarking(async () => {
+                setMarkError(null);
+                const fd = new FormData();
+                fd.set("id", card.id);
+                const result = await markCardDetailsUpdated(fd);
+                if (result?.error) setMarkError(result.error);
+                else {
+                  setConfirmMark(false);
+                  router.refresh();
+                }
+              })
+            }
+            className="rounded-md px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 disabled:opacity-60"
+            style={{ backgroundColor: "var(--viz-savings)" }}
+          >
+            {marking ? "Saving…" : "Yes, mark updated"}
+          </button>
+          {marking ? null : (
+            <button
+              type="button"
+              onClick={() => { setConfirmMark(false); setMarkError(null); }}
+              className="px-1 text-xs font-medium text-foreground/75 hover:text-foreground"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirmMark(true)}
+          className="ml-auto rounded-md px-3 py-1.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110"
+          style={{ backgroundColor: "var(--viz-savings)" }}
+        >
+          ✓ Mark updated
+        </button>
+      )}
+      {markError ? <span className="text-negative">{markError}</span> : null}
+    </div>
+  ) : null;
+
+  const toggleExpanded = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (!next) {
+      setEditing(false);
+      setPaying(false);
+      setLoggingRewards(false);
+      clearFocus();
+    }
+  };
+
   return (
     <li
       ref={rowRef}
       data-drop-key={`credit-card:${card.id}`}
       className={`${expanded ? "bg-background/60" : "hover:bg-background/40"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-sky-500" : ""}`}
     >
-      {/* Collapsed row */}
-      <div className="relative flex items-center">
+      {/* Collapsed row — phones, tablets and small laptops. 1280px+ gets the table row
+          below instead. */}
+      <div className="relative flex items-center xl:hidden">
         {!isArchived && onDragStart ? (
           <span className="flex-none pl-2 py-2">
             <GripHandle onMouseDown={onDragStart} size="sm" />
@@ -2055,16 +2299,7 @@ function CreditCardPanel({
         ) : null}
       <button
         type="button"
-        onClick={() => {
-          const next = !expanded;
-          setExpanded(next);
-          if (!next) {
-            setEditing(false);
-            setPaying(false);
-            setLoggingRewards(false);
-            clearFocus();
-          }
-        }}
+        onClick={toggleExpanded}
         className={`flex min-w-0 flex-1 items-start gap-2 ${!isArchived && onDragStart ? "pl-1" : "pl-4"} pr-3 py-2 text-left ${d?.cardUrl && !hasMetrics ? "min-h-[4.75rem]" : ""}`}
         aria-expanded={expanded}
       >
@@ -2079,8 +2314,8 @@ function CreditCardPanel({
               </span>
             ) : null}
             {bank ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700">
-                Bank: <span className="text-slate-700 dark:text-neutral-200">{bank}</span>
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${bankStyle(bank, carryingDebt).tag}`}>
+                Bank: {bank}
               </span>
             ) : null}
             {/* Authorized user sits right of the bank so the row reads
@@ -2096,7 +2331,7 @@ function CreditCardPanel({
                 Closed {card.dateClosed}
               </span>
             ) : null}
-            {d?.isRevolvingDebt ? (
+            {carryingDebt ? (
               <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
                 Debt
               </span>
@@ -2253,6 +2488,144 @@ function CreditCardPanel({
           </a>
         ) : null}
       </div>
+      {/* Collapsed row — laptop width: one table row under the column header.
+          The whole row toggles the card open; Visit and the drag handle keep
+          their own jobs. */}
+      <div
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("a, [data-grip]")) return;
+          toggleExpanded();
+        }}
+        className={`hidden cursor-pointer px-4 py-3 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.03] ${CARD_TABLE_COLS}`}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {!isArchived && onDragStart ? (
+            <span data-grip className="flex-none">
+              <GripHandle onMouseDown={onDragStart} size="sm" />
+            </span>
+          ) : (
+            <span className="w-4 flex-none" />
+          )}
+          <span aria-hidden className={`flex h-7 w-10 shrink-0 items-center justify-end rounded-md bg-linear-to-br p-1 shadow-sm ${bankStyle(bank, carryingDebt).chip}`}>
+            <span className="h-2 w-2.5 rounded-[2px] bg-white/70" />
+          </span>
+          <span className="min-w-0">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <button type="button" aria-expanded={expanded} className="text-left text-sm font-semibold leading-tight">
+                {card.name}
+              </button>
+              {carryingDebt ? (
+                <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">Debt</span>
+              ) : null}
+              {card.dateClosed ? (
+                <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">Closed {card.dateClosed}</span>
+              ) : null}
+            </span>
+            <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted">
+              {bank ? (
+                <span className={`rounded px-1.5 font-semibold ring-1 ${bankStyle(bank, carryingDebt).tag}`}>{bank}</span>
+              ) : null}
+              {card.holder ? <span>· Owner: {card.holder}</span> : null}
+              {d?.authUser ? <span className="text-foreground/50">· AU: {d.authUser}</span> : null}
+              {card.annualFeeCents && !card.feeWaived ? (
+                <span>· Fee <span className="font-semibold text-negative">${Math.round(card.annualFeeCents / 100)}/yr</span></span>
+              ) : null}
+            </span>
+            {bonus ? (
+              <span className="mt-1 flex items-center gap-2 text-[10px]">
+                <span className="font-semibold uppercase tracking-wide text-muted">Bonus</span>
+                <span className="block h-1.5 w-24 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                  <span className="block h-full rounded-full" style={{ width: `${bonus.pct}%`, backgroundColor: bonus.color }} />
+                </span>
+                <span className="font-bold" style={{ color: bonus.color }}>
+                  {bonus.met ? "met" : bonus.days < 0 ? "deadline passed" : expiryLabel(bonus.days)}
+                </span>
+              </span>
+            ) : null}
+          </span>
+        </span>
+        <span className="text-center">
+          {d?.charging ? (
+            // A break is allowed after a slash only ("iCloud/ Talkatone"), never mid-word.
+            <span className="inline-block max-w-full rounded-md bg-black/5 px-2 py-1 text-xs font-semibold dark:bg-white/10">{d.charging.replace(/\//g, "/\u200b")}</span>
+          ) : DASH_CELL}
+        </span>
+        <span className="text-center text-sm font-semibold tabular-nums">
+          {d && d.currentPoints > 0 ? d.currentPoints.toLocaleString() : DASH_CELL}
+        </span>
+        <span className="text-center text-sm font-semibold tabular-nums">
+          {d && d.currentPoints > 0 ? (
+            d.pointsValueMicros ? (
+              <span className="text-positive">${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}</span>
+            ) : (
+              <span className="text-xs text-negative">No value set</span>
+            )
+          ) : DASH_CELL}
+        </span>
+        <span className="text-center text-xs font-semibold tabular-nums text-foreground/75">
+          {valuePerPt != null ? `${formatCentsPerPoint(valuePerPt)}/pt` : DASH_CELL}
+        </span>
+        <span className="text-center">
+          {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax) ? (
+            <span className="inline-block rounded-full bg-sky-50 px-2 py-0.5 text-xs font-bold tabular-nums text-sky-700 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800">
+              {d?.freeNightCreditCents
+                ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
+                : d?.freeNightPointsLimit
+                  ? `${(d.freeNightPointsLimit / 1000).toLocaleString()}k pts`
+                  : `Cat 1\u2013${d!.freeNightCategoryMax}`}
+            </span>
+          ) : DASH_CELL}
+        </span>
+        <span className="text-center">
+          {d?.benefitUsedOn ? (
+            <span className={`inline-block whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${d.benefitUsedOn < today ? "bg-negative/10 text-negative ring-negative/30" : "bg-positive/10 text-positive ring-positive/30"}`}>
+              Booked {shortDate(d.benefitUsedOn)}
+            </span>
+          ) : d?.freeNightExpiresOn ? (
+            <span
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${
+                fnExpired || fnUrgent
+                  ? "bg-negative/10 text-negative ring-negative/30"
+                  : "bg-teal-50 text-teal-800 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:ring-teal-800"
+              }`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              {fnExpired ? "Expired" : fnDaysLeft != null ? `Exp: ${expiryLabel(fnDaysLeft).replace(" left", "").replace(" months", " mos")}` : "Expires"}
+            </span>
+          ) : DASH_CELL}
+          {/* The date itself, under the countdown tag. */}
+          {!d?.benefitUsedOn && d?.freeNightExpiresOn ? (
+            <span className="mt-1 block text-[11px] tabular-nums text-muted">{d.freeNightExpiresOn.replace(/-/g, "\u2011")}</span>
+          ) : null}
+        </span>
+        <span className={`text-center text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : ""}`}>
+          {owed !== 0 ? formatMoneyWhole(owed, currency) : DASH_CELL}
+        </span>
+        <span className="flex items-center justify-end gap-2">
+          {d?.cardUrl ? (
+            <a
+              href={externalCardUrl(d.cardUrl)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-0.5 rounded-lg bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/40"
+            >
+              Visit <span aria-hidden>↗</span>
+            </a>
+          ) : null}
+          <svg
+            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`shrink-0 text-foreground/50 transition-transform ${expanded ? "" : "-rotate-90"}`}
+            aria-hidden
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </div>
+      {expanded ? null : anniversaryBanner}
 
       {expanded ? (
         <div className="border-t border-line bg-background">
@@ -2336,6 +2709,7 @@ function CreditCardPanel({
               </form>
             ) : null}
           </div>
+          {anniversaryBanner}
 
           {editing ? (
             <EditCreditCardForm

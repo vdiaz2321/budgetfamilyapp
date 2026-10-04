@@ -240,7 +240,6 @@ export function InvestBoard({
   const [showImport, setShowImport] = useState(false);
   const [importNote, setImportNote] = useState<string | null>(null);
   const [openTax, setOpenTax] = useState<TaxTreatment | null>(null);
-  const [showAllocationRows, setShowAllocationRows] = useState(true);
 
   const mine = accounts.filter((a) => !a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
@@ -322,16 +321,16 @@ export function InvestBoard({
   // partial imports would misrepresent the whole as whichever slice happens to
   // have been imported.
   const allocation = useMemo(() => {
-    const rows: { label: string; cents: number }[] = [];
+    const rows: { label: string; cents: number; accountId: string }[] = [];
     for (const a of mine) {
       if (a.buckets.length > 0) {
         for (const b of a.buckets) {
           // A bucket name already carries its brokerage ("Fidelity (Taxable)
           // Vic"), so prefixing the account repeats it. Same rule as ledgerLabel.
-          if (b.balanceCents > 0) rows.push({ label: ledgerLabel(a.name, b.name), cents: b.balanceCents });
+          if (b.balanceCents > 0) rows.push({ label: ledgerLabel(a.name, b.name), cents: b.balanceCents, accountId: a.id });
         }
       } else if (a.balanceCents > 0) {
-        rows.push({ label: a.name, cents: a.balanceCents });
+        rows.push({ label: a.name, cents: a.balanceCents, accountId: a.id });
       }
     }
     const total = rows.reduce((s, r) => s + r.cents, 0);
@@ -353,7 +352,7 @@ export function InvestBoard({
   useRegisterMobilePageActions([{ label: "Transfer/Withdraw", onSelect: () => setShowTransfer(true) }]);
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-7">
+    <div className="mx-auto flex w-full max-w-[110rem] flex-col gap-6 px-4 py-7">
       {/* Header: title + one Transfer/Withdraw entry + hero stats + tabs */}
       <header className="space-y-4">
         {/* Title and its one action share a row. Below md the action lives in
@@ -591,63 +590,67 @@ export function InvestBoard({
             </section>
           ) : null}
 
-          {/* "Where it sits" and the performance chart share a row on wide
-              screens — each was leaving half its width empty. They stack below
-              lg, and the chart spans the full width when the allocation card
-              isn't rendered (a single-holding portfolio). */}
-          <div className={showAllocation ? "grid items-start gap-6 lg:grid-cols-2" : ""}>
-          {showAllocation ? (
-            <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              {/* Same header band as "Performance by year" and "Investments":
-                  chevron on the left, brand-soft fill, no Hide/Show wording. */}
-              <button
-                type="button"
-                onClick={() => setShowAllocationRows((open) => !open)}
-                aria-expanded={showAllocationRows}
-                className="flex w-full items-start gap-2 rounded-t-2xl bg-brand-soft/35 px-4 py-3 text-left ring-1 ring-brand/10 transition hover:bg-brand-soft/50"
-              >
-                <svg
-                  width="13" height="13" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                  className={`mt-1 shrink-0 text-muted transition-transform ${showAllocationRows ? "" : "-rotate-90"}`}
-                  aria-hidden
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-                <div className="min-w-0">
-                  <h2 className="text-sm font-bold">Total Investment Holdings</h2>
-                  <p className="text-xs text-muted">
-                    Total: {formatMoney(allocation.total, currency)} — current balances.
-                  </p>
+          {/* The holdings sit beside the chart inside one card: the chart is
+              a fixed-ratio SVG that left white space on both sides of a
+              full-width card, and the list fills it. They stack on a phone. */}
+          <PerformanceChart
+            accounts={chartAccounts}
+            years={years}
+            currency={currency}
+            selectedName={selectedAccount?.name ?? null}
+            onClear={() => setSelectedId(null)}
+            aside={
+              showAllocation ? (
+                <div>
+                  <div className="mb-1 flex items-baseline justify-between gap-2 px-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted">Total Investment Holdings</h3>
+                    <span className="text-xs font-semibold tabular-nums">{formatMoneyWhole(allocation.total, currency)}</span>
+                  </div>
+                  {/* Picking a holding filters the chart, the same as picking a
+                      row in Investments. It filters to the holding's whole
+                      account: a bucket's history only starts at its split (the
+                      older years live on the account), so a bucket-only chart
+                      would show those years empty. Its sibling buckets light
+                      up with it to say so. */}
+                  <ul className="space-y-0.5">
+                    {allocation.rows.slice(0, 8).map((r) => {
+                      const pct = (r.cents / allocation.total) * 100;
+                      const active = selectedId === r.accountId;
+                      return (
+                        <li key={r.label} className="min-w-0">
+                          <button
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setSelectedId((prev) => (prev === r.accountId ? null : r.accountId))}
+                            className={`w-full cursor-pointer rounded-md px-2 py-1 text-left ring-inset transition ${
+                              active
+                                ? "bg-sky-100 ring-1 ring-sky-400 dark:bg-sky-900/40 dark:ring-sky-500"
+                                : `hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${selectedId ? "opacity-50" : ""}`
+                            }`}
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="truncate text-xs">{r.label}</span>
+                              <span className="shrink-0 text-xs font-semibold tabular-nums">
+                                {formatMoneyWhole(r.cents, currency)}{" "}
+                                <span className="font-normal text-muted">({pct.toFixed(0)}%)</span>
+                              </span>
+                            </div>
+                            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }}
+                              />
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
-              </button>
-              <ul className={`space-y-1.5 px-4 py-3 ${showAllocationRows ? "" : "hidden"}`}>
-                {allocation.rows.slice(0, 8).map((r) => {
-                  const pct = (r.cents / allocation.total) * 100;
-                  return (
-                    <li key={r.label} className="min-w-0">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-xs">{r.label}</span>
-                        <span className="shrink-0 text-xs font-semibold tabular-nums">
-                          {formatMoneyWhole(r.cents, currency)}{" "}
-                          <span className="font-normal text-muted">({pct.toFixed(0)}%)</span>
-                        </span>
-                      </div>
-                      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ) : null}
+              ) : null
+            }
+          />
 
-          <PerformanceChart accounts={chartAccounts} years={years} currency={currency} selectedName={selectedAccount?.name ?? null} onClear={() => setSelectedId(null)} />
-          </div>
           {showTransfer && (
             <TransferModal
               accounts={accounts}
@@ -922,12 +925,16 @@ function PerformanceChart({
   currency,
   selectedName,
   onClear,
+  aside,
 }: {
   accounts: InvestAccount[];
   years: number[];
   currency: string;
   selectedName: string | null;
   onClear: () => void;
+  /** Shown beside the chart from lg up (under it on a phone) — the
+   *  holdings list, which fills the width the fixed-ratio chart leaves. */
+  aside?: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [mode, setMode] = useState<ChartMode>("stacked");
@@ -958,8 +965,31 @@ function PerformanceChart({
     [desc, accounts],
   );
 
+  // Beside the holdings list (lg up), the chart fills its column's height
+  // instead of keeping the 600×220 shape, which left a gap under the bars.
+  // The viewBox stays 600 wide so labels keep their size; only H grows to
+  // the box's measured shape.
+  const plotRef = useRef<HTMLDivElement>(null);
+  const [fillRatio, setFillRatio] = useState<number | null>(null);
+  useEffect(() => {
+    const el = plotRef.current;
+    if (!aside || !el) return;
+    const wide = window.matchMedia("(min-width: 1024px)");
+    const measure = () => {
+      const { width, height } = el.getBoundingClientRect();
+      setFillRatio(wide.matches && width > 0 ? height / width : null);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    wide.addEventListener("change", measure);
+    return () => {
+      observer.disconnect();
+      wide.removeEventListener("change", measure);
+    };
+  }, [aside, chartOpen]);
+
   const W = 600;
-  const H = 220;
+  const H = fillRatio ? Math.max(220, Math.round(W * fillRatio)) : 220;
   const PAD = { top: 32, right: 16, bottom: 32, left: 56 };
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
@@ -1057,7 +1087,8 @@ function PerformanceChart({
         </div>
       </div>
 
-      {chartOpen ? <>
+      {chartOpen ? <div className={aside ? "lg:grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : ""}>
+      <div className="flex min-w-0 flex-col">
       {/* Legend */}
       <div className="flex items-center gap-4 px-4 pb-2 text-xs text-muted">
         <span className="flex items-center gap-1.5">
@@ -1078,11 +1109,13 @@ function PerformanceChart({
       </div>
 
       {/* SVG chart */}
-      <div className="relative px-2 pb-4">
+      <div className={`relative px-2 pb-4 ${aside ? "lg:min-h-[220px] lg:flex-1" : ""}`}>
+        {/* The measured box: the padding-free area the SVG fills from lg up. */}
+        <div ref={plotRef} className={aside ? "lg:absolute lg:inset-x-2 lg:bottom-4 lg:top-0" : ""} aria-hidden />
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          className="w-full"
-          style={{ height: "clamp(160px, 24vw, 220px)" }}
+          className={`w-full ${fillRatio ? "absolute inset-x-2 bottom-4 top-0 !w-[calc(100%-1rem)]" : ""}`}
+          style={fillRatio ? { height: "calc(100% - 1rem)" } : { height: "clamp(160px, 24vw, 220px)" }}
           aria-label="Investment performance chart"
         >
           {/* Y-axis grid + labels */}
@@ -1212,7 +1245,11 @@ function PerformanceChart({
           <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} mode={mode} />
         ) : null}
       </div>
-      </> : null}
+      </div>
+      {aside ? (
+        <div className="min-w-0 border-t border-line px-2 py-3 lg:border-l lg:border-t-0 lg:py-1 lg:pb-3">{aside}</div>
+      ) : null}
+      </div> : null}
     </section>
   );
 }

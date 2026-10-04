@@ -49,7 +49,7 @@ export async function loadCreditCardBoardData(
         .order("name"),
       supabase
         .from("credit_card_details")
-        .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, free_night_category_max, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence")
+        .select("account_id, bank, auth_user, charging, bonus_info, bonus_spend_cents, bonus_spend_deadline, bonus_earned, current_points, fees_paid_cents, free_night_credit_cents, free_night_expires_on, free_night_points_limit, free_night_category_max, benefit_used_on, spending_limit_cents, remarks, is_revolving_debt, debt_subcategory_id, rewards_category, rewards_program, points_value_micros, five24_countable, card_url, benefit_cadence, updated_at")
         .eq("household_id", householdId),
       supabase
         .from("credit_card_reward_activities")
@@ -160,6 +160,7 @@ export async function loadCreditCardBoardData(
       debtSubcategoryId: payoff?.subcategory_id ?? null,
       cardUrl: d.card_url ?? null,
       benefitCadence: d.benefit_cadence ?? null,
+      updatedAt: d.updated_at ?? null,
       payoffBalanceCents: payoff?.current_balance_cents ?? 0,
       payoffMinimumCents: payoff?.min_payment_cents ?? 0,
       payoffPlannedCents: payoff?.target_payment_cents ?? 0,

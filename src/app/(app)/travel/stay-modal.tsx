@@ -9,7 +9,7 @@ import { BrandPicker } from "./brand-picker";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { CurrencyConverter } from "@/components/currency-converter";
 import {
-  CurrencySelect, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote,
+  CurrencySelect, MoreDetailsToggle, PlanSpentFields, PlannedPointsNote, isPlannedOnly, outsideTripNote,
   type PlanSpent, type PlanSpentSlot,
 } from "./travel-form";
 import type { Embed, SectionHandle } from "./embedded-section";
@@ -126,6 +126,19 @@ export function StayModal({
   // Paid with the card's free-night certificate instead. The two are
   // exclusive: ticking one unticks the other.
   const [freeNightUsed, setFreeNightUsed] = useState(stay?.freeNightUsed ?? false);
+  // The short form: points, credits, the second currency, card owner and
+  // remarks fold away. A saved stay that already uses any of them opens with
+  // them showing, so editing never hides a figure that's there.
+  const [showMore, setShowMore] = useState(
+    () =>
+      !!stay &&
+      !!(
+        stay.cardLabel?.trim() || stay.holder?.trim() || stay.pointsCost > 0 || stay.hotelCreditCents > 0 ||
+        stay.hotelCostCents > 0 || stay.freeNightUsed || stay.pointsUsed || stay.breakfastIncluded ||
+        stay.remarks?.trim() || stay.costForeignCents || stay.plannedCostForeignCents
+      ),
+  );
+  const more = showMore ? "contents" : "hidden";
   const [freeNightPoints, setFreeNightPoints] = useState(
     stay?.freeNightPoints ? String(stay.freeNightPoints) : preset?.freeNightPointsLimit ? String(preset.freeNightPointsLimit) : "",
   );
@@ -420,6 +433,7 @@ export function StayModal({
               </span>
             ) : null}
           </Field>
+          <div className={more}>
           <Field label="Card used (if not linked)">
             <input name="cardLabel" defaultValue={stay?.cardLabel ?? ""} className={inputClass} />
           </Field>
@@ -431,12 +445,13 @@ export function StayModal({
               className={inputClass}
             />
           </Field>
+          </div>
         </div>
 
         {/* Planned beside Spent, each in dollars and the stay's other
             currency. Spent is what left the wallet. */}
         <div className="space-y-2 sm:col-span-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className={showMore ? "flex flex-wrap items-center gap-x-3 gap-y-2" : "hidden"}>
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
             <div className="has-[.rounded-xl]:basis-full">
               <CurrencyConverter
@@ -464,6 +479,7 @@ export function StayModal({
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
             spentLocked={stay?.paidCents != null}
+            showForeign={showMore}
           />
           <input type="hidden" name="plannedCost" value={fig.planned} />
           <input type="hidden" name="plannedCostForeign" value={fig.plannedForeign} />
@@ -472,6 +488,9 @@ export function StayModal({
           <input type="hidden" name="foreignCurrency" value={foreignCurrency} />
         </div>
 
+        <MoreDetailsToggle open={showMore} onToggle={() => setShowMore((v) => !v)} className="sm:col-span-2" />
+
+        <div className={more}>
         {/* The six figures are all short — the free-night cap, points, a
              rate, three money amounts — so they ride on one line instead of
              eating six rows of the form. Two per row at 375px. */}
@@ -652,6 +671,7 @@ export function StayModal({
           <Field label="Remarks" className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
             <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
           </Field>
+        </div>
         </div>
 
         <div className="sm:col-span-2 empty:hidden">

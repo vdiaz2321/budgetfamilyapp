@@ -13,7 +13,7 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { CurrencySelect, Field, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
+import { CurrencySelect, Field, MoreDetailsToggle, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -149,6 +149,15 @@ export function FlightModal({
   });
   const [remarks, setRemarks] = useState(flight?.remarks ?? "");
   const [editingNames, setEditingNames] = useState(false);
+  // The short form: points seats, the currency pickers, card owner and
+  // remarks fold away; a saved flight already using any of them opens with
+  // them showing.
+  const [showMore, setShowMore] = useState(
+    () =>
+      !!flight &&
+      !!(flight.cardLabel?.trim() || flight.holder?.trim() || flight.pointsUsed || flight.pointsCost > 0 ||
+        flight.remarks?.trim() || flight.passengers.some((p) => p.pointsUsed)),
+  );
 
   // The fare the currency converter fills: the one last clicked into, or else
   // the first one still empty.
@@ -494,10 +503,10 @@ export function FlightModal({
               />
             </label>
             {/* The currency the second column of Planned and Spent is in. */}
-            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
+            {showMore ? <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} /> : null}
             {/* Which seats were paid with points, picked in one place; each
                 ticked passenger gets a Points box on their row. */}
-            <CheckPicker
+            {showMore ? <CheckPicker
               label="Paid with points"
               align="left"
               className={`h-7 ${PILL_CONTROL}`}
@@ -521,10 +530,12 @@ export function FlightModal({
                 checked: p.pointsUsed,
                 onToggle: () => updatePassenger(p.key, { pointsUsed: !p.pointsUsed }),
               }))}
-            />
-            <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
-              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
-            </div>
+            /> : null}
+            {showMore ? (
+              <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
+                <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => setEditingNames((v) => !v)}
@@ -661,14 +672,19 @@ export function FlightModal({
               </span>
             ) : null}
           </Field>
+          <div className={showMore ? "contents" : "hidden"}>
           <Field label="Card used (if not linked)">
             <input value={cardLabel} onChange={(e) => setCardLabel(e.target.value)} className={inputClass} />
           </Field>
           <Field label="Card owner">
             <input value={holder} onChange={(e) => setHolder(e.target.value)} className={inputClass} />
           </Field>
+          </div>
         </div>
 
+        <MoreDetailsToggle open={showMore} onToggle={() => setShowMore((v) => !v)} className="mt-3" />
+
+        <div className={showMore ? "contents" : "hidden"}>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="Points used">
             {/* The points tickets above, added up. */}
@@ -711,6 +727,7 @@ export function FlightModal({
           <Field label="Remarks" className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
             <input value={remarks} onChange={(e) => setRemarks(e.target.value)} className={inputClass} />
           </Field>
+        </div>
         </div>
         </Section>
 

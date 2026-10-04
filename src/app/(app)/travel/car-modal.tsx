@@ -7,7 +7,7 @@ import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import {
-  CurrencySelect, Field, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote,
+  CurrencySelect, Field, MoreDetailsToggle, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote,
   type PlanSpent, type PlanSpentSlot,
 } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
@@ -104,6 +104,15 @@ export function CarModal({
     const next = cards.find((c) => c.id === nextId);
     if (next && !holder.trim() && next.holder) setHolder(next.holder);
   }
+
+  // The short form: points, the second currency, card owner and remarks fold
+  // away; a saved rental already using any of them opens with them showing.
+  const [showMore, setShowMore] = useState(
+    () =>
+      !!car &&
+      !!(car.cardLabel?.trim() || car.holder?.trim() || car.pointsCost > 0 || car.pointsUsed || car.remarks?.trim() ||
+        car.costEurCents || car.plannedCostForeignCents),
+  );
 
   const payload = () => ({
     id: car?.id ?? null,
@@ -206,7 +215,7 @@ export function CarModal({
         <Section
           title="Payment"
           action={
-            <CurrencyConverter
+            showMore ? <CurrencyConverter
               blue
               defaultFrom={foreignCurrency}
               // Fills Planned or Spent — whichever was clicked last, else
@@ -221,11 +230,11 @@ export function CarModal({
                     : {}),
                 }));
               }}
-            />
+            /> : null
           }
         >
           {/* The currency the second Planned / Spent box is in. */}
-          <div className="mb-3">
+          <div className={showMore ? "mb-3" : "hidden"}>
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
           </div>
           <PlanSpentFields
@@ -235,6 +244,7 @@ export function CarModal({
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
             spentOnPoints={onPoints}
+            showForeign={showMore}
           />
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
@@ -250,14 +260,19 @@ export function CarModal({
                 </span>
               ) : null}
             </Field>
+            <div className={showMore ? "contents" : "hidden"}>
             <Field label="Card used (if not linked)">
               <input value={cardLabel} onChange={(e) => setCardLabel(e.target.value)} className={inputClass} />
             </Field>
             <Field label="Card owner">
               <input value={holder} onChange={(e) => setHolder(e.target.value)} className={inputClass} />
             </Field>
+            </div>
           </div>
 
+          <MoreDetailsToggle open={showMore} onToggle={() => setShowMore((v) => !v)} className="mt-3" />
+
+          <div className={showMore ? "contents" : "hidden"}>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Field label={pointsUsed ? "Points used" : "Pts if used"}>
               <input type="number" min="0" step="1" value={points} onChange={(e) => setPoints(e.target.value)} className={inputClass} />
@@ -307,6 +322,7 @@ export function CarModal({
             <Field label="Remarks" className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
               <input value={remarks} onChange={(e) => setRemarks(e.target.value)} className={inputClass} />
             </Field>
+          </div>
           </div>
         </Section>
 

@@ -621,6 +621,24 @@ export async function reopenCard(formData: FormData) {
   revalidate();
 }
 
+// "Checked after the anniversary, nothing to change": stamps the card's details
+// row so the Travel Log's "Update due" warning clears without editing a field.
+export async function markCardDetailsUpdated(formData: FormData): Promise<{ error: string | null }> {
+  const { supabase, householdId } = await requireHousehold();
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { error: "No card picked." };
+  const { data, error } = await supabase
+    .from("credit_card_details")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("account_id", id)
+    .eq("household_id", householdId)
+    .select("account_id");
+  if (error) return { error: error.message };
+  if (!data?.length) return { error: "This card has no rewards details to mark." };
+  revalidate();
+  return { error: null };
+}
+
 // Upsert the rewards-tracker fields for one credit card. First save creates
 // the credit_card_details row; subsequent saves update it in place.
 export async function upsertCardDetails(formData: FormData) {

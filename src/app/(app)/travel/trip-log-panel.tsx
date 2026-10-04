@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExpandIcon, LOG_FIGURE_COL, LOG_TITLE_COL } from "./travel-board";
+import { ExpandIcon, HEAD_FIGURE_COLS, HEAD_TITLE_COL } from "./travel-board";
 import { SearchBox } from "./search-box";
 import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
@@ -16,6 +16,10 @@ function placeName(name: string): string {
   return name.split(" · ")[0];
 }
 const DASH = "—";
+
+// A picked cell in the open log, split into what it adds to the Spent,
+// Planned and Saved sums — a cell that is part bought, part plan feeds both.
+type Pick = { tripId: string; spent: number; plan: number; saved: number };
 
 // What the trip search matches: the trip's name plus what was booked on it —
 // hotels and their cities, airlines, flight numbers, airports and booking codes, and rental
@@ -87,6 +91,7 @@ export function TripLogPanel({
   // afterwards is remembered for the session.
   const [year, setYear] = useSessionYears("travel-trip-log-years", () => thisAndFutureYears(years));
   const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<Map<string, Pick>>(() => new Map());
   const q = query.trim().toLowerCase();
   const shown = summaries.filter(
     (t) => inYears(year, t.start?.slice(0, 4)) && (!q || searchText(t).includes(q)),
@@ -134,6 +139,62 @@ export function TripLogPanel({
     { trips: 0, total: 0, planned: 0, points: 0, saved: 0 },
   );
 
+  // Only cells of trips still on screen count — a year or search change hides
+  // a picked trip without silently keeping its money in the sum.
+  const shownIds = new Set(shown.map((t) => t.trip.id));
+  const picks = [...picked.values()].filter((p) => shownIds.has(p.tripId));
+  const pickSum = (read: (p: Pick) => number) => picks.reduce((total, p) => total + read(p), 0);
+  // Only the kinds actually picked get a figure — spent, planned and saved
+  // never fold into one number.
+  const pickFigures = [
+    { label: "Selected spent:", cents: pickSum((p) => p.spent), tone: "text-negative" },
+    { label: "Selected planned:", cents: pickSum((p) => p.plan), tone: "text-muted" },
+    { label: "Selected saved:", cents: pickSum((p) => p.saved), tone: "text-positive" },
+  ].filter((f) => f.cents > 0);
+
+  const togglePick = (key: string, pick: Pick) =>
+    setPicked((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, pick);
+      return next;
+    });
+
+  /** A money cell that can be picked into the Selected sum, the way Annual's
+   *  cells feed its hero. It stops the click so the row doesn't also open the
+   *  trip — the name, dates and nights still do. A cell that is all plan sits
+   *  in a grey pill, so upcoming money reads apart from spent at a glance
+   *  (not in the Planned column, where every figure is a plan). */
+  const pickCell = (t: TripSummary, column: string, cents: number, plan: number, opts: { saved?: boolean; pill?: boolean } = {}) => {
+    const saved = opts.saved ?? false;
+    const pill = opts.pill ?? (!saved && plan >= cents);
+    if (cents <= 0) return <span className="font-normal text-muted">{DASH}</span>;
+    const key = `${t.trip.id}:${column}`;
+    const active = picked.has(key);
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          const planPart = saved ? 0 : Math.min(plan, cents);
+          togglePick(key, { tripId: t.trip.id, spent: saved ? 0 : cents - planPart, plan: planPart, saved: saved ? cents : 0 });
+        }}
+        aria-pressed={active}
+        // Picked reads as the light blue of the Clear button, so "these are
+        // in the sum" ties visibly to the way to undo it.
+        className={`cursor-pointer px-2 py-0.5 tabular-nums ring-inset transition ${pill ? "rounded-full" : "rounded-md"} ${
+          active
+            ? "bg-sky-100 ring-1 ring-sky-400 hover:bg-sky-200 dark:bg-sky-900/40 dark:ring-sky-500 dark:hover:bg-sky-900/60"
+            : pill
+              ? "bg-black/[0.07] hover:bg-black/[0.12] dark:bg-white/[0.12] dark:hover:bg-white/[0.18]"
+              : "hover:bg-black/[0.06] dark:hover:bg-white/[0.10]"
+        }`}
+      >
+        {formatMoneyWhole(cents, currency)}
+      </button>
+    );
+  };
+
   const money = (cents: number) => (cents > 0 ? formatMoneyWhole(cents, currency) : DASH);
   // A cell that is nothing but a plan reads grey, so a row of upcoming trips
   // is visibly "not spent yet" without a second line under each figure.
@@ -161,9 +222,12 @@ export function TripLogPanel({
             <tr
               key={t.trip.id}
               onClick={() => onOpenTrip(t.trip.id)}
-              className="cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+              className="group cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
             >
-              <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold">
+              {/* The sticky name cell needs an opaque fill so columns scroll
+                  under it, which hides the row's see-through hover — it takes
+                  the same grey, mixed solid. */}
+              <td className="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-semibold transition group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] dark:group-hover:bg-[color-mix(in_srgb,var(--surface),white_6%)]">
                 {/* The Dates column drops the year, so the row carries it here —
                     the log reads across years when more than one is picked. */}
                 <span className="flex items-baseline gap-1">
@@ -178,19 +242,21 @@ export function TripLogPanel({
               </td>
               <td className="px-2 py-2 text-center tabular-nums">{t.nights ?? DASH}</td>
               {MONEY_COLUMNS.map((c) => (
-                <td key={c.label} className={`whitespace-nowrap px-2 py-2 text-center tabular-nums ${planClass(c.read(t), c.plan(t))}`}>{money(c.read(t))}</td>
+                <td key={c.label} className={`whitespace-nowrap px-1 py-1.5 text-center tabular-nums ${planClass(c.read(t), c.plan(t))}`}>
+                  {pickCell(t, c.label, c.read(t), c.plan(t))}
+                </td>
               ))}
-              <td className="whitespace-nowrap px-2 py-2 text-center font-bold tabular-nums text-negative">
-                {t.spent > 0 ? formatMoneyWhole(t.spent, currency) : <span className="font-normal text-muted">{DASH}</span>}
+              <td className="whitespace-nowrap px-1 py-1.5 text-center font-bold tabular-nums text-negative">
+                {pickCell(t, "Spent", t.spent, 0)}
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums text-muted">
-                {money(t.planOnly.total)}
+              <td className="whitespace-nowrap px-1 py-1.5 text-center font-semibold tabular-nums text-muted">
+                {pickCell(t, "Planned", t.planOnly.total, t.planOnly.total, { pill: false })}
               </td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {t.points > 0 ? t.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
               </td>
-              <td className="whitespace-nowrap px-2 py-2 text-center font-semibold tabular-nums text-positive">
-                {t.saved > 0 ? formatMoneyWhole(t.saved, currency) : <span className="font-normal text-muted">{DASH}</span>}
+              <td className="whitespace-nowrap px-1 py-1.5 text-center font-semibold tabular-nums text-positive">
+                {pickCell(t, "Saved", t.saved, 0, { saved: true })}
               </td>
             </tr>
           ))}
@@ -218,7 +284,7 @@ export function TripLogPanel({
   );
 
   const yearSelect = (
-    <YearPicker years={years} value={year} onChange={setYear} label="Travel Combined Log year" />
+    <YearPicker years={years} value={year} onChange={setYear} label="All trips year" />
   );
 
   return (
@@ -232,31 +298,31 @@ export function TripLogPanel({
           button stays so the card is still reachable by keyboard. */}
       <div
         onClick={() => setExpanded(true)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
       >
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-          className={`flex min-w-0 items-center gap-2 text-left ${LOG_TITLE_COL}`}
+          className={`flex min-w-0 items-center gap-2 text-left ${HEAD_TITLE_COL}`}
         >
           <ExpandIcon />
-          <span className="text-sm font-bold sm:truncate">Travel Combined Log</span>
+          <span className="text-sm font-bold sm:text-base sm:truncate">All Trips</span>
         </button>
         {/* Collapsed, the card carries the same figures as the open log's
             header — trips, spent, planned — and the year they cover. Only the
             search stays inside, since it filters the table. */}
-        <span className={`flex shrink-0 items-baseline gap-1.5 ${LOG_FIGURE_COL}`}>
+        <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[0]}`}>
           <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
-          <span className="text-sm font-bold tabular-nums">{shown.length}</span>
+          <span className="text-sm font-semibold tabular-nums">{shown.length}</span>
         </span>
-        <span className={`flex shrink-0 items-baseline gap-1.5 ${LOG_FIGURE_COL}`}>
-          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
-          <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
+        <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[1]}`}>
+          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
+          <span className="text-sm font-semibold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
         </span>
         {totalPlanned > 0 ? (
-          <span className={`flex shrink-0 items-baseline gap-1.5 ${LOG_FIGURE_COL}`}>
-            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Planned:</span>
-            <span className="text-sm font-bold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
+          <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[2]}`}>
+            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
+            <span className="text-sm font-semibold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
           </span>
         ) : null}
         <span className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
@@ -264,25 +330,48 @@ export function TripLogPanel({
 
       {expanded ? (
         <ModalShell
-          title="Travel Combined Log"
-          onClose={() => setExpanded(false)}
+          title="All Trips"
+          onClose={() => { setExpanded(false); setPicked(new Map()); }}
           className="sm:max-w-[96vw]"
           headerExtra={
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {picks.length > 0 ? (
+                /* Picked cells take over the figures' slot rather than adding
+                   a second line — Clear brings the trip totals back. */
+                <>
+                  {pickFigures.map((f) => (
+                    <span key={f.label} className="flex items-baseline gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{f.label}</span>
+                      <span className={`text-sm font-semibold tabular-nums ${f.tone}`}>{formatMoneyWhole(f.cents, currency)}</span>
+                    </span>
+                  ))}
+                  <span className="text-xs text-muted">{picks.length} cell{picks.length === 1 ? "" : "s"}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPicked(new Map())}
+                    className="rounded-md border border-sky-400 bg-sky-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-foreground transition hover:bg-sky-200 dark:border-sky-500 dark:bg-sky-900/40 dark:hover:bg-sky-900/60"
+                  >
+                    Clear
+                  </button>
+                </>
+              ) : (
+              <>
               <span className="flex items-baseline gap-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
-                <span className="text-sm font-bold tabular-nums">{shown.length}</span>
+                <span className="text-sm font-semibold tabular-nums">{shown.length}</span>
               </span>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Spent:</span>
-                <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
+                <span className="text-sm font-semibold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
               </span>
               {totalPlanned > 0 ? (
                 <span className="flex items-baseline gap-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Planned:</span>
-                  <span className="text-sm font-bold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
+                  <span className="text-sm font-semibold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
                 </span>
               ) : null}
+              </>
+              )}
               <SearchBox value={query} onChange={setQuery} placeholder="Search trip, hotel, flight…" label="Search trips" className="w-44" />
               {yearSelect}
             </span>
