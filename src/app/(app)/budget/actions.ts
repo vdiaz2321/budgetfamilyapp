@@ -2358,13 +2358,13 @@ async function deleteSingleTransaction(
   const tx = unwrap(
     await supabase
       .from("transactions")
-      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
+      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, reward_activity_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle<{
         subcategory_id: string | null; category_id: string | null; account_id: string | null; bucket_id: string | null;
         paid_to_account_id: string | null; amount_cents: number; is_withdrawal: boolean | null; movement_type: string | null;
-        travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null;
+        travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null; reward_activity_id: string | null;
         subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
         categories: { kind: string } | null;
       }>(),
@@ -2372,6 +2372,19 @@ async function deleteSingleTransaction(
   );
   const none: DeleteOutcome = { balancesMoved: false, touchedDebt: false };
   const deletedBooking = tx ? bookingRefOf(tx) : null;
+
+  // The cash from a points cash-out: its points entry goes with it, so the
+  // card gets its points back (AFTER DELETE trigger) instead of staying spent
+  // with no cash behind them. Deleting from the rewards log comes through here
+  // too — by then this finds the entry already gone and does nothing.
+  if (tx?.reward_activity_id) {
+    const { error } = await supabase
+      .from("credit_card_reward_activities")
+      .delete()
+      .eq("id", tx.reward_activity_id)
+      .eq("household_id", householdId);
+    if (error) return { error: `Couldn't give the points back — ${error.message}` };
+  }
 
   if (tx?.movement_type === "account_transfer") {
     const { error } = await supabase.rpc("mutate_account_transfer", {

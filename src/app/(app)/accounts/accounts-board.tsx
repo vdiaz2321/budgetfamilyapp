@@ -87,14 +87,14 @@ function maskAccountNumber(accountNumber: string | null): string | null {
 // appear only as the popup gets wide enough for them — see MONTH_GRID below.
 const MONTH_COLUMNS = 7;
 // Column visibility, by index: month 0 always, 1-2 once the panel clears
-// 560px, 3-4 once it clears 860px, 5-6 once it clears 980px (columns narrow to
-// 6rem there so seven fit a laptop-width popup). Kept as literal class strings because
+// 560px, 3-4 once it clears 860px, 5-6 once it clears 1180px (all 7rem — a 6-figure
+// amount like $127,000.00 overflows a 6rem column). Kept as literal class strings because
 // Tailwind only generates the arbitrary values it can see in the source.
 // Written out in full rather than built by string surgery: Tailwind only
 // emits the arbitrary variants it can literally see in the source, so a class
 // assembled at runtime silently never gets any CSS.
-const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents", "hidden @[980px]:contents"] as const;
-const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block", "hidden @[980px]:block"] as const;
+const MONTH_TIER = ["", "hidden @[560px]:contents", "hidden @[860px]:contents", "hidden @[1180px]:contents"] as const;
+const MONTH_HEAD_TIER = ["", "hidden @[560px]:block", "hidden @[860px]:block", "hidden @[1180px]:block"] as const;
 // Both take the column's DISTANCE FROM THE ANCHOR (the selected period), not
 // its raw index. Months read newest -> oldest (Victor wants the current month
 // first), so the anchor is column 0 and a narrow popup keeps the columns
@@ -107,11 +107,11 @@ const monthHeadTier = (distance: number) =>
 // A column's index is therefore also its distance from the anchor.
 const ANCHOR_IDX = 0;
 // Row grids: name + 1 money column when narrow, + 3 at 560px, + 5 at 860px,
-// + 7 at 980px.
+// + 7 at 1180px.
 const ROW_GRID =
-  "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem] @[980px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_6rem_6rem_6rem_6rem_6rem_6rem_6rem_1.25rem]";
+  "grid-cols-[1.5rem_1rem_minmax(0,1fr)_6rem] @[560px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_1.25rem] @[860px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_1.25rem] @[1180px]:grid-cols-[1.75rem_1.25rem_minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_7rem_7rem_1.25rem]";
 const DEBT_ROW_GRID =
-  "grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] @[860px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem] @[980px]:grid-cols-[minmax(0,1fr)_6rem_6rem_6rem_6rem_6rem_6rem_6rem]";
+  "grid-cols-[minmax(0,1fr)_6rem] @[560px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem] @[860px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem] @[1180px]:grid-cols-[minmax(0,1fr)_7rem_7rem_7rem_7rem_7rem_7rem_7rem]";
 
 const SECTIONS: Section[] = [
   {
@@ -1505,7 +1505,7 @@ function SumCell({ pickKey, cents, children }: { pickKey: string; cents: number 
         e.stopPropagation();
         sum.toggle(pickKey, cents);
       }}
-      className={`relative -mx-0.5 flex w-full items-center justify-end rounded-md px-0.5 ${
+      className={`relative -mx-0.5 flex w-full items-center justify-center rounded-md px-0.5 ${
         picked ? "bg-sky-500/15 ring-1 ring-inset ring-sky-500/60" : ""
       }`}
     >
@@ -1739,7 +1739,7 @@ function AccountSection({
           title={section.label}
           onClose={closePopup}
           // Wide enough for all seven month columns on a laptop.
-          className="sm:max-w-6xl"
+          className="sm:max-w-7xl"
           headerExtra={
             sumPicks.size > 0 ? (
               <div className="flex items-center gap-1.5 whitespace-nowrap sm:gap-2">
@@ -1805,7 +1805,7 @@ function AccountSection({
               <div className={`grid ${DEBT_ROW_GRID} items-center gap-1.5 border-b border-line/60 bg-background/40 px-4 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted`}>
                 <span />
                 {historyMonths.map((m, i) => (
-                  <span key={m} className={`text-right ${monthHeadTier(i)}`}>
+                  <span key={m} className={`text-center ${monthHeadTier(i)}`}>
                     {monthAbbr(m)}
                   </span>
                 ))}
@@ -1824,7 +1824,7 @@ function AccountSection({
                 {historyMonths.map((m, i) => (
                   <span
                     key={m}
-                    className={`justify-self-stretch text-right ${monthHeadTier(i)}`}
+                    className={`justify-self-stretch text-center ${monthHeadTier(i)}`}
                   >
                     {monthAbbr(m)}
                   </span>
@@ -1863,7 +1863,7 @@ function AccountSection({
                 // A paid-off debt is listed for the months it still had a
                 // balance. Show its row only at widths where one of those
                 // months is on screen (1 column narrow, 3 from 560px, 5 from
-                // 860px, 7 from 980px) — otherwise a phone shows a bare
+                // 860px, 7 from 1180px) — otherwise a phone shows a bare
                 // "$0.00" row.
                 const owedIn = (from: number, to: number) =>
                   historyMonths.slice(from, to).some((m) => (d.balancesByMonth?.[m] ?? 0) !== 0);
@@ -1871,7 +1871,7 @@ function AccountSection({
                   d.balanceCents !== 0 || owedIn(0, 1) ? "grid"
                     : owedIn(1, 3) ? "hidden @[560px]:grid"
                       : owedIn(3, 5) ? "hidden @[860px]:grid"
-                        : "hidden @[980px]:grid";
+                        : "hidden @[1180px]:grid";
                 return (
                 <li
                   key={`debt:${d.subcategoryId}`}
@@ -1893,7 +1893,7 @@ function AccountSection({
                     return (
                       <div key={m} className={monthTier(j + 1)}>
                         <SumCell pickKey={`d:${d.subcategoryId}:${m}`} cents={v}>
-                        <span className="flex w-full justify-end">
+                        <span className="flex w-full justify-center">
                           {v != null ? (
                             <span className="inline-flex items-center gap-0 font-semibold tabular-nums text-negative">
                               <span className="text-xs text-muted">{currencySymbol(currency)}</span>
@@ -2425,7 +2425,7 @@ function BucketEditPanel({
  */
 // Tab walks DOWN a month column (Shift+Tab walks up) instead of across the
 // row, so a month's balances can be keyed in one after another. Columns are
-// matched by their right edge — every balance cell is right-aligned in its
+// matched by their horizontal centre — every balance cell is centred in its
 // grid column. Past the last row, Tab falls back to its normal behaviour.
 //
 // A bucketed account's total is the sum of its buckets and can't be typed
@@ -2435,11 +2435,12 @@ function tabDownColumn(e: React.KeyboardEvent<HTMLInputElement>) {
   if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
   const current = e.currentTarget;
   const scope = current.closest("[data-column-tab-scope]") ?? document;
-  const right = current.getBoundingClientRect().right;
+  const centreOf = (r: DOMRect) => (r.left + r.right) / 2;
+  const centre = centreOf(current.getBoundingClientRect());
   const columnOf = () =>
     Array.from(scope.querySelectorAll<HTMLElement>("input[data-column-tab], [data-column-tab-expand]"))
       .map((el) => ({ el, rect: el.getBoundingClientRect() }))
-      .filter(({ rect }) => rect.width > 0 && Math.abs(rect.right - right) < 3)
+      .filter(({ rect }) => rect.width > 0 && Math.abs(centreOf(rect) - centre) < 3)
       .sort((a, b) => a.rect.top - b.rect.top)
       .map(({ el }) => el);
   const column = columnOf();
@@ -2527,7 +2528,7 @@ function BucketBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => updateBucketBalance(fd))}
-      className="justify-self-end inline-flex items-center gap-0"
+      className="justify-self-center inline-flex items-center gap-0"
     >
       <input type="hidden" name="id" value={id} />
       <span className="pointer-events-none text-sm text-muted">{currencySymbol(currency)}</span>
@@ -2573,7 +2574,7 @@ function HistoricBucketBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => setBucketSnapshot(fd))}
-      className="justify-self-end inline-flex items-center gap-0"
+      className="justify-self-center inline-flex items-center gap-0"
     >
       <input type="hidden" name="bucketId" value={bucketId} />
       <input type="hidden" name="month" value={month} />
@@ -2680,7 +2681,7 @@ function DerivedBalance({
     return (
       <div
         data-column-tab-expand={tabExpand || undefined}
-        className="justify-self-end inline-flex items-center gap-0 py-1"
+        className="justify-self-center inline-flex items-center gap-0 py-1"
       >
         <span className="text-sm">—</span>
       </div>
@@ -2689,7 +2690,7 @@ function DerivedBalance({
   return (
     <div
       data-column-tab-expand={tabExpand || undefined}
-      className="justify-self-end inline-flex items-center gap-0 py-1"
+      className="justify-self-center inline-flex items-center gap-0 py-1"
     >
       <span className={`text-sm ${negative ? "text-negative" : "text-muted"}`}>{currencySymbol(currency)}</span>
       <span className={`text-[0.9375rem] tabular-nums ${negative ? "text-negative font-semibold" : ""}`}>
@@ -2724,7 +2725,7 @@ function HistoricBalanceInput({
     <form
       ref={formRef}
       action={(fd) => start(() => setAccountSnapshot(fd))}
-      className="justify-self-end inline-flex items-center gap-0"
+      className="justify-self-center inline-flex items-center gap-0"
     >
       <input type="hidden" name="accountId" value={accountId} />
       <input type="hidden" name="month" value={month} />
@@ -2773,7 +2774,7 @@ function BalanceInput({
   const initial = amountText(balanceCents);
 
   return (
-    <div className="flex w-full items-center justify-end">
+    <div className="flex w-full items-center justify-center">
       <form
         ref={formRef}
         action={(fd) => start(() => updateBalance(fd))}

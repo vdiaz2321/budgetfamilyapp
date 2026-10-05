@@ -97,6 +97,9 @@ export type RewardActivity = {
   hotelCreditDeltaCents: number;
   bookedOn: string | null;
   note: string | null;
+  /** Cash a Cashed out entry brought in. toAccountId null = statement credit
+   *  on the card itself. Only loaded on /travel. */
+  cash?: { cents: number; toAccountId: string | null } | null;
 };
 
 export type AccountData = {

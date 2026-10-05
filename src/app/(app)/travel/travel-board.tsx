@@ -1297,7 +1297,7 @@ export function TravelBoard({
               onClick={() => setAdding(true)}
               className="rounded-lg bg-sky-700 px-4 py-2 text-base font-bold text-white transition hover:bg-sky-800 sm:text-lg"
             >
-              Add Travel Log
+              Add Trip
             </button>
             <EditTripPicker
               // A trip saved with just a name has no dates of its own; its
@@ -1345,7 +1345,6 @@ export function TravelBoard({
           currency={currency}
           nonCardAccounts={rewards.nonCardAccounts}
           allBuckets={rewards.allBuckets}
-          travelBrands={rewards.travelBrands}
           // What each card's points have actually come out at, from the award
           // bookings in the logs below — the rewards board's stated
           // cents-per-point has nothing to check itself against otherwise.

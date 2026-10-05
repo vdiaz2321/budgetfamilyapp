@@ -164,11 +164,11 @@ export default async function AccountsPage() {
     fetchAllRows<{
       id: string; occurred_on: string; amount_cents: number; memo: string | null;
       account_id: string | null; bucket_id: string | null; paid_to_account_id: string | null; movement_type: string | null;
-      reimbursed_cents: number; created_at: string; updated_at: string;
+      reimbursed_cents: number; created_at: string; updated_at: string; reward_activity_id: string | null;
     }>((from, to) =>
       supabase
         .from("transactions")
-        .select("id, occurred_on, amount_cents, reimbursed_cents, memo, account_id, bucket_id, paid_to_account_id, movement_type, created_at, updated_at")
+        .select("id, occurred_on, amount_cents, reimbursed_cents, memo, account_id, bucket_id, paid_to_account_id, movement_type, created_at, updated_at, reward_activity_id")
         .eq("household_id", household.id)
         .not("paid_to_account_id", "is", null)
         .order("occurred_on", { ascending: false })
@@ -508,6 +508,8 @@ export default async function AccountsPage() {
       reimbursedCents: t.reimbursed_cents ?? 0,
       editedAt: editedAtOf(t),
       fromAccountId: t.account_id ?? null,
+      // A statement credit from cashed-out points (Travel rewards log).
+      fromPoints: Boolean(t.reward_activity_id),
       memo: t.memo ?? null,
       undo: undoOf(t.account_id, t.bucket_id, debtByCard.get(t.paid_to_account_id as string)),
     }));

@@ -6,7 +6,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { centsToDisplay, formatMoney } from "@/lib/money";
-import { matchCardStatement, payCard } from "./actions";
+import { logCreditCardRewardActivity, matchCardStatement, payCard } from "./actions";
 import type { AccountData, BucketData, NonCardAccount } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 
@@ -180,6 +180,9 @@ export function StatTile({
   return <div className={base}>{inner}</div>;
 }
 
+// The From dropdown's value for paying with points rather than a bank.
+const POINTS_SOURCE = "points";
+
 export function PayCardModal({
   card,
   currency,
@@ -198,6 +201,11 @@ export function PayCardModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string>(nonCardAccounts[0]?.id ?? "");
   const source = nonCardAccounts.find((a) => a.id === sourceId) ?? null;
+  // Paying with points: a statement credit. Saved as a Cashed out rewards
+  // entry with its card payment attached, the same record the rewards log
+  // makes — so the points come off the card and the payment shows "Points".
+  const pointsAvailable = card.cardDetails?.currentPoints ?? 0;
+  const payingWithPoints = sourceId === POINTS_SOURCE;
   const sourceBuckets = allBuckets.filter((b) => b.accountId === sourceId);
   // Try to pre-pick a bucket whose name references this card (fuzzy match on
   // card name words, case-insensitive).
@@ -264,9 +272,17 @@ export function PayCardModal({
           onSubmit={(e) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
+            if (payingWithPoints) {
+              fd.set("accountId", card.id);
+              fd.set("activityType", "points_redemption");
+              fd.set("occurredOn", String(fd.get("date") ?? ""));
+              fd.set("cashReceived", String(fd.get("amount") ?? ""));
+              fd.set("receivedAs", "credit");
+              fd.set("note", String(fd.get("notes") ?? ""));
+            }
             start(async () => {
               setErrorMsg(null);
-              const r = await payCard(fd);
+              const r = payingWithPoints ? await logCreditCardRewardActivity(fd) : await payCard(fd);
               if (r?.error) setErrorMsg(r.error);
               else onClose();
             });
@@ -311,9 +327,22 @@ export function PayCardModal({
               {nonCardAccounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
+              {pointsAvailable > 0 ? (
+                <option value={POINTS_SOURCE}>Points (statement credit)</option>
+              ) : null}
             </select>
           </label>
-          {source?.hasBuckets && sourceBuckets.length > 0 ? (
+          {payingWithPoints ? (
+            <LabeledInput
+              label={`Points used · ${pointsAvailable.toLocaleString()} available`}
+              name="pointsUsed"
+              inputMode="numeric"
+              placeholder="0"
+              autoComplete="off"
+              required
+            />
+          ) : null}
+          {!payingWithPoints && source?.hasBuckets && sourceBuckets.length > 0 ? (
             <label className="block">
               <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
                 From bucket
@@ -335,7 +364,12 @@ export function PayCardModal({
               </p>
             </label>
           ) : null}
-          <LabeledInput label="Notes" name="notes" defaultValue={`Payment to ${card.name}`} />
+          <LabeledInput
+            key={payingWithPoints ? "points" : "bank"}
+            label="Notes"
+            name="notes"
+            defaultValue={payingWithPoints ? "" : `Payment to ${card.name}`}
+          />
           {errorMsg ? <p className="text-xs text-negative">{errorMsg}</p> : null}
           <div className="flex items-center justify-end gap-2 pt-1">
             <button

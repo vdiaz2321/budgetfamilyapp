@@ -32,6 +32,8 @@ export type CardPayment = {
   // When it was last changed after being logged; null if never edited.
   editedAt: string | null;
   fromAccountId: string | null;
+  /** Paid by cashing out points (a statement credit) — no bank behind it. */
+  fromPoints?: boolean;
   memo: string | null;
   // What Remove would put back, worked out on the server from the same rules
   // deleteTransaction follows. `refund` is null when no bank balance moves.
@@ -83,6 +85,10 @@ export function CardPaymentsLedger({
   const [view, setView] = useState<"month" | "year">("month");
   // The card whose payment history popup is open.
   const [detailCardId, setDetailCardId] = useState<string | null>(null);
+  // Spreadsheet-style sort: click a header to sort by it (amounts biggest
+  // first, names A-Z), click again to flip, a third time to go back to the
+  // default active-first order. null = that default.
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   // Open on a fresh login, and holds whatever it was last set to while moving
   // around the app inside one session.
   const [openState, setOpenState] = useSessionCollapse(storageKey, () => ({ open: true }));
@@ -130,8 +136,40 @@ export function CardPaymentsLedger({
       name: nameById.get(cardId) ?? labels.closed,
       cells,
       total: [...cells.values()].reduce((sum, v) => sum + v, 0),
+      // Columns run newest first, so this is how many columns back the last
+      // payment sits (Infinity = nothing paid in range).
+      lastPaid: (() => {
+        const i = columns.findIndex((c) => (cells.get(c.key) ?? 0) !== 0);
+        return i === -1 ? Infinity : i;
+      })(),
     }))
-    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    // Active first — paid in the latest two months (latest year when By
+    // year) — biggest total first. Then the rest by how recently they were
+    // paid, so a paid-off debt sinks below the ones still being paid.
+    .map((r) => ({ ...r, active: r.lastPaid <= (view === "month" ? 1 : 0) }))
+    .sort(
+      (a, b) =>
+        Number(b.active) - Number(a.active) ||
+        (a.active ? 0 : a.lastPaid - b.lastPaid) ||
+        b.total - a.total ||
+        a.name.localeCompare(b.name),
+    );
+  if (sort) {
+    const sign = sort.dir === "asc" ? 1 : -1;
+    const valueOf = (r: (typeof rows)[number]) =>
+      sort.key === "total" ? r.total : r.cells.get(sort.key) ?? 0;
+    // Stable sort, so ties keep the default order underneath.
+    rows.sort((a, b) =>
+      sort.key === "name" ? sign * a.name.localeCompare(b.name) : sign * (valueOf(a) - valueOf(b)),
+    );
+  }
+  const toggleSort = (key: string) =>
+    setSort((cur) => {
+      const first = key === "name" ? "asc" : "desc";
+      if (cur?.key !== key) return { key, dir: first };
+      if (cur.dir === first) return { key, dir: first === "asc" ? "desc" : "asc" };
+      return null;
+    });
 
 
   const columnTotal = (key: string) => rows.reduce((sum, r) => sum + (r.cells.get(key) ?? 0), 0);
@@ -267,13 +305,26 @@ export function CardPaymentsLedger({
             <table className={`w-full border-collapse text-xs ${columns.length > 3 ? "min-w-[42rem]" : ""}`}>
               <thead>
                 <tr className="border-b border-line bg-surface">
-                  <th className={`${headBase} sticky left-0 z-10 bg-surface text-center`}>{labels.item}</th>
+                  <th className={`${headBase} sticky left-0 z-10 bg-surface text-center`}>
+                    <SortButton label={labels.item} dir={sort?.key === "name" ? sort.dir : null} onClick={() => toggleSort("name")} />
+                  </th>
                   {/* By year this column spans every year, so "Annual" only fits by month. */}
-                  <th className={head}>{view === "month" ? "Annual Total" : "Total"}</th>
+                  <th className={head}>
+                    <SortButton label={view === "month" ? "Annual Total" : "Total"} dir={sort?.key === "total" ? sort.dir : null} onClick={() => toggleSort("total")} />
+                  </th>
                   {showPeriodColumns
-                    ? columns.map((c) => <th key={c.key} className={head}>{c.label}</th>)
+                    ? columns.map((c) => (
+                        <th key={c.key} className={head}>
+                          <SortButton label={c.label} dir={sort?.key === c.key ? sort.dir : null} onClick={() => toggleSort(c.key)} />
+                        </th>
+                      ))
                     : null}
-                  {view === "month" ? <th className={head}>Avg/mo</th> : null}
+                  {/* Avg/mo is the total spread evenly, so it sorts the same as Total. */}
+                  {view === "month" ? (
+                    <th className={head}>
+                      <SortButton label="Avg/mo" dir={sort?.key === "total" ? sort.dir : null} onClick={() => toggleSort("total")} />
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -340,6 +391,7 @@ export function CardPaymentsLedger({
               </tfoot>
             </table>
           </div>
+          <p className="border-t border-line px-4 py-2 text-xs text-muted">Select a row to edit its payments.</p>
         </>
       )}
       {detailCardId ? (
@@ -378,7 +430,7 @@ function CardPaymentsDetail({
   const total = payments.reduce((sum, p) => sum + p.amountCents, 0);
   return (
     <ModalShell
-      title={`${cardName} · ${year}`}
+      title={cardName}
       onClose={onClose}
       // As wide as its rows and no wider: the From column is sized to the longest
       // account name (--from-w below), so there's no empty band on a big screen.
@@ -386,7 +438,7 @@ function CardPaymentsDetail({
       mobileAlign="top"
       headerExtra={
         <span className="text-sm text-muted">
-          {payments.some((p) => p.reimbursedCents > 0) ? "Net paid" : "Paid"} <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>{formatMoney(total, currency)}</span>
+          {payments.some((p) => p.reimbursedCents > 0) ? "Net payments:" : "Total payments:"} <span className="font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>{formatMoney(total, currency)}</span>
         </span>
       }
     >
@@ -397,7 +449,7 @@ function CardPaymentsDetail({
           <div
             // Every row is its own grid, so the From column's width is set once
             // here — the longest name at roughly 0.47rem per character.
-            style={{ ["--from-w" as string]: `${Math.max(3, ...sorted.map((p) => (p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : "").length + (p.editedAt ? 16 : 0))) * 0.47 + 0.5}rem` }}
+            style={{ ["--from-w" as string]: `${Math.max(3, ...sorted.map((p) => (p.fromPoints ? "Points" : p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : "").length + (p.editedAt ? 16 : 0))) * 0.47 + 0.5}rem` }}
           >
           <div className={`border-b border-line pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted ${PAYMENT_GRID}`}>
             <span className="text-center">Date</span>
@@ -412,7 +464,7 @@ function CardPaymentsDetail({
                 payment={p}
                 itemName={cardName}
                 // CSV-imported rows carry no account — show nothing rather than a dash.
-                fromName={p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : null}
+                fromName={p.fromPoints ? "Points" : p.fromAccountId ? accountNames[p.fromAccountId] ?? "Closed account" : null}
                 currency={currency}
               />
             ))}
@@ -744,5 +796,26 @@ function MoneyBox({
         />
       </span>
     </label>
+  );
+}
+
+/** A column header that sorts the table. The arrow only shows on the sorted
+ *  column; the hover wash says the others are clickable too. A hidden arrow
+ *  holds its space so the label stays centred over its figures either way. */
+function SortButton({ label, dir, onClick }: { label: string; dir: "asc" | "desc" | null; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10 ${
+        dir ? "text-foreground" : ""
+      }`}
+    >
+      <span className="invisible w-2 text-[8px]" aria-hidden>▲</span>
+      {label}
+      <span className={`w-2 text-[8px] ${dir ? "" : "invisible"}`} aria-hidden>
+        {dir === "asc" ? "▲" : "▼"}
+      </span>
+    </button>
   );
 }

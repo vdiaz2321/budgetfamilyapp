@@ -11,7 +11,7 @@
 import { YearPicker, inYears, useSessionYears, yearsListLabel } from "./year-picker";
 import { useRouter } from "next/navigation";
 import React, { useEffect, useRef, useState, useTransition } from "react";
-import { centsToDisplay, formatMoneyWhole } from "@/lib/money";
+import { centsToDisplay, formatMoney, formatMoneyWhole } from "@/lib/money";
 import { evaluateExpression, hasOperator } from "@/lib/math-expression";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { FreeNightCapField, GripHandle, LabeledInput, PayCardModal, usePointerReorder } from "../accounts/shared-ui";
@@ -37,8 +37,6 @@ import {
 } from "../accounts/actions";
 import { ModalShell } from "@/components/modal-shell";
 import { ExpandIcon } from "./travel-board";
-import { StayModal } from "./stay-modal";
-import type { TravelBrand, TravelCard } from "./types";
 import {
   UNLINKED,
   centsPerPoint,
@@ -109,14 +107,6 @@ function expiryLabel(days: number): string {
   return `${Math.round(days / 30)} months left`;
 }
 
-// Everything the shared Add stay modal needs, made available to the card
-// panels without threading it through four levels of props. The cards are
-// derived from the accounts this board already has.
-const TravelStayContext = React.createContext<{ cards: TravelCard[]; brands: TravelBrand[] }>({
-  cards: [],
-  brands: [],
-});
-
 // Clicking a row in the Rewards activity ledger jumps to that card's own
 // rewards log instead of leaving you to scroll the card list hunting for it.
 // The panel that owns the card watches this id, opens itself and scrolls into
@@ -159,7 +149,6 @@ export function CreditCardRewardsProvider({
   currency,
   nonCardAccounts,
   allBuckets,
-  travelBrands,
   redemptions,
 }: {
   children: React.ReactNode;
@@ -169,7 +158,6 @@ export function CreditCardRewardsProvider({
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
-  travelBrands: TravelBrand[];
   /** Award bookings per card id, from the logs below. */
   redemptions: Map<string, CardRedemption>;
 }) {
@@ -184,57 +172,40 @@ export function CreditCardRewardsProvider({
   const toggleSection = (key: string) =>
     setCollapsed((state) => ({ ...state, [key]: !state[key] }));
 
-  // The card list the shared Add stay form offers. A closed card is left out
-  // of a NEW booking's dropdown — its old stays still reference it.
-  const travelCards: TravelCard[] = accounts
-    .filter((c) => !c.dateClosed)
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      holder: c.holder ?? null,
-      currentPoints: c.cardDetails?.currentPoints ?? 0,
-      pointsValueMicros: c.cardDetails?.pointsValueMicros ?? null,
-      freeNightCreditCents: c.cardDetails?.freeNightCreditCents ?? null,
-      freeNightPointsLimit: c.cardDetails?.freeNightPointsLimit ?? null,
-      freeNightCategoryMax: c.cardDetails?.freeNightCategoryMax ?? null,
-    }));
-
   const rewardEntries = accounts
     .flatMap((card) => card.rewardActivities.map((a) => ({ ...a, cardName: card.name, cardId: card.id })))
     .sort((a, b) => b.occurredOn.localeCompare(a.occurredOn));
 
   return (
-    <TravelStayContext.Provider value={{ cards: travelCards, brands: travelBrands }}>
-      <RewardFocusContext.Provider
+    <RewardFocusContext.Provider
+      value={{
+        focusCardId,
+        requestFocus: (cardId) => {
+          // A collapsed section never renders the panel, so the click would
+          // do nothing at all — open whichever one holds this card first.
+          const card = accounts.find((a) => a.id === cardId);
+          const section = card ? CREDIT_SECTIONS.find((sec) => sec.match(card)) : null;
+          if (section) setCollapsed((c) => ({ ...c, [section.key]: false }));
+          setFocusCardId(cardId);
+        },
+        clearFocus: () => setFocusCardId(null),
+      }}
+    >
+      <RewardsDataContext.Provider
         value={{
-          focusCardId,
-          requestFocus: (cardId) => {
-            // A collapsed section never renders the panel, so the click would
-            // do nothing at all — open whichever one holds this card first.
-            const card = accounts.find((a) => a.id === cardId);
-            const section = card ? CREDIT_SECTIONS.find((sec) => sec.match(card)) : null;
-            if (section) setCollapsed((c) => ({ ...c, [section.key]: false }));
-            setFocusCardId(cardId);
-          },
-          clearFocus: () => setFocusCardId(null),
+          accounts,
+          currency,
+          nonCardAccounts,
+          allBuckets,
+          rewardEntries,
+          redemptions,
+          collapsed,
+          toggleSection,
         }}
       >
-        <RewardsDataContext.Provider
-          value={{
-            accounts,
-            currency,
-            nonCardAccounts,
-            allBuckets,
-            rewardEntries,
-            redemptions,
-            collapsed,
-            toggleSection,
-          }}
-        >
-          {children}
-        </RewardsDataContext.Provider>
-      </RewardFocusContext.Provider>
-    </TravelStayContext.Provider>
+        {children}
+      </RewardsDataContext.Provider>
+    </RewardFocusContext.Provider>
   );
 }
 
@@ -1019,7 +990,7 @@ function CreditCardSection({
                   narrowing the list, so a filter left on is never invisible —
                   that, not the space, is what a hidden filter row costs. */}
               {(() => {
-                const on = [openedFrom || openedTo ? "opened" : null].filter(Boolean) as string[];
+                const on = [bankFilter, holderFilter, openedFrom || openedTo ? "opened" : null].filter(Boolean) as string[];
                 return (
                   <span className="flex items-center gap-1">
                     <button
@@ -1058,6 +1029,8 @@ function CreditCardSection({
                       <button
                         type="button"
                         onClick={() => {
+                          setBankFilter(null);
+                          setHolderFilter(null);
                           setOpenedFrom("");
                           setOpenedTo("");
                         }}
@@ -1066,37 +1039,6 @@ function CreditCardSection({
                         Clear
                       </button>
                     ) : null}
-                  </span>
-                );
-              })()}
-              {/* Bank and owner pills, always in view — the two filters used
-                  most, so they don't hide behind the Filters panel. */}
-              {(() => {
-                const banks = [...new Set(allCreditCards.map(cardBank).filter(Boolean))].sort((x, y) => x.localeCompare(y));
-                const holders = [...new Set(allCreditCards.map((x) => (x.holder ?? "").trim()).filter(Boolean))].sort();
-                const group = (label: string, options: string[], value: string | null, set: (v: string | null) => void) =>
-                  options.length < 2 ? null : (
-                    <span role="group" aria-label={label} className="inline-flex rounded-xl bg-background p-1 shadow-sm ring-1 ring-line">
-                      {[null, ...options].map((o) => {
-                        const on = value === o;
-                        return (
-                          <button
-                            key={o ?? "all"}
-                            type="button"
-                            onClick={() => set(o)}
-                            aria-pressed={on}
-                            className={`rounded-lg px-2.5 py-1 font-semibold transition ${on ? "bg-brand text-white shadow-sm" : "text-foreground/75 hover:text-foreground"}`}
-                          >
-                            {o ?? "All"}
-                          </button>
-                        );
-                      })}
-                    </span>
-                  );
-                return (
-                  <span className="flex flex-wrap items-center gap-2 sm:ml-auto">
-                    {group("Filter by bank", banks, bankFilter, setBankFilter)}
-                    {group("Filter by owner", holders, holderFilter, setHolderFilter)}
                   </span>
                 );
               })()}
@@ -1149,6 +1091,35 @@ function CreditCardSection({
                   named on the button above, so closing never hides state. */}
               {filtersOpen ? (
               <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
+              {/* Bank and owner pills. Inside the panel since 2026-10-05 — the
+                  Filters button names whichever is on, so they stay visible. */}
+              {(() => {
+                const banks = [...new Set(allCreditCards.map(cardBank).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+                const holders = [...new Set(allCreditCards.map((x) => (x.holder ?? "").trim()).filter(Boolean))].sort();
+                // Labelled dropdowns, styled like the Date Opened row beside them.
+                const group = (label: string, options: string[], value: string | null, set: (v: string | null) => void) =>
+                  options.length < 2 ? null : (
+                    <label className="flex items-center gap-1.5">
+                      <span className="shrink-0 font-semibold text-foreground">{label}:</span>
+                      <select
+                        value={value ?? ""}
+                        onChange={(e) => set(e.target.value || null)}
+                        className="cursor-pointer rounded-md bg-background px-1.5 py-1 text-center text-xs font-semibold ring-1 ring-line [text-align-last:center] focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      >
+                        <option value="">All</option>
+                        {options.map((o) => (
+                          <option key={o} value={o}>{o}</option>
+                        ))}
+                      </select>
+                    </label>
+                  );
+                return (
+                  <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    {group("Bank", banks, bankFilter, setBankFilter)}
+                    {group("Owner", holders, holderFilter, setHolderFilter)}
+                  </span>
+                );
+              })()}
               {/* Opened-on range. Application spacing is the one card question
                   this board couldn't answer — "what did we open between these
                   dates" — and the dates are already on every card. */}
@@ -1749,7 +1720,7 @@ function RewardsActivityLedger({
     points_redemption: "Points used",
     points_earned: "Points earned",
     hotel_credit_redemption: "Hotel credit used",
-    free_night_booking: "Free night booked",
+    free_night_booking: "Stay booked",
     flight_booking: "Flight booked",
     car_booking: "Car booked",
     reward_refund: "Points refunded",
@@ -1792,7 +1763,8 @@ function RewardsActivityLedger({
             {entry.pointsDelta ? `${entry.pointsDelta > 0 ? "+" : ""}${entry.pointsDelta.toLocaleString()} pts` : entry.hotelCreditDeltaCents ? formatMoneyWhole(entry.hotelCreditDeltaCents, currency) : "Booked"}
           </span>
         );
-        const detail = `${labels[entry.type]}${entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}${entry.note ? ` · ${entry.note}` : ""}`;
+        const cash = entry.cash ? ` · ${formatMoney(entry.cash.cents, currency)} ${entry.cash.toAccountId ? "deposit" : "credit"}` : "";
+        const detail = `${entry.cash ? "Cashed out" : labels[entry.type]}${cash}${entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}${entry.note ? ` · ${entry.note}` : ""}`;
         return (
         <li key={entry.id} className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] sm:gap-2 dark:hover:bg-white/[0.04]">
           {/* Every row opens the edit popup. It used to jump to the card
@@ -1820,7 +1792,9 @@ function RewardsActivityLedger({
             <span className="hidden min-w-0 truncate text-foreground/75 sm:block">{detail}</span>
             <span className="hidden sm:block">{amount}</span>
           </button>
-          <RewardActivityRowActions entry={entry} compact />
+          {/* A booking's row is changed through the booking — deleting it here
+              would give the points back while the booking still says paid. */}
+          {EDITABLE_TYPES.has(entry.type) ? <RewardActivityRowActions entry={entry} compact /> : <span />}
         </li>
         );
       })}
@@ -1897,8 +1871,8 @@ function EditRewardActivityModal({
       <ModalShell title={`Edit · ${entry.cardName}`} onClose={onDone} mobileAlign="top">
         <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] text-sm">
           <p>
-            This entry was made by a hotel stay{entry.note ? ` (${entry.note})` : ""}. To change its points, open that stay
-            in the <span className="font-semibold">Hotel Log</span> and edit it there.
+            This entry was made by a booking{entry.note ? ` (${entry.note})` : ""}. To change its points, edit that booking
+            in its trip.
           </p>
           <button type="button" onClick={onDone} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800">
             OK
@@ -1949,7 +1923,7 @@ function EditRewardActivityModal({
                   }`}
                   style={direction === option ? softPill(DIRECTION_TONE[option]) : undefined}
                 >
-                  {option === "used" ? "Points used" : option === "earned" ? "Points earned" : "Points refunded"}
+                  {option === "used" ? "Cashed out" : option === "earned" ? "Points earned" : "Points refunded"}
                 </button>
               ))}
             </div>
@@ -1958,7 +1932,7 @@ function EditRewardActivityModal({
           <LabeledInput
             label={
               direction === "used"
-                ? `Points used · ${Math.max(0, withoutEntry).toLocaleString()} available`
+                ? `Points cashed out · ${Math.max(0, withoutEntry).toLocaleString()} available`
                 : direction === "earned"
                   ? "Points earned"
                   : "Points returned"
@@ -2137,14 +2111,12 @@ function CreditCardPanel({
   const [confirmMark, setConfirmMark] = useState(false);
   const [editing, setEditing] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [stayOpen, setStayOpen] = useState(false);
   const [loggingRewardsState, setLoggingRewards] = useState(false);
   // Arriving from a click on a Rewards activity row. Open-ness is DERIVED from
   // the focus rather than pushed into state by an effect — the effect only
   // scrolls, which is the one thing state can't express. Closing the panel or
   // the log clears the focus, so it never props itself back open.
   const { focusCardId, clearFocus } = React.useContext(RewardFocusContext);
-  const travel = React.useContext(TravelStayContext);
   const focused = focusCardId === card.id;
   const expanded = expandedState || focused;
   const loggingRewards = loggingRewardsState || focused;
@@ -2630,7 +2602,7 @@ function CreditCardPanel({
         <div className="border-t border-line bg-background">
           {/* Every one of these opens in a modal, the way Add stay does — the
               forms used to push the rest of the list down the page. */}
-          <div className="grid grid-cols-3 items-center gap-1.5 px-3 py-2.5 min-[380px]:grid-cols-5 sm:flex sm:flex-nowrap">
+          <div className="grid grid-cols-3 items-center gap-1.5 px-3 py-2.5 min-[380px]:grid-cols-4 sm:flex sm:flex-nowrap">
             <button
               type="button"
               onClick={() => setEditing(true)}
@@ -2651,20 +2623,6 @@ function CreditCardPanel({
                 <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards Activity Log</span>
               </button>
             ) : null}
-            {/* A stay is not a ledger line — it has a city, nights, pax and
-                a cash rate — so it opens the Travel Log's own Add stay
-                form, pre-selected to this card. It sits beside Rewards Activity Log
-                rather than inside it: from inside, it read as one more way
-                to log a redemption. */}
-            {!isArchived && !card.dateClosed ? (
-              <button
-                type="button"
-                onClick={() => setStayOpen(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-neutral-950"
-              >
-                <span className="sm:hidden">Book stay</span><span className="hidden sm:inline">Book a stay</span>
-              </button>
-            ) : null}
             {!isArchived && !card.dateClosed ? (
               <button
                 type="button"
@@ -2679,7 +2637,7 @@ function CreditCardPanel({
               </button>
             ) : null}
             {!isArchived && !card.dateClosed ? (
-              <form action={(fd) => startClose(() => closeCard(fd))} className="col-span-2 min-[380px]:col-span-1 sm:ml-auto sm:shrink-0">
+              <form action={(fd) => startClose(() => closeCard(fd))} className="col-span-3 min-[380px]:col-span-1 sm:ml-auto sm:shrink-0">
                 <input type="hidden" name="id" value={card.id} />
                 <button
                   type="submit"
@@ -2726,22 +2684,11 @@ function CreditCardPanel({
               onClose={() => setPaying(false)}
             />
           ) : null}
-          {stayOpen ? (
-            <StayModal
-              stay={null}
-              cards={travel.cards}
-              brands={travel.brands}
-              currency={currency}
-              defaultAccountId={card.id}
-              // StayModal calls router.refresh() on a successful save, so the
-              // card's points and Booked date are current behind it.
-              onClose={() => setStayOpen(false)}
-            />
-          ) : null}
           {loggingRewards ? (
             <RewardActivityForm
               card={card}
               currency={currency}
+              nonCardAccounts={nonCardAccounts}
               onDone={() => { setLoggingRewards(false); clearFocus(); }}
             />
           ) : null}
@@ -2819,26 +2766,36 @@ function pointsCalcProps(points: string, setPoints: (value: string) => void) {
 function RewardActivityForm({
   card,
   currency,
+  nonCardAccounts,
   onDone,
 }: {
   card: AccountData;
   currency: string;
+  nonCardAccounts: NonCardAccount[];
   onDone: () => void;
 }) {
+  // Where a cash-out's money went: back onto this card as a statement credit,
+  // or into a bank as income.
+  const [receivedAs, setReceivedAs] = useState<"credit" | "deposit">("credit");
+  const bankName = (id: string | null) => nonCardAccounts.find((a) => a.id === id)?.name ?? "bank";
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // Points move both ways: everyday spending earns them, redemptions spend
   // them. Earning used to have no entry at all — the balance was typed over
   // in the card's edit form, which left no record of where it came from.
-  const [direction, setDirection] = useState<"used" | "earned" | "returned">("used");
+  // Points spent on travel are taken off the card by the booking itself (Add
+  // Trip), so this form no longer logs them — a second hand entry spent the
+  // same points twice. "Cashed out" is only for points spent outside a trip:
+  // statement credit, gift cards, transfers.
+  const [direction, setDirection] = useState<"used" | "earned" | "returned">("earned");
   const [points, setPoints] = useState("");
   const d = card.cardDetails;
   const labels: Record<RewardActivity["type"], string> = {
     points_redemption: "Points used",
     points_earned: "Points earned",
     hotel_credit_redemption: "Hotel credit used",
-    free_night_booking: "Free night booked",
+    free_night_booking: "Stay booked",
     flight_booking: "Flight booked",
     car_booking: "Car booked",
     reward_refund: "Points refunded",
@@ -2848,7 +2805,7 @@ function RewardActivityForm({
     <ModalShell
       title={
         direction === "used"
-          ? `Log points used · ${card.name}`
+          ? `Log cashed-out points · ${card.name}`
           : direction === "earned"
             ? `Log points earned · ${card.name}`
             : `Log points returned · ${card.name}`
@@ -2895,8 +2852,9 @@ function RewardActivityForm({
         />
         <div className="sm:col-span-2">
           <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="inline-flex rounded-md ring-1 ring-line">
-            {(["used", "earned", "returned"] as const).map((option) => (
+            {(["earned", "returned", "used"] as const).map((option) => (
               <button
                 key={option}
                 type="button"
@@ -2907,9 +2865,13 @@ function RewardActivityForm({
                 }`}
                 style={direction === option ? softPill(DIRECTION_TONE[option]) : undefined}
               >
-                {option === "used" ? "Points used" : option === "earned" ? "Points earned" : "Points refunded"}
+                {option === "used" ? "Cashed out" : option === "earned" ? "Points earned" : "Points refunded"}
               </button>
             ))}
+          </div>
+          {direction === "used" ? (
+            <p className="text-xs text-muted">Not for trips — bookings take their own points.</p>
+          ) : null}
           </div>
         </div>
         {/* No default date: an entry is logged after the fact as often as on
@@ -2919,7 +2881,7 @@ function RewardActivityForm({
         <LabeledInput
           label={
             direction === "used"
-              ? `Points used · ${d?.currentPoints.toLocaleString() ?? "0"} available`
+              ? `Points cashed out · ${d?.currentPoints.toLocaleString() ?? "0"} available`
               : direction === "earned"
                 ? `Points earned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
                 : `Points returned · ${d?.currentPoints.toLocaleString() ?? "0"} on the card now`
@@ -2929,6 +2891,44 @@ function RewardActivityForm({
           hint={pointsBalanceHint(d?.currentPoints ?? 0, direction, points)}
           {...pointsCalcProps(points, setPoints)}
         />
+        {direction === "used" ? (
+          <>
+            <LabeledInput label="Cash received" name="cashReceived" prefix="$" inputMode="decimal" placeholder="0.00" autoComplete="off" />
+            <div className="block">
+              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Received as</span>
+              <input type="hidden" name="receivedAs" value={receivedAs} />
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-md ring-1 ring-line">
+                  {(["credit", "deposit"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={receivedAs === option}
+                      onClick={() => setReceivedAs(option)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                        receivedAs === option ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground/75 hover:bg-black/5 dark:hover:bg-white/10"
+                      }`}
+                    >
+                      {option === "credit" ? "Statement credit" : "Deposit"}
+                    </button>
+                  ))}
+                </div>
+                {receivedAs === "deposit" ? (
+                  <select
+                    name="depositAccountId"
+                    aria-label="Deposited into"
+                    defaultValue={nonCardAccounts[0]?.id ?? ""}
+                    className="w-full min-w-0 cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 sm:w-auto sm:flex-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  >
+                    {nonCardAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+            </div>
+          </>
+        ) : null}
         <div className="sm:col-span-2">
           <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
           <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
@@ -2948,9 +2948,14 @@ function RewardActivityForm({
               // the page, so fixing a wrong entry meant scrolling away from
               // the card that made it and finding the row again.
               <li key={activity.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                <span className="min-w-0 flex-1 truncate">{labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
+                <span className="min-w-0 flex-1 truncate">{activity.cash ? "Cashed out" : labels[activity.type]} · {activity.bookedOn ? `Booked ${activity.bookedOn}` : activity.occurredOn}{activity.note ? ` · ${activity.note}` : ""}</span>
+                {activity.cash ? (
+                  <span className="shrink-0 font-semibold tabular-nums" style={{ color: "var(--positive)" }}>
+                    {formatMoney(activity.cash.cents, currency)} {activity.cash.toAccountId ? `to ${bankName(activity.cash.toAccountId)}` : "credit"}
+                  </span>
+                ) : null}
                 <span className={`shrink-0 font-semibold ${activity.pointsDelta > 0 || activity.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>{activity.pointsDelta ? `${activity.pointsDelta > 0 ? "+" : ""}${activity.pointsDelta.toLocaleString()} pts` : activity.hotelCreditDeltaCents ? formatMoneyWhole(activity.hotelCreditDeltaCents, currency) : "Booked"}</span>
-                <RewardActivityRowActions entry={activity} compact />
+                {EDITABLE_TYPES.has(activity.type) ? <RewardActivityRowActions entry={activity} compact /> : null}
               </li>
             ))}
           </ul>

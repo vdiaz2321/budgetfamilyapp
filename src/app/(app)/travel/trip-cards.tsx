@@ -150,7 +150,7 @@ export function TripCards({
         ) : null}
       </button>
       {!open ? null : ahead.length === 0 ? (
-        <p className="px-4 pb-4 text-sm text-muted sm:px-6">Nothing booked ahead. Add Travel Log starts a new trip.</p>
+        <p className="px-4 pb-4 text-sm text-muted sm:px-6">Nothing booked ahead. Add Trip starts a new one.</p>
       ) : (
         <ul className="grid grid-cols-1 gap-3 px-4 pb-4 sm:grid-cols-2 lg:grid-cols-3 sm:px-6">
           {ahead.map((t) => {

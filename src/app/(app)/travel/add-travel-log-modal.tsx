@@ -186,7 +186,7 @@ export function AddTravelLogModal({
       // Add button it is always a new trip, named right in the header — no
       // list of saved trips here. Changing a saved trip is the page's "Edit
       // trip" picker, which opens that trip's own popup.
-      title={defaultTripId ? `Add to ${trips.find((t) => t.id === defaultTripId)?.name ?? "trip"}` : "Add Travel Log:"}
+      title={defaultTripId ? `Add to ${trips.find((t) => t.id === defaultTripId)?.name ?? "trip"}` : "Add Trip"}
       headerActions={
         <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
           {defaultTripId ? null : (
@@ -411,7 +411,7 @@ export function AddTravelLogModal({
             disabled={pending}
             className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
           >
-            {pending ? "Saving…" : "Add Travel Log"}
+            {pending ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

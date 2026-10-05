@@ -8,11 +8,12 @@ import { captureSnapshots } from "@/lib/snapshots";
 import { saveDebt } from "@/lib/save-debt";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { syncAccountFromBuckets, syncAllBucketedAccounts, adjustBucketBalance } from "@/lib/buckets";
-import { adjustAccountLedger } from "@/lib/account-ledger";
+import { adjustAccountLedger, ledgerDelta } from "@/lib/account-ledger";
+import { resolvePayeeId } from "@/lib/payees";
 import { adjustDebtBalance } from "@/lib/debts";
 import { unwrap } from "@/lib/supabase-result";
 import { isRetirementKind } from "@/lib/retirement-kind";
-import { updateTransactionAmount } from "@/app/(app)/budget/actions";
+import { deleteTransaction, updateTransactionAmount } from "@/app/(app)/budget/actions";
 
 // Every account type presented in the Accounts add flow. Rewards cards remain
 // ordinary cards unless payoff tracking is explicitly enabled in Edit details.
@@ -869,7 +870,30 @@ export async function logCreditCardRewardActivity(formData: FormData) {
     return { error: "That is more points than this card currently has." };
   }
 
-  const { error } = await supabase
+  // Cashed out (points_redemption) brings its cash with it: a statement
+  // credit on this card, or a deposit into a bank account. Checked before
+  // anything is written so a bad pick never leaves points spent with no cash.
+  const cashing = !adding;
+  const cashCents = cashing ? displayToCents(String(formData.get("cashReceived") ?? "0")) : 0;
+  const receivedAs = String(formData.get("receivedAs") ?? "credit");
+  const depositAccountId = String(formData.get("depositAccountId") ?? "");
+  if (cashing && cashCents <= 0) return { error: "Enter the cash you received." };
+  if (cashing && receivedAs === "deposit") {
+    const bank = unwrap(
+      await supabase
+        .from("accounts")
+        .select("kind, is_kids_account")
+        .eq("id", depositAccountId)
+        .eq("household_id", householdId)
+        .maybeSingle(),
+      "accounts",
+    );
+    if (!bank || bank.kind === "credit_card" || bank.kind === "investment" || bank.is_kids_account) {
+      return { error: "Pick the bank account the cash went into." };
+    }
+  }
+
+  const { data: inserted, error } = await supabase
     .from("credit_card_reward_activities")
     .insert({
       household_id: householdId,
@@ -884,15 +908,135 @@ export async function logCreditCardRewardActivity(formData: FormData) {
       // night as used. Only a stay sets it, through syncRewardLedger.
       booked_on: null,
       note,
-    });
-  if (error) {
+    })
+    .select("id")
+    .single();
+  if (error || !inserted) {
     console.error("[logCreditCardRewardActivity]", error);
-    return { error: "Couldn't log that reward activity — " + error.message };
+    return { error: "Couldn't log that reward activity — " + (error?.message ?? "no row returned") };
+  }
+
+  if (cashing) {
+    const cashError = await recordCashOut(supabase, householdId, {
+      activityId: inserted.id,
+      cardId: accountId,
+      occurredOn,
+      cashCents,
+      depositAccountId: receivedAs === "deposit" ? depositAccountId : null,
+      memo: note ? `Points cashed out · ${note}` : "Points cashed out",
+    });
+    if (cashError) {
+      // Put the points back rather than leave them spent with no cash behind
+      // them — the AFTER DELETE trigger returns what the row took.
+      await supabase.from("credit_card_reward_activities").delete().eq("id", inserted.id).eq("household_id", householdId);
+      return { error: cashError };
+    }
+    await captureSnapshots(supabase, householdId, { force: true });
+    revalidatePath("/budget");
+    revalidatePath("/transactions");
+    revalidatePath("/networth");
+    revalidatePath("/insights");
+    revalidatePath("/annual");
   }
 
   revalidate();
   revalidatePath("/travel");
   return { error: null };
+}
+
+// The cash side of a Cashed out entry, as one transaction tied to it.
+// Statement credit: a card payment with no source account — the card owes
+// less, no bank moves, and it is neither spending nor income. A card carried
+// as a debt has that debt lowered too, as payCard does (deleting the payment
+// puts it back through reverseMovementTransaction).
+// Deposit: Income / Card Rewards into the bank, so Budget counts it as income
+// and the bank's running balance goes up.
+async function recordCashOut(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  p: { activityId: string; cardId: string; occurredOn: string; cashCents: number; depositAccountId: string | null; memo: string },
+): Promise<string | null> {
+  if (!p.depositAccountId) {
+    const { error } = await supabase.from("transactions").insert({
+      household_id: householdId,
+      account_id: null,
+      paid_to_account_id: p.cardId,
+      movement_type: "card_payment",
+      amount_cents: p.cashCents,
+      occurred_on: p.occurredOn,
+      memo: p.memo,
+      is_withdrawal: false,
+      reward_activity_id: p.activityId,
+    });
+    if (error) return `Couldn't record the statement credit — ${error.message}`;
+    const linkedDebt = unwrap(
+      await supabase
+        .from("debts")
+        .select("subcategory_id")
+        .eq("household_id", householdId)
+        .eq("account_id", p.cardId)
+        .maybeSingle(),
+      "debts",
+    );
+    if (linkedDebt?.subcategory_id) {
+      await adjustDebtBalance(supabase, householdId, linkedDebt.subcategory_id, -p.cashCents);
+      revalidatePath("/snowball");
+    }
+    return null;
+  }
+
+  const income = unwrap(
+    await supabase
+      .from("categories")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("kind", "income")
+      .order("sort_order")
+      .limit(1)
+      .maybeSingle(),
+    "categories",
+  );
+  if (!income) return "There is no Income group on Budget to file this under.";
+  let sub = unwrap(
+    await supabase
+      .from("subcategories")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("category_id", income.id)
+      .ilike("name", "Card Rewards")
+      .maybeSingle(),
+    "subcategories",
+  );
+  if (!sub) {
+    const { data, error } = await supabase
+      .from("subcategories")
+      .insert({ household_id: householdId, category_id: income.id, name: "Card Rewards", sort_order: 99 })
+      .select("id")
+      .single();
+    if (error || !data) return `Couldn't add the Card Rewards income line — ${error?.message ?? "no row returned"}`;
+    sub = data;
+  }
+  const card = unwrap(
+    await supabase.from("accounts").select("name").eq("id", p.cardId).eq("household_id", householdId).maybeSingle(),
+    "accounts",
+  );
+  const payeeId = card?.name ? await resolvePayeeId(supabase, householdId, card.name) : null;
+  const { error } = await supabase.from("transactions").insert({
+    household_id: householdId,
+    account_id: p.depositAccountId,
+    category_id: income.id,
+    subcategory_id: sub.id,
+    payee_id: payeeId,
+    amount_cents: p.cashCents,
+    occurred_on: p.occurredOn,
+    memo: p.memo,
+    is_withdrawal: false,
+    cleared: true,
+    reward_activity_id: p.activityId,
+  });
+  if (error) return `Couldn't record the deposit — ${error.message}`;
+  await adjustAccountLedger(supabase, householdId, p.depositAccountId, ledgerDelta("income", p.cashCents));
+  return null;
 }
 
 // Correct a hand-logged ledger entry in place: date, direction, points, note.
@@ -957,6 +1101,21 @@ export async function updateCreditCardRewardActivity(formData: FormData) {
     };
   }
 
+  // A cash-out with its cash recorded stays a cash-out: flipping it to earned
+  // would leave the statement credit or deposit behind with no points spent.
+  const cashTx = unwrap(
+    await supabase
+      .from("transactions")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("reward_activity_id", activityId)
+      .maybeSingle(),
+    "transactions",
+  );
+  if (cashTx && activityType !== "points_redemption") {
+    return { error: "This cash-out has cash recorded with it. Delete it and log it again instead." };
+  }
+
   if (!adding) {
     const details = unwrap(
       await supabase
@@ -989,6 +1148,12 @@ export async function updateCreditCardRewardActivity(formData: FormData) {
     console.error("[updateCreditCardRewardActivity]", error);
     return { error: `Couldn't save that activity — ${error.message}` };
   }
+  // The cash moves with the entry's date.
+  if (cashTx) {
+    await supabase.from("transactions").update({ occurred_on: occurredOn }).eq("id", cashTx.id).eq("household_id", householdId);
+    revalidatePath("/budget");
+    revalidatePath("/transactions");
+  }
   revalidate();
   revalidatePath("/travel");
   return { error: null };
@@ -1020,6 +1185,25 @@ export async function deleteCreditCardRewardActivity(formData: FormData) {
     return {
       error: `That entry belongs to the stay "${stay.property_name}" — edit or delete it in the Travel Log and the points come back with it.`,
     };
+  }
+
+  // A cashed-out entry takes its cash with it: the statement credit or the
+  // deposit is deleted the normal way, so the card's owed / the bank balance
+  // and any debt go back exactly as a hand delete would put them.
+  const cashTx = unwrap(
+    await supabase
+      .from("transactions")
+      .select("id")
+      .eq("household_id", householdId)
+      .eq("reward_activity_id", activityId)
+      .maybeSingle(),
+    "transactions",
+  );
+  if (cashTx) {
+    const fd = new FormData();
+    fd.set("id", cashTx.id);
+    const result = await deleteTransaction(fd);
+    if (result?.error) return { error: `Couldn't remove the cash with it — ${result.error}` };
   }
 
   const { error } = await supabase

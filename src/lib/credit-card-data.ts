@@ -13,7 +13,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountData, BucketData, CardDetails, NonCardAccount, RewardActivity } from "@/app/(app)/accounts/types";
 import { throwIfAny } from "@/lib/supabase-result";
 import { loadDebtMonthPlans } from "@/lib/debt-month-plan";
-import type { TravelBrand } from "@/app/(app)/travel/types";
 
 export type CreditCardBoardData = {
   /** Every credit card, closed ones included. */
@@ -22,7 +21,6 @@ export type CreditCardBoardData = {
   nonCardAccounts: NonCardAccount[];
   /** Buckets on those accounts, for the same modal's "From bucket". */
   allBuckets: BucketData[];
-  travelBrands: TravelBrand[];
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -33,7 +31,7 @@ export async function loadCreditCardBoardData(
   const now = new Date();
   const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, brandRows, balanceRows, monthRows, debtMonth, bonusRows] =
+  const [accountRows, bucketRows, cardDetailRows, rewardRows, debtRows, balanceRows, monthRows, debtMonth, bonusRows] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -53,7 +51,7 @@ export async function loadCreditCardBoardData(
         .eq("household_id", householdId),
       supabase
         .from("credit_card_reward_activities")
-        .select("id, account_id, activity_type, occurred_on, points_delta, hotel_credit_delta_cents, booked_on, note")
+        .select("id, account_id, activity_type, occurred_on, points_delta, hotel_credit_delta_cents, booked_on, note, transactions!transactions_reward_activity_id_fkey(amount_cents, account_id)")
         .eq("household_id", householdId)
         .order("occurred_on", { ascending: false })
         .order("created_at", { ascending: false }),
@@ -61,11 +59,6 @@ export async function loadCreditCardBoardData(
         .from("debts")
         .select("subcategory_id, account_id, current_balance_cents, min_payment_cents, target_payment_cents, apr, due_day, promo_apr_ends_on")
         .eq("household_id", householdId),
-      supabase
-        .from("travel_brands")
-        .select("id, name")
-        .eq("household_id", householdId)
-        .order("name"),
       // Summed in Postgres, one row per card — the same cost at 900
       // transactions or 900,000, and never silently truncated by the
       // 1000-row response cap.
@@ -93,7 +86,6 @@ export async function loadCreditCardBoardData(
     buckets: bucketRows.error,
     credit_card_details: cardDetailRows.error,
     debts: debtRows.error,
-    travel_brands: brandRows.error,
     v_card_balances: balanceRows.error,
     v_card_month_spend: monthRows.error,
   });
@@ -122,6 +114,9 @@ export async function loadCreditCardBoardData(
       hotelCreditDeltaCents: a.hotel_credit_delta_cents ?? 0,
       bookedOn: a.booked_on ?? null,
       note: a.note ?? null,
+      cash: a.transactions?.[0]
+        ? { cents: a.transactions[0].amount_cents ?? 0, toAccountId: a.transactions[0].account_id ?? null }
+        : null,
     });
     rewardsByAccount.set(a.account_id, items);
   }
@@ -234,6 +229,5 @@ export async function loadCreditCardBoardData(
     cards,
     nonCardAccounts,
     allBuckets,
-    travelBrands: (brandRows.data ?? []) as TravelBrand[],
   };
 }
