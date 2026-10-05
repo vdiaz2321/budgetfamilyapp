@@ -1389,11 +1389,38 @@ export function TravelBoard({
           >
             {null}
           </Panel>
+
+          {/* ---- Stays History: hotel stays tallied by brand or card. Same
+               column slots as the rows above so the figures line up. */}
+          <Panel
+            title="Stays History"
+            titleClassName={HEAD_TITLE_COL}
+            meta={
+              <HeaderTotals
+                countLabel={tallyBy === "brands" ? "Total brands" : "Total cards"}
+                count={tallyBy === "brands" ? brandTally.length : cardTally.length}
+                spent={tallyTotals.spent}
+                saved={tallyTotals.saved}
+                currency={currency}
+                figureClassNames={HEAD_FIGURE_COLS}
+              />
+            }
+            control={
+              <span className="flex flex-wrap items-center gap-2">
+                {tallySwitch(true)}
+                {tallyPeriod(tallyYear, setTallyYear, "Stays history year")}
+              </span>
+            }
+            open={false}
+            onToggle={() => setExpandedTally(true)}
+            onExpand={() => setExpandedTally(true)}
+          >
+            {null}
+          </Panel>
           </div>
 
-          {/* ---- The two charts beside the stays tally, three across from xl
-               up. The charts are drawn narrow by design. */}
-          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          {/* ---- The two charts, side by side from lg up. */}
+          <section className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
               <div className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
                 <h2 className="mb-3 text-center text-sm font-bold sm:text-base">Hotel cost vs pocket cost</h2>
                 <CostBars years={yearPoints} currency={currency} selected={yearPicked || yearRestored ? year : undefined} onPick={openLogForYear} />
@@ -1405,23 +1432,6 @@ export function TravelBoard({
                 <div className="flex flex-1 flex-col justify-end">
                   <SavedLine years={yearPoints} currency={currency} selected={yearPicked || yearRestored ? year : undefined} onPick={openLogForYear} />
                 </div>
-              </div>
-              <div className="lg:col-span-2 xl:col-span-1">
-                <Panel
-                  title="Stays History"
-                  meta={<Figure label="Total cash saved" value={formatMoneyWhole(tallyTotals.saved, currency)} tone="text-positive" />}
-                  control={
-                    <span className="flex flex-wrap items-center gap-2">
-                      {tallySwitch(true)}
-                      {tallyPeriod(tallyYear, setTallyYear, "Stays history year")}
-                    </span>
-                  }
-                  open={false}
-                  onToggle={() => setExpandedTally(true)}
-                  onExpand={() => setExpandedTally(true)}
-                >
-                  {null}
-                </Panel>
               </div>
           </section>
 

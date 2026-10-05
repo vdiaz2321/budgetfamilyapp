@@ -22,14 +22,6 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const TEAL_TEXT = "text-[#165451] dark:text-[#5fb3ad]";
 const AQUA_FILL = "bg-[#adefed] dark:bg-[#4fb8b4]";
 
-// Each card's initial tile cycles through the teal ladder.
-const TILE_CLASSES = [
-  "bg-linear-to-br from-[#165451] to-[#2a827e]",
-  "bg-linear-to-br from-[#2a827e] to-[#7fd6d3]",
-  "bg-linear-to-br from-[#0e4140] to-[#165451]",
-  "bg-linear-to-br from-[#1f2926] to-[#5a6660]",
-];
-
 const CHIP_ICONS: Record<"flight" | "hotel" | "car", React.ReactNode> = {
   flight: <path d="M2 12l19-7-5 7 5 7-19-7z" />,
   hotel: <path d="M3 18v-8h18v8M3 14h18M7 10V7h10v3" />,
@@ -50,12 +42,12 @@ function DaysPill({ days, className }: { days: number; className: string }) {
   );
 }
 
-/** A booking count; dashed and muted when that kind isn't booked yet. */
+/** A booking count; dashed and red when that kind isn't booked yet. */
 function Chip({ icon, missing, children }: { icon: keyof typeof CHIP_ICONS; missing?: boolean; children: React.ReactNode }) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-        missing ? "border border-dashed border-line text-muted" : "bg-black/5 text-foreground dark:bg-white/10"
+        missing ? "border border-dashed border-line text-negative" :"bg-black/5 text-foreground dark:bg-white/10"
       }`}
     >
       <svg viewBox="0 0 24 24" className={`h-3 w-3 ${missing ? "" : TEAL_TEXT}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -160,8 +152,8 @@ export function TripCards({
       {!open ? null : ahead.length === 0 ? (
         <p className="px-4 pb-4 text-sm text-muted sm:px-6">Nothing booked ahead. Add Travel Log starts a new trip.</p>
       ) : (
-        <ul className="grid grid-cols-1 gap-3 px-4 pb-4 sm:grid-cols-2 sm:px-6">
-          {ahead.map((t, i) => {
+        <ul className="grid grid-cols-1 gap-3 px-4 pb-4 sm:grid-cols-2 lg:grid-cols-3 sm:px-6">
+          {ahead.map((t) => {
             const start = t.start as string;
             const days = daysBetween(today, start);
             const name = t.trip.name.split(" · ")[0];
@@ -173,22 +165,16 @@ export function TripCards({
             const planned = t.planOnly.total;
             const whole = t.spent + planned;
             const paidPct = whole > 0 ? Math.round((t.spent / whole) * 100) : 0;
+            const fullyPaid = t.spent > 0 && planned <= 0;
             const booked = t.counts.flight + t.counts.stay + t.counts.car > 0;
-            const tile = TILE_CLASSES[i % TILE_CLASSES.length];
             return (
               <li key={t.trip.id}>
                 <button
                   type="button"
                   onClick={() => onOpenTrip(t.trip.id)}
-                  className="flex h-full w-full flex-col gap-3 rounded-xl bg-background p-4 text-left ring-1 ring-line transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 dark:bg-neutral-950 sm:p-5"
+                  className="flex h-full w-full flex-col gap-3 rounded-xl bg-background p-4 text-left ring-1 ring-line transition duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 sm:p-5"
                 >
                   <span className="flex items-center gap-3">
-                    <span
-                      aria-hidden
-                      className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg text-lg font-semibold text-white ${tile}`}
-                    >
-                      {name.charAt(0).toUpperCase()}
-                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-2">
                         <span className="truncate text-base font-semibold">{name}</span>
@@ -204,7 +190,7 @@ export function TripCards({
                   </span>
 
                   {/* On a phone the days pill moves down here, so the dates
-                      get the full width beside the tile. */}
+                      get the full width. */}
                   {booked ? (
                     <span className="flex flex-wrap items-center gap-1.5">
                       {t.counts.flight ? <Chip icon="flight">{plural(t.counts.flight, "flight")}</Chip> : null}
@@ -228,14 +214,21 @@ export function TripCards({
                       className="block h-3 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10"
                       style={t.spent === 0 ? { backgroundImage: "repeating-linear-gradient(-45deg, transparent 0 5px, rgb(0 0 0 / 0.05) 5px 10px)" } : undefined}
                     >
-                      <span className={`block h-full rounded-full transition-[width] duration-700 ${AQUA_FILL}`} style={{ width: `${paidPct}%` }} />
+                      {/* Green once everything is paid. */}
+                      <span
+                        className={`block h-full rounded-full transition-[width] duration-700 ${fullyPaid ? "" : AQUA_FILL}`}
+                        style={{ width: `${paidPct}%`, ...(fullyPaid ? { backgroundColor: "var(--positive)" } : {}) }}
+                      />
                     </span>
                     <span className="mt-2 flex items-baseline justify-between gap-2">
                       <span className="flex items-baseline gap-1.5">
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Spent</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(t.spent, currency)}</span>
                       </span>
-                      <span className={`hidden whitespace-nowrap text-[11px] font-medium tabular-nums min-[400px]:inline ${TEAL_TEXT}`}>{t.spent > 0 && whole > 0 ? `${paidPct}% paid` : ""}</span>
+                      <span
+                        className={`hidden whitespace-nowrap text-sm font-semibold tabular-nums min-[400px]:inline ${fullyPaid ? "" : TEAL_TEXT}`}
+                        style={fullyPaid ? { color: "var(--positive)" } : undefined}
+                      >{t.spent > 0 && whole > 0 ? `${paidPct}% paid` : ""}</span>
                       <span className="flex items-baseline gap-1.5">
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Planned</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(planned, currency)}</span>

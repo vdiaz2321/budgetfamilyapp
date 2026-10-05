@@ -175,11 +175,11 @@ export function CreditCardRewardsProvider({
 }) {
   const [focusCardId, setFocusCardId] = useState<string | null>(null);
   // Each card section remembers its own open/closed state for the session.
-  // Every section starts shut: the rewards sit at the foot of the page, under
-  // the trips and bookings, and open when asked for.
+  // The main rewards section starts open (tiles, filters and the Travel /
+  // Hotel bars, whose card lists stay shut); closed and archived start shut.
   const [collapsed, setCollapsed] = useSessionCollapse(
-    "travel-credit-sections-collapsed-v2",
-    () => ({ credit: true, credit_closed: true, credit_archived: true }),
+    "travel-credit-sections-collapsed-v3",
+    () => ({ credit: false, credit_closed: true, credit_archived: true }),
   );
   const toggleSection = (key: string) =>
     setCollapsed((state) => ({ ...state, [key]: !state[key] }));
@@ -548,11 +548,12 @@ function CreditCardSection({
     }
     return { points, value, redeemable, unvalued };
   };
-  // Figure chips for a group's dark banner. Colours are lifted versions of
-  // the data palette so they read on the dark fill.
-  const bannerChip = (label: string, text: string, valueClass: string, extra = "") => (
-    <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${extra || "bg-white/[0.06] ring-white/10"}`}>
-      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}:</span>
+  // Figure chips for a group's banner. Light chips on the light fill; in dark
+  // mode the values use lifted versions of the data palette. Each slot has a
+  // fixed min width so the Travel and Hotel rows line up in columns.
+  const bannerChip = (label: string, text: string, valueClass: string, extra = "", slot = "") => (
+    <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${slot} ${extra || "bg-background ring-line dark:bg-white/[0.06] dark:ring-white/10"}`}>
+      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted dark:text-slate-400">{label}:</span>
       <span className={`whitespace-nowrap text-sm font-semibold tabular-nums ${valueClass}`}>{text}</span>
     </span>
   );
@@ -560,14 +561,14 @@ function CreditCardSection({
     const { points, value, redeemable, unvalued } = groupRewards(cards);
     return (
       <>
-        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-rose-300" : "text-slate-300")}
-        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-emerald-300") : null}
-        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-emerald-300") : null}
+        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative dark:text-rose-300" : "text-muted dark:text-slate-300", "", "sm:min-w-[9.5rem]")}
+        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-positive dark:text-emerald-300", "", "sm:min-w-[11.25rem]") : null}
+        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-positive dark:text-emerald-300", "", "sm:min-w-[11.25rem]") : null}
         {redeemable > 0
-          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-200", "bg-sky-400/15 ring-sky-300/30")
+          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-700 dark:text-sky-200", "bg-sky-50 ring-sky-700/20 dark:bg-sky-400/15 dark:ring-sky-300/30", "sm:min-w-[11.25rem]")
           : null}
         {/* Only as complete as the cents-per-point typed on the cards. */}
-        {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-rose-300") : null}
+        {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-negative dark:text-rose-300") : null}
       </>
     );
   };
@@ -596,8 +597,8 @@ function CreditCardSection({
         // banner; switched on it fills solid.
         className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition lg:ml-auto ${
           active
-            ? "bg-teal-400 text-slate-900 ring-teal-300"
-            : "bg-teal-400/15 text-teal-200 ring-teal-300/30 hover:bg-teal-400/25"
+            ? "bg-teal-600 text-white ring-teal-600 dark:bg-teal-400 dark:text-slate-900 dark:ring-teal-300"
+            : "bg-teal-50 text-teal-800 ring-teal-600/30 hover:bg-teal-100 dark:bg-teal-400/15 dark:text-teal-200 dark:ring-teal-300/30 dark:hover:bg-teal-400/25"
         }`}
       >
         {/* A group usually holds one kind of benefit; "0 free nights" beside
@@ -609,17 +610,17 @@ function CreditCardSection({
       </button>
     );
   };
-  // A group's header: a dark banner with the name, a one-line description and
-  // the group's figures as chips. Clicking anywhere on it folds the group.
+  // A group's header: a banner with the name and the group's figures as
+  // chips. Clicking anywhere on it folds the group.
   const groupBanner = (cat: "travel" | "hotel", isOpen: boolean, owed: number, cards: AccountData[]) => (
     <div className="px-4 pt-4 sm:px-6">
       <div
         onClick={() => toggleGroup(cat)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 rounded-2xl bg-slate-900 px-4 py-3.5 text-white shadow-md ring-1 ring-white/10 sm:px-5 dark:bg-neutral-800"
+        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 rounded-2xl bg-slate-100 px-4 py-3.5 text-foreground shadow-sm ring-1 ring-line sm:px-5 dark:bg-neutral-800 dark:text-white dark:ring-white/10"
       >
-        <button type="button" aria-expanded={isOpen} className="flex min-w-0 items-center gap-3 text-left lg:mr-3">
-          <span className="text-slate-400"><GroupChevron open={isOpen} /></span>
-          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ${cat === "travel" ? "bg-sky-400/15 text-sky-300 ring-sky-300/30" : "bg-teal-400/15 text-teal-300 ring-teal-300/30"}`}>
+        <button type="button" aria-expanded={isOpen} className="flex min-w-0 shrink-0 items-center gap-3 text-left sm:w-[12rem]">
+          <span className="text-muted dark:text-slate-400"><GroupChevron open={isOpen} /></span>
+          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ${cat === "travel" ? "bg-sky-100 text-sky-700 ring-sky-700/20 dark:bg-sky-400/15 dark:text-sky-300 dark:ring-sky-300/30" : "bg-teal-100 text-teal-700 ring-teal-700/20 dark:bg-teal-400/15 dark:text-teal-300 dark:ring-teal-300/30"}`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               {cat === "travel" ? (
                 <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z" />
@@ -633,7 +634,6 @@ function CreditCardSection({
           </span>
           <span className="min-w-0">
             <span className="block whitespace-nowrap text-sm font-bold sm:text-base">{cat === "travel" ? "Travel Rewards" : "Hotel Rewards"}</span>
-            <span className="block text-[11px] text-slate-400">{cat === "travel" ? "Airline & bank points, travel credits" : "Hotel points & free-night credits"}</span>
           </span>
         </button>
         {/* Two per row on a phone, one line from sm up. */}
@@ -824,7 +824,6 @@ function CreditCardSection({
                     {allStats.openCards.length} active cards
                   </span>
                 </span>
-                <span className="mt-0.5 block text-xs text-muted">Point balances, redemption values, fees and travel credits</span>
               </span>
             </button>
             {/* The one thing on this board that stops existing if it isn't
@@ -1432,19 +1431,19 @@ function RewardTile({
   };
   const inner = (
     <>
-      <span className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted sm:text-[11px]" style={tone === "owed" ? { color: t.color } : undefined}>
-          {label}
-        </span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: t.color }} aria-hidden>
+      <span className="flex items-center justify-center gap-1.5">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: t.color }} aria-hidden>
           {REWARD_TILE_ICONS[icon]}
         </svg>
+        <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-muted sm:text-[11px]" style={tone === "owed" ? { color: t.color } : undefined}>
+          {label}
+        </span>
       </span>
-      <span className="mt-1 text-lg font-bold tabular-nums tracking-tight sm:text-2xl" style={{ color: t.color }}>
+      <span className="mt-1 text-center text-lg font-bold tabular-nums tracking-tight sm:text-2xl" style={{ color: t.color }}>
         {value}
       </span>
       {sub ? (
-        <span className="mt-1 text-[11px] font-medium tabular-nums text-muted" style={subColor ? { color: subColor } : undefined}>
+        <span className="mt-1 text-center text-[11px] font-medium tabular-nums text-muted" style={subColor ? { color: subColor } : undefined}>
           {sub}
         </span>
       ) : null}
