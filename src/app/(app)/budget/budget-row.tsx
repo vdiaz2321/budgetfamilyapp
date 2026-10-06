@@ -151,7 +151,10 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       : row.spentCents > 0
         ? 100
         : 0;
-  const pct = Math.min(100, Math.round(rawPct));
+  // A refund bigger than the month's purchases leaves Spent below zero: show
+  // it as Refunded, in green, at 0% — not a red negative and a minus %.
+  const moneyBack = kind !== "income" && row.spentCents < 0;
+  const pct = Math.max(0, Math.min(100, Math.round(rawPct)));
 
   // Overbudget also covers "no plan set but money went out" (spent > 0, planned 0)
   // so the current-month progress bar goes red when the row wasn't planned for.
@@ -212,10 +215,17 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
           type="button"
           onClick={onSelect}
           className={`text-[15px] font-semibold tabular-nums ${
-            remaining < 0 && kind !== "income" ? "text-negative" : actualColorClass(kind, row.spentCents)
+            moneyBack ? "text-positive" : remaining < 0 && kind !== "income" ? "text-negative" : actualColorClass(kind, row.spentCents)
           }`}
         >
-          / {formatMoney(row.spentCents, currency)}
+          / {moneyBack ? (
+            <>
+              {formatMoney(-row.spentCents, currency)}
+              <span className="ml-0.5 text-[11px]">Refunded</span>
+            </>
+          ) : (
+            formatMoney(row.spentCents, currency)
+          )}
         </button>
 
         {/* Remaining — the number the row is actually consulted for. Desktop
@@ -321,10 +331,19 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       <button
         type="button"
         onClick={onSelect}
-        className={`hidden @md:col-span-2 @md:block @md:text-center @md:text-sm @md:font-semibold @md:tabular-nums ${actualColorClass(kind, row.spentCents)}`}
+        className={`hidden @md:col-span-2 @md:block @md:text-center @md:text-sm @md:font-semibold @md:tabular-nums ${moneyBack ? "text-positive" : actualColorClass(kind, row.spentCents)}`}
         title={`${ACTUAL_WORD[kind]} — click to edit transactions`}
       >
-        {formatMoney(row.spentCents, currency)}
+        {moneyBack ? (
+          // "Refunded" sits small under the amount: the Spent column is too
+          // narrow for both on one line at most widths.
+          <span className="block leading-tight">
+            {formatMoney(-row.spentCents, currency)}
+            <span className="block text-[10px] font-semibold">Refunded</span>
+          </span>
+        ) : (
+          formatMoney(row.spentCents, currency)
+        )}
       </button>
 
       {/* Desktop: Remaining */}

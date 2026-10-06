@@ -64,7 +64,38 @@ const TAB_ACTIVE_TEXT: Record<CategoryKind, string> = {
 
 type SplitEntry = { subId: string; amountCents: number };
 
-export function TransactionModal({
+type TransactionModalProps = Omit<Parameters<typeof TransactionModalForm>[0], "onAddRefund">;
+
+/**
+ * The add / edit transaction form. "+ Add refund" on a saved purchase swaps
+ * it for a fresh form: a refund of the same item, account and payee, dated
+ * today and for the full amount (either can be changed before saving).
+ */
+export function TransactionModal(props: TransactionModalProps) {
+  const [refundOf, setRefundOf] = useState<TxData | null>(null);
+  if (refundOf) {
+    return (
+      <TransactionModalForm
+        key={`refund-${refundOf.id}`}
+        {...props}
+        editTx={null}
+        initialKind={refundOf.kind ?? undefined}
+        initialSubId={refundOf.subId ?? undefined}
+        initialAccountId={refundOf.accountId ?? undefined}
+        initialAmountCents={Math.abs(refundOf.amountCents)}
+        initialPayee={refundOf.payee ?? undefined}
+        initialMemo={refundOf.memo ?? undefined}
+        initialDate={new Date().toISOString().slice(0, 10)}
+        initialIsWithdrawal={false}
+        initialIsRefund
+        restrictToInitialKind={false}
+      />
+    );
+  }
+  return <TransactionModalForm {...props} onAddRefund={setRefundOf} />;
+}
+
+function TransactionModalForm({
   editTx,
   monthKey,
   firstOfMonth,
@@ -81,7 +112,10 @@ export function TransactionModal({
   initialPayee,
   initialDate,
   initialIsWithdrawal = false,
+  initialIsRefund = false,
+  initialMemo,
   restrictToInitialKind = false,
+  onAddRefund,
   onClose,
 }: {
   editTx: TxData | null;
@@ -102,7 +136,12 @@ export function TransactionModal({
   initialPayee?: string;
   initialDate?: string;
   initialIsWithdrawal?: boolean;
+  initialIsRefund?: boolean;
+  initialMemo?: string;
   restrictToInitialKind?: boolean;
+  // Set by the wrapper below: swaps this form for a new refund of the
+  // saved purchase being edited.
+  onAddRefund?: (tx: TxData) => void;
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
@@ -116,7 +155,7 @@ export function TransactionModal({
   // from spending and return the money to the account. Seed from the sign of
   // the existing tx so the toggle reflects reality on edit.
   const [isRefund, setIsRefund] = useState<boolean>(
-    editTx != null && editTx.amountCents < 0,
+    initialIsRefund || (editTx != null && editTx.amountCents < 0),
   );
   const [selectedAccountId, setSelectedAccountId] = useState<string>(editTx?.accountId ?? initialAccountId ?? "");
   const availableBuckets = bucketsByAccount[selectedAccountId] ?? [];
@@ -830,7 +869,7 @@ export function TransactionModal({
               name="memo"
               type="text"
               placeholder="Add a note (optional)"
-              defaultValue={editTx?.memo ?? ""}
+              defaultValue={editTx?.memo ?? initialMemo ?? ""}
               className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
             {/* Delete moved into the footer next to Refund so all row-level
@@ -886,6 +925,19 @@ export function TransactionModal({
                 (a refund of income doesn't exist) and on the locked
                 debt/savings context (those flows have their own semantics). */}
             {txType !== "income" && !initialIsWithdrawal && !(restrictToInitialKind && (initialKind === "debt" || initialKind === "savings")) ? (
+              // A saved purchase isn't flipped into a refund — that erased the
+              // purchase and moved spending by twice the amount (2026-10-06).
+              // Its Refund button opens a new refund row for the same item,
+              // card and payee instead, so both stay on the account's history.
+              isEdit && editTx.amountCents > 0 && onAddRefund ? (
+                <button
+                  type="button"
+                  onClick={() => onAddRefund(editTx)}
+                  className="rounded-full bg-transparent px-2.5 py-1 text-[11px] font-bold text-muted ring-1 ring-line transition hover:text-foreground"
+                >
+                  + Add refund
+                </button>
+              ) : (
               <button
                 type="button"
                 onClick={() => setIsRefund((v) => !v)}
@@ -898,6 +950,7 @@ export function TransactionModal({
               >
                 {isRefund ? "✓ Refund" : "Refund"}
               </button>
+              )
             ) : null}
             {/* Row-level controls all sit on the left next to Cancel so the
                 right side stays a single primary action. Add mode: Clear

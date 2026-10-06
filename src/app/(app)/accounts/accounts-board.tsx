@@ -1115,7 +1115,7 @@ function CreditCardListSection({
         <Link
           href="/travel"
           onClick={(e) => e.stopPropagation()}
-          className="shrink-0 rounded-md border border-brand/30 bg-background px-2 py-1 text-[11px] font-semibold text-brand transition hover:border-brand/60 hover:bg-brand-soft/30 dark:bg-neutral-950"
+          className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
         >
           Points & rewards →
         </Link>

@@ -41,6 +41,31 @@ export function sheetDateRange(start: string, end: string | null | undefined): s
   return `${Number(d)}-${MONTHS[Number(m) - 1]} – ${sheetDate(end)}`;
 }
 
+/** "28-Mar": a date inside a trip popup, whose header already gives the
+ *  year. Keeps the year ("5-Oct-26") when the date falls in another one. */
+export function tripDate(iso: string, tripYear: string | null | undefined): string {
+  if (tripYear && iso.slice(0, 4) !== tripYear) return sheetDate(iso);
+  const [, m, d] = iso.split("-");
+  return `${Number(d)}-${MONTHS[Number(m) - 1]}`;
+}
+
+/**
+ * When a booking happens, for its row in the trip popup: `date` sits beside
+ * the title ("28-Mar", or "8-Oct – 12-Oct" for a round trip), and a flight's
+ * `legs` go under it as columns — the leg's day (only when the booking spans
+ * more than one day), its depart time and its arrive time.
+ */
+export type WhenLeg = { day: string | null; depart: string | null; arrive: string | null };
+export function bookingWhen(b: Booking, tripYear: string | null | undefined): { date: string; legs: WhenLeg[] } {
+  const date = b.end === b.start ? tripDate(b.start, tripYear) : `${tripDate(b.start, tripYear)} – ${tripDate(b.end, tripYear)}`;
+  if (b.kind !== "flight") return { date, legs: [] };
+  const manyDays = b.start !== b.end;
+  const legs = b.flight.legs
+    .map((leg) => ({ day: manyDays ? tripDate(leg.flightOn, tripYear) : null, depart: leg.departsAt, arrive: leg.arrivesAt }))
+    .filter((leg) => leg.day || leg.depart || leg.arrive);
+  return { date, legs };
+}
+
 export function flightRoute(f: TravelFlight): string {
   const stops: string[] = [];
   for (const leg of f.legs) {

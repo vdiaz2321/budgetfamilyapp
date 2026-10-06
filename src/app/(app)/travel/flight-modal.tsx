@@ -437,7 +437,7 @@ export function FlightModal({
               // ("Outbound date", "Return date"), so there is no heading row.
               <div
                 key={leg.key}
-                className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[9rem_5.5rem_1fr_1fr_8rem_8rem_auto]"
+                className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_8rem_8rem_auto]"
               >
                 <Field label={`${legs.length === 1 ? "Flight" : i === 0 ? "Outbound" : legs.length === 2 ? "Return" : `Flight ${i + 1}`} date`}>
                   <input
@@ -447,7 +447,7 @@ export function FlightModal({
                     className={`${inputClass} ${reservedOn && leg.flightOn && leg.flightOn < reservedOn ? "ring-2 ring-negative" : ""}`}
                   />
                 </Field>
-                <Field label="Flight no.">
+                <Field label="Booking Ref">
                   <input
                     value={leg.flightNumber}
                     onChange={(e) => updateLeg(leg.key, { flightNumber: e.target.value })}
@@ -532,9 +532,17 @@ export function FlightModal({
                 onBlur={() => setCountDraft(null)}
                 // Compact, to sit level with the currency and points pickers
                 // beside it.
-                className="h-7 w-14 rounded-md bg-background px-2 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="h-7 w-14 rounded-md bg-background px-2 text-center text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
             </label>
+            {/* Beside Total: the names are who the passenger rows pick from. */}
+            <button
+              type="button"
+              onClick={() => setEditingNames((v) => !v)}
+              className="rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              {editingNames ? "Done editing names" : "Edit family names"}
+            </button>
             {/* The currency the second column of Planned and Spent is in. */}
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
             {/* Which seats were paid with points, picked in one place; each
@@ -567,13 +575,6 @@ export function FlightModal({
             <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
               <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
             </div>
-            <button
-              type="button"
-              onClick={() => setEditingNames((v) => !v)}
-              className="ml-auto rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
-            >
-              {editingNames ? "Done editing names" : "Edit family names"}
-            </button>
           </div>
 
           {editingNames ? <TravellerEditor travellers={travellers} /> : null}

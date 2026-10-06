@@ -3,7 +3,7 @@
 import type React from "react";
 import { formatMoneyWhole } from "@/lib/money";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { sheetDateRange, type TripSummary } from "./trip-summary";
+import { sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
 import { HEAD_FIGURE_COLS, HEAD_TITLE_COL } from "./travel-board";
 
 // Whole days between two plain ISO dates.
@@ -167,6 +167,15 @@ export function TripCards({
             const paidPct = whole > 0 ? Math.round((t.spent / whole) * 100) : 0;
             const fullyPaid = t.spent > 0 && planned <= 0;
             const booked = t.counts.flight + t.counts.stay + t.counts.car > 0;
+            // What's been paid for each kind of booking — the same split as
+            // Spent below (plan-only bookings left out). Blank when nothing is
+            // paid yet; "Pts" when it went on points with no cash.
+            const paidFor = (kind: Booking["kind"], total: number, planOnly: number) => {
+              const cash = total - planOnly;
+              if (cash > 0) return ` · ${formatMoneyWhole(cash, currency)}`;
+              const onPoints = t.bookings.some((b) => b.kind === kind && !b.cancelled && b.points > 0);
+              return onPoints ? " · Pts" : "";
+            };
             return (
               <li key={t.trip.id}>
                 <button
@@ -193,9 +202,9 @@ export function TripCards({
                       get the full width. */}
                   {booked ? (
                     <span className="flex flex-wrap items-center gap-1.5">
-                      {t.counts.flight ? <Chip icon="flight">{plural(t.counts.flight, "flight")}</Chip> : null}
-                      {t.counts.stay ? <Chip icon="hotel">{plural(t.counts.stay, "hotel")}</Chip> : null}
-                      {t.counts.car ? <Chip icon="car">{plural(t.counts.car, "rental")}</Chip> : null}
+                      {t.counts.flight ? <Chip icon="flight">{plural(t.counts.flight, "flight")}{paidFor("flight", t.flights, t.planOnly.flights)}</Chip> : null}
+                      {t.counts.stay ? <Chip icon="hotel">{plural(t.counts.stay, "hotel")}{paidFor("stay", t.hotels, t.planOnly.hotels)}</Chip> : null}
+                      {t.counts.car ? <Chip icon="car">{plural(t.counts.car, "rental")}{paidFor("car", t.rentals, t.planOnly.rentals)}</Chip> : null}
                       {!t.counts.flight ? <Chip icon="flight" missing>No flight</Chip> : null}
                       {!t.counts.stay ? <Chip icon="hotel" missing>No hotel</Chip> : null}
                       <DaysPill days={days} className="ml-auto sm:hidden" />

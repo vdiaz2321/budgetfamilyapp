@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { formatForeignWhole, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { bookingForeign, bookingPlanActual, sheetDate, sheetDateRange, type Booking, type TripSummary } from "./trip-summary";
+import { bookingForeign, bookingPlanActual, bookingWhen, sheetDateRange, tripDate, type Booking, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES, actualCents, type TripTaggedPurchase } from "./types";
 import { MatchPurchasesModal } from "./match-purchases-modal";
 
@@ -414,10 +414,11 @@ export function TripDetailModal({
                         <span className="flex min-w-0 flex-col">
                           <span className="text-[13px] font-semibold">
                             {b.title}
+                            <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
                             {b.cancelled ? <span className="ml-1.5 text-[10px] font-semibold text-muted">Cancelled</span> : null}
                           </span>
                           <span className="text-[11px] text-muted">
-                            <span className="tabular-nums">{sheetDateRange(b.start, b.end)}</span> · {b.detail}
+                            <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
                           </span>
                           <BookingRemarks booking={b} />
                         </span>
@@ -568,10 +569,11 @@ export function TripDetailModal({
                             <span className="flex min-w-0 flex-col">
                               <span className="text-[13px] font-semibold">
                                 {b.title}
+                                <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
                                 {b.cancelled ? <span className="ml-1.5 text-[10px] font-semibold text-muted">Cancelled</span> : null}
                               </span>
                               <span className="text-[11px] text-muted">
-                                <span className="tabular-nums">{sheetDateRange(b.start, b.end)}</span> · {b.detail}
+                                <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
                               </span>
                             </span>
                           </button>
@@ -740,7 +742,7 @@ export function TripDetailModal({
                       }
                       diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
                     />
-                    {openRow === key ? <TaggedPurchaseList list={e.txList} currency={currency} /> : null}
+                    {openRow === key ? <TaggedPurchaseList list={e.txList} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
                   </li>
                 );
               })}
@@ -826,7 +828,7 @@ export function TripDetailModal({
                       {openRow === key ? (
                         <tr className="border-b border-line/60">
                           <td colSpan={4} className="px-3 pb-2">
-                            <TaggedPurchaseList list={e.txList} currency={currency} />
+                            <TaggedPurchaseList list={e.txList} currency={currency} tripYear={t.start?.slice(0, 4)} />
                           </td>
                         </tr>
                       ) : null}
@@ -991,16 +993,51 @@ function PurchasesToggle({ count, open, onClick }: { count: number; open: boolea
   );
 }
 
+// A booking's day(s), beside its title: "STR → Lisbon  28-Mar".
+function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string | undefined }) {
+  return <span className="ml-2 whitespace-nowrap text-[11px] font-medium tabular-nums text-muted">{bookingWhen(booking, tripYear).date}</span>;
+}
+
+// Under the title: a flight's legs in columns — day, Depart, Arrive — so a
+// round trip's two times line up, then the detail (airline · pax) on its own
+// line. A stay or rental has no legs: just its detail (city, nights).
+function BookingWhen({ booking, tripYear }: { booking: Booking; tripYear: string | undefined }) {
+  const { legs } = bookingWhen(booking, tripYear);
+  if (!legs.length) return <>{booking.detail}</>;
+  const withDay = legs.some((l) => l.day);
+  return (
+    <>
+      <span className={`grid justify-start gap-x-1.5 tabular-nums sm:gap-x-2 ${withDay ? "grid-cols-[auto_auto_auto]" : "grid-cols-[auto_auto]"}`}>
+        {legs.map((leg, i) => (
+          <Fragment key={i}>
+            {withDay ? <span className="whitespace-nowrap">{leg.day}</span> : null}
+            <span className="whitespace-nowrap">{leg.depart ? `Depart: ${leg.depart}` : ""}</span>
+            {/* The arrow is dropped on a phone, where the three columns only just fit. */}
+            <span className="whitespace-nowrap">
+              {leg.arrive ? (
+                <>
+                  <span className="hidden sm:inline">→ </span>Arrive: {leg.arrive}
+                </>
+              ) : null}
+            </span>
+          </Fragment>
+        ))}
+      </span>
+      <span className="block">{booking.detail}</span>
+    </>
+  );
+}
+
 // The tagged purchases behind one Spending row, one line each — a read-only
 // look at what makes up the Actual. (A Remove button was built and taken out
 // on Victor's call, 2026-09-23: taking a purchase off a trip changes nothing
 // outside the Travel Log, so it read as a delete that wasn't one.)
-function TaggedPurchaseList({ list, currency }: { list: TripTaggedPurchase[]; currency: string }) {
+function TaggedPurchaseList({ list, currency, tripYear }: { list: TripTaggedPurchase[]; currency: string; tripYear: string | undefined }) {
   return (
     <ul className="mt-1.5 divide-y divide-line/60 rounded-md bg-background/60 text-xs ring-1 ring-line">
       {list.map((p) => (
         <li key={p.id} className="flex items-center gap-3 px-2.5 py-1.5">
-          <span className="shrink-0 whitespace-nowrap tabular-nums text-muted">{sheetDate(p.date)}</span>
+          <span className="shrink-0 whitespace-nowrap tabular-nums text-muted">{tripDate(p.date, tripYear)}</span>
           <span className="min-w-0 flex-1 truncate">
             <span className="font-semibold">{p.payee ?? "—"}</span>
             <span className="text-muted"> · {p.item}</span>

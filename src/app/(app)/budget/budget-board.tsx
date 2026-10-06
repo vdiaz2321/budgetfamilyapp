@@ -1868,7 +1868,7 @@ function RollInPlanControl({
               }}
               className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
             >
-              {undoPending ? "Undoing…" : `↩ Undo ${shortMonth(prevMonthLabel)} plan roll-in`}
+              {undoPending ? "Undoing…" : `↩ Undo ${shortMonth(prevMonthLabel)} Planned roll-in`}
             </button>
           ) : confirming ? (
             // Roll-in overwrites this month's plans, and the button sits right
@@ -1876,7 +1876,7 @@ function RollInPlanControl({
             // so it asks once, inline, before touching anything.
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] font-semibold text-foreground">
-                Replace this month&apos;s plan with {shortMonth(prevMonthLabel)}&apos;s?
+                Replace this month&apos;s Planned with {shortMonth(prevMonthLabel)}&apos;s?
               </span>
               <form
                 action={(fd) =>
@@ -1911,7 +1911,7 @@ function RollInPlanControl({
               onClick={() => setConfirming(true)}
               className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
             >
-              {`↓ Roll in ${shortMonth(prevMonthLabel)} plan`}
+              {`↓ Roll in ${shortMonth(prevMonthLabel)} Planned`}
             </button>
           )}
     </div>
