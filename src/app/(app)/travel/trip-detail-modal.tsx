@@ -599,8 +599,8 @@ export function TripDetailModal({
                       {/* Each passenger's seat under the flight, in the same
                           columns — so the total reads as the seats added up. */}
                       {seats.map((p, i) => (
-                        // Reading the seats never opens the flight's form.
-                        <tr key={p.key} onClick={(e) => e.stopPropagation()} className={`cursor-default text-[12px] tabular-nums [&>td]:py-0.5 ${i === 0 ? "[&>td]:pt-1.5" : ""} ${i === seats.length - 1 && !remarks ? "[&>td]:pb-2" : ""}`}>
+                        // Clicking a seat opens the flight's form, like the rest of the booking.
+                        <tr key={p.key} className={`text-[12px] tabular-nums [&>td]:py-0.5 ${i === 0 ? "[&>td]:pt-1.5" : ""} ${i === seats.length - 1 && !remarks ? "[&>td]:pb-2" : ""}`}>
                           <td className="truncate px-3 pl-[5.25rem] text-left text-muted">{p.name}</td>
                           <td className="whitespace-nowrap px-3 text-center">
                             {p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}

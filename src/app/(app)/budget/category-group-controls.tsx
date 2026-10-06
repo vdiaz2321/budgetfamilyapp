@@ -19,10 +19,12 @@ export function AddCategoryGroupButton() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-1.5 py-1 text-[13px] font-semibold text-foreground transition hover:bg-foreground/8 dark:hover:bg-white/10 sm:px-2.5 sm:text-xs"
+        className="inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg bg-brand-soft px-2.5 text-xs font-semibold text-brand ring-1 ring-brand/25 transition hover:ring-brand/50 sm:rounded-full sm:px-3"
       >
         <span aria-hidden>+</span>
-        Cat Group
+        {/* Full name ran off the edge of the phone toolbar. */}
+        <span className="sm:hidden">Cat Group</span>
+        <span className="hidden sm:inline">Category Group</span>
       </button>
       {open ? <AddCategoryGroupModal onClose={() => setOpen(false)} /> : null}
     </>

@@ -17,6 +17,20 @@ export const FX_CURRENCIES = [
 // Module-level cache so the modal doesn't re-fetch every time it opens.
 let cachedRates: { rates: Record<string, number>; fetchedAt: number } | null = null;
 
+/** The USD-based rates, fetched once per session and shared with the
+ *  converter's cache. Resolves to null when they can't be loaded. */
+export function loadFxRates(): Promise<Record<string, number> | null> {
+  if (cachedRates) return Promise.resolve(cachedRates.rates);
+  return fetch("https://open.er-api.com/v6/latest/USD")
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d?.rates || typeof d.rates !== "object") return null;
+      cachedRates = { rates: d.rates, fetchedAt: Date.now() };
+      return d.rates as Record<string, number>;
+    })
+    .catch(() => null);
+}
+
 /** What was typed into the converter, for forms that keep the receipt's own
  *  figure beside the dollars (the Travel Log keeps euros). */
 export type ConvertedFrom = { currency: string; amountCents: number };
@@ -51,17 +65,8 @@ export function CurrencyConverter({
     if (rates) return;
     setLoading(true);
     setError(null);
-    fetch("https://open.er-api.com/v6/latest/USD")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d?.rates && typeof d.rates === "object") {
-          cachedRates = { rates: d.rates, fetchedAt: Date.now() };
-          setRates(d.rates);
-        } else {
-          setError("Couldn't load rates");
-        }
-      })
-      .catch(() => setError("Network error — check connection"))
+    loadFxRates()
+      .then((r) => (r ? setRates(r) : setError("Couldn't load rates")))
       .finally(() => setLoading(false));
   }
 

@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
+import { CurrencyConverter, loadFxRates, type ConvertedFrom } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatMoneyWhole } from "@/lib/money";
 import {
   addTraveller,
@@ -55,6 +55,8 @@ const emptyPassenger = (): PassengerDraft => ({
   key: nextKey++, travellerId: null, name: "", planned: "", plannedForeign: "", fare: "", fareEur: "", pointsUsed: false, points: "",
 });
 const money = (cents: number | null | undefined) => (cents ? centsToDisplay(cents) : "");
+// Each foreign-currency box and the dollar box it fills beside it.
+const FX_PAIR = { plannedForeign: "planned", fareEur: "fare" } as const;
 
 const rateDisplay = (micros: number) => microsToCentsField(micros);
 
@@ -149,7 +151,7 @@ export function FlightModal({
   });
   const [remarks, setRemarks] = useState(flight?.remarks ?? "");
   const [editingNames, setEditingNames] = useState(false);
-  // The short form: points seats, the currency pickers, card owner and
+  // The short form: points seats, card owner and
   // remarks fold away; a saved flight already using any of them opens with
   // them showing.
   const [showMore, setShowMore] = useState(
@@ -162,6 +164,37 @@ export function FlightModal({
   // The fare the currency converter fills: the one last clicked into, or else
   // the first one still empty.
   const lastFare = useRef<{ key: number; slot: FareSlot } | null>(null);
+
+  // Typing a fare in the foreign column fills the dollar box on that same row
+  // at today's rate — only that row, since the kids' fares differ. The rates
+  // load the first time a foreign box is clicked into.
+  const fxRates = useRef<Record<string, number> | null>(null);
+  const toUsd = (raw: string): string | null => {
+    const rate = fxRates.current?.[foreignCurrency];
+    if (!rate) return null;
+    if (!raw.trim()) return "";
+    const n = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(n) ? centsToDisplay(Math.round((n / rate) * 100)) : null;
+  };
+  function typeFare(key: number, slot: FareSlot, value: string) {
+    if (slot !== "plannedForeign" && slot !== "fareEur") return updatePassenger(key, { [slot]: value });
+    const usd = toUsd(value);
+    updatePassenger(key, usd == null ? { [slot]: value } : { [slot]: value, [FX_PAIR[slot]]: usd });
+  }
+  function loadRatesFor(key: number, slot: FareSlot) {
+    if (fxRates.current || (slot !== "plannedForeign" && slot !== "fareEur")) return;
+    loadFxRates().then((rates) => {
+      fxRates.current = rates;
+      // A figure typed before the rates arrived gets its dollars now.
+      setPassengers((all) =>
+        all.map((p) => {
+          if (p.key !== key || !p[slot].trim() || p[FX_PAIR[slot]].trim()) return p;
+          const usd = toUsd(p[slot]);
+          return usd ? { ...p, [FX_PAIR[slot]]: usd } : p;
+        }),
+      );
+    });
+  }
 
   const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Bought once a Spent fare or the booking date is in; a plan until then.
@@ -503,7 +536,7 @@ export function FlightModal({
               />
             </label>
             {/* The currency the second column of Planned and Spent is in. */}
-            {showMore ? <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} /> : null}
+            <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
             {/* Which seats were paid with points, picked in one place; each
                 ticked passenger gets a Points box on their row. */}
             {showMore ? <CheckPicker
@@ -531,11 +564,9 @@ export function FlightModal({
                 onToggle: () => updatePassenger(p.key, { pointsUsed: !p.pointsUsed }),
               }))}
             /> : null}
-            {showMore ? (
-              <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
-                <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
-              </div>
-            ) : null}
+            <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
+              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
+            </div>
             <button
               type="button"
               onClick={() => setEditingNames((v) => !v)}
@@ -615,8 +646,11 @@ export function FlightModal({
                     key={slot}
                     aria-label={`Passenger ${i + 1} ${n < 2 ? "planned" : "spent"} ${n % 2 ? foreignCurrency : currency}`}
                     value={p[slot]}
-                    onChange={(e) => updatePassenger(p.key, { [slot]: e.target.value })}
-                    onFocus={() => (lastFare.current = { key: p.key, slot })}
+                    onChange={(e) => typeFare(p.key, slot, e.target.value)}
+                    onFocus={() => {
+                      lastFare.current = { key: p.key, slot };
+                      loadRatesFor(p.key, slot);
+                    }}
                     // On a points seat the Spent boxes take the cash paid on
                     // top of the points (taxes, fees, a points + cash fare).
                     placeholder={p.pointsUsed && n >= 2 ? "Cash paid" : undefined}

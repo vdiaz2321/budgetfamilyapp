@@ -545,7 +545,7 @@ export function BudgetBoard({
               onClick={() => showingOverspent ? setRowFilter("all") : showOverspent()}
               aria-pressed={showingOverspent}
               disabled={overspentCount === 0}
-              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${showingOverspent ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
+              className={`${overspentCount === 0 ? "hidden" : "inline-flex"} items-center gap-1 whitespace-nowrap rounded-full px-2.5 h-7 text-[12px] font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 disabled:opacity-50 sm:text-xs ${showingOverspent ? "bg-negative/30 text-foreground ring-1 ring-negative/30" : "bg-negative/8 text-negative hover:bg-negative/15"}`}
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M12 3.5 22 20.5H2L12 3.5Zm0 5.25a1 1 0 0 0-1 1v4.5a1 1 0 1 0 2 0v-4.5a1 1 0 0 0-1-1Zm0 8.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Z" />
@@ -560,7 +560,7 @@ export function BudgetBoard({
               <button
                 type="button"
                 onClick={() => setShowPrevOverspent(true)}
-                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-surface px-2.5 py-1 text-[11px] font-semibold text-negative ring-1 ring-negative/25 transition hover:bg-negative/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 sm:text-xs"
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-surface px-2.5 h-7 text-[12px] font-semibold text-negative ring-1 ring-negative/25 transition hover:bg-negative/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-negative/50 sm:text-xs"
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M3 10a9 9 0 1 1 2.6 6.4" />
@@ -569,8 +569,8 @@ export function BudgetBoard({
                 {prevMonthOverspent.monthLabel.split(" ")[0]} overspent ({prevMonthOverspent.items.length})
               </button>
             ) : null}
-            {/* Same order on both widths: [Due this week] [+ Cat Group]
-                [+ Transaction], pushed right on mobile where the toolbar has
+            {/* Same order on both widths: [Due this week] [+ Transaction]
+                [+ Cat Group], pushed right on mobile where the toolbar has
                 no card chrome, left-aligned on desktop. */}
             <div className="ml-auto flex items-center gap-1.5 sm:ml-0">
               {dueThisWeek.length > 0 && (
@@ -578,7 +578,7 @@ export function BudgetBoard({
                   type="button"
                   onClick={() => setShowDue((v) => !v)}
                   aria-pressed={showDue}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition sm:text-xs ${
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 h-7 text-[12px] font-semibold transition sm:text-xs ${
                     showDue ? "bg-negative/30 text-foreground" : "bg-negative/20 text-foreground hover:bg-negative/30"
                   }`}
                 >
@@ -586,17 +586,18 @@ export function BudgetBoard({
                   <span className="font-bold text-foreground">{dueThisWeek.length}</span>
                 </button>
               )}
-              <AddCategoryGroupButton />
               <button
                 type="button"
                 onClick={() => { loadPayees(); setShowAddModal(true); }}
-                className="h-7 shrink-0 cursor-pointer items-center rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:rounded-full sm:px-3 sm:text-[11px]"
+                className="h-7 shrink-0 cursor-pointer items-center rounded-lg bg-brand px-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong sm:rounded-full sm:px-3"
               >
                 + Transaction
               </button>
+              <AddCategoryGroupButton />
             </div>
-            {/* Desktop only: + Bulk add items sits next to the progress switch */}
-            <div className="ml-auto hidden sm:block">
+            {/* Desktop only: + Bulk add items and the progress switch follow
+                + Transaction on the left, not pushed to the far edge. */}
+            <div className="hidden sm:block">
               <BulkAddSubcategories groups={groups} />
             </div>
             {/* One switch replaces the old separate on/off buttons. */}
@@ -1414,14 +1415,15 @@ function CategoryProgressCard({
       {/* Wraps rather than truncates: when the card is full-width on mobile the
           amounts are long enough to squeeze a truncating label down to an
           ellipsis, so they drop to their own line instead. */}
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+      {/* Wide (4 across): name centered on line 1, amounts centered on line 2. */}
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 @3xl:justify-center">
         <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} aria-hidden />
         <span className="whitespace-nowrap text-[11px] text-muted">{label}</span>
         {/* The planned figure and the "/ Spent $x" pair each hold together,
             but the line may break between them. Holding the whole thing on one
             line clipped it against the card's edge whenever the summary panel
             squeezed this column — the amounts were wider than the card. */}
-        <span className="ml-auto text-[11px] tabular-nums sm:text-xs">
+        <span className="ml-auto text-[11px] tabular-nums sm:text-xs @3xl:ml-0 @3xl:basis-full @3xl:text-center">
           <span className="whitespace-nowrap font-semibold text-foreground">{formatMoney(planned, currency)}</span>{" "}
           <span className="whitespace-nowrap">
             <span className="text-muted">/ {actualLabel} </span>
@@ -1445,7 +1447,7 @@ function CategoryProgressCard({
 // Summary / Transactions tab strip in the right rail.
 
 // Small submit-only Undo button used inline next to the "+$X rollover" line
-// in the hero card. Same server action as the pill's Undo in RolloverFooter —
+// in the hero card. Same server action as the pill's Undo in RolloverControl —
 // posts a blank `enable` value to toggle rollover off for this month.
 function UndoRolloverButton({ monthFirstOfMonth }: { monthFirstOfMonth: string }) {
   const [pending, start] = useTransition();
@@ -1501,28 +1503,52 @@ function SummaryHeroCard({
   return (
     <div className="@container -mx-4 overflow-hidden bg-surface shadow-sm ring-1 ring-black/5 sm:mx-0 sm:rounded-2xl dark:ring-white/10">
       <div className="px-6 pb-5 pt-5">
-        {/* Wide packs the four figures into a tight 2x2 on the left and stacks
-            the progress cards down the right; narrow falls back to stacking.
-            The split is a CONTAINER query, not `md:`. The card only gets the
-            left pane, which is far narrower than the window — at a 1060px
-            window this card is 472px, `md:` had already fired, and the first
-            track took its 24rem maximum and left the progress cards 56px to
-            render "Bills & Expenses $6,503.29 / Spent $1,146.47" in. */}
-        <div className="grid grid-cols-1 gap-5 @3xl:grid-cols-[minmax(17rem,24rem)_minmax(0,1fr)] @3xl:gap-x-8">
-        <div className="flex min-w-0 flex-col">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:gap-x-8">
-          <div className="min-w-0">
+        {/* Wide: the four figures run across one row (each with its own action
+            underneath), then the four progress cards across the row below.
+            Narrow: the figures fall back to a 2x2 — Income/Actual on top,
+            Total/Leftover below, via `order-*` — and the cards stack.
+            The breakpoints are CONTAINER queries, not `md:`: the card only
+            gets the left pane, which is far narrower than the window. */}
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:gap-x-8 @3xl:grid-cols-4">
+          <div className="min-w-0 @3xl:text-center">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned</p>
             <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-positive">
               {formatMoney(incomePlanned, currency)}
             </p>
+            {/* Rollover adds last month's leftover to this month's income, so
+                its pill (and the "Added · Undo" line once it's in) sit here. */}
+            <div className="mt-1.5 flex flex-col items-start gap-1.5 @3xl:items-center">
+              <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+              {rolloverCents > 0 && (
+                // <div> (not <p>) because UndoRolloverButton renders a <form>,
+                // and forms inside paragraphs are invalid HTML.
+                <div className="flex items-baseline gap-1.5 text-xs text-muted">
+                  <span className="whitespace-nowrap">
+                    <span className="font-semibold text-positive">
+                      {formatMoney(rolloverCents, currency)}
+                    </span>{" "}
+                    Added
+                  </span>
+                  <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
+                </div>
+              )}
+            </div>
           </div>
-          <div className="min-w-0">
+          <div className="order-3 min-w-0 @3xl:order-none @3xl:text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total Planned</p>
+            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
+              {formatMoney(outflowPlanned, currency)}
+            </p>
+            <div className="mt-1.5 @3xl:flex @3xl:justify-center">
+              <RollInPlanControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+            </div>
+          </div>
+          <div className="order-2 min-w-0 @3xl:order-none @3xl:text-center">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Actual Spent</p>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <p className="whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
-                {formatMoney(actualSpent, currency)}
-              </p>
+            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-negative">
+              {formatMoney(actualSpent, currency)}
+            </p>
+            <div className="mt-1.5 flex flex-col items-start gap-1.5 empty:hidden @3xl:items-center">
               {tone !== "good" && (
                 <span
                   className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium ${toneClasses.badge}`}
@@ -1533,29 +1559,21 @@ function SummaryHeroCard({
                   {badgeText}
                 </span>
               )}
+              {/* Planned-vs-spent matcher: it's about what was spent, so it
+                  sits under Actual Spent. */}
+              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} leftCents={displayLeft} />
             </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned Budget</p>
-            <p className="mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums text-foreground">
-              {formatMoney(outflowPlanned, currency)}
-            </p>
-            {/* Rollover pill + Roll-in stack directly under this figure —
-                they're both about the previous month's plan, so they read as
-                a continuation of Planned Budget rather than card chrome. */}
-            <RolloverFooter rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Left to Budget</p>
+          <div className="order-4 min-w-0 @3xl:order-none @3xl:text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned Leftover</p>
             <p className={`mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>
-            {/* Zero-based budgeting says every dollar gets a job. This figure
-                used to sit here as a read-only fact; now it's the entry point
-                for giving the money one — or, when the month is over-budgeted,
-                for taking a job away so the two sides balance again. */}
-            <div className="flex flex-col items-start">
-              {displayLeft !== 0 ? (
+            {/* Zero-based budgeting says every dollar gets a job — this is the
+                entry point for giving the leftover one, or for taking a job
+                away when the month is over-budgeted. */}
+            {displayLeft !== 0 ? (
+              <div className="mt-1.5 @3xl:flex @3xl:justify-center">
                 <AssignLeftover
                   mode={displayLeft < 0 ? "trim" : "assign"}
                   leftoverCents={displayLeft}
@@ -1563,35 +1581,16 @@ function SummaryHeroCard({
                   currency={currency}
                   options={heroSubOptions}
                 />
-              ) : null}
-              <MatchSpentButton candidates={matchCandidates} monthKey={monthFirstOfMonth} currency={currency} leftCents={displayLeft} />
-            </div>
-            {rolloverCents > 0 && (
-              // <div> (not <p>) because UndoRolloverButton renders a <form>,
-              // and forms inside paragraphs are invalid HTML.
-              <div className="mt-0.5 flex items-baseline gap-1.5 text-xs text-muted">
-                <span className="whitespace-nowrap">
-                  <span className="font-semibold text-positive">
-                    {formatMoney(rolloverCents, currency)}
-                  </span>{" "}
-                  Added
-                </span>
-                {/* Inline Undo — same submit RolloverFooter used to render.
-                    Keeping it here lets the footer drop the redundant
-                    pill+Undo when a rollover is already in. */}
-                <UndoRolloverButton monthFirstOfMonth={monthFirstOfMonth} />
               </div>
-            )}
+            ) : null}
           </div>
         </div>
-        </div>
 
-        <div className="grid grid-cols-1 gap-2.5 @xl:grid-cols-2 @3xl:mt-0 @3xl:grid-cols-1 @3xl:content-start">
+        <div className="mt-5 grid grid-cols-1 gap-2.5 @xl:grid-cols-2 @3xl:grid-cols-4">
           <CategoryProgressCard label="Income" actualLabel="Rec'd" actualColorClass="text-positive" actual={actualIncome} planned={incomePlanned} dotClass="bg-[color:var(--positive)]" fillClass="bg-[color:var(--positive)]" currency={currency} />
           <CategoryProgressCard label="Savings" actualLabel="Saved" actualColorClass="text-positive" actual={savings.spent} planned={savings.planned} dotClass="bg-[color:var(--viz-savings)]" fillClass="bg-[color:var(--viz-savings)]" currency={currency} />
           <CategoryProgressCard label="Bills & Expenses" actualLabel="Spent" actualColorClass="text-negative" actual={billsExpenses.spent} planned={billsExpenses.planned} dotClass="bg-[color:var(--viz-bills)]" fillClass="bg-[color:var(--viz-bills)]" currency={currency} />
           <CategoryProgressCard label="Debt Repayment" actualLabel="Paid" actualColorClass="text-negative" actual={debt.spent} planned={debt.planned} dotClass="bg-[color:var(--viz-debt)]" fillClass="bg-[color:var(--viz-debt)]" currency={currency} />
-        </div>
         </div>
       </div>
     </div>
@@ -1830,7 +1829,7 @@ function RolloverControl({
 
 // Footer row: [rollover amount] [Rollover/Remove btn]. The Due-this-week pill
 // lives in the board toolbar instead, next to + Cat Group.
-function RolloverFooter({
+function RollInPlanControl({
   rollover,
   monthFirstOfMonth,
   currency,
@@ -1853,10 +1852,9 @@ function RolloverFooter({
     return () => window.clearTimeout(t);
   }, [snapshot]);
   return (
-    // Renders inline inside the hero's left column, so no strip chrome — just
-    // the rollover pill and the Roll-in / Undo action on one wrapping row.
-    <div className="mt-1.5 flex flex-col items-start gap-1.5">
-          <RolloverControl rollover={rollover} monthFirstOfMonth={monthFirstOfMonth} currency={currency} />
+    // Renders inline under the Total Planned figure. The rollover pill lives
+    // under Income Planned instead — it adds income, it doesn't change the plan.
+    <div className="flex flex-col items-start gap-1.5">
           {snapshot ? (
             <button
               type="button"
