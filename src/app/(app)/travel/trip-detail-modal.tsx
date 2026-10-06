@@ -153,9 +153,15 @@ export function TripDetailModal({
     .reduce(
       (sum, b) => {
         const { planned, actual } = bookingPlanActual(b);
-        return { rows: sum.rows + 1, planned: sum.planned + (planned ?? 0), actual: sum.actual + (actual ?? 0) };
+        return {
+          rows: sum.rows + 1,
+          planned: sum.planned + (planned ?? 0),
+          actual: sum.actual + (actual ?? 0),
+          // The flights' share, for the Flights box beside Stays/Rentals.
+          flightPlanned: sum.flightPlanned + (b.kind === "flight" ? planned ?? 0 : 0),
+        };
       },
-      { rows: 0, planned: 0, actual: 0 },
+      { rows: 0, planned: 0, actual: 0, flightPlanned: 0 },
     );
   // The bookings' other-currency figures added up — only when every booking
   // that has one is in the same currency (euros and pounds don't add).
@@ -209,12 +215,12 @@ export function TripDetailModal({
   // its own hid the plan's total (Victor, 2026-09-30).
   // The plan's figures in PLAN_BLUE, so they read apart from the spent
   // figure above them (red once anything is spent).
-  const planNote = (planned: number, left: number) => {
+  const planNote = (planned: number, left: number, label = "Planned") => {
     const total = Math.max(planned, left);
     if (total <= 0) return undefined;
     return (
       <>
-        Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(total, currency)}</span>
+        {label}: <span className={PLAN_BLUE}>{formatMoneyWhole(total, currency)}</span>
         {left > 0 && left !== total ? (
           <>
             {" "}· left <span className={PLAN_BLUE}>{formatMoneyWhole(left, currency)}</span>
@@ -338,17 +344,23 @@ export function TripDetailModal({
           <p className="whitespace-pre-line text-xs">{t.trip.notes}</p>
         ) : null}
 
-        {/* What the trip came to, left to right as it adds up: the two parts,
+        {/* What the trip came to, left to right as it adds up: the three parts,
             then their total, then what the points and credits saved. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {/* Each box counts only money that left the wallet; what's still
               a plan (unbought bookings, spending with no actual yet) sits
               under it as "Plan left: $X" — a paid item drops out of the plan. */}
           <Stat
-            label="Flights/Stays/Rentals"
-            value={formatMoneyWhole(t.flights + t.hotels + t.rentals - t.planOnly.bookings, currency)}
-            className={t.flights + t.hotels + t.rentals - t.planOnly.bookings > 0 ? "text-negative" : undefined}
-            note={planNote(bookingTotals.planned, t.planOnly.bookings) ?? "flights · stays · rental"}
+            label="Flights"
+            value={formatMoneyWhole(t.flights - t.planOnly.flights, currency)}
+            className={t.flights - t.planOnly.flights > 0 ? "text-negative" : undefined}
+            note={planNote(bookingTotals.flightPlanned, t.planOnly.flights)}
+          />
+          <Stat
+            label="Stays/Rentals"
+            value={formatMoneyWhole(t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals, currency)}
+            className={t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals > 0 ? "text-negative" : undefined}
+            note={planNote(bookingTotals.planned - bookingTotals.flightPlanned, t.planOnly.hotels + t.planOnly.rentals)}
           />
           <Stat
             label="Spending"
@@ -360,9 +372,10 @@ export function TripDetailModal({
             label="Total spent"
             value={formatMoneyWhole(t.spent, currency)}
             className={t.spent > 0 ? "text-negative" : undefined}
-            note={planNote(bookingTotals.planned + t.plannedMisc, t.planOnly.total)}
+            note={planNote(bookingTotals.planned + t.plannedMisc, t.planOnly.total, "Total Planned")}
           />
           <Stat
+            wide
             label={t.points > 0 ? "Pts used · saved" : "Saved"}
             value={t.points > 0 ? `${t.points.toLocaleString()} · ${formatMoneyWhole(t.saved, currency)}` : formatMoneyWhole(t.saved, currency)}
             className="text-positive"
@@ -894,9 +907,10 @@ export function TripDetailModal({
   );
 }
 
-function Stat({ label, value, className, note }: { label: string; value: string; className?: string; note?: React.ReactNode }) {
+function Stat({ label, value, className, note, wide }: { label: string; value: string; className?: string; note?: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="rounded-lg bg-background/60 px-3 py-2 text-center ring-1 ring-line">
+    // `wide` takes the whole row on a phone, so an odd box count leaves no gap.
+    <div className={`rounded-lg bg-background/60 px-3 py-2 text-center ring-1 ring-line ${wide ? "col-span-2 sm:col-span-1" : ""}`}>
       <p className="text-[10px] font-semibold uppercase tracking-normal text-foreground/75 sm:text-[11px] sm:tracking-wide">{label}</p>
       <p className={`text-base font-bold tabular-nums ${className ?? ""}`}>{value}</p>
       {/* Readable, not a faint grey caption — the plan under the spent
