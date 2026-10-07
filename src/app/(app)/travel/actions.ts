@@ -160,7 +160,7 @@ export async function saveTravelStay(formData: FormData) {
     const prev = unwrap(
       await supabase
         .from("travel_stays")
-        .select("account_id, check_in, points_cost, points_used, hotel_credit_cents, cancelled_at, reward_activity_id, moves_card_points, free_night_used, is_estimate")
+        .select("account_id, check_in, reserved_on, points_cost, points_used, hotel_credit_cents, cancelled_at, reward_activity_id, moves_card_points, free_night_used, is_estimate")
         .eq("id", id)
         .eq("household_id", householdId)
         .maybeSingle(),
@@ -208,8 +208,10 @@ export async function saveTravelStay(formData: FormData) {
     const stampError = await syncFreeNightStamp(
       supabase,
       householdId,
-      prev.free_night_used && !prev.cancelled_at && !prev.is_estimate ? { accountId: prev.account_id, checkIn: prev.check_in } : null,
-      certificateUsed && !prev.cancelled_at ? { accountId, checkIn } : null,
+      prev.free_night_used && !prev.cancelled_at && !prev.is_estimate
+        ? { accountId: prev.account_id, checkIn: prev.check_in, reservedOn: prev.reserved_on }
+        : null,
+      certificateUsed && !prev.cancelled_at ? { accountId, checkIn, reservedOn: reservedOn || null } : null,
     );
     if (stampError) return fail(stampError);
     revalidate();
@@ -235,7 +237,7 @@ export async function saveTravelStay(formData: FormData) {
     return fail(`Couldn't save that stay — ${error.message}`);
   }
   if (certificateUsed) {
-    const stampError = await syncFreeNightStamp(supabase, householdId, null, { accountId, checkIn });
+    const stampError = await syncFreeNightStamp(supabase, householdId, null, { accountId, checkIn, reservedOn: reservedOn || null });
     if (stampError) return fail(stampError);
   }
   revalidate();
@@ -266,7 +268,7 @@ export async function deleteTravelStay(formData: FormData) {
     const stampError = await syncFreeNightStamp(
       supabase,
       householdId,
-      { accountId: stay.account_id, checkIn: stay.check_in },
+      { accountId: stay.account_id, checkIn: stay.check_in, reservedOn: stay.reserved_on },
       null,
     );
     if (stampError) return { error: stampError };
@@ -389,7 +391,7 @@ export async function setTravelStayCancelled(id: string, cancelled: boolean) {
     activityId = sync.activityId;
   }
   if (stay.free_night_used && !stay.is_estimate) {
-    const stamp = { accountId: stay.account_id, checkIn: stay.check_in };
+    const stamp = { accountId: stay.account_id, checkIn: stay.check_in, reservedOn: stay.reserved_on };
     const stampError = await syncFreeNightStamp(
       supabase,
       householdId,

@@ -1,12 +1,10 @@
-import { ensureCategories, type CategoryKind } from "@/lib/categories";
 import { getSessionContext } from "@/lib/auth-context";
 import { resolveMonth } from "@/lib/month";
-import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
+import type { TxData } from "../budget/types";
 import { TransactionsTable } from "./transactions-table";
 import { throwIfAny } from "@/lib/supabase-result";
 import { attachSplitParts } from "@/lib/split-parts";
-import { buildPlanResolver, fetchPlanInputs } from "@/lib/planned-by-sub";
-import { cardOwedMap, pickerBalanceCents } from "@/lib/account-picker-balance";
+import { loadTxFormData } from "@/lib/tx-form-options";
 
 export const metadata = { title: "Transactions · Capitall" };
 
@@ -67,10 +65,6 @@ export default async function TransactionsPage({
 
   const { supabase, household } = await getSessionContext();
 
-  // Started now, awaited with the other reads below — it used to run alone
-  // first, one more round trip before anything else began.
-  const categoriesPromise = ensureCategories(supabase, household.id);
-
   const buildTransactionsQuery = () => {
     let query = supabase
       .from("transactions")
@@ -101,121 +95,29 @@ export default async function TransactionsPage({
   };
   const transactionRowsPromise = loadTransactions();
 
-  const [{ data: subs, error: subsError }, txRows, { data: payees, error: payeesError }, { data: accounts, error: accountsError }, { data: buckets, error: bucketsError }, { data: subscriptions, error: subscriptionsError }, { data: irregularBills, error: irregularBillsError }, planInputs, { data: actualRows, error: actualRowsError }, { data: cardOwedRows, error: cardOwedError }] =
-    await Promise.all([
-      supabase
-        .from("subcategories")
-        .select("id, category_id, name, linked_bucket_id, travel_category, receives_trip_plans")
-        .eq("household_id", household.id)
-        .order("sort_order"),
-      transactionRowsPromise,
-      supabase
-        // Names only — used server-side (payeeById) to label each row. The
-        // autocomplete list is fetched on demand by the client (listPayees).
-        .from("payees")
-        .select("id, name")
-        .eq("household_id", household.id),
-      supabase
-        .from("accounts")
-        .select("id, name, kind, is_kids_account, sort_order, current_balance_cents")
-        .eq("household_id", household.id)
-        .eq("active", true)
-        .order("sort_order")
-        .order("name"),
-      supabase
-        .from("buckets")
-        .select("id, account_id, name, sort_order")
-        .eq("household_id", household.id)
-        .order("sort_order")
-        .order("name"),
-      // Managed items for the transaction Payee autocomplete's auto-fill.
-      supabase
-        .from("subscriptions")
-        .select("name, amount_cents, subcategory_id")
-        .eq("household_id", household.id)
-        .eq("is_active", true),
-      supabase
-        .from("irregular_bills")
-        .select("name, subcategory_id")
-        .eq("household_id", household.id),
-      // Planned + actuals for the current month so the picker can show
-      // Planned and Remaining ($planned − $spent) per budget item — planned by
-      // the Budget page's own rule, so the two pages always agree.
-      fetchPlanInputs(supabase, household.id, [month.firstOfMonth]),
-      supabase
-        .from("v_monthly_actuals")
-        .select("subcategory_id, actual_cents")
-        .eq("household_id", household.id)
-        .eq("month", month.firstOfMonth),
-      // Owed per card for the transaction modal's account picker.
-      supabase
-        .from("v_card_balances")
-        .select("account_id, owed_cents")
-        .eq("household_id", household.id),
-    ]);
-  const categories = await categoriesPromise;
-  const kindByCat = new Map(categories.map((c) => [c.id, c.kind as CategoryKind]));
-  throwIfAny({ subs: subsError, payees: payeesError, accounts: accountsError, buckets: bucketsError, subscriptions: subscriptionsError, irregularBills: irregularBillsError, actualRows: actualRowsError, cardOwed: cardOwedError });
+  // The modal's pickers (budget items, accounts, buckets, payee auto-fill)
+  // come from the shared loader Travel Log's "Add transaction" also uses.
+  const [txForm, txRows, { data: payees, error: payeesError }] = await Promise.all([
+    loadTxFormData(supabase, household.id, month.firstOfMonth),
+    transactionRowsPromise,
+    supabase
+      // Names only — used server-side (payeeById) to label each row. The
+      // autocomplete list is fetched on demand by the client (listPayees).
+      .from("payees")
+      .select("id, name")
+      .eq("household_id", household.id),
+  ]);
+  throwIfAny({ payees: payeesError });
+  const { subs, accounts, buckets, kindByCat } = txForm;
+  const { subOptions, accountOptions, propertyOptions, bucketsByAccount, payeeLineItems } = txForm.options;
 
-  const plan = buildPlanResolver(planInputs);
-  const actualBySub = new Map<string, number>(
-    (actualRows ?? []).map((a) => [a.subcategory_id as string, a.actual_cents ?? 0]),
-  );
-
-  const nameBySub = new Map((subs ?? []).map((s) => [s.id, s.name]));
+  const nameBySub = new Map(subs.map((s) => [s.id, s.name]));
   const kindBySub = new Map(
-    (subs ?? []).map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
+    subs.map((s) => [s.id, kindByCat.get(s.category_id) ?? null]),
   );
   const payeeById = new Map((payees ?? []).map((p) => [p.id, p.name]));
-  const accountNameById = new Map((accounts ?? []).map((a) => [a.id, a.name]));
-  const accountKindById = new Map((accounts ?? []).map((a) => [a.id, a.kind]));
-
-  const subOptions: SubOption[] = (subs ?? []).map((s) => {
-    const planned = plan.plannedFor(s.id, month.firstOfMonth);
-    const actual = actualBySub.get(s.id) ?? 0;
-    return {
-      id: s.id,
-      name: s.name,
-      kind: (kindByCat.get(s.category_id) ?? "expenses") as CategoryKind,
-      linkedBucketId: (s as { linked_bucket_id?: string | null }).linked_bucket_id ?? null,
-      remainingCents: planned - actual,
-      plannedCents: planned,
-      travelCategory: s.travel_category ?? null,
-      receivesTripPlans: s.receives_trip_plans ?? false,
-    };
-  });
-
-  const accountGroupFor = (a: { kind: string; is_kids_account?: boolean }) => {
-    if (a.is_kids_account) return "Kids Funding";
-    if (a.kind === "checking" || a.kind === "savings_bucket") return "Banking";
-    if (a.kind === "investment") return "Investments";
-    if (a.kind === "credit_card") return "Credit Cards";
-    if (a.kind === "debt_loan") return "Loans";
-    return "Other";
-  };
-  // Property accounts are a place, not somewhere money comes from: they are
-  // offered as the transaction's Property tag instead of in the account picker.
-  const cardOwed = cardOwedMap(cardOwedRows);
-  const propertyOptions: AccountOption[] = (accounts ?? [])
-    .filter((a) => a.kind === "property")
-    .map((a) => ({ id: a.id, name: a.name }));
-  const accountOptions: AccountOption[] = (accounts ?? [])
-    .filter((a) => a.kind !== "property")
-    .map((a) => ({
-      id: a.id,
-      name: a.name,
-      group: accountGroupFor(a),
-      balanceCents: pickerBalanceCents(a, cardOwed),
-    }));
-
-  // Buckets grouped by parent account, restricted to investment accounts —
-  // powers the transaction modal's Bucket picker (Fidelity → Roth IRA Vic).
-  const investmentAccountIds = new Set((accounts ?? []).filter((a) => a.kind === "investment").map((a) => a.id));
-  const bucketsByAccount: Record<string, { id: string; name: string }[]> = {};
-  for (const b of buckets ?? []) {
-    if (!investmentAccountIds.has(b.account_id)) continue;
-    (bucketsByAccount[b.account_id] ??= []).push({ id: b.id, name: b.name });
-  }
+  const accountNameById = new Map(accounts.map((a) => [a.id, a.name]));
+  const accountKindById = new Map(accounts.map((a) => [a.id, a.kind]));
 
   const transactions: TxData[] = txRows.map((t) => {
     const movementType = t.movement_type ?? (
@@ -267,21 +169,6 @@ export default async function TransactionsPage({
   });
   attachSplitParts(transactions);
 
-  const payeeLineItems: PayeeLineItem[] = [
-    ...(subscriptions ?? []).map((s) => ({
-      name: s.name,
-      amountCents: s.amount_cents,
-      subcategoryId: s.subcategory_id,
-      kind: "subscription" as const,
-    })),
-    ...(irregularBills ?? []).map((b) => ({
-      name: b.name,
-      amountCents: null,
-      subcategoryId: b.subcategory_id,
-      kind: "irregular" as const,
-    })),
-  ];
-
   return (
     <TransactionsTable
       month={{
@@ -295,7 +182,7 @@ export default async function TransactionsPage({
       accountOptions={accountOptions}
       propertyOptions={propertyOptions}
       bucketsByAccount={bucketsByAccount}
-      transferBuckets={(buckets ?? []).map((b) => ({ id: b.id, accountId: b.account_id, name: b.name }))}
+      transferBuckets={buckets.map((b) => ({ id: b.id, accountId: b.account_id, name: b.name }))}
       payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}
     />

@@ -117,6 +117,7 @@ function TransactionModalForm({
   initialIsRefund = false,
   initialMemo,
   restrictToInitialKind = false,
+  defaultTripId,
   onAddRefund,
   onClose,
 }: {
@@ -141,6 +142,8 @@ function TransactionModalForm({
   initialIsRefund?: boolean;
   initialMemo?: string;
   restrictToInitialKind?: boolean;
+  // The trip picked when none covers the date (Travel Log: the next trip).
+  defaultTripId?: string;
   // Set by the wrapper below: swaps this form for a new refund of the
   // saved purchase being edited.
   onAddRefund?: (tx: TxData) => void;
@@ -265,7 +268,7 @@ function TransactionModalForm({
   const [tripId, setTripId] = useState(editTx?.tripId ?? "");
   const [tripTouched, setTripTouched] = useState(isEdit);
   const tripForDate = trips.find((t) => t.startOn && t.endOn && dateValue >= t.startOn && dateValue <= t.endOn) ?? null;
-  const effectiveTripId = tripTouched ? tripId : tripForDate?.id ?? "";
+  const effectiveTripId = tripTouched ? tripId : tripForDate?.id ?? defaultTripId ?? "";
   // The dropdown lists trips still running this year or ahead — plus
   // whichever trip is selected, however old, so an edit never loses it.
   const thisYearStart = `${new Date().getFullYear()}-01-01`;
@@ -278,6 +281,9 @@ function TransactionModalForm({
   // Points typed beside the payment. Blank leaves the booking's own figure.
   const [bookingPoints, setBookingPoints] = useState("");
   const [bookingPointsValue, setBookingPointsValue] = useState("");
+  // Stays: free night / hotel credit set on the payment ("" = the stay's own).
+  const [bookingFreeNight, setBookingFreeNight] = useState<"" | "on" | "off">("");
+  const [bookingCredit, setBookingCredit] = useState("");
   const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? "");
   const bookingOk = bookings.some((b) => b.ref === bookingRef);
   // Which Travel Log column a trip purchase on the catch-all item
@@ -318,6 +324,8 @@ function TransactionModalForm({
     setPaxCurrency(null);
     setBookingPoints("");
     setBookingPointsValue("");
+    setBookingFreeNight("");
+    setBookingCredit("");
   }
   function editPaxRow(name: string, patch: Partial<Omit<PaxRow, "name">>) {
     clearErrors();
@@ -897,6 +905,8 @@ function TransactionModalForm({
                     <input type="hidden" name="bookingCurrency" value={flightCurrency} />
                     <input type="hidden" name="bookingPoints" value={bookingPoints} />
                     <input type="hidden" name="bookingPointsValue" value={bookingPointsValue} />
+                    <input type="hidden" name="bookingFreeNight" value={bookingFreeNight} />
+                    <input type="hidden" name="bookingCredit" value={bookingCredit} />
                     <BookingPaymentPanel
                       booking={paidBooking}
                       rows={paxRows}
@@ -914,6 +924,10 @@ function TransactionModalForm({
                       onBookingPoints={setBookingPoints}
                       pointsValue={bookingPointsValue}
                       onPointsValue={setBookingPointsValue}
+                      freeNight={bookingFreeNight}
+                      onFreeNight={setBookingFreeNight}
+                      credit={bookingCredit}
+                      onCredit={setBookingCredit}
                     />
                   </>
                 ) : null}

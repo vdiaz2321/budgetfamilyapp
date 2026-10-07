@@ -344,6 +344,7 @@ export function InvestBoard({
   const capYear = savings.capYear ?? new Date().getFullYear();
   const limitRows = savings.contributionLimits ?? [];
   const contributionRoomRows = limitRows.length;
+  const contributionLimitCents = limitRows.reduce((sum, r) => sum + r.limitCents, 0);
   const contributionRoomCents = limitRows.reduce(
     (sum, r) => sum + Math.max(0, r.limitCents - r.contributedCents),
     0,
@@ -359,7 +360,7 @@ export function InvestBoard({
             the ⋯ menu instead (registered above) — title and button don't fit
             one line on a phone, and a button row of its own pushed the numbers
             down. */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-4">
           <h1 className="text-2xl font-bold tracking-tight">Invest / Savings</h1>
           <button
             type="button"
@@ -378,8 +379,11 @@ export function InvestBoard({
             hero rather than a tile — it read "$0.00" for most of the month.
             Whole dollars: cents on six figures add noise; the table below
             keeps them. */}
-        <div className="flex flex-col rounded-2xl bg-surface px-4 shadow-sm ring-1 ring-black/5 sm:flex-row sm:items-center sm:px-5 dark:ring-white/10">
-          <div className="min-w-0 py-4 sm:flex-1 sm:pr-4">
+        {/* Three peers on one grid: same padding, label → figure → note in
+            each, all centered, so labels and figures line up across. On a
+            phone the portfolio total takes the full top row. */}
+        <div className="grid grid-cols-2 rounded-2xl bg-surface text-center shadow-sm ring-1 ring-black/5 sm:grid-cols-3 dark:ring-white/10">
+          <div className="col-span-2 min-w-0 border-b border-line px-4 py-4 sm:col-span-1 sm:border-b-0">
             {/* Named for the pool it sums, not the moment: this is investment
                 accounts only, and excludes the cash in savings buckets that the
                 Savings tab counts. "Current value" read like it might be both. */}
@@ -408,30 +412,43 @@ export function InvestBoard({
               </p>
             ) : null}
           </div>
-          <div className="grid grid-cols-2 divide-x divide-line border-t border-line sm:w-[24rem] sm:shrink-0 sm:border-l sm:border-t-0">
-            <SummaryStat label={`Contributed · ${year}`} value={formatMoneyWhole(summary.contributed, currency)} />
-            {/* Mirrors the Savings tab's limits card. Scoped to the CAP year, not
-                the selected portfolio year — the room left to contribute doesn't
-                move when you page the grid back to 2024. Replaced unrealized
-                gains, which is typed once at year end and reads $0.00 until then. */}
-            <SummaryStat
-              label={`Room left · ${capYear}`}
-              value={
-                contributionRoomRows === 0
-                  ? "—"
-                  : contributionRoomCents > 0
-                    ? formatMoneyWhole(contributionRoomCents, currency)
-                    : "All maxed"
-              }
-              tone={
-                contributionRoomRows === 0
-                  ? undefined
-                  : contributionRoomCents > 0
-                    ? "text-[color:var(--viz-savings)]"
-                    : "text-positive"
-              }
-            />
-          </div>
+          <SummaryStat
+            label={`Contributed · ${year}`}
+            value={formatMoneyWhole(summary.contributed, currency)}
+            note="into all investments"
+            className="border-r border-line sm:border-l"
+          />
+          {/* Mirrors the Savings tab's limits card: each person's TSP/401(k)
+              and IRA yearly limit minus what's gone in. Scoped to the CAP
+              year, not the selected portfolio year. Was "Room left", which
+              didn't say room for what. */}
+          <SummaryStat
+            label={`Left to max · ${capYear}`}
+            value={
+              contributionRoomRows === 0
+                ? "—"
+                : contributionRoomCents > 0
+                  ? formatMoneyWhole(contributionRoomCents, currency)
+                  : "All maxed"
+            }
+            note={
+              contributionRoomRows === 0
+                ? undefined
+                : (
+                    <>
+                      of {formatMoneyWhole(contributionLimitCents, currency)}
+                      <span className="hidden sm:inline"> TSP + IRA</span> limits
+                    </>
+                  )
+            }
+            tone={
+              contributionRoomRows === 0
+                ? undefined
+                : contributionRoomCents > 0
+                  ? "text-[color:var(--viz-savings)]"
+                  : "text-positive"
+            }
+          />
         </div>
 
         <div role="tablist" aria-label="Invest and savings views" className="flex gap-1 border-b border-line/70">
@@ -495,9 +512,6 @@ export function InvestBoard({
             <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
               <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                 <h2 className="text-sm font-bold">How it&rsquo;s taxed</h2>
-                <span className="text-sm font-semibold tabular-nums text-muted">
-                  {formatMoney(taxSplit.total, currency)} total
-                </span>
                 <p className="w-full text-xs text-muted">
                   Select a band to see what&rsquo;s in it and what it means.
                 </p>
@@ -513,7 +527,27 @@ export function InvestBoard({
                   />
                 ))}
               </div>
-              <ul className="mt-2.5 flex flex-wrap gap-1.5">
+              <ul className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                {/* Total leads the chip row in its own pill; "=" says the chips
+                    after it are what it's made of. */}
+                <li
+                  className="flex items-center gap-1.5 rounded-full px-3 py-0.5 text-sm"
+                  style={{
+                    color: "var(--viz-savings)",
+                    backgroundColor: "color-mix(in srgb, var(--viz-savings) 14%, transparent)",
+                    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--viz-savings) 40%, transparent)",
+                  }}
+                >
+                  <span className="font-medium">Total</span>
+                  <span className="font-bold tabular-nums">{formatMoney(taxSplit.total, currency)}</span>
+                </li>
+                <li
+                  aria-hidden
+                  className="hidden px-1 text-xl font-bold leading-none sm:block"
+                  style={{ color: "var(--viz-savings)" }}
+                >
+                  =
+                </li>
                 {taxSplit.rows.map((r) => {
                   const open = openTax === r.treatment;
                   return (
@@ -522,11 +556,15 @@ export function InvestBoard({
                         type="button"
                         aria-expanded={open}
                         onClick={() => setOpenTax(open ? null : r.treatment)}
-                        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition ${
-                          open
-                            ? "bg-black/10 ring-1 ring-black/15 dark:bg-white/15 dark:ring-white/20"
-                            : "bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                        }`}
+                        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition hover:brightness-95 dark:hover:brightness-125"
+                        style={{
+                          // Tinted in the band's own colour so each chip ties
+                          // back to its stretch of the bar; open = stronger.
+                          backgroundColor: `color-mix(in srgb, ${TAX_COLOR[r.treatment]} ${open ? 30 : 16}%, transparent)`,
+                          boxShadow: open
+                            ? `inset 0 0 0 1.5px ${TAX_COLOR[r.treatment]}`
+                            : `inset 0 0 0 1px color-mix(in srgb, ${TAX_COLOR[r.treatment]} 35%, transparent)`,
+                        }}
                       >
                         <span
                           className="h-2 w-2 shrink-0 rounded-full"
@@ -903,14 +941,26 @@ function TabButton({
   );
 }
 
-// A secondary figure beside the hero. The first sits flush with the card's
-// left edge on a phone (the hero above it is), and gets its own padding once
-// the pair moves beside the hero past the divider.
-function SummaryStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+// A secondary figure beside the hero, built like it (label → figure → note)
+// so the three line up across the card.
+function SummaryStat({
+  label,
+  value,
+  note,
+  tone,
+  className,
+}: {
+  label: string;
+  value: string;
+  note?: React.ReactNode;
+  tone?: string;
+  className?: string;
+}) {
   return (
-    <div className="flex min-w-0 flex-col px-3 py-3 first:pl-0 sm:px-4 sm:first:pl-4">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">{label}</p>
-      <p className={`mt-0.5 truncate text-base font-bold tabular-nums sm:text-lg ${tone ?? ""}`}>{value}</p>
+    <div className={`min-w-0 px-3 py-4 sm:px-4 ${className ?? ""}`}>
+      <p className="truncate text-[10px] font-medium uppercase text-muted sm:text-[11px] sm:tracking-wide">{label}</p>
+      <p className={`mt-0.5 truncate text-2xl font-bold tabular-nums sm:text-4xl ${tone ?? ""}`}>{value}</p>
+      {note ? <p className="mt-0.5 truncate text-xs text-muted">{note}</p> : null}
     </div>
   );
 }

@@ -777,6 +777,8 @@ export async function upsertCardDetails(formData: FormData) {
         }
       : {}),
     benefit_used_on: optDate("benefitUsedOn"),
+    // Only from a form that has the box, so an older form can't wipe it.
+    ...(formData.has("benefitBookedOn") ? { benefit_booked_on: optDate("benefitBookedOn") } : {}),
     spending_limit_cents: optCents("spendingLimit"),
     remarks: optText("remarks"),
     card_url: cardUrl,
@@ -794,6 +796,7 @@ export async function upsertCardDetails(formData: FormData) {
     if (error.code === "PGRST204") {
       const rowWithout = { ...row } as Record<string, unknown>;
       delete rowWithout.benefit_used_on;
+      delete rowWithout.benefit_booked_on;
       delete rowWithout.free_night_points_limit;
       delete rowWithout.free_night_category_max;
       delete rowWithout.rewards_category;
@@ -902,10 +905,9 @@ export async function logCreditCardRewardActivity(formData: FormData) {
       occurred_on: occurredOn,
       points_delta: adding ? points : -points,
       hotel_credit_delta_cents: 0,
-      // Never set from here. The trigger copies booked_on onto the card's
-      // benefit_used_on — the free-night certificate's "BOOKED" date — so a
-      // flight redemption carrying a date would mark that year's anniversary
-      // night as used. Only a stay sets it, through syncRewardLedger.
+      // Never set from here: booked_on is a stay's check-in, shown in the
+      // rewards log. (It no longer touches the card's free-night dates —
+      // migration 20261007160000; only Free-night stays set those.)
       booked_on: null,
       note,
     })

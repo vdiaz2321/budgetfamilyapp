@@ -331,12 +331,12 @@ function CreditCardSection({
   const isNightCert = (d: AccountData["cardDetails"]) =>
     Boolean(d && (d.freeNightPointsLimit || d.freeNightCategoryMax));
   const annualCreditCents = (d: AccountData["cardDetails"]) => d?.freeNightCreditCents ?? 0;
-  // Still spendable: nothing booked against it (benefitUsedOn is the booking),
-  // and its expiry hasn't passed. An expired benefit is no more spendable than
-  // a used one — and neither belongs in a "redeemable" total.
+  // Still spendable: nothing booked against it (a Booked-on or Check-in date
+  // is the booking), and its expiry hasn't passed. An expired benefit is no
+  // more spendable than a used one — and neither belongs in a "redeemable" total.
   const benefitLive = (d: AccountData["cardDetails"]) => {
     if (!d) return false;
-    if (d.benefitUsedOn) return false;
+    if (d.benefitUsedOn || d.benefitBookedOn) return false;
     if (d.freeNightExpiresOn && d.freeNightExpiresOn < sectionToday) return false;
     return true;
   };
@@ -2137,7 +2137,9 @@ function CreditCardPanel({
   const fnExpired = fnExpires ? fnExpires < today : false;
   // A benefit already booked against can't lapse, so it gets no countdown —
   // only one still sitting there unspent does.
-  const fnUnspent = Boolean(fnExpires) && !d?.benefitUsedOn && !fnExpired
+  // Reserved (Booked on) or stayed (Check-in): either way it's spent.
+  const certSpent = Boolean(d?.benefitUsedOn || d?.benefitBookedOn);
+  const fnUnspent = Boolean(fnExpires) && !certSpent && !fnExpired
     && Boolean(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax);
   const fnDaysLeft = fnExpires && fnUnspent ? daysUntil(fnExpires, today) : null;
   const fnUrgent = fnDaysLeft != null && fnDaysLeft <= EXPIRY_SOON_DAYS;
@@ -2179,7 +2181,7 @@ function CreditCardPanel({
   const valuePerPt = statedCentsPerPoint(d?.pointsValueMicros);
   const hasMetrics = Boolean(
     valuePerPt != null || (d && (d.currentPoints > 0 || d.freeNightCreditCents || d.freeNightPointsLimit || d.freeNightCategoryMax
-      || d.freeNightExpiresOn || d.benefitUsedOn || d.charging)),
+      || d.freeNightExpiresOn || d.benefitUsedOn || d.benefitBookedOn || d.charging)),
   );
 
   // Anniversary passed since the card was last touched. Nothing may need
@@ -2378,7 +2380,12 @@ function CreditCardPanel({
                   </span>
                 ) : null}
               </MetricCell>
-              <MetricCell label="Booked" omit={!d?.benefitUsedOn}>
+              <MetricCell label="Booked on" omit={!d?.benefitBookedOn}>
+                {d?.benefitBookedOn ? (
+                  <span className="tabular-nums font-semibold">{d.benefitBookedOn.replace(/-/g, "\u2011")}</span>
+                ) : null}
+              </MetricCell>
+              <MetricCell label="Check-in" omit={!d?.benefitUsedOn}>
                 {d?.benefitUsedOn ? (
                   <span
                     className={`tabular-nums font-semibold ${
@@ -2550,7 +2557,11 @@ function CreditCardPanel({
         <span className="text-center">
           {d?.benefitUsedOn ? (
             <span className={`inline-block whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${d.benefitUsedOn < today ? "bg-negative/10 text-negative ring-negative/30" : "bg-positive/10 text-positive ring-positive/30"}`}>
-              Booked {shortDate(d.benefitUsedOn)}
+              Check-in {shortDate(d.benefitUsedOn)}
+            </span>
+          ) : d?.benefitBookedOn ? (
+            <span className="inline-block whitespace-nowrap rounded-md bg-black/5 px-2 py-0.5 text-[11px] font-semibold text-foreground ring-1 ring-line dark:bg-white/10">
+              Booked {shortDate(d.benefitBookedOn)}
             </span>
           ) : d?.freeNightExpiresOn ? (
             <span
@@ -2568,7 +2579,7 @@ function CreditCardPanel({
             </span>
           ) : DASH_CELL}
           {/* The date itself, under the countdown tag. */}
-          {!d?.benefitUsedOn && d?.freeNightExpiresOn ? (
+          {!certSpent && d?.freeNightExpiresOn ? (
             <span className="mt-1 block text-[11px] tabular-nums text-muted">{d.freeNightExpiresOn.replace(/-/g, "\u2011")}</span>
           ) : null}
         </span>
@@ -3046,7 +3057,8 @@ function EditCreditCardForm({
               <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
               <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
               <FreeNightCapField pointsLimit={d?.freeNightPointsLimit ?? null} categoryMax={d?.freeNightCategoryMax ?? null} />
-              <LabeledInput label="Booked / check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
+              <LabeledInput label="Booked on" name="benefitBookedOn" type="date" defaultValue={d?.benefitBookedOn ?? ""} />
+              <LabeledInput label="Check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
               <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
               <label className="block">

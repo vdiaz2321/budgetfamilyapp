@@ -274,6 +274,9 @@ export type TripBookingOption = {
   usesForeign: boolean;
   /** Flights only: who is on it, each with their planned fare and points. */
   passengers: { name: string; plannedCents: number; points: number }[];
+  /** Stays only: the free-night certificate and hotel credit on the stay. */
+  freeNightUsed: boolean;
+  hotelCreditCents: number;
 };
 // One untagged purchase dated during a trip, offered by the trip popup's
 // "Match purchases" list (listTripPurchaseCandidates).
@@ -290,6 +293,10 @@ export type TripPurchaseCandidate = {
   // own column, like the transaction modal. Only travel-type items are ever
   // listed, so every candidate has a Travel Log row.
   catchAll: boolean;
+  // Already on a trip budget item (Restaurant Travel, Traveling/Trips), so
+  // tagging leaves Budget as it is. False for an everyday item (Groceries,
+  // Cash…), which tagging moves onto a trip item.
+  onTripItem: boolean;
   // A booking on this trip the payee looks like ("Four Points" → the Four
   // Points stay) — probably the booking's payment, already counted there.
   looksLike: string | null;

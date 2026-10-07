@@ -55,7 +55,10 @@ export type CardDetails = {
   // Top hotel category a free-night certificate covers (4 = "Cat 1–4", the
   // World of Hyatt night). Used instead of the points cap, never with it.
   freeNightCategoryMax: number | null;
+  // Free-night certificate: the night it pays for (check-in) and the day it
+  // was reserved. Either one set means the certificate is spent.
   benefitUsedOn: string | null;
+  benefitBookedOn: string | null;
   spendingLimitCents: number | null;
   remarks: string | null;
   isRevolvingDebt: boolean;

@@ -40,6 +40,10 @@ export function BookingPaymentPanel({
   onBookingPoints,
   pointsValue,
   onPointsValue,
+  freeNight,
+  onFreeNight,
+  credit,
+  onCredit,
 }: {
   booking: TripBookingOption;
   /** Flights: one row per passenger. Empty for stays and cars. */
@@ -61,7 +65,15 @@ export function BookingPaymentPanel({
   /** Value per point typed in cents; blank works it out from the points. */
   pointsValue: string;
   onPointsValue: (v: string) => void;
+  /** Stays: "on"/"off" once ticked here; "" keeps the stay's own. */
+  freeNight: "" | "on" | "off";
+  onFreeNight: (v: "on" | "off") => void;
+  /** Stays: hotel credit typed in dollars; "" keeps the stay's own. */
+  credit: string;
+  onCredit: (v: string) => void;
 }) {
+  const isStay = booking.ref.startsWith("stay:");
+  const nightOn = freeNight === "" ? booking.freeNightUsed : freeNight === "on";
   const isFlight = booking.ref.startsWith("flight:") && rows.length > 0;
   const splitCents = rows.reduce((sum, r) => sum + Math.max(0, displayToCents(r.cents)), 0);
   const splitForeign = rows.reduce((sum, r) => sum + Math.max(0, displayToCents(r.foreign)), 0);
@@ -228,6 +240,39 @@ export function BookingPaymentPanel({
         </label>
         <Stat label="Planned cost" value={plannedCents ? formatMoney(plannedCents) : "—"} />
         <Stat label="Pocket cost" value={formatMoney(pocketCents)} color="var(--negative)" />
+        {/* Stays: what else the booking takes off the card, so a free night
+            or credit used is recorded here and the card updates itself —
+            no trip to the card's Edit form. */}
+        {isStay ? (
+          <>
+            <div className="min-w-0">
+              <span className={label}>Free night</span>
+              <button
+                type="button"
+                aria-pressed={nightOn}
+                onClick={() => onFreeNight(nightOn ? "off" : "on")}
+                className={`mt-0.5 w-full rounded-lg px-2 py-1.5 text-sm font-semibold ring-1 transition ${
+                  nightOn
+                    ? "bg-brand text-white ring-brand"
+                    : "bg-surface text-foreground ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                }`}
+              >
+                {nightOn ? "Used" : "Not used"}
+              </button>
+            </div>
+            <label className="min-w-0">
+              <span className={label}>Hotel credit ($)</span>
+              <input
+                inputMode="decimal"
+                value={credit}
+                onChange={(e) => onCredit(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                placeholder={booking.hotelCreditCents ? centsToDisplay(booking.hotelCreditCents) : "0"}
+                className={`${box} mt-0.5`}
+              />
+            </label>
+          </>
+        ) : null}
       </div>
     </div>
   );

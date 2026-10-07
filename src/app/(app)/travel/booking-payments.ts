@@ -114,6 +114,9 @@ type PaymentRestore = {
   flight_cost_eur_cents?: number | null;
   foreign_currency?: string | null;
   points_value_micros?: number | null;
+  // Stays: the free night and hotel credit, which a payment can now set.
+  free_night_used?: boolean;
+  hotel_credit_cents?: number;
 };
 
 /** Points typed per passenger on the transaction form, by name. */
@@ -249,6 +252,9 @@ export async function syncBookingPayment(
   extra: {
     paxPoints?: PassengerPoints[] | null; paymentAccountId?: string | null;
     currency?: string | null; pointsValueMicros?: number | null;
+    // Stays: free night ticked and hotel credit typed on the payment. Null
+    // leaves the stay's own figures alone.
+    freeNightUsed?: boolean | null; hotelCreditCents?: number | null;
   } = {},
 ): Promise<string | null> {
   const { data: payments, error: payError } = await supabase
@@ -311,6 +317,10 @@ export async function syncBookingPayment(
     if (b.points_value_micros !== undefined) {
       restore.points_value_micros = (b.points_value_micros as number | null) ?? null;
     }
+    if (ref.kind === "stay") {
+      restore.free_night_used = Boolean(b.free_night_used);
+      restore.hotel_credit_cents = Number(b.hotel_credit_cents ?? 0);
+    }
     update.payment_restore = restore;
   }
 
@@ -355,6 +365,19 @@ export async function syncBookingPayment(
   }
   if (extra.pointsValueMicros != null) update.points_value_micros = extra.pointsValueMicros;
 
+  // Stays: a free night and hotel credit typed on the payment are written
+  // onto the stay, the same as its own form would. A free-night certificate
+  // draws no points (the stay form's rule), so ticking it clears them.
+  const freeNight = ref.kind === "stay" ? (extra.freeNightUsed ?? Boolean(b.free_night_used)) : false;
+  if (ref.kind === "stay" && extra.freeNightUsed != null) {
+    update.free_night_used = extra.freeNightUsed;
+    if (extra.freeNightUsed) {
+      update.points_used = false;
+      pointsTyped = null;
+    }
+  }
+  if (ref.kind === "stay" && extra.hotelCreditCents != null) update.hotel_credit_cents = extra.hotelCreditCents;
+
   // The payment says it is booked now. Points and hotel credit leave the card
   // exactly as the form's Booked switch would make them — and a points figure
   // typed on a booking already Booked moves the card by the difference.
@@ -364,8 +387,8 @@ export async function syncBookingPayment(
     const wasBooked = !b.is_estimate && accountBefore != null;
     const drawnBefore = wasBooked && b.points_used ? Number(b.points_cost ?? 0) : 0;
     const creditBefore = wasBooked && ref.kind === "stay" ? Number(b.hotel_credit_cents ?? 0) : 0;
-    const points = pointsTyped ?? (b.points_used ? Number(b.points_cost ?? 0) : 0);
-    const credit = ref.kind === "stay" ? Number(b.hotel_credit_cents ?? 0) : 0;
+    const points = freeNight ? 0 : pointsTyped ?? (b.points_used ? Number(b.points_cost ?? 0) : 0);
+    const credit = ref.kind === "stay" ? (extra.hotelCreditCents ?? Number(b.hotel_credit_cents ?? 0)) : 0;
     let activityId = (b.reward_activity_id as string | null) ?? null;
     if (b.moves_card_points && accountId && (accountId !== accountBefore || points !== drawnBefore || credit !== creditBefore)) {
       const sync = await syncRewardLedger(
@@ -395,8 +418,14 @@ export async function syncBookingPayment(
       }
       activityId = sync.activityId;
     }
-    if (ref.kind === "stay" && b.is_estimate && b.free_night_used && accountId) {
-      const stampError = await syncFreeNightStamp(supabase, householdId, null, { accountId, checkIn: b.check_in as string });
+    // The free-night certificate: stamp the card's Booked date when the
+    // stay now uses one, clear it when it no longer does (or moved card).
+    if (ref.kind === "stay") {
+      const checkIn = b.check_in as string;
+      const reservedOn = (b.reserved_on as string | null) ?? null;
+      const nightBefore = wasBooked && b.free_night_used ? { accountId: accountBefore, checkIn, reservedOn } : null;
+      const nightAfter = freeNight && accountId ? { accountId, checkIn, reservedOn } : null;
+      const stampError = await syncFreeNightStamp(supabase, householdId, nightBefore, nightAfter);
       if (stampError) return stampError;
     }
     update.is_estimate = false;
@@ -436,7 +465,7 @@ async function restoreBooking(
     const drawnNow = !b.is_estimate && b.points_used ? Number(b.points_cost ?? 0) : 0;
     const creditNow = !b.is_estimate ? credit : 0;
     const drawnThen = accountThen && !restore.is_estimate && restore.points_used ? restore.points_cost : 0;
-    const creditThen = accountThen && !restore.is_estimate ? credit : 0;
+    const creditThen = accountThen && !restore.is_estimate ? (restore.hotel_credit_cents ?? credit) : 0;
     if (b.moves_card_points && (accountThen !== accountId || drawnNow !== drawnThen || creditNow !== creditThen)) {
       const sync = await syncRewardLedger(
         supabase,
@@ -450,9 +479,16 @@ async function restoreBooking(
       if (sync.error) return `Payment removed, but the card's points couldn't be handed back: ${sync.error}`;
       activityId = sync.activityId;
     }
-    // The first payment stamped the card's free-night Booked date; undo it.
-    if (ref.kind === "stay" && restore.is_estimate && !b.is_estimate && b.free_night_used) {
-      const stampError = await syncFreeNightStamp(supabase, householdId, { accountId, checkIn: b.check_in as string }, null);
+    // Put the card's free-night Booked date back to how the stay had it
+    // before its first payment (stamped by a payment, or ticked on one).
+    if (ref.kind === "stay") {
+      const checkIn = b.check_in as string;
+      const reservedOn = (b.reserved_on as string | null) ?? null;
+      const nightNow = !b.is_estimate && b.free_night_used ? { accountId, checkIn, reservedOn } : null;
+      const nightThen = accountThen && !restore.is_estimate && (restore.free_night_used ?? Boolean(b.free_night_used))
+        ? { accountId: accountThen, checkIn, reservedOn }
+        : null;
+      const stampError = await syncFreeNightStamp(supabase, householdId, nightNow, nightThen);
       if (stampError) return stampError;
     }
   }
@@ -497,6 +533,8 @@ async function restoreBooking(
       ...(ref.kind === "flight" && restore.flight_cost_eur_cents !== undefined ? { flight_cost_eur_cents: restore.flight_cost_eur_cents } : {}),
       ...(ref.kind === "flight" && restore.foreign_currency !== undefined ? { foreign_currency: restore.foreign_currency } : {}),
       ...(restore.points_value_micros !== undefined ? { points_value_micros: restore.points_value_micros } : {}),
+      ...(ref.kind === "stay" && restore.free_night_used !== undefined ? { free_night_used: restore.free_night_used } : {}),
+      ...(ref.kind === "stay" && restore.hotel_credit_cents !== undefined ? { hotel_credit_cents: restore.hotel_credit_cents } : {}),
       payment_restore: null,
       updated_at: new Date().toISOString(),
     })

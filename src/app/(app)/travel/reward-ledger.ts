@@ -159,18 +159,32 @@ export async function syncRewardLedger(
 }
 
 // A free-night certificate is a status on the card, not points: using one
-// sets the card's Booked date to the stay's check-in. Moving the certificate
-// off a stay (unticked, another card, a new date, cancelled, deleted) clears
-// the old stamp — but only when the card still shows THIS stay's date, so a
-// date typed on the card by hand is never wiped.
+// sets the card's Check-in date to the stay's check-in, and its Booked-on
+// date to the day the stay was reserved (when the stay has one). Moving the
+// certificate off a stay (unticked, another card, a new date, cancelled,
+// deleted) clears both — but only when the card still shows THIS stay's
+// dates, so a date typed on the card by hand is never wiped.
+type Stamp = { accountId: string | null; checkIn: string; reservedOn?: string | null };
 export async function syncFreeNightStamp(
   supabase: SupabaseClient,
   householdId: string,
-  before: { accountId: string | null; checkIn: string } | null,
-  after: { accountId: string | null; checkIn: string } | null,
+  before: Stamp | null,
+  after: Stamp | null,
 ) {
-  const same = before && after && before.accountId === after.accountId && before.checkIn === after.checkIn;
+  const same = before && after && before.accountId === after.accountId && before.checkIn === after.checkIn
+    && (before.reservedOn ?? null) === (after.reservedOn ?? null);
   if (same) return null;
+  if (before?.accountId && before.reservedOn) {
+    // Booked-on first: it is only this stay's while Check-in still is.
+    const { error } = await supabase
+      .from("credit_card_details")
+      .update({ benefit_booked_on: null, updated_at: new Date().toISOString() })
+      .eq("account_id", before.accountId)
+      .eq("household_id", householdId)
+      .eq("benefit_used_on", before.checkIn)
+      .eq("benefit_booked_on", before.reservedOn);
+    if (error) return `Couldn't update the card's Booked date — ${error.message}`;
+  }
   if (before?.accountId) {
     const { error } = await supabase
       .from("credit_card_details")
@@ -183,7 +197,11 @@ export async function syncFreeNightStamp(
   if (after?.accountId) {
     const { error } = await supabase
       .from("credit_card_details")
-      .update({ benefit_used_on: after.checkIn, updated_at: new Date().toISOString() })
+      .update({
+        benefit_used_on: after.checkIn,
+        ...(after.reservedOn ? { benefit_booked_on: after.reservedOn } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq("account_id", after.accountId)
       .eq("household_id", householdId);
     if (error) return `Couldn't update the card's Booked date — ${error.message}`;

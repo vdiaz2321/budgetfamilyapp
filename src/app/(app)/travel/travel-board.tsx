@@ -21,6 +21,7 @@ import { sheetDateRange, summarizeTrips } from "./trip-summary";
 import { formatCentsPerPoint, redemptionsByCard } from "./points-value";
 import { AddTravelLogModal } from "./add-travel-log-modal";
 import { EditTripPicker } from "./edit-trip-picker";
+import { AddTransactionButton } from "./add-transaction-button";
 import { CostBars, SavedLine, type YearPoint } from "./travel-charts";
 import {
   effectivePointsValueMicros,
@@ -284,6 +285,10 @@ export function TravelBoard({
   // Everything but the Reservations list reads `live`: a cancelled booking was
   // never paid for, so it must not move a total, a chart or a tally.
   const live = useMemo(() => stays.filter((s) => !s.cancelledAt), [stays]);
+  // Money totals read `bought`: a Planned (estimate) booking isn't paid yet,
+  // so it's neither spent nor saved — counting it put the Greece placeholder's
+  // $250 into Spent and −$250 into Cash saved. Lists still show it, tagged.
+  const bought = useMemo(() => live.filter((s) => !s.isEstimate), [live]);
 
   const cardName = useMemo(
     () => new Map(cards.map((c) => [c.id, c.name])),
@@ -312,8 +317,8 @@ export function TravelBoard({
   const shownCars = carList.filter(
     (c) => inYears(year, c.pickupOn.slice(0, 4)) && (!needle || carText(c).includes(needle)),
   );
-  const flightsSpent = shownFlights.filter((f) => !f.cancelledAt).reduce((sum, f) => sum + f.pocketCostCents, 0);
-  const carsSpent = shownCars.filter((c) => !c.cancelledAt).reduce((sum, c) => sum + c.pocketCostCents, 0);
+  const flightsSpent = shownFlights.filter((f) => !f.cancelledAt && !f.isEstimate).reduce((sum, f) => sum + f.pocketCostCents, 0);
+  const carsSpent = shownCars.filter((c) => !c.cancelledAt && !c.isEstimate).reduce((sum, c) => sum + c.pocketCostCents, 0);
   const brands = useMemo(
     () => Array.from(new Set(stays.map((s) => s.brand).filter(Boolean) as string[])).sort(),
     [stays],
@@ -361,7 +366,7 @@ export function TravelBoard({
       string,
       { hotel: number; pocket: number; stays: number; points: number }
     >();
-    for (const s of live) {
+    for (const s of bought) {
       const key = stayYear(s);
       const row = map.get(key) ?? { hotel: 0, pocket: 0, stays: 0, points: 0 };
       row.hotel += s.hotelCostCents;
@@ -371,7 +376,7 @@ export function TravelBoard({
       map.set(key, row);
     }
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [live]);
+  }, [bought]);
 
   const yearPoints: YearPoint[] = useMemo(
     () => {
@@ -455,8 +460,8 @@ export function TravelBoard({
   // Stays per brand for the period the panel is set to — the sheet's brand
   // tally, and what a by-brand chart will group on.
   const tallyStays = useMemo(
-    () => live.filter((s) => inYears(tallyYear, stayYear(s))),
-    [live, tallyYear],
+    () => bought.filter((s) => inYears(tallyYear, stayYear(s))),
+    [bought, tallyYear],
   );
   const tallyTotals = useMemo(() => {
     let spent = 0, saved = 0;
@@ -505,6 +510,7 @@ export function TravelBoard({
     let hotel = 0, pocket = 0, points = 0, pointsValue = 0, nights = 0, cancelled = 0;
     for (const s of filtered) {
       if (s.cancelledAt) { cancelled += 1; continue; }
+      if (s.isEstimate) continue;
       hotel += s.hotelCostCents;
       pocket += s.pocketCostCents;
       points += spentPoints(s);
@@ -1305,6 +1311,7 @@ export function TravelBoard({
               trips={tripSummaries.map((t) => ({ ...t.trip, startOn: t.start }))}
               onPick={setOpenTripId}
             />
+            <AddTransactionButton />
             {/* Only worth showing while something still needs linking — with
                 every label pointed at a card there's nothing for it to fix, so
                 it stays out of the way until a new unlinked stay appears. */}

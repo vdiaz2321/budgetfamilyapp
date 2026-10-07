@@ -63,8 +63,10 @@ export function MatchPurchasesModal({
       .then((found) => {
         if (!alive) return;
         setRows(found);
-        // Everything starts ticked except a likely booking payment.
-        setChecked(new Set(found.filter((r) => !r.looksLike).map((r) => r.id)));
+        // Only purchases already on a trip budget item start ticked: tagging
+        // an everyday one (Groceries, Cash) moves it on Budget, and in the
+        // trip's dates those are as likely home shopping as trip spending.
+        setChecked(new Set(found.filter((r) => !r.looksLike && r.onTripItem).map((r) => r.id)));
         setColumns(Object.fromEntries(found.filter((r) => r.catchAll).map((r) => [r.id, guessColumn(r.payee)])));
       })
       .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : "Could not load the purchases."));
@@ -179,6 +181,10 @@ export function MatchPurchasesModal({
                           <span className="tabular-nums">{sheetDate(r.date)}</span> · {r.itemName}
                           {r.catchAll ? "" : ` → ${columnLabel(r.column)}`}
                         </span>
+                        {/* Its own line, so a phone's truncation can't hide it. */}
+                        {r.onTripItem ? null : (
+                          <span className="text-[11px] text-muted">Moves off {r.itemName} on Budget</span>
+                        )}
                       </span>
                       {r.catchAll ? (
                         <select

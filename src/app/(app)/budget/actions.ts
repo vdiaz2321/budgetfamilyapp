@@ -61,6 +61,9 @@ function bookingPassengersOf(formData: FormData, booking: BookingRef | null): { 
 type BookingTyped = {
   points: number | null; paxPoints: PassengerPoints[] | null; accountId: string | null; currency: string | null;
   pointsValueMicros: number | null;
+  // Stays: the free-night certificate and hotel credit, as ticked/typed on
+  // the payment. Null leaves the stay's own figure alone.
+  freeNightUsed: boolean | null; hotelCreditCents: number | null;
 };
 function bookingTypedOf(formData: FormData, booking: BookingRef | null, accountId: string | null): BookingTyped {
   return {
@@ -68,6 +71,12 @@ function bookingTypedOf(formData: FormData, booking: BookingRef | null, accountI
     paxPoints: bookingPassengersOf(formData, booking)?.points ?? null,
     accountId,
     pointsValueMicros: centsPerPointToMicros(String(formData.get("bookingPointsValue") ?? "")),
+    freeNightUsed: booking?.kind !== "stay"
+      ? null
+      : formData.get("bookingFreeNight") === "on" ? true : formData.get("bookingFreeNight") === "off" ? false : null,
+    hotelCreditCents: booking?.kind !== "stay" || !String(formData.get("bookingCredit") ?? "").trim()
+      ? null
+      : Math.max(0, displayToCents(String(formData.get("bookingCredit")))),
     // The currency a flight's foreign figures were typed in.
     currency: booking?.kind === "flight" && /^[A-Z]{3}$/.test(String(formData.get("bookingCurrency") ?? ""))
       ? String(formData.get("bookingCurrency"))
@@ -1267,7 +1276,7 @@ export async function listTripTagging(): Promise<TripTagging> {
   if (tripIds.length === 0) return { trips, bookingsByTrip: {} };
 
   const [stays, flights, cars, legs, pax, paid] = await Promise.all([
-    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, hotel_cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, hotel_cost_cents, planned_cost_cents, points_value_micros, foreign_currency, free_night_used, hotel_credit_cents").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, flight_cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_cars").select("id, trip_id, company, pickup_on, return_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flight_legs").select("flight_id, flight_on, from_place, to_place, sort_order").eq("household_id", householdId).order("sort_order"),
@@ -1333,9 +1342,17 @@ export async function listTripTagging(): Promise<TripTagging> {
     foreignCurrency: b.foreign_currency ?? "",
     usesForeign: false,
     passengers: [] as { name: string; plannedCents: number; points: number }[],
+    freeNightUsed: false,
+    hotelCreditCents: 0,
   });
   const rows = [
-    ...(stays.data ?? []).map((s) => ({ on: s.check_in, label: `Stay · ${s.property_name} · ${day(s.check_in)}`, ...base(`stay:${s.id}`, s, s.hotel_cost_cents) })),
+    ...(stays.data ?? []).map((s) => ({
+      on: s.check_in,
+      label: `Stay · ${s.property_name} · ${day(s.check_in)}`,
+      ...base(`stay:${s.id}`, s, s.hotel_cost_cents),
+      freeNightUsed: Boolean(s.free_night_used),
+      hotelCreditCents: Number(s.hotel_credit_cents ?? 0),
+    })),
     ...(flights.data ?? []).map((f) => ({
       on: f.first_flight_on,
       label: ["Flight", f.airline, routeFor.get(f.id), day(f.first_flight_on)].filter(Boolean).join(" · "),
@@ -1348,6 +1365,18 @@ export async function listTripTagging(): Promise<TripTagging> {
     })),
     ...(cars.data ?? []).map((c) => ({ on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, ...base(`car:${c.id}`, c, c.cost_cents) })),
   ].sort((a, b) => a.on.localeCompare(b.on));
+  // Two bookings with the same label (two Four Points rooms on one night)
+  // read apart by what each cost: its points, else its cash.
+  const labelCount = new Map<string, number>();
+  for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1);
+  for (const r of rows) {
+    if ((labelCount.get(r.label) ?? 0) < 2) continue;
+    const cash = r.pocketCents || r.costCents;
+    const detail = r.pointsUsed && r.pointsCost
+      ? `${r.pointsCost.toLocaleString("en-US")} pts`
+      : cash ? `$${(cash / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
+    if (detail) r.label = `${r.label} · ${detail}`;
+  }
   const bookingsByTrip: TripTagging["bookingsByTrip"] = {};
   for (const { on: _on, tripId, ...r } of rows) (bookingsByTrip[tripId] ??= []).push(r);
 
@@ -1471,13 +1500,14 @@ export async function listTripPurchaseCandidates(
   const trip = await resolveTripTag(supabase, householdId, tripId);
   if (!trip || !ISO_DAY.test(from) || !ISO_DAY.test(to)) return [];
 
-  const [rows, stays, flights, cars] = await Promise.all([
+  const [rows, stays, flights, cars, tripRow] = await Promise.all([
     loadTripCandidates(supabase, householdId, from, to),
-    supabase.from("travel_stays").select("property_name, brand").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
+    supabase.from("travel_stays").select("property_name, brand, city").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
     supabase.from("travel_flights").select("airline").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
     supabase.from("travel_cars").select("company").eq("household_id", householdId).eq("trip_id", trip).is("cancelled_at", null),
+    supabase.from("travel_trips").select("name").eq("household_id", householdId).eq("id", trip).maybeSingle(),
   ]);
-  const problem = stays.error ?? flights.error ?? cars.error;
+  const problem = stays.error ?? flights.error ?? cars.error ?? tripRow.error;
   if (problem) throw new Error(`Could not load the trip's bookings: ${problem.message}`);
 
   // A payee sharing a real word (4+ letters) with one of the trip's bookings
@@ -1490,9 +1520,17 @@ export async function listTripPurchaseCandidates(
     ...(cars.data ?? []).map((c) => ({ name: c.company, column: "Rental" as const })),
   ].filter((b): b is { name: string; column: "Hotels" | "Flights" | "Rental" } => Boolean(b.name));
   const words = (text: string) => text.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4);
+  // Place names don't count: "Munich dachu" (a Dachau ticket) shares only
+  // "munich" with Hilton Munich City West, and every purchase on a trip can
+  // carry the trip's town. The trip's own name and the hotels' cities are
+  // dropped, so a match needs the brand or property ("Four Points", "Hilton").
+  const places = new Set([
+    ...words(tripRow.data?.name ?? ""),
+    ...(stays.data ?? []).flatMap((s) => words(s.city ?? "")),
+  ]);
   const looksLike = (payee: string | null) => {
     if (!payee) return null;
-    const mine = new Set(words(payee));
+    const mine = new Set(words(payee).filter((w) => !places.has(w)));
     return bookingNames.find((b) => words(b.name).some((w) => mine.has(w))) ?? null;
   };
 
@@ -1509,6 +1547,7 @@ export async function listTripPurchaseCandidates(
       column: sub.travel_category ?? "other",
       // Traveling/Trips itself: the purchase picks its own column.
       catchAll: sub.travel_category === "other",
+      onTripItem: sub.receives_trip_plans ?? false,
       looksLike: booking?.name ?? null,
       looksLikeColumn: booking?.column ?? null,
     };
@@ -1618,6 +1657,8 @@ async function syncBookings(
       paymentAccountId: mine?.accountId ?? null,
       currency: mine?.currency ?? null,
       pointsValueMicros: mine?.pointsValueMicros ?? null,
+      freeNightUsed: mine?.freeNightUsed ?? null,
+      hotelCreditCents: mine?.hotelCreditCents ?? null,
     });
     if (problem) {
       console.error("[syncBookingPayment]", problem);

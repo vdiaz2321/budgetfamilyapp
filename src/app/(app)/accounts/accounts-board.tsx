@@ -2866,7 +2866,8 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 <LabeledInput label="Total Hotel Credits Anv" name="freeNightCredit" type="number" step="0.01" prefix="$" />
                 <LabeledInput label="Free Night / Credits Exp" name="freeNightExpires" type="date" />
                 <FreeNightCapField pointsLimit={null} categoryMax={null} />
-                <LabeledInput label="Booked" name="benefitUsedOn" type="date" />
+                <LabeledInput label="Booked on" name="benefitBookedOn" type="date" />
+                <LabeledInput label="Check-in" name="benefitUsedOn" type="date" />
                 <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" />
                 <LabeledInput label="Card URL" name="cardUrl" type="url" placeholder="https://issuer.com/card" />
                 <label className="block">
