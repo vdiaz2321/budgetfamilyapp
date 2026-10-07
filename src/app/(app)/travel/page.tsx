@@ -216,7 +216,7 @@ export default async function TravelPage() {
     plannedCostCents: s.planned_cost_cents == null ? null : Number(s.planned_cost_cents),
     plannedCostForeignCents: s.planned_cost_foreign_cents == null ? null : Number(s.planned_cost_foreign_cents),
     costForeignCents: s.cost_foreign_cents == null ? null : Number(s.cost_foreign_cents),
-    foreignCurrency: s.foreign_currency ?? "EUR",
+    foreignCurrency: s.foreign_currency ?? "",
   }));
 
   const flightRows: TravelFlight[] = (flights.data ?? []).map((f) => ({
@@ -238,7 +238,7 @@ export default async function TravelPage() {
     isEstimate: f.is_estimate ?? false,
     plannedCostCents: f.planned_cost_cents == null ? null : Number(f.planned_cost_cents),
     plannedCostForeignCents: f.planned_cost_foreign_cents == null ? null : Number(f.planned_cost_foreign_cents),
-    foreignCurrency: f.foreign_currency ?? "EUR",
+    foreignCurrency: f.foreign_currency ?? "",
     pocketCostCents: Number(f.pocket_cost_cents ?? 0),
     paidCents: paidFor(`flight:${f.id}`),
     remarks: f.remarks ?? null,
@@ -294,7 +294,7 @@ export default async function TravelPage() {
     isEstimate: c.is_estimate ?? false,
     plannedCostCents: c.planned_cost_cents == null ? null : Number(c.planned_cost_cents),
     plannedCostForeignCents: c.planned_cost_foreign_cents == null ? null : Number(c.planned_cost_foreign_cents),
-    foreignCurrency: c.foreign_currency ?? "EUR",
+    foreignCurrency: c.foreign_currency ?? "",
     pocketCostCents: Number(c.pocket_cost_cents ?? 0),
     paidCents: paidFor(`car:${c.id}`),
     remarks: c.remarks ?? null,
@@ -310,7 +310,7 @@ export default async function TravelPage() {
         startOn: t.start_on ?? null,
         endOn: t.end_on ?? null,
         notes: t.notes ?? null,
-        spendingCurrency: t.spending_currency ?? "EUR",
+        spendingCurrency: t.spending_currency ?? "",
       }))}
       expenses={expenseRows}
       cars={carRows}

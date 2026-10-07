@@ -259,6 +259,21 @@ export type TripBookingOption = {
   pointsCost: number;
   pointsUsed: boolean;
   hasCard: boolean;
+  /** The card on the booking, if one is linked. */
+  accountId: string | null;
+  /** What the booking costs in cash (a flight's fares added up) and its plan. */
+  costCents: number;
+  plannedCents: number | null;
+  /** The value per point saved on the booking, in micros (1¢ = 10,000). */
+  pointsValueMicros: number | null;
+  /** Every transaction already paying for it, with a flight's split per passenger. */
+  payments: { txId: string; amountCents: number; shares: { name: string; cents: number; foreignCents?: number | null }[] | null }[];
+  /** The booking's second currency (its popup's "other currency"). */
+  foreignCurrency: string;
+  /** Flights: true when any figure is in that currency, so its column shows. */
+  usesForeign: boolean;
+  /** Flights only: who is on it, each with their planned fare and points. */
+  passengers: { name: string; plannedCents: number; points: number }[];
 };
 // One untagged purchase dated during a trip, offered by the trip popup's
 // "Match purchases" list (listTripPurchaseCandidates).

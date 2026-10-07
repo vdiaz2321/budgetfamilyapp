@@ -1,5 +1,6 @@
 import type { createClient } from "@/lib/supabase/server";
 import { syncFreeNightStamp, syncRewardLedger } from "./reward-ledger";
+import { parseShares, shareOut } from "@/lib/share-out";
 
 // Not a "use server" file: only the transaction actions call this.
 
@@ -100,9 +101,117 @@ type PaymentRestore = {
   points_cost: number;
   points_used: boolean;
   reward_activity_id: string | null;
-  // Flights: each passenger's points, since a typed points figure rewrites them.
-  passengers?: Array<{ id: string; points_used: boolean; points_cost: number }>;
+  // The card on the booking — a payment on a card links it when none was.
+  account_id?: string | null;
+  // Flights: each passenger's points and Spent figures, since payments
+  // rewrite them, and the fares added up. Matched back by name too: saving
+  // the flight form rewrites the passenger rows with new ids.
+  flight_cost_cents?: number;
+  passengers?: Array<{
+    id: string; name?: string; points_used: boolean; points_cost: number;
+    fare_cents?: number; cash_paid_cents?: number | null; fare_eur_cents?: number | null;
+  }>;
+  flight_cost_eur_cents?: number | null;
+  foreign_currency?: string | null;
+  points_value_micros?: number | null;
 };
+
+/** Points typed per passenger on the transaction form, by name. */
+export type PassengerPoints = { name: string; points: number };
+
+type PaxRow = {
+  id: string; name: string; sort_order: number; fare_cents: number; fare_eur_cents: number | null; planned_fare_cents: number | null;
+  points_used: boolean; points_cost: number; cash_paid_cents: number | null;
+};
+type Seat = {
+  id: string; points_used: boolean; points_cost: number; fare_cents: number; cash_paid_cents: number | null;
+  // Left out when no payment gave a foreign figure, so a typed one stays.
+  fare_eur_cents?: number | null;
+};
+
+/**
+ * Each passenger's seat as the payments linked to the flight make it. Every
+ * payment is shared out by the split saved on it (scaled to its amount, so a
+ * split purchase's parts and a refund each take their share), or — saved
+ * before splits existed — by the passengers' planned fares. A cash seat's
+ * Spent fare is its share; a points seat keeps its fare (what the seat would
+ * have cost, which values the points) and its share is the cash paid on top.
+ * Points typed on the form replace a passenger's points; the rest keep theirs.
+ */
+function flightSeats(
+  pax: PaxRow[],
+  payments: Array<{ amount_cents: number; booking_passengers?: unknown }>,
+  paxPoints: PassengerPoints[] | null,
+): Seat[] {
+  const key = (n: string) => n.trim().toLowerCase();
+  const paid = pax.map(() => 0);
+  const paidForeign = pax.map(() => 0);
+  let anyForeign = false;
+  for (const tx of payments) {
+    const shares = parseShares(tx.booking_passengers);
+    let weights = pax.map(() => 0);
+    const foreign = pax.map(() => 0);
+    if (shares) {
+      const used = new Set<number>();
+      shares.forEach((s, j) => {
+        let i = pax.findIndex((p, n) => !used.has(n) && key(p.name) === key(s.name));
+        // A passenger renamed since: the same place in the list.
+        if (i < 0 && j < pax.length && !used.has(j)) i = j;
+        if (i < 0) return;
+        used.add(i);
+        weights[i] = s.cents;
+        if (s.foreignCents != null) {
+          foreign[i] = s.foreignCents;
+          anyForeign = true;
+        }
+      });
+    }
+    // The foreign figures are what was typed for the whole purchase; a split
+    // part or a refund takes its share of them, as of the dollars.
+    const typedCents = weights.reduce((a, b) => a + b, 0);
+    if (typedCents > 0) {
+      const scale = Number(tx.amount_cents) / typedCents;
+      foreign.forEach((f, i) => (paidForeign[i] += Math.round(f * scale)));
+    }
+    if (!weights.some((w) => w > 0)) weights = pax.map((p) => Number(p.planned_fare_cents ?? p.fare_cents ?? 0));
+    shareOut(Number(tx.amount_cents), weights).forEach((c, i) => (paid[i] += c));
+  }
+  const typed = new Map((paxPoints ?? []).map((p) => [key(p.name), p.points]));
+  return pax.map((p, i) => {
+    const points = typed.get(key(p.name)) ?? (p.points_used ? Number(p.points_cost ?? 0) : 0);
+    const onPoints = points > 0;
+    const share = Math.max(0, paid[i]);
+    return {
+      id: p.id,
+      points_used: onPoints,
+      points_cost: points,
+      fare_cents: onPoints ? Number(p.planned_fare_cents ?? p.fare_cents ?? 0) : share,
+      cash_paid_cents: onPoints ? share || null : null,
+      ...(anyForeign ? { fare_eur_cents: Math.max(0, paidForeign[i]) || null } : {}),
+    };
+  });
+}
+
+async function saveSeats(supabase: SupabaseClient, householdId: string, seats: Seat[]): Promise<string | null> {
+  for (const { id, ...seat } of seats) {
+    const { error } = await supabase.from("travel_flight_passengers").update(seat).eq("id", id).eq("household_id", householdId);
+    if (error) return `Couldn't save the passengers' fares — ${error.message}`;
+  }
+  return null;
+}
+
+/** The account, when it is a credit card — the only kind a booking is put on. */
+async function cardAccount(supabase: SupabaseClient, householdId: string, accountId: string | null | undefined) {
+  if (!accountId) return null;
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id, kind")
+    .eq("id", accountId)
+    .eq("household_id", householdId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the payment's card: ${error.message}`);
+  return data?.kind === "credit_card" ? (data.id as string) : null;
+}
 
 // What the card's rewards ledger calls this booking.
 function ledgerMeta(kind: BookingKind, b: Record<string, unknown>) {
@@ -133,10 +242,18 @@ export async function syncBookingPayment(
   // points figure, so the Travel Log never has to be visited for them.
   // Null leaves the booking's own points figure alone.
   pointsTyped: number | null = null,
+  // Flights: points typed per passenger. Any booking: the card the payment
+  // was on, linked to the booking when it has no card yet.
+  // Also a flight's currency for the foreign figures, and a value per point
+  // typed on the form (kept over the worked-out one).
+  extra: {
+    paxPoints?: PassengerPoints[] | null; paymentAccountId?: string | null;
+    currency?: string | null; pointsValueMicros?: number | null;
+  } = {},
 ): Promise<string | null> {
   const { data: payments, error: payError } = await supabase
     .from("transactions")
-    .select("amount_cents")
+    .select("amount_cents, booking_passengers")
     .eq("household_id", householdId)
     .eq(BOOKING_COLUMN[ref.kind], ref.id);
   if (payError) return `Couldn't read the booking's payments — ${payError.message}`;
@@ -159,6 +276,19 @@ export async function syncBookingPayment(
 
   const update: Record<string, unknown> = { pocket_cost_cents: paid, updated_at: new Date().toISOString() };
 
+  // Flights: every passenger's seat, rebuilt from the payments below.
+  let pax: PaxRow[] = [];
+  if (ref.kind === "flight") {
+    const { data, error: paxError } = await supabase
+      .from("travel_flight_passengers")
+      .select("id, name, sort_order, fare_cents, fare_eur_cents, planned_fare_cents, points_used, points_cost, cash_paid_cents")
+      .eq("flight_id", ref.id)
+      .eq("household_id", householdId)
+      .order("sort_order");
+    if (paxError) return `Couldn't read the flight's passengers — ${paxError.message}`;
+    pax = (data ?? []) as PaxRow[];
+  }
+
   // First payment on a booking whose figures are the user's: remember them.
   if (b.payment_restore == null) {
     const restore: PaymentRestore = {
@@ -167,60 +297,81 @@ export async function syncBookingPayment(
       points_cost: Number(b.points_cost ?? 0),
       points_used: Boolean(b.points_used),
       reward_activity_id: (b.reward_activity_id as string | null) ?? null,
+      account_id: (b.account_id as string | null) ?? null,
     };
     if (ref.kind === "flight") {
-      const { data: pax, error: paxError } = await supabase
-        .from("travel_flight_passengers")
-        .select("id, points_used, points_cost")
-        .eq("flight_id", ref.id)
-        .eq("household_id", householdId);
-      if (paxError) return `Couldn't read the flight's passengers — ${paxError.message}`;
-      restore.passengers = (pax ?? []).map((p) => ({ id: p.id, points_used: Boolean(p.points_used), points_cost: Number(p.points_cost ?? 0) }));
+      restore.flight_cost_cents = Number(b.flight_cost_cents ?? 0);
+      restore.flight_cost_eur_cents = (b.flight_cost_eur_cents as number | null) ?? null;
+      restore.foreign_currency = (b.foreign_currency as string | null | undefined) ?? null;
+      restore.passengers = pax.map((p) => ({
+        id: p.id, name: p.name, points_used: Boolean(p.points_used), points_cost: Number(p.points_cost ?? 0),
+        fare_cents: Number(p.fare_cents ?? 0), cash_paid_cents: p.cash_paid_cents, fare_eur_cents: p.fare_eur_cents,
+      }));
+    }
+    if (b.points_value_micros !== undefined) {
+      restore.points_value_micros = (b.points_value_micros as number | null) ?? null;
     }
     update.payment_restore = restore;
   }
 
+  // A booking with no card takes the card this payment was made on, so its
+  // points come off the card that paid.
+  let accountId = (b.account_id as string | null) ?? null;
+  if (!accountId && !b.cancelled_at) {
+    const card = await cardAccount(supabase, householdId, extra.paymentAccountId);
+    if (card) {
+      accountId = card;
+      update.account_id = card;
+    }
+  }
+
+  // A flight's points are its passengers' points added up, and its cost
+  // their fares added up — the same rule the flight form saves by.
+  // (A flight with no passengers on record keeps its own figures.)
+  const isFlight = ref.kind === "flight" && pax.length > 0;
+  const seats = isFlight ? flightSeats(pax, payments, extra.paxPoints ?? null) : [];
+  if (isFlight) {
+    const points = seats.reduce((sum, p) => sum + p.points_cost, 0);
+    const pointsFares = seats.reduce((sum, p) => sum + (p.points_used ? p.fare_cents : 0), 0);
+    pointsTyped = points;
+    update.flight_cost_cents = seats.reduce((sum, p) => sum + p.fare_cents, 0);
+    if (seats.some((p) => p.fare_eur_cents !== undefined)) {
+      update.flight_cost_eur_cents = seats.some((p) => p.fare_eur_cents != null)
+        ? seats.reduce((sum, p) => sum + (p.fare_eur_cents ?? 0), 0)
+        : null;
+      if (extra.currency) update.foreign_currency = extra.currency;
+    }
+    // The value per point follows the points, unless one was typed by hand.
+    const oldPoints = Number(b.points_cost ?? 0);
+    const oldFares = pax.reduce((sum, p) => sum + (p.points_used ? Number(p.fare_cents ?? 0) : 0), 0);
+    const oldImplied = oldPoints > 0 && oldFares > 0 ? Math.round((oldFares / oldPoints) * 10_000) : null;
+    if (b.points_value_micros == null || Number(b.points_value_micros) === oldImplied) {
+      update.points_value_micros = points > 0 && pointsFares > 0 ? Math.round((pointsFares / points) * 10_000) : null;
+    }
+  }
   if (pointsTyped != null) {
     update.points_cost = pointsTyped;
     update.points_used = pointsTyped > 0;
-    // A flight's points are its passengers' points added up; the form
-    // rebuilds the total from them on its next save, so the typed figure
-    // goes on the first passenger and the rest are cleared.
-    if (ref.kind === "flight") {
-      const { data: pax, error: paxError } = await supabase
-        .from("travel_flight_passengers")
-        .select("id, sort_order")
-        .eq("flight_id", ref.id)
-        .eq("household_id", householdId)
-        .order("sort_order");
-      if (paxError) return `Couldn't read the flight's passengers — ${paxError.message}`;
-      for (const [i, p] of (pax ?? []).entries()) {
-        const { error: paxSave } = await supabase
-          .from("travel_flight_passengers")
-          .update({ points_used: i === 0 && pointsTyped > 0, points_cost: i === 0 ? pointsTyped : 0 })
-          .eq("id", p.id)
-          .eq("household_id", householdId);
-        if (paxSave) return `Couldn't set the flight's points — ${paxSave.message}`;
-      }
-    }
   }
+  if (extra.pointsValueMicros != null) update.points_value_micros = extra.pointsValueMicros;
 
   // The payment says it is booked now. Points and hotel credit leave the card
   // exactly as the form's Booked switch would make them — and a points figure
   // typed on a booking already Booked moves the card by the difference.
   if (!b.cancelled_at) {
-    const accountId = (b.account_id as string | null) ?? null;
-    const wasBooked = !b.is_estimate;
+    // The card that drew before: none, when this payment just linked one.
+    const accountBefore = (b.account_id as string | null) ?? null;
+    const wasBooked = !b.is_estimate && accountBefore != null;
     const drawnBefore = wasBooked && b.points_used ? Number(b.points_cost ?? 0) : 0;
     const creditBefore = wasBooked && ref.kind === "stay" ? Number(b.hotel_credit_cents ?? 0) : 0;
     const points = pointsTyped ?? (b.points_used ? Number(b.points_cost ?? 0) : 0);
     const credit = ref.kind === "stay" ? Number(b.hotel_credit_cents ?? 0) : 0;
     let activityId = (b.reward_activity_id as string | null) ?? null;
-    if (b.moves_card_points && accountId && (points !== drawnBefore || credit !== creditBefore)) {
+    if (b.moves_card_points && accountId && (accountId !== accountBefore || points !== drawnBefore || credit !== creditBefore)) {
       const sync = await syncRewardLedger(
         supabase,
         householdId,
-        { accountId, points: drawnBefore, credit: creditBefore },
+        { accountId: accountBefore, points: drawnBefore, credit: creditBefore },
         { accountId, points, credit },
         ledgerMeta(ref.kind, b),
         activityId,
@@ -228,10 +379,17 @@ export async function syncBookingPayment(
       );
       if (sync.error) {
         // The card can't cover it: keep the payment and the pocket cost,
-        // leave the booking's status and points as they were, and say why.
+        // leave the booking's card, status and points as they were, and say
+        // why. Each passenger's Spent figure still follows the payments.
         const { pocket_cost_cents, updated_at, payment_restore } = update;
         const partialUpdate: Record<string, unknown> = { pocket_cost_cents, updated_at };
         if (payment_restore !== undefined) partialUpdate.payment_restore = payment_restore;
+        if (isFlight) {
+          const cashOnly = flightSeats(pax, payments, null);
+          const seatError = await saveSeats(supabase, householdId, cashOnly);
+          if (seatError) return seatError;
+          partialUpdate.flight_cost_cents = cashOnly.reduce((sum, p) => sum + p.fare_cents, 0);
+        }
         const { error: partial } = await supabase.from(TABLE[ref.kind]).update(partialUpdate).eq("id", ref.id).eq("household_id", householdId);
         return partial ? `Couldn't update that booking — ${partial.message}` : `Paid, but the points weren't taken: ${sync.error}`;
       }
@@ -243,6 +401,11 @@ export async function syncBookingPayment(
     }
     update.is_estimate = false;
     update.reward_activity_id = activityId;
+  }
+
+  if (isFlight) {
+    const seatError = await saveSeats(supabase, householdId, seats);
+    if (seatError) return seatError;
   }
 
   const { error: saveError } = await supabase.from(TABLE[ref.kind]).update(update).eq("id", ref.id).eq("household_id", householdId);
@@ -264,20 +427,22 @@ async function restoreBooking(
   restore: PaymentRestore,
 ): Promise<string | null> {
   const accountId = (b.account_id as string | null) ?? null;
+  // The card it had before: none, when the first payment linked this one.
+  const accountThen = restore.account_id !== undefined ? restore.account_id : accountId;
   let activityId = (b.reward_activity_id as string | null) ?? null;
 
   if (!b.cancelled_at && accountId) {
     const credit = ref.kind === "stay" ? Number(b.hotel_credit_cents ?? 0) : 0;
     const drawnNow = !b.is_estimate && b.points_used ? Number(b.points_cost ?? 0) : 0;
     const creditNow = !b.is_estimate ? credit : 0;
-    const drawnThen = !restore.is_estimate && restore.points_used ? restore.points_cost : 0;
-    const creditThen = !restore.is_estimate ? credit : 0;
-    if (b.moves_card_points && (drawnNow !== drawnThen || creditNow !== creditThen)) {
+    const drawnThen = accountThen && !restore.is_estimate && restore.points_used ? restore.points_cost : 0;
+    const creditThen = accountThen && !restore.is_estimate ? credit : 0;
+    if (b.moves_card_points && (accountThen !== accountId || drawnNow !== drawnThen || creditNow !== creditThen)) {
       const sync = await syncRewardLedger(
         supabase,
         householdId,
         { accountId, points: drawnNow, credit: creditNow },
-        { accountId, points: drawnThen, credit: creditThen },
+        { accountId: accountThen, points: drawnThen, credit: creditThen },
         ledgerMeta(ref.kind, b),
         activityId,
         SPEND_TYPE[ref.kind],
@@ -293,11 +458,27 @@ async function restoreBooking(
   }
 
   if (ref.kind === "flight" && restore.passengers) {
+    const { data: now, error: paxError } = await supabase
+      .from("travel_flight_passengers")
+      .select("id, name")
+      .eq("flight_id", ref.id)
+      .eq("household_id", householdId);
+    if (paxError) return `Couldn't read the flight's passengers — ${paxError.message}`;
+    const byName = (name: string | undefined) =>
+      name ? (now ?? []).find((n) => n.name.trim().toLowerCase() === name.trim().toLowerCase()) : undefined;
     for (const p of restore.passengers) {
+      // By id, or by name once the flight form has saved new passenger rows.
+      const row = (now ?? []).find((n) => n.id === p.id) ?? byName(p.name);
+      if (!row) continue;
       const { error: paxSave } = await supabase
         .from("travel_flight_passengers")
-        .update({ points_used: p.points_used, points_cost: p.points_cost })
-        .eq("id", p.id)
+        .update({
+          points_used: p.points_used,
+          points_cost: p.points_cost,
+          ...(p.fare_cents !== undefined ? { fare_cents: p.fare_cents, cash_paid_cents: p.cash_paid_cents ?? null } : {}),
+          ...(p.fare_eur_cents !== undefined ? { fare_eur_cents: p.fare_eur_cents } : {}),
+        })
+        .eq("id", row.id)
         .eq("household_id", householdId);
       if (paxSave) return `Couldn't put the flight's points back — ${paxSave.message}`;
     }
@@ -311,6 +492,11 @@ async function restoreBooking(
       points_cost: restore.points_cost,
       points_used: restore.points_used,
       reward_activity_id: activityId,
+      ...(restore.account_id !== undefined ? { account_id: restore.account_id } : {}),
+      ...(ref.kind === "flight" && restore.flight_cost_cents !== undefined ? { flight_cost_cents: restore.flight_cost_cents } : {}),
+      ...(ref.kind === "flight" && restore.flight_cost_eur_cents !== undefined ? { flight_cost_eur_cents: restore.flight_cost_eur_cents } : {}),
+      ...(ref.kind === "flight" && restore.foreign_currency !== undefined ? { foreign_currency: restore.foreign_currency } : {}),
+      ...(restore.points_value_micros !== undefined ? { points_value_micros: restore.points_value_micros } : {}),
       payment_restore: null,
       updated_at: new Date().toISOString(),
     })

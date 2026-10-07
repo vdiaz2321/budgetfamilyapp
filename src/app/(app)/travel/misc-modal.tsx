@@ -107,8 +107,13 @@ export function MiscModal({
   const endOn = dates ? dates.endOn : ownEndOn;
   const [rows, setRows] = useState<Row[]>(() => rowsFor(trip.tripId, expenses));
   // The currency the second Planned / Spent columns are in — one per trip.
-  const [foreignCurrency, setForeignCurrency] = useState(current?.spendingCurrency ?? "EUR");
+  // Blank is None: dollars only, no second-currency columns.
+  const [foreignCurrency, setForeignCurrency] = useState(current?.spendingCurrency ?? "");
   const fx = foreignSymbol(foreignCurrency);
+  const showFx = Boolean(foreignCurrency);
+  // Category, then Planned / Spent / Difference — each in dollars and, with a
+  // currency picked, that currency too.
+  const COLS = showFx ? "sm:grid-cols-[8.5rem_repeat(6,minmax(0,1fr))]" : "sm:grid-cols-[8.5rem_repeat(3,minmax(0,1fr))]";
   // The field the currency converter fills: the one last clicked into.
   const focused = useRef<{ category: ExpenseCategory; slot: Slot } | null>(null);
 
@@ -119,7 +124,7 @@ export function MiscModal({
       setRows(rowsFor(next.tripId, expenses));
       setStartOn(t?.startOn ?? "");
       setEndOn(t?.endOn ?? "");
-      setForeignCurrency(t?.spendingCurrency ?? "EUR");
+      setForeignCurrency(t?.spendingCurrency ?? "");
     }
     setTripChoice(next);
   }
@@ -132,7 +137,7 @@ export function MiscModal({
         const loaded = rowsFor(trip.tripId, expenses);
         const datesUntouched =
           (dates != null || (startOn === (current?.startOn ?? "") && endOn === (current?.endOn ?? ""))) &&
-          foreignCurrency === (current?.spendingCurrency ?? "EUR");
+          foreignCurrency === (current?.spendingCurrency ?? "");
         return (
           datesUntouched && rows.every((r, i) => JSON.stringify(r) === JSON.stringify(loaded[i]))
         );
@@ -284,17 +289,17 @@ export function MiscModal({
 
           {/* Two-level header, the same as the flight form: Planned and Spent
               each span their two columns, with the currency under each. */}
-          <div className="hidden grid-cols-[8.5rem_repeat(6,minmax(0,1fr))] items-end gap-x-2 gap-y-1 pb-1.5 text-center text-[11px] font-bold uppercase tracking-wide sm:grid">
+          <div className={`hidden ${COLS} items-end gap-x-2 gap-y-1 pb-1.5 text-center text-[11px] font-bold uppercase tracking-wide sm:grid`}>
             <span className="row-span-2 self-end pb-0.5 text-left text-muted">Category</span>
-            <span className="col-span-2 border-b-2 border-line pb-0.5 text-muted">Planned</span>
-            <span className="col-span-2 border-b-2 border-sky-400 pb-0.5 text-foreground dark:border-sky-500">Spent</span>
-            <span className="col-span-2 border-b-2 border-line pb-0.5 text-muted">Difference</span>
+            <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-line pb-0.5 text-muted`}>Planned</span>
+            <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-sky-400 pb-0.5 text-foreground dark:border-sky-500`}>Spent</span>
+            <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-line pb-0.5 text-muted`}>Difference</span>
             <span className="font-semibold text-muted">{usdHead}</span>
-            <span className="font-semibold text-muted">{fxHead}</span>
+            {showFx ? <span className="font-semibold text-muted">{fxHead}</span> : null}
             <span className="font-semibold text-foreground">{usdHead}</span>
-            <span className="font-semibold text-foreground">{fxHead}</span>
+            {showFx ? <span className="font-semibold text-foreground">{fxHead}</span> : null}
             <span className="font-semibold text-muted">{usdHead}</span>
-            <span className="font-semibold text-muted">{fxHead}</span>
+            {showFx ? <span className="font-semibold text-muted">{fxHead}</span> : null}
           </div>
           <ul className="space-y-2">
             {/* From the trip's own bookings, not typed here — shown so the
@@ -303,20 +308,20 @@ export function MiscModal({
             {bookedRows.map((b) => (
               <li
                 key={b.label}
-                className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[8.5rem_repeat(6,minmax(0,1fr))] sm:items-center sm:rounded-none sm:bg-transparent sm:p-0 sm:ring-0"
+                className={`grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line ${COLS} sm:items-center sm:rounded-none sm:bg-transparent sm:p-0 sm:ring-0`}
               >
                 <span className="col-span-2 flex items-baseline gap-2 text-sm font-semibold sm:col-span-1">
                   {b.label}
                   <span className="text-[10px] font-normal uppercase tracking-wide text-muted">Booked</span>
                 </span>
                 <BookedCell label={`Planned (${currencySymbol(currency)})`} value={b.planned ? formatMoneyWhole(b.planned, currency) : "—"} />
-                <BookedCell label={`Planned (${fx})`} value={b.fx.planned ? formatForeignWhole(b.fx.planned, foreignCurrency) : "—"} />
+                {showFx ? <BookedCell label={`Planned (${fx})`} value={b.fx.planned ? formatForeignWhole(b.fx.planned, foreignCurrency) : "—"} /> : null}
                 <BookedCell label={`Spent (${currencySymbol(currency)})`} value={b.actual ? formatMoneyWhole(b.actual, currency) : "—"} />
-                <BookedCell label={`Spent (${fx})`} value={b.fx.actual ? formatForeignWhole(b.fx.actual, foreignCurrency) : "—"} />
+                {showFx ? <BookedCell label={`Spent (${fx})`} value={b.fx.actual ? formatForeignWhole(b.fx.actual, foreignCurrency) : "—"} /> : null}
                 {/* Nothing to compare against when the booking never was an
                     estimate — a dash, not a red "over by the full price". */}
                 {diffSlot(b.planned ? b.planned - b.actual : null)}
-                {diffSlot(b.fx.planned ? b.fx.planned - (b.fx.actual ?? 0) : null, true)}
+                {showFx ? diffSlot(b.fx.planned ? b.fx.planned - (b.fx.actual ?? 0) : null, true) : null}
               </li>
             ))}
             {rows.map((r) => {
@@ -324,34 +329,36 @@ export function MiscModal({
               return (
                 <li
                   key={r.category}
-                  className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[8.5rem_repeat(6,minmax(0,1fr))] sm:items-center sm:rounded-none sm:bg-transparent sm:p-0 sm:ring-0"
+                  className={`grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line ${COLS} sm:items-center sm:rounded-none sm:bg-transparent sm:p-0 sm:ring-0`}
                 >
                   <span className="col-span-2 text-sm font-semibold sm:col-span-1">{label}</span>
                   {money(r, "planned", `Planned (${currencySymbol(currency)})`)}
-                  {money(r, "plannedEur", `Planned (${fx})`)}
+                  {showFx ? money(r, "plannedEur", `Planned (${fx})`) : null}
                   {money(r, "actual", `Spent (${currencySymbol(currency)})`)}
-                  {money(r, "actualEur", `Spent (${fx})`)}
+                  {showFx ? money(r, "actualEur", `Spent (${fx})`) : null}
                   {diffSlot(difference(r))}
-                  {diffSlot(differenceFx(r), true)}
+                  {showFx ? diffSlot(differenceFx(r), true) : null}
                 </li>
               );
             })}
           </ul>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums sm:grid-cols-[8.5rem_repeat(6,minmax(0,1fr))] sm:text-center">
+          <div className={`mt-3 grid grid-cols-2 gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums ${COLS} sm:text-center`}>
             <span className="col-span-2 sm:col-span-1 sm:text-left">Total</span>
             <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Planned </span>{formatMoneyWhole(totals.planned, currency)}</span>
-            <span>{formatForeignWhole(totals.plannedEur, foreignCurrency)}</span>
+            {showFx ? <span>{formatForeignWhole(totals.plannedEur, foreignCurrency)}</span> : null}
             <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Spent </span>{formatMoneyWhole(totals.actual, currency)}</span>
-            <span>{formatForeignWhole(totals.actualEur, foreignCurrency)}</span>
+            {showFx ? <span>{formatForeignWhole(totals.actualEur, foreignCurrency)}</span> : null}
             <span className="col-span-2 sm:col-span-1">
               <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference </span>
               {diffCell(totalDiff)}
             </span>
-            <span className="col-span-2 sm:col-span-1">
-              <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference ({fx}) </span>
-              {diffCell(totalDiffFx, true)}
-            </span>
+            {showFx ? (
+              <span className="col-span-2 sm:col-span-1">
+                <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference ({fx}) </span>
+                {diffCell(totalDiffFx, true)}
+              </span>
+            ) : null}
           </div>
         </section>
 

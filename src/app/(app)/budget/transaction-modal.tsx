@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { CurrencyConverter } from "@/components/currency-converter";
-import { centsToDisplay, moneyExpressionToCents } from "@/lib/money";
+import { centsToDisplay, displayToCents, moneyExpressionToCents } from "@/lib/money";
+import { shareOut } from "@/lib/share-out";
+import { BookingPaymentPanel, type PaxRow } from "./booking-payment-panel";
 import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, addSplitTransaction, replaceWithSplit, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
@@ -275,6 +277,7 @@ function TransactionModalForm({
   const bookings = (effectiveTripId && bookingsByTrip[effectiveTripId]) || [];
   // Points typed beside the payment. Blank leaves the booking's own figure.
   const [bookingPoints, setBookingPoints] = useState("");
+  const [bookingPointsValue, setBookingPointsValue] = useState("");
   const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? "");
   const bookingOk = bookings.some((b) => b.ref === bookingRef);
   // Which Travel Log column a trip purchase on the catch-all item
@@ -282,6 +285,60 @@ function TransactionModalForm({
   // has one fixed column, set on its item form.
   const [travelCategory, setTravelCategory] = useState(editTx?.travelCategory ?? "other");
   const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
+  // A flight payment split per passenger — each share is that passenger's
+  // Spent on the Travel Log, in dollars and the flight's other currency, as on
+  // its popup. It starts as this payment's own saved split (on an edit) or the
+  // passengers' planned fares, scaled to the amount; a figure typed by hand is
+  // kept until the booking changes, and the amount follows the dollars typed.
+  const flightPax = paidBooking?.ref.startsWith("flight:") ? paidBooking.passengers : [];
+  const ownShares = editTx ? paidBooking?.payments.find((p) => p.txId === editTx.id)?.shares ?? null : null;
+  const [paxCents, setPaxCents] = useState<Record<string, string> | null>(null);
+  const [paxForeign, setPaxForeign] = useState<Record<string, string> | null>(null);
+  const [paxPoints, setPaxPoints] = useState<Record<string, string> | null>(null);
+  const [paxCurrency, setPaxCurrency] = useState<string | null>(null);
+  const flightCurrency = paxCurrency ?? (paidBooking?.foreignCurrency || "EUR");
+  const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const ownShare = (name: string) => ownShares?.find((s) => sameName(s.name, name));
+  const defaultShares = shareOut(
+    totalCents,
+    flightPax.map((p) => (ownShares ? ownShare(p.name)?.cents ?? 0 : p.plannedCents)),
+  );
+  const paxRows: PaxRow[] = flightPax.map((p, i) => ({
+    name: p.name,
+    cents: paxCents?.[p.name] ?? (defaultShares[i] ? centsToDisplay(defaultShares[i]) : ""),
+    foreign: paxForeign?.[p.name] ?? (ownShare(p.name)?.foreignCents ? centsToDisplay(ownShare(p.name)!.foreignCents!) : ""),
+    points: paxPoints?.[p.name] ?? (p.points ? String(p.points) : ""),
+  }));
+  const paxSplitCents = paxRows.reduce((sum, r) => sum + Math.max(0, displayToCents(r.cents)), 0);
+  function pickBooking(ref: string) {
+    setBookingRef(ref);
+    setPaxCents(null);
+    setPaxForeign(null);
+    setPaxPoints(null);
+    setPaxCurrency(null);
+    setBookingPoints("");
+    setBookingPointsValue("");
+  }
+  function editPaxRow(name: string, patch: Partial<Omit<PaxRow, "name">>) {
+    clearErrors();
+    const pick = (key: "cents" | "foreign" | "points") =>
+      Object.fromEntries(paxRows.map((r) => [r.name, r.name === name && patch[key] !== undefined ? patch[key]! : r[key]]));
+    if (patch.foreign !== undefined) setPaxForeign(pick("foreign"));
+    if (patch.points !== undefined) setPaxPoints(pick("points"));
+    if (patch.cents !== undefined) {
+      const next = pick("cents");
+      setPaxCents(next);
+      // The amount is what the passengers' dollars add up to.
+      const sum = Object.values(next).reduce((s, v) => s + Math.max(0, displayToCents(v)), 0);
+      setTotalCents(sum);
+      setConvertedCents(sum);
+    }
+  }
+  // A points total typed in "Points used" is shared evenly across the seats.
+  function setTotalPaxPoints(points: number) {
+    const parts = shareOut(points, flightPax.map(() => 1));
+    setPaxPoints(Object.fromEntries(flightPax.map((p, i) => [p.name, parts[i] ? String(parts[i]) : ""])));
+  }
   // On a trip, an item with a travel twin — a trip item (receivesTripPlans)
   // on the same Travel Log column (Restaurants → Restaurant Travel) —
   // switches to that twin, so the meal counts on the trip budget, not the
@@ -392,6 +449,13 @@ function TransactionModalForm({
     if (!String(fd.get("payee") ?? "").trim()) {
       messages.push("Payee — enter a name.");
       fields.add("payee");
+    }
+
+    // A flight payment's passenger split has to add up to the payment.
+    if (bookingOk && flightPax.length > 0 && totalCents > 0 && paxSplitCents !== totalCents) {
+      messages.push(
+        `Passengers — the split adds up to $${centsToDisplay(paxSplitCents)}, not the $${centsToDisplay(totalCents)} paid.`,
+      );
     }
 
     if (splits.length > 1) {
@@ -789,7 +853,7 @@ function TransactionModalForm({
                     setTripId(e.target.value);
                     setTripTouched(true);
                     // A booking belongs to one trip; changing trips unlinks it.
-                    setBookingRef("");
+                    pickBooking("");
                   }}
                   className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                 >
@@ -802,7 +866,7 @@ function TransactionModalForm({
                   <select
                     name="bookingRef"
                     value={bookingOk ? bookingRef : ""}
-                    onChange={(e) => setBookingRef(e.target.value)}
+                    onChange={(e) => pickBooking(e.target.value)}
                     className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     <option value="">Pays for: day-to-day spending</option>
@@ -813,26 +877,45 @@ function TransactionModalForm({
                     ))}
                   </select>
                 ) : null}
-                {/* Points on that booking, typed here so the Travel Log
-                    never has to be visited for them. Shows the booking's own
-                    figure as the hint; blank keeps it. */}
-                {paidBooking ? (
-                  <div className="mt-2 flex items-center gap-2">
-                    <label className="flex flex-1 items-center gap-2 rounded-xl bg-background px-2 py-2 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-brand sm:px-3">
-                      <span className="shrink-0 text-xs font-semibold text-muted">Points used</span>
-                      <input
-                        name="bookingPoints"
-                        type="number"
-                        min="0"
-                        step="1"
-                        inputMode="numeric"
-                        value={bookingPoints}
-                        onChange={(e) => setBookingPoints(e.target.value)}
-                        placeholder={paidBooking.pointsUsed && paidBooking.pointsCost ? paidBooking.pointsCost.toLocaleString() : "0"}
-                        className="min-w-0 flex-1 bg-transparent text-right tabular-nums focus:outline-none"
-                      />
-                    </label>
-                  </div>
+                {/* What the payment does to that booking: a flight's split
+                    per passenger, its points, and the same Payment figures
+                    the Travel Log's popup shows. */}
+                {paidBooking && bookingOk ? (
+                  <>
+                    <input
+                      type="hidden"
+                      name="bookingPassengers"
+                      value={JSON.stringify(
+                        paxRows.map((r) => ({
+                          name: r.name,
+                          cents: Math.max(0, displayToCents(r.cents)),
+                          foreignCents: r.foreign.trim() ? Math.max(0, displayToCents(r.foreign)) : null,
+                          points: Math.max(0, Math.trunc(Number(r.points.replace(/,/g, ""))) || 0),
+                        })),
+                      )}
+                    />
+                    <input type="hidden" name="bookingCurrency" value={flightCurrency} />
+                    <input type="hidden" name="bookingPoints" value={bookingPoints} />
+                    <input type="hidden" name="bookingPointsValue" value={bookingPointsValue} />
+                    <BookingPaymentPanel
+                      booking={paidBooking}
+                      rows={paxRows}
+                      onRow={editPaxRow}
+                      onTotalPoints={setTotalPaxPoints}
+                      onResetSplit={() => setPaxCents(null)}
+                      foreignCurrency={flightCurrency}
+                      onForeignCurrency={setPaxCurrency}
+                      totalCents={totalCents}
+                      isRefund={isRefund}
+                      editTxId={editTx?.id ?? null}
+                      accountId={selectedAccountId}
+                      accountOptions={accountOptions}
+                      bookingPoints={bookingPoints}
+                      onBookingPoints={setBookingPoints}
+                      pointsValue={bookingPointsValue}
+                      onPointsValue={setBookingPointsValue}
+                    />
+                  </>
                 ) : null}
                 {effectiveTripId && !bookingOk && splits.some((sp) => subOptions.find((o) => o.id === sp.subId)?.travelCategory === "other") ? (
                   <select
@@ -852,12 +935,10 @@ function TransactionModalForm({
                     ))}
                   </select>
                 ) : null}
-                {effectiveTripId ? (
+                {effectiveTripId && !bookingOk ? (
                   <span className="mt-1 block px-1 text-[11px] text-muted">
                     {bookingOk
-                      ? paidBooking?.hasCard
-                        ? "Sets that booking's Pocket cost to its payments added up, marks it Booked, and takes the points off its card."
-                        : "Sets that booking's Pocket cost to its payments added up and marks it Booked. No card is linked on it, so points are recorded but not taken from any card."
+                      ? null
                       : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}${movedToCatchAll.length ? ` ${movedToCatchAll.map((o) => o.name).join(", ")} will save on ${tripCatchAll!.name} (${movedToCatchAll.map((o) => EXPENSE_CATEGORIES.find((c) => c.key === o.travelCategory)?.label ?? o.name).join(", ")} column), not your everyday budget.` : ""}`}
                   </span>
                 ) : null}

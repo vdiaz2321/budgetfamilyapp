@@ -15,8 +15,9 @@ export type ExpensePayload = {
   newTripName: string;
   startOn: string;
   endOn: string;
-  /** The currency the second Planned / Spent columns are in. */
-  foreignCurrency: string;
+  /** The currency the second Planned / Spent columns are in; blank is None
+   *  (dollars only), and left out keeps the trip's own. */
+  foreignCurrency?: string;
   rows: Array<{
     category: ExpenseCategory;
     planned: string;
@@ -56,12 +57,16 @@ export async function saveTripExpenses(payload: ExpensePayload) {
     .update({
       start_on: startOn,
       end_on: endOn,
-      ...(/^[A-Z]{3}$/.test(payload.foreignCurrency) ? { spending_currency: payload.foreignCurrency } : {}),
+      ...(payload.foreignCurrency === undefined
+        ? {}
+        : { spending_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : null }),
     })
     .eq("id", trip.tripId)
     .eq("household_id", householdId);
   if (tripError) return fail(`Couldn't save the trip dates — ${tripError.message}`);
 
+  // None picked: the trip's spending is in dollars only.
+  const noFx = payload.foreignCurrency !== undefined && !/^[A-Z]{3}$/.test(payload.foreignCurrency);
   const rows = payload.rows
     .filter((r) => KEYS.has(r.category))
     .map((r) => ({
@@ -69,9 +74,9 @@ export async function saveTripExpenses(payload: ExpensePayload) {
       trip_id: trip.tripId,
       category: r.category,
       planned_cents: money(r.planned),
-      planned_eur_cents: money(r.plannedEur),
+      planned_eur_cents: noFx ? null : money(r.plannedEur),
       actual_cents: money(r.actual),
-      actual_eur_cents: money(r.actualEur),
+      actual_eur_cents: noFx ? null : money(r.actualEur),
       account_id: r.accountId || null,
       updated_at: new Date().toISOString(),
     }));

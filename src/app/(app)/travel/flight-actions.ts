@@ -7,7 +7,7 @@ import { unwrap } from "@/lib/supabase-result";
 import { centsPerPointToMicros } from "./points-value";
 import { discardNewTrip, resolveTripId, tripDateError } from "./trip-resolve";
 import { syncRewardLedger, type RewardDraw } from "./reward-ledger";
-import { linkedPaidCents } from "./booking-payments";
+import { linkedPaidCents, syncBookingPayment } from "./booking-payments";
 
 function revalidate() {
   revalidatePath("/travel");
@@ -85,7 +85,11 @@ export async function saveTravelFlight(payload: FlightPayload) {
       arrivesAt: clean(leg.arrivesAt),
     }))
     .filter((leg) => leg.flightOn || leg.flightNumber || leg.fromPlace || leg.toPlace);
-  const named = payload.passengers.filter((p) => p.name.trim());
+  // None picked: dollars only, so no second-currency figure is kept.
+  const foreignCurrency = /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : null;
+  const named = payload.passengers
+    .filter((p) => p.name.trim())
+    .map((p) => (foreignCurrency ? p : { ...p, plannedForeign: "", fareEur: "" }));
   // Bought once a Spent fare or the booking date is in; a plan until then
   // (isPlannedOnly in travel-form, the same rule the form shows).
   const isEstimate = !named.some((p) => p.fare.trim() || p.fareEur.trim()) && !reservedOn;
@@ -186,7 +190,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
       : null,
     pocket_cost_cents: paid ?? pocketCost,
     is_estimate: isEstimate && paid == null,
-    foreign_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : "EUR",
+    foreign_currency: foreignCurrency,
     // While an estimate, its cost is the plan. Once bought, the plan is the
     // Planned column added up (cash seats, as pocket cost counts them), kept
     // so the trip can set it beside what was really paid.
@@ -296,6 +300,13 @@ export async function saveTravelFlight(payload: FlightPayload) {
     })),
   );
   if (paxError) return fail(`Couldn't save the passengers — ${paxError.message}`);
+
+  // Payments linked: each passenger's Spent figure is their share of those
+  // payments, not what the form sent — the same figures the Budget wrote.
+  if (paid != null && flightId) {
+    const problem = await syncBookingPayment(supabase, householdId, { kind: "flight", id: flightId });
+    if (problem) return { error: problem };
+  }
 
   revalidate();
   return { error: null };

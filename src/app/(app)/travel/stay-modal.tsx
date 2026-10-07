@@ -184,7 +184,8 @@ export function StayModal({
     spent: stay?.paidCents != null ? money(stay.paidCents) : stay?.isEstimate ? "" : money(stay?.pocketCostCents),
     spentForeign: stay?.isEstimate ? "" : money(stay?.costForeignCents ?? undefined),
   }));
-  const [foreignCurrency, setForeignCurrency] = useState(base?.foreignCurrency ?? "EUR");
+  // Blank is None: dollars only.
+  const [foreignCurrency, setForeignCurrency] = useState(base?.foreignCurrency ?? "");
   const lastSlot = useRef<PlanSpentSlot | null>(null);
   // Booked once a Spent figure or the booking date is in; a plan until then.
   const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
@@ -479,7 +480,7 @@ export function StayModal({
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
             spentLocked={stay?.paidCents != null}
-            showForeign={showMore}
+            showForeign={showMore && Boolean(foreignCurrency)}
           />
           <input type="hidden" name="plannedCost" value={fig.planned} />
           <input type="hidden" name="plannedCostForeign" value={fig.plannedForeign} />

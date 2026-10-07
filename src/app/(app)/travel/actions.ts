@@ -80,7 +80,11 @@ export async function saveTravelStay(formData: FormData) {
   // The pocket column holds what the stay costs now — the plan until it is
   // booked — so every total that reads it is unchanged.
   const pocketCost = paid ?? (isEstimate ? plannedCost : money("pocketCost")) ?? 0;
+  // Sent by the stay form; blank is None (dollars only). A form that doesn't
+  // offer it leaves the stay's own currency alone.
+  const currencySent = formData.has("foreignCurrency");
   const foreignCurrency = String(formData.get("foreignCurrency") ?? "");
+  const hasForeign = /^[A-Z]{3}$/.test(foreignCurrency) || !currencySent;
 
   // How the out-of-pocket half was settled is not a choice any more: it is
   // whatever the numbers say. Money paid means the card; nothing paid means
@@ -139,10 +143,9 @@ export async function saveTravelStay(formData: FormData) {
     // While planned, its cost is the plan; once booked, the Planned figure
     // stays beside what was paid.
     planned_cost_cents: isEstimate ? pocketCost : plannedCost,
-    planned_cost_foreign_cents: money("plannedCostForeign"),
-    cost_foreign_cents: isEstimate ? money("plannedCostForeign") : money("spentForeign"),
-    // Absent from a form that doesn't offer it; the column's default holds.
-    ...(/^[A-Z]{3}$/.test(foreignCurrency) ? { foreign_currency: foreignCurrency } : {}),
+    planned_cost_foreign_cents: hasForeign ? money("plannedCostForeign") : null,
+    cost_foreign_cents: !hasForeign ? null : isEstimate ? money("plannedCostForeign") : money("spentForeign"),
+    ...(currencySent ? { foreign_currency: /^[A-Z]{3}$/.test(foreignCurrency) ? foreignCurrency : null } : {}),
     remarks: text(formData, "remarks"),
     breakfast_included: formData.get("breakfastIncluded") === "on",
     free_night_used: freeNightUsed,

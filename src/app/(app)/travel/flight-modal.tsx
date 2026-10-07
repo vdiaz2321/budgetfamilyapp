@@ -61,9 +61,12 @@ const FX_PAIR = { plannedForeign: "planned", fareEur: "fare" } as const;
 const rateDisplay = (micros: number) => microsToCentsField(micros);
 
 // Passenger rows: ✕, name, Planned $ / other, Spent $ / other, points. On a
-// phone the name takes its own line and the four figures share the next.
-const PAX_GRID =
+// phone the name takes its own line and the figures share the next. With no
+// other currency the two foreign columns go.
+const PAX_GRID_FX =
   "grid grid-cols-[1.75rem_repeat(4,minmax(0,1fr))] gap-2 sm:grid-cols-[1.75rem_minmax(0,12rem)_repeat(5,6.5rem)]";
+const PAX_GRID_USD =
+  "grid grid-cols-[1.75rem_repeat(2,minmax(0,1fr))] gap-2 sm:grid-cols-[1.75rem_minmax(0,12rem)_repeat(3,6.5rem)]";
 
 export function FlightModal({
   flight,
@@ -103,8 +106,10 @@ export function FlightModal({
   // Not editable here any more; kept so saving leaves an existing code alone.
   const [bookingCode] = useState(flight?.bookingCode ?? "");
   const [reservedOn, setReservedOn] = useState(flight?.reservedOn ?? copyOf?.reservedOn ?? "");
-  const [foreignCurrency, setForeignCurrency] = useState(flight?.foreignCurrency ?? copyOf?.foreignCurrency ?? "EUR");
+  // Blank is None: dollars only, no second-currency columns.
+  const [foreignCurrency, setForeignCurrency] = useState(flight?.foreignCurrency ?? copyOf?.foreignCurrency ?? "");
   const fx = foreignSymbol(foreignCurrency);
+  const showFx = Boolean(foreignCurrency);
   const [legs, setLegs] = useState<LegDraft[]>(() =>
     flight?.legs.length
       ? flight.legs.map((l) => ({
@@ -179,7 +184,9 @@ export function FlightModal({
   function typeFare(key: number, slot: FareSlot, value: string) {
     if (slot !== "plannedForeign" && slot !== "fareEur") return updatePassenger(key, { [slot]: value });
     const usd = toUsd(value);
-    updatePassenger(key, usd == null ? { [slot]: value } : { [slot]: value, [FX_PAIR[slot]]: usd });
+    // Spent $ follows the linked payments; a foreign figure doesn't change it.
+    const locked = slot === "fareEur" && flight?.paidCents != null;
+    updatePassenger(key, usd == null || locked ? { [slot]: value } : { [slot]: value, [FX_PAIR[slot]]: usd });
   }
   function loadRatesFor(key: number, slot: FareSlot) {
     if (fxRates.current || (slot !== "plannedForeign" && slot !== "fareEur")) return;
@@ -189,12 +196,21 @@ export function FlightModal({
       setPassengers((all) =>
         all.map((p) => {
           if (p.key !== key || !p[slot].trim() || p[FX_PAIR[slot]].trim()) return p;
+          if (slot === "fareEur" && flight?.paidCents != null) return p;
           const usd = toUsd(p[slot]);
           return usd ? { ...p, [FX_PAIR[slot]]: usd } : p;
         }),
       );
     });
   }
+
+  // Payments linked from the Budget fill each passenger's Spent $ — their
+  // share of the payments — so those boxes can't be typed over here.
+  const spentLinked = flight?.paidCents != null;
+  const PAX_GRID = showFx ? PAX_GRID_FX : PAX_GRID_USD;
+  // The money boxes on each row: with a currency, dollars and that currency
+  // under Planned and under Spent; without, dollars only.
+  const SLOTS = (showFx ? ["planned", "plannedForeign", "fare", "fareEur"] : ["planned", "fare"]) as FareSlot[];
 
   const passengerPoints = (p: PassengerDraft) => (p.pointsUsed ? Number(p.points.replace(/,/g, "")) || 0 : 0);
   // Bought once a Spent fare or the booking date is in; a plan until then.
@@ -588,19 +604,19 @@ export function FlightModal({
             <span className="hidden self-end pb-0.5 text-left text-[11px] font-bold uppercase tracking-wide text-muted sm:row-span-2 sm:block">
               Passenger
             </span>
-            <span className="col-span-2 col-start-2 border-b-2 border-line pb-0.5 text-[11px] font-bold uppercase tracking-wide text-muted sm:col-start-auto">
+            <span className={`${showFx ? "col-span-2" : ""} col-start-2 border-b-2 border-line pb-0.5 text-[11px] font-bold uppercase tracking-wide text-muted sm:col-start-auto`}>
               Planned
             </span>
-            <span className="col-span-2 border-b-2 border-sky-400 pb-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground dark:border-sky-500">
+            <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-sky-400 pb-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground dark:border-sky-500`}>
               Spent
             </span>
             <span aria-hidden className="hidden sm:block" />
             <span aria-hidden className="hidden sm:block" />
             {[
               { code: currency, sign: currencySymbol(currency), spent: false },
-              { code: foreignCurrency, sign: fx, spent: false },
+              ...(showFx ? [{ code: foreignCurrency, sign: fx, spent: false }] : []),
               { code: currency, sign: currencySymbol(currency), spent: true },
-              { code: foreignCurrency, sign: fx, spent: true },
+              ...(showFx ? [{ code: foreignCurrency, sign: fx, spent: true }] : []),
             ].map((c, n) => (
               <span
                 key={n}
@@ -624,7 +640,7 @@ export function FlightModal({
                 >
                   ✕
                 </button>
-                <label className="col-span-4 block min-w-0 sm:col-span-1">
+                <label className={`${showFx ? "col-span-4" : "col-span-2"} block min-w-0 sm:col-span-1`}>
                   <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">
                     Passenger {i + 1}
                   </span>
@@ -642,10 +658,14 @@ export function FlightModal({
                     ))}
                   </select>
                 </label>
-                {(["planned", "plannedForeign", "fare", "fareEur"] as const).map((slot, n) => (
+                {SLOTS.map((slot, n) => {
+                  const spent = slot === "fare" || slot === "fareEur";
+                  return (
                   <input
                     key={slot}
-                    aria-label={`Passenger ${i + 1} ${n < 2 ? "planned" : "spent"} ${n % 2 ? foreignCurrency : currency}`}
+                    readOnly={spentLinked && spent}
+                    tabIndex={spentLinked && spent ? -1 : undefined}
+                    aria-label={`Passenger ${i + 1} ${spent ? "spent" : "planned"} ${slot.endsWith("Foreign") || slot === "fareEur" ? foreignCurrency : currency}`}
                     value={p[slot]}
                     onChange={(e) => typeFare(p.key, slot, e.target.value)}
                     onFocus={() => {
@@ -654,15 +674,16 @@ export function FlightModal({
                     }}
                     // On a points seat the Spent boxes take the cash paid on
                     // top of the points (taxes, fees, a points + cash fare).
-                    placeholder={p.pointsUsed && n >= 2 ? "Cash paid" : undefined}
+                    placeholder={p.pointsUsed && spent ? "Cash paid" : undefined}
                     inputMode="decimal"
-                    className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""}`}
+                    className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""} ${spentLinked && spent ? "opacity-70" : ""}`}
                   />
-                ))}
+                  );
+                })}
                 {/* Points: under the figures on a phone, on the same line on a
                     wide screen — only for the seats ticked in "Paid with points". */}
                 {p.pointsUsed ? (
-                  <Field label="Points" className="col-span-2 col-start-2 text-center sm:col-span-1 sm:col-start-auto">
+                  <Field label="Points" className={`${showFx ? "col-span-2" : ""} col-start-2 text-center sm:col-span-1 sm:col-start-auto`}>
                     <input
                       type="number"
                       min="0"
@@ -682,11 +703,11 @@ export function FlightModal({
           {/* Every seat added up, Planned beside Spent. */}
           <div className={`${PAX_GRID} mt-2 items-baseline border-t border-line pt-2 text-sm font-bold tabular-nums`}>
             <span aria-hidden />
-            <span className="col-span-4 sm:col-span-1">Total</span>
+            <span className={`${showFx ? "col-span-4" : "col-span-2"} sm:col-span-1`}>Total</span>
             <span className="col-start-2 text-center sm:col-start-auto">{formatMoneyWhole(total("planned"), currency)}</span>
-            <span className="text-center">{fx}{centsToDisplay(total("plannedForeign"))}</span>
+            {showFx ? <span className="text-center">{fx}{centsToDisplay(total("plannedForeign"))}</span> : null}
             <span className="text-center">{formatMoneyWhole(total("fare"), currency)}</span>
-            <span className="text-center">{fx}{centsToDisplay(total("fareEur"))}</span>
+            {showFx ? <span className="text-center">{fx}{centsToDisplay(total("fareEur"))}</span> : null}
             <span className="hidden text-center sm:block">{pointsTyped ? pointsTyped.toLocaleString() : ""}</span>
           </div>
         </section>

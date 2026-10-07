@@ -13,7 +13,9 @@ import { previousMonthPlanRows } from "@/lib/plan-roll-in";
 import { getSessionContext } from "@/lib/auth-context";
 
 // travel_trip_expenses.category keys — the rows on a trip's Spending table.
-import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef } from "@/app/(app)/travel/booking-payments";
+import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef, type PassengerPoints } from "@/app/(app)/travel/booking-payments";
+import { parseShares, type PassengerShare } from "@/lib/share-out";
+import { centsPerPointToMicros } from "@/app/(app)/travel/points-value";
 import type { TripPurchaseCandidate, TripTagging } from "./types";
 
 const TRAVEL_CATEGORY_KEYS = new Set(["restaurants", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash", "other"]);
@@ -25,6 +27,52 @@ function bookingPointsOf(formData: FormData): number | null {
   if (!raw) return null;
   const n = Math.trunc(Number(raw));
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+// A flight payment's split per passenger, typed on the form as JSON in
+// "bookingPassengers": [{ name, cents, points }]. The cents are kept on the
+// transaction (each passenger's Spent figure adds them up across payments);
+// the points are written onto the passengers. Null when it isn't a flight.
+function bookingPassengersOf(formData: FormData, booking: BookingRef | null): { shares: PassengerShare[]; points: PassengerPoints[] } | null {
+  if (booking?.kind !== "flight") return null;
+  try {
+    const raw = JSON.parse(String(formData.get("bookingPassengers") ?? "null"));
+    if (!Array.isArray(raw)) return null;
+    const rows = raw
+      .map((r) => ({
+        name: String(r?.name ?? "").trim(),
+        cents: Math.max(0, Math.trunc(Number(r?.cents) || 0)),
+        foreignCents: r?.foreignCents == null || r.foreignCents === "" ? null : Math.max(0, Math.trunc(Number(r.foreignCents) || 0)),
+        points: Math.max(0, Math.trunc(Number(r?.points) || 0)),
+      }))
+      .filter((r) => r.name);
+    if (rows.length === 0) return null;
+    return {
+      shares: rows.map(({ name, cents, foreignCents }) => ({ name, cents, foreignCents })),
+      points: rows.map(({ name, points }) => ({ name, points })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// What the form typed for the booking it pays for: points (stays, cars),
+// points per passenger (flights), and the card the payment was made on.
+type BookingTyped = {
+  points: number | null; paxPoints: PassengerPoints[] | null; accountId: string | null; currency: string | null;
+  pointsValueMicros: number | null;
+};
+function bookingTypedOf(formData: FormData, booking: BookingRef | null, accountId: string | null): BookingTyped {
+  return {
+    points: booking?.kind === "flight" ? null : bookingPointsOf(formData),
+    paxPoints: bookingPassengersOf(formData, booking)?.points ?? null,
+    accountId,
+    pointsValueMicros: centsPerPointToMicros(String(formData.get("bookingPointsValue") ?? "")),
+    // The currency a flight's foreign figures were typed in.
+    currency: booking?.kind === "flight" && /^[A-Z]{3}$/.test(String(formData.get("bookingCurrency") ?? ""))
+      ? String(formData.get("bookingCurrency"))
+      : null,
+  };
 }
 
 // The Travel Log row picked on the form for a trip purchase on the catch-all
@@ -1218,30 +1266,87 @@ export async function listTripTagging(): Promise<TripTagging> {
   const tripIds = trips.map((t) => t.id);
   if (tripIds.length === 0) return { trips, bookingsByTrip: {} };
 
-  const [stays, flights, cars, legs] = await Promise.all([
-    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
-    supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
-    supabase.from("travel_cars").select("id, trip_id, company, pickup_on, return_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
-    supabase.from("travel_flight_legs").select("flight_id, flight_on").eq("household_id", householdId),
+  const [stays, flights, cars, legs, pax, paid] = await Promise.all([
+    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, hotel_cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, flight_cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_cars").select("id, trip_id, company, pickup_on, return_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_flight_legs").select("flight_id, flight_on, from_place, to_place, sort_order").eq("household_id", householdId).order("sort_order"),
+    supabase.from("travel_flight_passengers").select("flight_id, name, sort_order, fare_cents, fare_eur_cents, planned_fare_cents, planned_fare_foreign_cents, points_used, points_cost").eq("household_id", householdId).order("sort_order"),
+    supabase.from("transactions").select("id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, booking_passengers").eq("household_id", householdId).in("trip_id", tripIds).or("travel_stay_id.not.is.null,travel_flight_id.not.is.null,travel_car_id.not.is.null"),
   ]);
-  const problem = stays.error ?? flights.error ?? cars.error ?? legs.error;
+  const problem = stays.error ?? flights.error ?? cars.error ?? legs.error ?? pax.error ?? paid.error;
   if (problem) throw new Error(`Could not load the trips' bookings: ${problem.message}`);
   const day = (iso: string) => {
     const [y, m, d] = iso.split("-");
     return `${Number(d)}-${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m) - 1]}-${y.slice(2)}`;
   };
-  const base = (b: { trip_id: string | null; pocket_cost_cents: number | null; is_estimate: boolean | null; points_cost: number | null; points_used: boolean | null; account_id: string | null }) => ({
+  // Payments already linked to each booking, keyed "flight:<id>" etc.
+  type Payment = TripTagging["bookingsByTrip"][string][number]["payments"][number];
+  const paymentsFor = new Map<string, Payment[]>();
+  for (const t of paid.data ?? []) {
+    const ref = t.travel_stay_id ? `stay:${t.travel_stay_id}` : t.travel_flight_id ? `flight:${t.travel_flight_id}` : `car:${t.travel_car_id}`;
+    const list = paymentsFor.get(ref) ?? [];
+    list.push({ txId: t.id, amountCents: Number(t.amount_cents), shares: parseShares(t.booking_passengers) });
+    paymentsFor.set(ref, list);
+  }
+  const paxFor = new Map<string, { name: string; plannedCents: number; points: number }[]>();
+  const foreignFlights = new Set<string>();
+  for (const p of pax.data ?? []) {
+    const list = paxFor.get(p.flight_id) ?? [];
+    list.push({
+      name: p.name,
+      plannedCents: Number(p.planned_fare_cents ?? p.fare_cents ?? 0),
+      points: p.points_used ? Number(p.points_cost ?? 0) : 0,
+    });
+    paxFor.set(p.flight_id, list);
+    // A flight with a figure in its other currency shows that column; one
+    // priced only in dollars (a trip at home) does not.
+    if (Number(p.fare_eur_cents ?? 0) > 0 || Number(p.planned_fare_foreign_cents ?? 0) > 0) foreignFlights.add(p.flight_id);
+  }
+  // "Porto → STR": the first flight of the booking, so two flights on one
+  // trip read apart in the "Pays for" list.
+  const routeFor = new Map<string, string>();
+  for (const l of legs.data ?? []) {
+    if (!routeFor.has(l.flight_id) && (l.from_place || l.to_place)) routeFor.set(l.flight_id, `${l.from_place ?? "?"} → ${l.to_place ?? "?"}`);
+  }
+  const base = (
+    ref: string,
+    b: {
+      trip_id: string | null; pocket_cost_cents: number | null; is_estimate: boolean | null; points_cost: number | null;
+      points_used: boolean | null; account_id: string | null; planned_cost_cents: number | null; points_value_micros: number | null;
+      foreign_currency: string | null;
+    },
+    costCents: number | null,
+  ) => ({
+    ref,
     tripId: b.trip_id as string,
     pocketCents: Number(b.pocket_cost_cents ?? 0),
     isEstimate: Boolean(b.is_estimate),
     pointsCost: Number(b.points_cost ?? 0),
     pointsUsed: Boolean(b.points_used),
     hasCard: Boolean(b.account_id),
+    accountId: b.account_id ?? null,
+    costCents: Number(costCents ?? 0),
+    plannedCents: b.planned_cost_cents == null ? null : Number(b.planned_cost_cents),
+    pointsValueMicros: b.points_value_micros == null ? null : Number(b.points_value_micros),
+    payments: paymentsFor.get(ref) ?? [],
+    foreignCurrency: b.foreign_currency ?? "",
+    usesForeign: false,
+    passengers: [] as { name: string; plannedCents: number; points: number }[],
   });
   const rows = [
-    ...(stays.data ?? []).map((s) => ({ ref: `stay:${s.id}`, on: s.check_in, label: `Stay · ${s.property_name} · ${day(s.check_in)}`, ...base(s) })),
-    ...(flights.data ?? []).map((f) => ({ ref: `flight:${f.id}`, on: f.first_flight_on, label: `Flight · ${f.airline} · ${day(f.first_flight_on)}`, ...base(f) })),
-    ...(cars.data ?? []).map((c) => ({ ref: `car:${c.id}`, on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, ...base(c) })),
+    ...(stays.data ?? []).map((s) => ({ on: s.check_in, label: `Stay · ${s.property_name} · ${day(s.check_in)}`, ...base(`stay:${s.id}`, s, s.hotel_cost_cents) })),
+    ...(flights.data ?? []).map((f) => ({
+      on: f.first_flight_on,
+      label: ["Flight", f.airline, routeFor.get(f.id), day(f.first_flight_on)].filter(Boolean).join(" · "),
+      ...base(`flight:${f.id}`, f, f.flight_cost_cents),
+      passengers: paxFor.get(f.id) ?? [],
+      usesForeign:
+        Boolean(f.foreign_currency) ||
+        foreignFlights.has(f.id) ||
+        (paymentsFor.get(`flight:${f.id}`) ?? []).some((p) => p.shares?.some((s) => s.foreignCents != null)),
+    })),
+    ...(cars.data ?? []).map((c) => ({ on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, ...base(`car:${c.id}`, c, c.cost_cents) })),
   ].sort((a, b) => a.on.localeCompare(b.on));
   const bookingsByTrip: TripTagging["bookingsByTrip"] = {};
   for (const { on: _on, tripId, ...r } of rows) (bookingsByTrip[tripId] ??= []).push(r);
@@ -1493,8 +1598,8 @@ export async function tagTripPurchases(
 async function syncBookings(
   supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
   householdId: string,
-  // Points typed on the form go onto the LAST ref (the booking being paid).
-  pointsTyped: number | null,
+  // What the form typed goes onto the LAST ref (the booking being paid).
+  typed: BookingTyped | null,
   ...refs: Array<BookingRef | null>
 ): Promise<string | null> {
   const seen = new Set<string>();
@@ -1507,7 +1612,13 @@ async function syncBookings(
     const key = `${ref?.kind}:${ref?.id}`;
     if (!ref || seen.has(key)) continue;
     seen.add(key);
-    const problem = await syncBookingPayment(supabase, householdId, ref, key === targetKey ? pointsTyped : null);
+    const mine = key === targetKey ? typed : null;
+    const problem = await syncBookingPayment(supabase, householdId, ref, mine?.points ?? null, {
+      paxPoints: mine?.paxPoints ?? null,
+      paymentAccountId: mine?.accountId ?? null,
+      currency: mine?.currency ?? null,
+      pointsValueMicros: mine?.pointsValueMicros ?? null,
+    });
     if (problem) {
       console.error("[syncBookingPayment]", problem);
       problems.push(problem);
@@ -1678,6 +1789,7 @@ async function insertTransactionCore(
     property_id: propertyId,
     trip_id: tripId,
     ...bookingColumns(booking),
+    booking_passengers: bookingPassengersOf(formData, booking)?.shares ?? null,
     travel_category: routed.forcedCategory ?? travelCategoryOf(formData, sub.travel_category, tripId, booking),
     // The item it was picked on, when a trip tag moved it (Groceries ->
     // Traveling/Trips) — a record of where it came from.
@@ -1688,7 +1800,7 @@ async function insertTransactionCore(
     source: "manual",
     split_group_id: splitGroupId,
   }), "saving the transaction");
-  const bookingWarning = booking ? await syncBookings(supabase, householdId, bookingPointsOf(formData), booking) : null;
+  const bookingWarning = booking ? await syncBookings(supabase, householdId, bookingTypedOf(formData, booking, accountId), booking) : null;
 
   // A contribution adds to the linked bucket; a withdrawal (e.g. using the
   // Real Estate bucket for a down payment) subtracts from it instead. All
@@ -1994,6 +2106,7 @@ export async function updateTransaction(formData: FormData) {
       property_id: await resolvePropertyId(supabase, householdId, propertyIdRaw),
       trip_id: tripId,
       ...bookingColumns(booking),
+      booking_passengers: bookingPassengersOf(formData, booking)?.shares ?? null,
       travel_category: routed.forcedCategory ?? travelCategoryOf(formData, sub.travel_category, tripId, booking),
       // See the insert path: remembers the item a trip tag moved it off. An
       // edit that keeps the trip without moving it again (fixing the amount
@@ -2011,7 +2124,7 @@ export async function updateTransaction(formData: FormData) {
     .eq("id", id)
     .eq("household_id", householdId), "saving the transaction");
   const bookingWarning = prevBooking || booking
-    ? await syncBookings(supabase, householdId, booking ? bookingPointsOf(formData) : null, prevBooking, booking)
+    ? await syncBookings(supabase, householdId, booking ? bookingTypedOf(formData, booking, accountId) : null, prevBooking, booking)
     : null;
 
   // Undo the old transaction's bucket effect (it may have hit a different

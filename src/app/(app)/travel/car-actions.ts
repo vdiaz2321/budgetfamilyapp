@@ -55,6 +55,8 @@ const carNote = (company: string | null, bookingCode: string | null) =>
 
 export async function saveTravelCar(payload: CarPayload) {
   const { supabase, household } = await getSessionContext();
+  // None picked: dollars only, so no second-currency figure is kept.
+  const foreignCurrency = /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : null;
   const householdId = household.id;
 
   const kind: CarKind = payload.kind === "own_car" ? "own_car" : "rental";
@@ -132,14 +134,14 @@ export async function saveTravelCar(payload: CarPayload) {
     points_used: pointsUsed,
     points_value_micros: points > 0 ? pointsValueMicros : null,
     cost_cents: cost,
-    cost_eur_cents: costForeign,
+    cost_eur_cents: foreignCurrency ? costForeign : null,
     pocket_cost_cents: paid ?? pocketCost,
     is_estimate: isEstimate && paid == null,
-    foreign_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : "EUR",
+    foreign_currency: foreignCurrency,
     // While a plan, its cost is the plan; once booked, the Planned figure
     // stays beside what was paid.
     planned_cost_cents: isEstimate ? pocketCost : cents(payload.planned),
-    planned_cost_foreign_cents: cents(payload.plannedForeign),
+    planned_cost_foreign_cents: foreignCurrency ? cents(payload.plannedForeign) : null,
     remarks: clean(payload.remarks),
     updated_at: new Date().toISOString(),
   };

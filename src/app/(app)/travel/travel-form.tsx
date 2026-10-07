@@ -58,6 +58,8 @@ export function CurrencySelect({ value, onChange }: { value: string; onChange: (
         onChange={(e) => onChange(e.target.value)}
         className="cursor-pointer bg-transparent font-semibold focus:outline-none"
       >
+        {/* None — dollars only — hides the second-currency columns. */}
+        <option value="">None</option>
         {FX_CURRENCIES.map((c) => (
           <option key={c} value={c}>{c}</option>
         ))}

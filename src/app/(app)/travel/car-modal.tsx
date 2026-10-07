@@ -70,7 +70,8 @@ export function CarModal({
       spentForeign: car?.isEstimate ? "" : show(car?.costEurCents),
     };
   });
-  const [foreignCurrency, setForeignCurrency] = useState(car?.foreignCurrency ?? "EUR");
+  // Blank is None: dollars only.
+  const [foreignCurrency, setForeignCurrency] = useState(car?.foreignCurrency ?? "");
   const lastSlot = useRef<PlanSpentSlot | null>(null);
   const [pointsUsed, setPointsUsed] = useState(car?.pointsUsed ?? false);
   const [points, setPoints] = useState(car?.pointsCost ? String(car.pointsCost) : "");
@@ -244,7 +245,7 @@ export function CarModal({
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
             spentOnPoints={onPoints}
-            showForeign={showMore}
+            showForeign={showMore && Boolean(foreignCurrency)}
           />
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Card used">
