@@ -524,7 +524,7 @@ function CreditCardSection({
   // fixed min width so the Travel and Hotel rows line up in columns.
   const bannerChip = (label: string, text: string, valueClass: string, extra = "", slot = "") => (
     <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${slot} ${extra || "bg-background ring-line dark:bg-white/[0.06] dark:ring-white/10"}`}>
-      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted dark:text-slate-400">{label}:</span>
+      <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted dark:text-slate-400">{label}:</span>
       <span className={`whitespace-nowrap text-sm font-semibold tabular-nums ${valueClass}`}>{text}</span>
     </span>
   );
@@ -791,7 +791,7 @@ function CreditCardSection({
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
-                  <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-[11px] font-semibold text-foreground/80 ring-1 ring-line dark:bg-white/10">
+                  <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs font-semibold text-foreground/80 ring-1 ring-line dark:bg-white/10">
                     {allStats.openCards.length} active cards
                   </span>
                 </span>
@@ -805,7 +805,7 @@ function CreditCardSection({
               <button
                 type="button"
                 onClick={() => setShowOnlyExpiring((v) => !v)}
-                className={`shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-bold transition ${
+                className={`shrink-0 rounded-md border px-2 py-1 text-left text-xs font-bold transition ${
                   showOnlyExpiring
                     ? "border-transparent bg-negative text-white"
                     : "border-negative/40 bg-background text-negative hover:bg-negative/10"
@@ -827,7 +827,7 @@ function CreditCardSection({
                   setShowOnlyAnnivDue((v) => !v);
                 }}
                 aria-pressed={showOnlyAnnivDue}
-                className={`shrink-0 rounded-md border px-2 py-1 text-left text-[11px] font-bold transition ${
+                className={`shrink-0 rounded-md border px-2 py-1 text-left text-xs font-bold transition ${
                   showOnlyAnnivDue
                     ? "border-transparent text-white"
                     : "bg-background hover:bg-black/5 dark:hover:bg-white/10"
@@ -1182,7 +1182,7 @@ function CreditCardSection({
           >
             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
             <span className="font-semibold">{section.label}</span>
-            <span className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-foreground/75 dark:bg-white/10">
+            <span className="rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-foreground/75 dark:bg-white/10">
               {accounts.length} card{accounts.length !== 1 ? "s" : ""}
             </span>
             <svg
@@ -1196,7 +1196,7 @@ function CreditCardSection({
           </button>
           {totalOwed > 0 ? (
             <span className="flex items-baseline gap-1.5">
-              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Total owed:</span>
+              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Total owed:</span>
               <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
                 {formatMoneyWhole(totalOwed, currency)}
               </span>
@@ -1406,7 +1406,7 @@ function RewardTile({
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" style={{ color: t.color }} aria-hidden>
           {REWARD_TILE_ICONS[icon]}
         </svg>
-        <span className="text-center text-[10px] font-semibold uppercase tracking-wide text-muted sm:text-[11px]" style={tone === "owed" ? { color: t.color } : undefined}>
+        <span className="text-center text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-xs" style={tone === "owed" ? { color: t.color } : undefined}>
           {label}
         </span>
       </span>
@@ -1414,7 +1414,7 @@ function RewardTile({
         {value}
       </span>
       {sub ? (
-        <span className="mt-1 text-center text-[11px] font-medium tabular-nums text-muted" style={subColor ? { color: subColor } : undefined}>
+        <span className="mt-1 text-center text-xs font-medium tabular-nums text-muted" style={subColor ? { color: subColor } : undefined}>
           {sub}
         </span>
       ) : null}
@@ -1624,7 +1624,7 @@ function PointsByCard({
         {total.redeemed.points > 0 ? (
           <>
             <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[16.75rem]">
-              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">
+              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
                 Total pts used:
               </span>
               <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
@@ -1632,7 +1632,7 @@ function PointsByCard({
               </span>
             </span>
             <span className="flex shrink-0 items-baseline gap-1.5">
-              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">
+              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
                 Total cash saved:
               </span>
               <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
@@ -1644,7 +1644,7 @@ function PointsByCard({
       </button>
       {open ? (
         <ul className="divide-y divide-line border-t border-line">
-          <li aria-hidden className={`hidden px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-foreground/75 ${cols}`}>
+          <li aria-hidden className={`hidden px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-foreground/75 ${cols}`}>
             <span>Card</span>
             <span className="text-center">Balance</span>
             <span className="text-center">Value per pt</span>
@@ -1693,7 +1693,7 @@ function MetricCell({
   if (omit) return <span aria-hidden className="hidden min-[420px]:block" />;
   return (
     <span className={`min-w-0 text-center ${empty ? "hidden min-[420px]:block" : "block"}`}>
-      <span className={`block text-[10px] font-semibold uppercase tracking-wide text-foreground/75 ${tableLg ? "lg:hidden" : ""}`}>
+      <span className={`block text-[11px] font-semibold uppercase tracking-wide text-foreground/75 ${tableLg ? "lg:hidden" : ""}`}>
         {mobileLabel ? (
           <>
             <span className="sm:hidden">{mobileLabel}</span>
@@ -1910,7 +1910,7 @@ function EditRewardActivityModal({
             value={direction === "used" ? "points_redemption" : direction === "earned" ? "points_earned" : "reward_refund"}
           />
           <div className="sm:col-span-2">
-            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
+            <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
             <div className="inline-flex rounded-md ring-1 ring-line">
               {(["used", "earned", "returned"] as const).map((option) => (
                 <button
@@ -1943,7 +1943,7 @@ function EditRewardActivityModal({
             {...pointsCalcProps(points, setPoints)}
           />
           <div className="sm:col-span-2">
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
+            <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
             <input
               name="note"
               defaultValue={entry.note ?? ""}
@@ -2009,7 +2009,7 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
                 type="submit"
                 disabled={deletePending}
                 aria-busy={deletePending}
-                className="cursor-pointer rounded-md bg-negative px-2 py-1 text-[11px] font-semibold text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-80"
+                className="cursor-pointer rounded-md bg-negative px-2 py-1 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-wait disabled:opacity-80"
               >
                 {deletePending ? "Deleting…" : "Delete & give back"}
               </button>
@@ -2018,7 +2018,7 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
               <button
                 type="button"
                 onClick={() => { setConfirming(false); setError(null); }}
-                className="cursor-pointer px-1 text-[11px] font-medium text-foreground/75 hover:text-foreground"
+                className="cursor-pointer px-1 text-xs font-medium text-foreground/75 hover:text-foreground"
               >
                 Cancel
               </button>
@@ -2028,13 +2028,13 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
           <button
             type="button"
             onClick={() => setConfirming(true)}
-            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-[11px] font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-neutral-950 dark:hover:bg-negative/20"
+            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-xs font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-neutral-950 dark:hover:bg-negative/20"
           >
             Delete
           </button>
         )}
       </div>
-      {error ? <span className="max-w-[18rem] text-right text-[11px] font-medium text-negative">{error}</span> : null}
+      {error ? <span className="max-w-[18rem] text-right text-xs font-medium text-negative">{error}</span> : null}
     </div>
   );
 }
@@ -2048,7 +2048,7 @@ const CARD_TABLE_COLS =
 
 function CardTableHeader() {
   return (
-    <div className={`hidden border-b border-line bg-black/[0.03] px-4 py-2.5 text-center text-[10px] font-semibold uppercase tracking-wide text-muted dark:bg-white/[0.04] ${CARD_TABLE_COLS}`}>
+    <div className={`hidden border-b border-line bg-black/[0.03] px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-white/[0.04] ${CARD_TABLE_COLS}`}>
       <span className="pl-6 text-left">Card / Account</span>
       <span>Charging</span>
       <span>Current pts</span>
@@ -2282,12 +2282,12 @@ function CreditCardPanel({
             {/* Labelled "Owner:" the way the authorized user is labelled "AU:"
                 — a bare name beside the bank chip read as another bank. */}
             {card.holder ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                 Owner: <span className="text-slate-700 dark:text-neutral-200">{card.holder}</span>
               </span>
             ) : null}
             {bank ? (
-              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${bankStyle(bank, carryingDebt).tag}`}>
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${bankStyle(bank, carryingDebt).tag}`}>
                 Bank: {bank}
               </span>
             ) : null}
@@ -2295,22 +2295,22 @@ function CreditCardPanel({
                 holder -> bank -> who else can charge on it. The label stays
                 muted so it doesn't compete with the holder chip. */}
             {d?.authUser ? (
-              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-foreground/75 dark:bg-white/10">
+              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-foreground/75 dark:bg-white/10">
                 Authorized User: <span className="text-foreground">{d.authUser}</span>
               </span>
             ) : null}
             {card.dateClosed ? (
-              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
+              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[11px] font-semibold text-negative">
                 Closed {card.dateClosed}
               </span>
             ) : null}
             {carryingDebt ? (
-              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">
+              <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[11px] font-semibold text-negative">
                 Debt
               </span>
             ) : null}
             {card.annualFeeCents && !card.feeWaived ? (
-              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-foreground/75 dark:bg-white/10">
+              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-foreground/75 dark:bg-white/10">
                 Active Fee: <span className="text-negative">${Math.round(card.annualFeeCents / 100)}/yr</span>
               </span>
             ) : null}
@@ -2372,7 +2372,7 @@ function CreditCardPanel({
                         in the warning colour. */}
                     {fnDaysLeft != null ? (
                       <span
-                        className={`block text-[10px] font-bold ${fnUrgent ? "text-negative" : "text-foreground/75"}`}
+                        className={`block text-[11px] font-bold ${fnUrgent ? "text-negative" : "text-foreground/75"}`}
                       >
                         {expiryLabel(fnDaysLeft)}
                       </span>
@@ -2403,7 +2403,7 @@ function CreditCardPanel({
               cards actually working on a bonus carry it. */}
           {bonus ? (
             <span className="mt-2 block">
-              <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
+              <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
                 <span className="font-semibold uppercase tracking-wide text-foreground/75">Bonus spend</span>
                 <span className="font-bold tabular-nums">
                   {bonus.spent == null ? "—" : formatMoneyWhole(bonus.spent, currency)} of{" "}
@@ -2437,7 +2437,7 @@ function CreditCardPanel({
         <span className="ml-2 w-20 shrink-0 text-right sm:w-28">
           {/* Labelled: a bare red figure beside the chevron didn't say it was
               the card's unpaid balance. */}
-          <span className="block whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Total owed</span>
+          <span className="block whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Total owed</span>
           <span className={`block whitespace-nowrap text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-foreground/75"}`}>
             {owed !== 0 ? formatMoneyWhole(owed, currency) : "—"}
           </span>
@@ -2460,7 +2460,7 @@ function CreditCardPanel({
             href={externalCardUrl(d.cardUrl)}
             target="_blank"
             rel="noreferrer"
-            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-12 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-neutral-950"
+            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-12 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-neutral-950"
           >
             Visit site <span aria-hidden>↗</span>
           </a>
@@ -2493,13 +2493,13 @@ function CreditCardPanel({
                 {card.name}
               </button>
               {carryingDebt ? (
-                <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">Debt</span>
+                <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[11px] font-semibold text-negative">Debt</span>
               ) : null}
               {card.dateClosed ? (
-                <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[10px] font-semibold text-negative">Closed {card.dateClosed}</span>
+                <span className="shrink-0 rounded bg-negative/10 px-1.5 py-0.5 text-[11px] font-semibold text-negative">Closed {card.dateClosed}</span>
               ) : null}
             </span>
-            <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] text-muted">
+            <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted">
               {bank ? (
                 <span className={`rounded px-1.5 font-semibold ring-1 ${bankStyle(bank, carryingDebt).tag}`}>{bank}</span>
               ) : null}
@@ -2510,7 +2510,7 @@ function CreditCardPanel({
               ) : null}
             </span>
             {bonus ? (
-              <span className="mt-1 flex items-center gap-2 text-[10px]">
+              <span className="mt-1 flex items-center gap-2 text-[11px]">
                 <span className="font-semibold uppercase tracking-wide text-muted">Bonus</span>
                 <span className="block h-1.5 w-24 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
                   <span className="block h-full rounded-full" style={{ width: `${bonus.pct}%`, backgroundColor: bonus.color }} />
@@ -2556,16 +2556,16 @@ function CreditCardPanel({
         </span>
         <span className="text-center">
           {d?.benefitUsedOn ? (
-            <span className={`inline-block whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${d.benefitUsedOn < today ? "bg-negative/10 text-negative ring-negative/30" : "bg-positive/10 text-positive ring-positive/30"}`}>
+            <span className={`inline-block whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ${d.benefitUsedOn < today ? "bg-negative/10 text-negative ring-negative/30" : "bg-positive/10 text-positive ring-positive/30"}`}>
               Check-in {shortDate(d.benefitUsedOn)}
             </span>
           ) : d?.benefitBookedOn ? (
-            <span className="inline-block whitespace-nowrap rounded-md bg-black/5 px-2 py-0.5 text-[11px] font-semibold text-foreground ring-1 ring-line dark:bg-white/10">
+            <span className="inline-block whitespace-nowrap rounded-md bg-black/5 px-2 py-0.5 text-xs font-semibold text-foreground ring-1 ring-line dark:bg-white/10">
               Booked {shortDate(d.benefitBookedOn)}
             </span>
           ) : d?.freeNightExpiresOn ? (
             <span
-              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ${
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ${
                 fnExpired || fnUrgent
                   ? "bg-negative/10 text-negative ring-negative/30"
                   : "bg-teal-50 text-teal-800 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:ring-teal-800"
@@ -2580,7 +2580,7 @@ function CreditCardPanel({
           ) : DASH_CELL}
           {/* The date itself, under the countdown tag. */}
           {!certSpent && d?.freeNightExpiresOn ? (
-            <span className="mt-1 block text-[11px] tabular-nums text-muted">{d.freeNightExpiresOn.replace(/-/g, "\u2011")}</span>
+            <span className="mt-1 block text-xs tabular-nums text-muted">{d.freeNightExpiresOn.replace(/-/g, "\u2011")}</span>
           ) : null}
         </span>
         <span className={`text-center text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : ""}`}>
@@ -2617,7 +2617,7 @@ function CreditCardPanel({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-black/[0.04] px-1.5 py-1.5 text-[11px] font-medium text-primary hover:bg-black/[0.08] sm:w-auto sm:shrink-0 sm:px-2 dark:bg-white/5 dark:hover:bg-white/10"
+              className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-black/[0.04] px-1.5 py-1.5 text-xs font-medium text-primary hover:bg-black/[0.08] sm:w-auto sm:shrink-0 sm:px-2 dark:bg-white/5 dark:hover:bg-white/10"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M12 20h9" />
@@ -2629,7 +2629,7 @@ function CreditCardPanel({
               <button
                 type="button"
                 onClick={() => setLoggingRewards(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-neutral-950"
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-neutral-950"
               >
                 <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards Activity Log</span>
               </button>
@@ -2638,7 +2638,7 @@ function CreditCardPanel({
               <button
                 type="button"
                 onClick={() => setPaying(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-sky-700 px-1.5 py-1.5 text-[11px] font-medium text-white hover:bg-sky-800 sm:w-auto sm:shrink-0 sm:px-2"
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-sky-700 px-1.5 py-1.5 text-xs font-medium text-white hover:bg-sky-800 sm:w-auto sm:shrink-0 sm:px-2"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <rect x="2" y="6" width="20" height="12" rx="2" />
@@ -2653,7 +2653,7 @@ function CreditCardPanel({
                 <button
                   type="submit"
                   disabled={closePending}
-                  className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-negative/10 px-1.5 py-1.5 text-[11px] font-medium text-negative hover:bg-negative/15 disabled:opacity-60 sm:w-auto sm:px-2"
+                  className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-negative/10 px-1.5 py-1.5 text-xs font-medium text-negative hover:bg-negative/15 disabled:opacity-60 sm:w-auto sm:px-2"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M3 6h18" />
@@ -2862,7 +2862,7 @@ function RewardActivityForm({
           }
         />
         <div className="sm:col-span-2">
-          <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
+          <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="inline-flex rounded-md ring-1 ring-line">
             {(["earned", "returned", "used"] as const).map((option) => (
@@ -2906,7 +2906,7 @@ function RewardActivityForm({
           <>
             <LabeledInput label="Cash received" name="cashReceived" prefix="$" inputMode="decimal" placeholder="0.00" autoComplete="off" />
             <div className="block">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Received as</span>
+              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">Received as</span>
               <input type="hidden" name="receivedAs" value={receivedAs} />
               <div className="flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-md ring-1 ring-line">
@@ -2941,7 +2941,7 @@ function RewardActivityForm({
           </>
         ) : null}
         <div className="sm:col-span-2">
-          <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
+          <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
           <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
         </div>
         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
@@ -2951,7 +2951,7 @@ function RewardActivityForm({
       </form>
       {card.rewardActivities.length > 0 ? (
         <div className="mt-3 border-t border-line pt-2">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Recent rewards activity</p>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Recent rewards activity</p>
           <ul className="space-y-1 text-xs">
             {card.rewardActivities.slice(0, 5).map((activity) => (
               // Delete lives on the row you are already looking at. It used
@@ -3003,7 +3003,7 @@ function EditCreditCardForm({
     <button
       type="button"
       onClick={() => setActiveTab(id)}
-      className={`h-8 min-w-0 whitespace-nowrap px-1 text-[11px] font-semibold transition sm:px-2.5 sm:text-sm ${
+      className={`h-8 min-w-0 whitespace-nowrap px-1 text-xs font-semibold transition sm:px-2.5 sm:text-sm ${
         activeTab === id
           ? "text-sky-700 dark:text-sky-400 shadow-[inset_0_-2px_0_var(--color-sky-700)]"
           : "text-foreground/75 hover:bg-slate-50 hover:text-foreground dark:hover:bg-neutral-900"
@@ -3062,7 +3062,7 @@ function EditCreditCardForm({
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
               <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
               <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Benefits reset</span>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground/75">Benefits reset</span>
                 <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md px-2 py-1.5 text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-sky-500">
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
@@ -3099,7 +3099,7 @@ function EditCreditCardForm({
               </datalist>
             </div>
             <label className="block">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Rewards category</span>
+              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Rewards category</span>
               <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
                 <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
               </select>
@@ -3110,7 +3110,7 @@ function EditCreditCardForm({
                   href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-neutral-950 dark:text-sky-400 dark:hover:bg-sky-900/40"
+                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-neutral-950 dark:text-sky-400 dark:hover:bg-sky-900/40"
                 >
                   TPG point values <span aria-hidden>↗</span>
                 </a>
@@ -3125,7 +3125,7 @@ function EditCreditCardForm({
               Bonus earned
             </label>
             <div className="sm:col-span-2">
-              <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground/75">Remarks</label>
+              <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Remarks</label>
               <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
             </div>
           </div>
@@ -3156,7 +3156,7 @@ function EditCreditCardForm({
               <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
               <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
             </div>
-            <p className="text-[11px] text-foreground/75">
+            <p className="text-xs text-foreground/75">
               APR % should be <span className="font-semibold">0</span> during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.
             </p>
           </div>

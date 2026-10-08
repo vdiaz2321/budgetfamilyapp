@@ -267,7 +267,7 @@ export function SummaryPanel({ groups, currency }: Props) {
                       {formatMoney(s.value, currency)}
                     </span>
                     <span
-                      className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums"
+                      className="w-9 shrink-0 text-right text-sm font-semibold tabular-nums"
                       style={{ color: s.color }}
                     >
                       {pct}%

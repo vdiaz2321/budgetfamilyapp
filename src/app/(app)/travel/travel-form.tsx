@@ -35,7 +35,7 @@ export function isPlannedOnly(spentTyped: boolean, reservedOn: string): boolean 
 export function PlannedPointsNote({ show, what = "points" }: { show: boolean; what?: string }) {
   if (!show) return null;
   return (
-    <p className="text-[11px] font-medium text-negative">
+    <p className="text-xs font-medium text-negative">
       Still planned — no {what} come off the card until a Spent amount or the booking date is entered.
     </p>
   );
@@ -114,25 +114,32 @@ export function PlanSpentFields({
     { slot: "spentForeign", label: spentOnPoints ? `Cash paid with pts (${fx})` : `Spent ${what} (${fx})` },
   ];
   const boxes = allBoxes.filter((b) => showForeign || !b.slot.endsWith("Foreign"));
+  const box = (b: (typeof boxes)[number]) => {
+    const locked = spentLocked && b.slot === "spent";
+    return (
+      <Field key={b.slot} label={b.label}>
+        <input
+          value={value[b.slot]}
+          onChange={(e) => onChange({ ...value, [b.slot]: e.target.value })}
+          onFocus={() => onFocusSlot?.(b.slot)}
+          readOnly={locked}
+          tabIndex={locked ? -1 : undefined}
+          inputMode="decimal"
+          className={`${inputClass} ${locked ? "opacity-70" : ""}`}
+        />
+        {locked ? <PaidNote linked /> : null}
+      </Field>
+    );
+  };
+  // Planned and Spent each in their own group; Spent's sits in the blue
+  // frame the flight form and trip tables use, so the two never blur.
+  const group = showForeign ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3";
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {boxes.map((b) => {
-        const locked = spentLocked && b.slot === "spent";
-        return (
-          <Field key={b.slot} label={b.label}>
-            <input
-              value={value[b.slot]}
-              onChange={(e) => onChange({ ...value, [b.slot]: e.target.value })}
-              onFocus={() => onFocusSlot?.(b.slot)}
-              readOnly={locked}
-              tabIndex={locked ? -1 : undefined}
-              inputMode="decimal"
-              className={`${inputClass} ${locked ? "opacity-70" : ""}`}
-            />
-            {locked ? <PaidNote linked /> : null}
-          </Field>
-        );
-      })}
+    <div className={`grid gap-3 ${showForeign ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2"}`}>
+      <div className={`${group} p-2`}>{boxes.filter((b) => b.slot.startsWith("planned")).map(box)}</div>
+      <div className={`${group} rounded-lg p-2 ring-2 ring-sky-400 dark:ring-sky-500`}>
+        {boxes.filter((b) => b.slot.startsWith("spent")).map(box)}
+      </div>
     </div>
   );
 }
@@ -142,7 +149,7 @@ export function PlanSpentFields({
 // the trip still counts the Spent figures typed here until then.
 export function PaidNote({ linked }: { linked: boolean }) {
   return (
-    <span className="mt-0.5 block text-[10px] font-medium text-muted">
+    <span className="mt-0.5 block text-[11px] font-medium text-muted">
       {linked ? "From linked transactions" : "Fills in from linked transactions"}
     </span>
   );
@@ -167,7 +174,7 @@ export function Section({ title, action, children }: { title: string; action?: R
 export function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
     <label className={`block min-w-0 ${className ?? ""}`}>
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
     </label>
   );

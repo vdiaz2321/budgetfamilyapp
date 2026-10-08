@@ -631,7 +631,7 @@ export function TravelBoard({
               <div className="hidden overflow-x-auto sm:block">
                 <table className="w-full min-w-[1180px] text-sm">
                   <thead>
-                    <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+                    <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                       <SortTh label="Reservation made" col="reservedOn" sort={sort} onSort={sortBy} nowrap />
                       <SortTh label="Check in date" col="checkIn" sort={sort} onSort={sortBy} nowrap />
                       <SortTh label="Hotel name" col="propertyName" sort={sort} onSort={sortBy} />
@@ -664,12 +664,12 @@ export function TravelBoard({
                             {s.propertyName}
                           </span>
                           {s.cancelledAt ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
                               Cancelled
                             </span>
                           ) : null}
                           {s.isEstimate ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
                               Planned
                             </span>
                           ) : null}
@@ -687,7 +687,7 @@ export function TravelBoard({
                               : `(${s.pointsCost.toLocaleString()})`
                             : DASH}
                           {s.freeNightUsed ? (
-                            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--viz-bills)" }}>
+                            <span className="mt-0.5 block text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--viz-bills)" }}>
                               Free night
                             </span>
                           ) : null}
@@ -713,7 +713,7 @@ export function TravelBoard({
                           {s.pocketCostCents > 0 ? (
                             formatMoneyWhole(s.pocketCostCents, currency)
                           ) : (
-                            <span className="text-[11px] font-semibold text-muted">{coveredBy(s)}</span>
+                            <span className="text-xs font-semibold text-muted">{coveredBy(s)}</span>
                           )}
                         </td>
                         <td className="px-2 py-2 text-left text-muted">{s.city ?? DASH}</td>
@@ -750,12 +750,12 @@ export function TravelBoard({
                         <span className="min-w-0 flex-1 text-sm font-semibold">
                           <span className={s.cancelledAt ? "line-through" : ""}>{s.propertyName}</span>
                           {s.cancelledAt ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
                               Cancelled
                             </span>
                           ) : null}
                           {s.isEstimate ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
                               Planned
                             </span>
                           ) : null}
@@ -768,7 +768,7 @@ export function TravelBoard({
                           )}
                         </span>
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
                         <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
                         <span className="tabular-nums">{s.nights}n</span>
                         {s.city ? <span>{s.city}</span> : null}
@@ -776,9 +776,9 @@ export function TravelBoard({
                         {s.cardLabel ? <span>{s.cardLabel}</span> : null}
                         {s.pax ? <span className="tabular-nums">{s.pax} pax</span> : null}
                       </div>
-                      <div className="mt-1.5 grid grid-cols-3 gap-2 text-[11px]">
+                      <div className="mt-1.5 grid grid-cols-3 gap-2 text-xs">
                         <span>
-                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">
+                          <span className="block text-xs font-semibold uppercase tracking-wide text-muted sm:text-[11px]">
                             {s.pointsCost > 0 && !s.pointsUsed ? "Pts if used" : "Points used"}
                           </span>
                           <span
@@ -788,19 +788,19 @@ export function TravelBoard({
                             {s.pointsCost > 0 ? s.pointsCost.toLocaleString() : "—"}
                           </span>
                           {s.freeNightUsed ? (
-                            <span className="block text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--viz-bills)" }}>
+                            <span className="block text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--viz-bills)" }}>
                               Free night
                             </span>
                           ) : null}
                         </span>
                         <span>
-                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel credit</span>
+                          <span className="block text-xs font-semibold uppercase tracking-wide text-muted sm:text-[11px]">Hotel credit</span>
                           <span className="tabular-nums font-semibold" style={{ color: "var(--viz-bills)" }}>
                             {s.hotelCreditCents > 0 ? formatMoneyWhole(s.hotelCreditCents, currency) : "—"}
                           </span>
                         </span>
                         <span>
-                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-[10px]">Hotel cost</span>
+                          <span className="block text-xs font-semibold uppercase tracking-wide text-muted sm:text-[11px]">Hotel cost</span>
                           <span className="tabular-nums font-semibold">
                             {s.hotelCostCents > 0 ? formatMoneyWhole(s.hotelCostCents, currency) : "—"}
                           </span>
@@ -842,12 +842,12 @@ export function TravelBoard({
               <span className="min-w-0 text-sm font-semibold sm:truncate">{s.propertyName}</span>
               {/* Same chip as the card panel's "Owner:" / "Bank:". */}
               {s.brand ? (
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                   Booked Thru: <span className="text-slate-700 dark:text-neutral-200">{s.brand}</span>
                 </span>
               ) : null}
             </span>
-            <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+            <span className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
               <span className="tabular-nums">{sheetDate(s.checkIn)}</span>
               <span className="tabular-nums">{s.nights}n</span>
               {s.city ? <span>{s.city}</span> : null}
@@ -912,13 +912,13 @@ export function TravelBoard({
             <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:min-w-[16rem] sm:basis-0">
               <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
                 <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                   {f.airline}
                   {f.bookingCode ? <span className="text-slate-700 dark:text-neutral-200"> · {f.bookingCode}</span> : null}
                 </span>
               </span>
               {/* The next flight: its date, number, time and route. */}
-              <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+              <span className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
                 <span className="tabular-nums">{sheetDate(next.flightOn)}</span>
                 {next.flightNumber ? <span>{next.flightNumber}</span> : null}
                 {next.departsAt ? <span className="tabular-nums">{next.departsAt}</span> : null}
@@ -965,12 +965,12 @@ export function TravelBoard({
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
               {c.bookingCode ? (
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                   Booking: <span className="text-slate-700 dark:text-neutral-200">{c.bookingCode}</span>
                 </span>
               ) : null}
             </span>
-            <span className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+            <span className="flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
               <span className="tabular-nums">
                 {sheetDateRange(c.pickupOn, c.returnOn)}
               </span>
@@ -1126,7 +1126,7 @@ export function TravelBoard({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+          <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
             <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Year</th>
             <th className="px-2 py-2 text-center font-semibold">Total stays</th>
             <th className="px-2 py-2 text-center font-semibold">Total pts used</th>
@@ -1213,7 +1213,7 @@ export function TravelBoard({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-sm sm:min-w-0">
         <thead>
-          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+          <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
             {/* Pinned: on a phone these five columns still need a
                 sideways swipe, and without an anchor you arrive at
                 Total saved with no idea whose row you are reading. */}
@@ -1248,7 +1248,7 @@ export function TravelBoard({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-sm sm:min-w-0">
         <thead>
-          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+          <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
             <th className="sticky left-0 z-10 bg-surface px-2 py-2 text-center font-semibold">Card</th>
             <th className="px-2 py-2 text-center font-semibold">Stays</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Total Pts Used</th>
@@ -1288,7 +1288,7 @@ export function TravelBoard({
   );
 
   return (
-    <div className="space-y-3">
+    <div className="ink-strong space-y-3">
       <header className="rounded-xl bg-surface px-4 py-4 shadow-sm ring-1 ring-black/5 dark:ring-white/10 sm:px-6">
         {/* The actions sit next to the title rather than pinned to the far
              right — on a wide screen that put the primary button an entire
@@ -1322,7 +1322,7 @@ export function TravelBoard({
                 className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
               >
                 Link cards
-                <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] tabular-nums text-muted dark:bg-white/10">
+                <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[11px] tabular-nums text-muted dark:bg-white/10">
                   {unlinked} unlinked
                 </span>
               </button>
@@ -1590,7 +1590,7 @@ export function TravelBoard({
 // inside the name column.
 function Remarks({ text }: { text: string | null }) {
   if (!text?.trim()) return null;
-  return <span className="line-clamp-2 basis-full text-[11px] italic text-muted">{text}</span>;
+  return <span className="line-clamp-2 basis-full text-xs italic text-muted">{text}</span>;
 }
 
 // The heading over one group in the upcoming card: what the group holds, and
@@ -1776,7 +1776,7 @@ export function Figure({
 }) {
   return (
     <span className={`flex shrink-0 items-baseline gap-1.5 ${className ?? ""}`}>
-      <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
+      <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
       <span className={`text-sm font-semibold tabular-nums ${tone}`} style={style}>{value}</span>
     </span>
   );

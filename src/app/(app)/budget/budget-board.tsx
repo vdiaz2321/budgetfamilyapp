@@ -1565,7 +1565,7 @@ function SummaryHeroCard({
             </div>
           </div>
           <div className="order-4 min-w-0 @3xl:order-none @3xl:text-center">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned Leftover</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Income Planned Remaining</p>
             <p className={`mt-0.5 whitespace-nowrap text-2xl font-bold tabular-nums ${displayLeft < 0 ? "text-negative" : "text-foreground"}`}>
               {formatMoney(displayLeft, currency)}
             </p>

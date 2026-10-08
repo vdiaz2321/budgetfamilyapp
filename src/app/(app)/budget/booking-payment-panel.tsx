@@ -30,6 +30,7 @@ export function BookingPaymentPanel({
   onTotalPoints,
   onResetSplit,
   foreignCurrency,
+  date,
   onForeignCurrency,
   totalCents,
   isRefund,
@@ -53,6 +54,8 @@ export function BookingPaymentPanel({
   onTotalPoints: (points: number) => void;
   onResetSplit: () => void;
   foreignCurrency: string;
+  /** The payment's date — foreign figures convert at that day's rate. */
+  date: string;
   onForeignCurrency: (code: string) => void;
   totalCents: number;
   isRefund: boolean;
@@ -83,15 +86,17 @@ export function BookingPaymentPanel({
   const grid = foreign ? PAX_GRID : PAX_GRID_USD;
   const nameSpan = foreign ? "col-span-3 sm:col-span-1" : "col-span-2 sm:col-span-1";
 
-  // Typing in the other currency fills that passenger's dollars at today's
-  // rate, as the flight popup does. The rates load with the panel.
+  // Typing in the other currency fills that passenger's dollars at the
+  // payment date's rate. The rates load with the panel and follow the date.
   const rates = useRef<Record<string, number> | null>(null);
   useEffect(() => {
     if (!isFlight) return;
-    loadFxRates().then((r) => {
-      rates.current = r;
+    let stale = false;
+    loadFxRates(date).then((r) => {
+      if (!stale) rates.current = r;
     });
-  }, [isFlight]);
+    return () => { stale = true; };
+  }, [isFlight, date]);
   function typeForeign(name: string, value: string) {
     const rate = rates.current?.[foreignCurrency];
     const n = Number(value.replace(/,/g, ""));

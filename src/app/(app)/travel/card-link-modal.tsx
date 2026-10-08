@@ -90,7 +90,7 @@ export function CardLinkModal({
             <li key={row.label} className="grid grid-cols-1 gap-1.5 py-2 sm:grid-cols-2 sm:items-center sm:gap-3">
               <span className="flex items-baseline gap-2">
                 <span className="text-sm font-semibold">{row.label}</span>
-                <span className="text-[11px] tabular-nums text-muted">
+                <span className="text-xs tabular-nums text-muted">
                   {row.stays} stay{row.stays === 1 ? "" : "s"}
                 </span>
               </span>

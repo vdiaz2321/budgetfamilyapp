@@ -223,7 +223,7 @@ export function AddTravelLogModal({
           {/* The trip's own span, typed once here rather than buried in the
               Spending section. Saved with the trip even if no section is open. */}
           <label className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted">Starts</span>
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted">Starts</span>
             <input
               type="date"
               value={startOn}
@@ -233,7 +233,7 @@ export function AddTravelLogModal({
             />
           </label>
           <label className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted">Ends</span>
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted">Ends</span>
             <input
               type="date"
               value={endOn}

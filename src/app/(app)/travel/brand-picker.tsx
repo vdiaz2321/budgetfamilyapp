@@ -188,7 +188,7 @@ export function BrandPicker({
               {pending ? "Adding…" : `Add “${typed}”`}
             </button>
           ) : null}
-          {error ? <p className="px-2 pb-1.5 text-[11px] text-negative">{error}</p> : null}
+          {error ? <p className="px-2 pb-1.5 text-xs text-negative">{error}</p> : null}
         </div>
       ) : null}
     </div>

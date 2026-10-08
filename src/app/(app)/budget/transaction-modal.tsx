@@ -675,6 +675,7 @@ function TransactionModalForm({
             <input type="hidden" name="isRefund" value={isRefund ? "on" : ""} />
 
             <CurrencyConverter
+              date={dateValue}
               onUse={(usdCents) => {
                 setConvertedCents(usdCents);
                 setTotalCents(usdCents);
@@ -914,6 +915,7 @@ function TransactionModalForm({
                       onTotalPoints={setTotalPaxPoints}
                       onResetSplit={() => setPaxCents(null)}
                       foreignCurrency={flightCurrency}
+                      date={dateValue}
                       onForeignCurrency={setPaxCurrency}
                       totalCents={totalCents}
                       isRefund={isRefund}

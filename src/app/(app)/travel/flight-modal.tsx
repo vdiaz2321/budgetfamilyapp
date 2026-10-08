@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition } from "react";
+import { Fragment, useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, loadFxRates, type ConvertedFrom } from "@/components/currency-converter";
-import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatMoneyWhole } from "@/lib/money";
+import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
   addTraveller,
   deleteTraveller,
@@ -18,7 +18,7 @@ import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
 import type { Embed, SectionHandle } from "./embedded-section";
-import type { TravelCard, TravelFlight, TravelTrip, Traveller } from "./types";
+import type { FlightBaggage, TravelCard, TravelFlight, TravelTrip, Traveller } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
 
 type LegDraft = {
@@ -155,6 +155,9 @@ export function FlightModal({
     return flight.pointsValueMicros !== implied ? rateDisplay(flight.pointsValueMicros) : "";
   });
   const [remarks, setRemarks] = useState(flight?.remarks ?? "");
+  const [baggage, setBaggage] = useState<FlightBaggage>(
+    () => flight?.baggage ?? { fare: "", personalItem: false, carryOn: false, checkedBags: 0 },
+  );
   const [editingNames, setEditingNames] = useState(false);
   // The short form: points seats, card owner and
   // remarks fold away; a saved flight already using any of them opens with
@@ -171,11 +174,14 @@ export function FlightModal({
   const lastFare = useRef<{ key: number; slot: FareSlot } | null>(null);
 
   // Typing a fare in the foreign column fills the dollar box on that same row
-  // at today's rate — only that row, since the kids' fares differ. The rates
-  // load the first time a foreign box is clicked into.
-  const fxRates = useRef<Record<string, number> | null>(null);
-  const toUsd = (raw: string): string | null => {
-    const rate = fxRates.current?.[foreignCurrency];
+  // — only that row, since the kids' fares differ. Spent converts at the
+  // booking date's rate (what the card charged); Planned at today's. The
+  // rates load the first time a foreign box is clicked into.
+  const fxRates = useRef<{ planned: Record<string, number> | null; spent: Record<string, number> | null; spentOn: string }>({
+    planned: null, spent: null, spentOn: "",
+  });
+  const toUsd = (raw: string, slot: FareSlot): string | null => {
+    const rate = (slot === "fareEur" ? fxRates.current.spent : fxRates.current.planned)?.[foreignCurrency];
     if (!rate) return null;
     if (!raw.trim()) return "";
     const n = Number(raw.replace(/,/g, ""));
@@ -183,21 +189,24 @@ export function FlightModal({
   };
   function typeFare(key: number, slot: FareSlot, value: string) {
     if (slot !== "plannedForeign" && slot !== "fareEur") return updatePassenger(key, { [slot]: value });
-    const usd = toUsd(value);
+    const usd = toUsd(value, slot);
     // Spent $ follows the linked payments; a foreign figure doesn't change it.
     const locked = slot === "fareEur" && flight?.paidCents != null;
     updatePassenger(key, usd == null || locked ? { [slot]: value } : { [slot]: value, [FX_PAIR[slot]]: usd });
   }
   function loadRatesFor(key: number, slot: FareSlot) {
-    if (fxRates.current || (slot !== "plannedForeign" && slot !== "fareEur")) return;
-    loadFxRates().then((rates) => {
-      fxRates.current = rates;
+    if (slot !== "plannedForeign" && slot !== "fareEur") return;
+    const spent = slot === "fareEur";
+    if (spent ? fxRates.current.spent && fxRates.current.spentOn === reservedOn : fxRates.current.planned) return;
+    loadFxRates(spent ? reservedOn : undefined).then((rates) => {
+      if (spent) fxRates.current = { ...fxRates.current, spent: rates, spentOn: reservedOn };
+      else fxRates.current = { ...fxRates.current, planned: rates };
       // A figure typed before the rates arrived gets its dollars now.
       setPassengers((all) =>
         all.map((p) => {
           if (p.key !== key || !p[slot].trim() || p[FX_PAIR[slot]].trim()) return p;
           if (slot === "fareEur" && flight?.paidCents != null) return p;
-          const usd = toUsd(p[slot]);
+          const usd = toUsd(p[slot], slot);
           return usd ? { ...p, [FX_PAIR[slot]]: usd } : p;
         }),
       );
@@ -234,6 +243,25 @@ export function FlightModal({
   const impliedMicros = pointsTyped > 0 && pointsFareCents > 0 ? Math.round((pointsFareCents / pointsTyped) * 10_000) : null;
   const datesOutOfOrder = Boolean(reservedOn && legs[0]?.flightOn && legs.some((l) => l.flightOn && l.flightOn < reservedOn));
   const tripNote = outsideTripNote(trips, trip.tripId, legs.map((l) => l.flightOn));
+  // Names each flight from the route: the first leg back to where the trip
+  // began is the Return; a leg picking up where the last one landed, before
+  // or after it, is a Layover.
+  const samePlace = (a: string, b: string) => Boolean(a.trim()) && a.trim().toLowerCase() === b.trim().toLowerCase();
+  const returnStart = (() => {
+    const home = legs[0]?.fromPlace ?? "";
+    const back = legs.findIndex((l, i) => i > 0 && samePlace(l.toPlace, home));
+    if (back < 0) return -1;
+    // The return begins at the first leg of that homeward chain.
+    let start = back;
+    while (start > 1 && samePlace(legs[start - 1].toPlace, legs[start].fromPlace) && legs[start - 1].flightOn === legs[start].flightOn) start--;
+    return start;
+  })();
+  const legLabel = (i: number) => {
+    if (legs.length === 1) return "Flight";
+    if (i === 0) return "Outbound";
+    if (i === returnStart) return "Return";
+    return "Layover";
+  };
 
   // What saving moves on the card, same preview the stay form gives. An
   // estimate has drawn nothing and draws nothing.
@@ -317,6 +345,7 @@ export function FlightModal({
         holder,
         pointsValueCents: pointsValue,
         remarks,
+        baggage,
         foreignCurrency,
         legs: legs.map((l) => ({
           flightOn: l.flightOn, flightNumber: l.flightNumber, fromPlace: l.fromPlace,
@@ -449,13 +478,25 @@ export function FlightModal({
         <Section title="Flights">
           <div className="space-y-3">
             {legs.map((leg, i) => (
-              // One line per flight: the date carries the flight's name
-              // ("Outbound date", "Return date"), so there is no heading row.
+              <Fragment key={leg.key}>
+              {i > 0 && connectionMinutes(legs[i - 1], leg) != null ? (
+                // Time on the ground between two connecting flights, worked
+                // out from the arrival and departure typed above and below.
+                <div className="flex items-center gap-2 px-2" aria-label="Layover">
+                  <span className="h-px flex-1 border-t border-dashed border-sky-300 dark:border-sky-700" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 ring-1 ring-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:ring-sky-800">
+                    <svg aria-hidden viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 2" /></svg>
+                    Layover{leg.fromPlace.trim() ? ` in ${leg.fromPlace.trim()}` : ""} · {formatDuration(connectionMinutes(legs[i - 1], leg)!)}
+                  </span>
+                  <span className="h-px flex-1 border-t border-dashed border-sky-300 dark:border-sky-700" />
+                </div>
+              ) : null}
+              {/* One line per flight: the date carries the flight's name
+                  ("Outbound date", "Return date"), so there is no heading row. */}
               <div
-                key={leg.key}
                 className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background/60 p-2.5 ring-1 ring-line sm:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_8rem_8rem_auto]"
               >
-                <Field label={`${legs.length === 1 ? "Flight" : i === 0 ? "Outbound" : legs.length === 2 ? "Return" : `Flight ${i + 1}`} date`}>
+                <Field label={`${legLabel(i)} date`}>
                   <input
                     type="date"
                     value={leg.flightOn}
@@ -504,26 +545,46 @@ export function FlightModal({
                   </button>
                 ) : null}
               </div>
+              </Fragment>
             ))}
             {datesOutOfOrder ? (
-              <p className="text-[11px] font-medium text-negative">A flight is dated before the booking — check the year.</p>
+              <p className="text-xs font-medium text-negative">A flight is dated before the booking — check the year.</p>
             ) : tripNote ? (
-              <p className="text-[11px] font-medium text-negative">{tripNote}</p>
+              <p className="text-xs font-medium text-negative">{tripNote}</p>
             ) : null}
-            {/* The return starts where the last flight landed. An added
-                booking (Booking 2, …) is a one-way ticket: no return. */}
-            {copyOf ? null : (
+            <div className="flex flex-wrap items-start gap-2 pt-1">
+              {/* A layover carries on from where the last flight landed, on
+                  the same day and booking ref. */}
               <button
                 type="button"
                 onClick={() => {
                   const last = legs[legs.length - 1];
-                  setLegs((all) => [...all, emptyLeg(last?.toPlace ?? "", last?.fromPlace ?? "")]);
+                  setLegs((all) => [
+                    ...all,
+                    { ...emptyLeg(last?.toPlace ?? "", ""), flightOn: last?.flightOn ?? "", flightNumber: last?.flightNumber ?? "" },
+                  ]);
                 }}
-                className="rounded-md px-2.5 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                className={FLIGHT_ACTION}
               >
-                + {legs.length === 1 ? "Add return flight" : "Add another flight"}
+                Add layover flight
               </button>
-            )}
+              {/* The return flies from where the last flight landed back to
+                  where the trip began. An added booking (Booking 2, …) is a
+                  one-way ticket: no return. */}
+              {copyOf || returnStart >= 0 ? null : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const last = legs[legs.length - 1];
+                    setLegs((all) => [...all, emptyLeg(last?.toPlace ?? "", legs[0]?.fromPlace ?? "")]);
+                  }}
+                  className={FLIGHT_ACTION}
+                >
+                  Add return flight
+                </button>
+              )}
+              <FeaturesButton value={baggage} onChange={setBaggage} />
+            </div>
           </div>
         </Section>
 
@@ -535,7 +596,7 @@ export function FlightModal({
               takes the whole next line once it is opened. */}
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             <h3 className="text-xs font-bold uppercase tracking-wide">Passengers</h3>
-            <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
               Total
               <input
                 type="number"
@@ -555,7 +616,7 @@ export function FlightModal({
             <button
               type="button"
               onClick={() => setEditingNames((v) => !v)}
-              className="rounded-md px-2 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              className="rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
             >
               {editingNames ? "Done editing names" : "Edit family names"}
             </button>
@@ -589,7 +650,7 @@ export function FlightModal({
               }))}
             /> : null}
             <div className="has-[.rounded-xl]:order-last has-[.rounded-xl]:basis-full">
-              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
+              <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} date={isEstimate ? undefined : reservedOn} />
             </div>
           </div>
 
@@ -599,15 +660,27 @@ export function FlightModal({
               span their two money columns, with the currency under each. It
               stands in for the per-row labels, so the rows sit straight under
               it. On a phone the four figures share the line under each name. */}
+          <div className="relative">
+          {/* A blue frame round the Spent columns, from their heading down
+              through the Total, so they read apart from Planned. The rows are
+              separate grids, so the frame is one more grid laid over them,
+              its box in the same columns. Wide screens only: on a phone the
+              figures sit under each name instead. */}
+          <div aria-hidden className={`${PAX_GRID} pointer-events-none absolute -inset-y-1.5 inset-x-0 hidden sm:grid`}>
+            <span
+              className="-mx-1 rounded-lg ring-2 ring-sky-400 dark:ring-sky-500"
+              style={{ gridColumn: showFx ? "5 / span 2" : "4 / span 1" }}
+            />
+          </div>
           <div className={`${PAX_GRID} mb-1.5 items-end text-center`}>
             <span aria-hidden className="hidden sm:block" />
-            <span className="hidden self-end pb-0.5 text-left text-[11px] font-bold uppercase tracking-wide text-muted sm:row-span-2 sm:block">
+            <span className="hidden self-end pb-0.5 text-left text-xs font-bold uppercase tracking-wide text-muted sm:row-span-2 sm:block">
               Passenger
             </span>
-            <span className={`${showFx ? "col-span-2" : ""} col-start-2 border-b-2 border-line pb-0.5 text-[11px] font-bold uppercase tracking-wide text-muted sm:col-start-auto`}>
+            <span className={`${showFx ? "col-span-2" : ""} col-start-2 border-b-2 border-line pb-0.5 text-xs font-bold uppercase tracking-wide text-muted sm:col-start-auto`}>
               Planned
             </span>
-            <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-sky-400 pb-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground dark:border-sky-500`}>
+            <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-sky-400 pb-0.5 text-xs font-bold uppercase tracking-wide text-foreground dark:border-sky-500`}>
               Spent
             </span>
             <span aria-hidden className="hidden sm:block" />
@@ -620,7 +693,7 @@ export function FlightModal({
             ].map((c, n) => (
               <span
                 key={n}
-                className={`text-[11px] font-semibold ${c.spent ? "text-foreground" : "text-muted"} ${n === 0 ? "col-start-2 sm:col-start-auto" : ""}`}
+                className={`text-xs font-semibold ${c.spent ? "text-foreground" : "text-muted"} ${n === 0 ? "col-start-2 sm:col-start-auto" : ""}`}
               >
                 {c.sign === c.code ? c.code : `${c.code} ${c.sign}`}
               </span>
@@ -641,7 +714,7 @@ export function FlightModal({
                   ✕
                 </button>
                 <label className={`${showFx ? "col-span-4" : "col-span-2"} block min-w-0 sm:col-span-1`}>
-                  <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">
+                  <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted sm:hidden">
                     Passenger {i + 1}
                   </span>
                   <select
@@ -704,11 +777,12 @@ export function FlightModal({
           <div className={`${PAX_GRID} mt-2 items-baseline border-t border-line pt-2 text-sm font-bold tabular-nums`}>
             <span aria-hidden />
             <span className={`${showFx ? "col-span-4" : "col-span-2"} sm:col-span-1`}>Total</span>
-            <span className="col-start-2 text-center sm:col-start-auto">{formatMoneyWhole(total("planned"), currency)}</span>
+            <span className="col-start-2 text-center sm:col-start-auto">{formatMoney(total("planned"), currency)}</span>
             {showFx ? <span className="text-center">{fx}{centsToDisplay(total("plannedForeign"))}</span> : null}
-            <span className="text-center">{formatMoneyWhole(total("fare"), currency)}</span>
+            <span className="text-center">{formatMoney(total("fare"), currency)}</span>
             {showFx ? <span className="text-center">{fx}{centsToDisplay(total("fareEur"))}</span> : null}
             <span className="hidden text-center sm:block">{pointsTyped ? pointsTyped.toLocaleString() : ""}</span>
+          </div>
           </div>
         </section>
 
@@ -722,11 +796,6 @@ export function FlightModal({
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            {card ? (
-              <span className="mt-1 block text-[10px] font-semibold" style={{ color: "var(--viz-savings)" }}>
-                {card.currentPoints.toLocaleString()} pts
-              </span>
-            ) : null}
           </Field>
           <div className={showMore ? "contents" : "hidden"}>
           <Field label="Card used (if not linked)">
@@ -755,7 +824,7 @@ export function FlightModal({
               className={inputClass}
             />
             {impliedMicros ? (
-              <span className="mt-0.5 block text-[10px] font-medium text-muted">
+              <span className="mt-0.5 block text-[11px] font-medium text-muted">
                 <span style={{ color: "var(--viz-savings)" }}>{formatCentsPerPoint(impliedMicros / 10_000)}/pt</span> ={" "}
                 {formatMoneyWhole(pointsFareCents, currency)} ÷ {pointsTyped.toLocaleString()} pts
               </span>
@@ -793,7 +862,7 @@ export function FlightModal({
 
         <PlannedPointsNote show={isEstimate && pointsUsed} />
         {draw !== 0 ? (
-          <p className="text-[11px] text-muted">
+          <p className="text-xs text-muted">
             Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
           </p>
         ) : null}
@@ -847,7 +916,7 @@ export function FlightModal({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
             {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · {isEstimate ? "Planned flight cost" : "Flight cost"}{" "}
-            <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(fareCents, currency)}</span>
+            <span className="font-bold tabular-nums text-foreground">{formatMoney(fareCents, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {flight ? (
@@ -948,7 +1017,7 @@ function TravellerEditor({ travellers }: { travellers: Traveller[] }) {
                   type="button"
                   disabled={pending}
                   onClick={() => run(() => renameTraveller(t.id, draft))}
-                  className="rounded-md bg-sky-700 px-2.5 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+                  className="rounded-md bg-sky-700 px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-60"
                 >
                   Save
                 </button>
@@ -957,7 +1026,7 @@ function TravellerEditor({ travellers }: { travellers: Traveller[] }) {
                 type="button"
                 disabled={pending}
                 onClick={() => run(() => deleteTraveller(t.id))}
-                className="rounded-md px-2 py-1 text-[11px] font-semibold text-negative hover:bg-negative/10"
+                className="rounded-md px-2 py-1 text-xs font-semibold text-negative hover:bg-negative/10"
               >
                 Remove
               </button>
@@ -983,7 +1052,7 @@ function TravellerEditor({ travellers }: { travellers: Traveller[] }) {
           type="button"
           disabled={pending || !newName.trim()}
           onClick={() => run(() => addTraveller(newName), () => setNewName(""))}
-          className="rounded-md px-2.5 py-1 text-[11px] font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
+          className="rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
         >
           Add name
         </button>
@@ -992,3 +1061,95 @@ function TravellerEditor({ travellers }: { travellers: Traveller[] }) {
     </div>
   );
 }
+
+// Minutes between one flight landing and the next taking off, when the second
+// leaves from where the first landed within a day — a connection, not a
+// return days later. Both times are at the same airport, so no time zones.
+function connectionMinutes(prev: { flightOn: string; arrivesAt: string; toPlace: string }, next: { flightOn: string; departsAt: string; fromPlace: string }): number | null {
+  if (!prev.flightOn || !next.flightOn || !prev.arrivesAt || !next.departsAt) return null;
+  if (prev.toPlace.trim() && next.fromPlace.trim() && prev.toPlace.trim().toLowerCase() !== next.fromPlace.trim().toLowerCase()) return null;
+  const at = (date: string, time: string) => {
+    const [y, m, d] = date.split("-").map(Number);
+    const [hh, mm] = time.split(":").map(Number);
+    return Date.UTC(y, m - 1, d, hh, mm) / 60000;
+  };
+  const gap = at(next.flightOn, next.departsAt) - at(prev.flightOn, prev.arrivesAt);
+  return gap >= 0 && gap <= 24 * 60 ? gap : null;
+}
+
+const formatDuration = (minutes: number) =>
+  minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ""}`;
+
+// "Features": what the fare includes. The button names what is set, so the
+// row reads without opening it; a click opens a small panel to change it.
+function FeaturesButton({ value, onChange }: { value: FlightBaggage; onChange: (v: FlightBaggage) => void }) {
+  const [open, setOpen] = useState(false);
+  const parts = [
+    value.fare.trim(),
+    value.personalItem ? "Personal item" : "",
+    value.carryOn ? "Carry-on" : "",
+    value.checkedBags ? `${value.checkedBags} checked bag${value.checkedBags === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  const set = (patch: Partial<FlightBaggage>) => onChange({ ...value, ...patch });
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={parts.length ? FLIGHT_ACTION_ON : FLIGHT_ACTION}
+      >
+        <svg aria-hidden viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="4" y="6" width="12" height="11" rx="2" /><path d="M7.5 6V4.5A1.5 1.5 0 0 1 9 3h2a1.5 1.5 0 0 1 1.5 1.5V6M8 10v3M12 10v3" />
+        </svg>
+        Features{parts.length ? `: ${parts.join(" · ")}` : ""}
+        <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 7.5 10 12.5 15 7.5" /></svg>
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-full z-30 mt-1 w-72 max-w-[calc(100vw-3rem)] space-y-2.5 rounded-lg bg-surface p-3 text-sm shadow-lg ring-1 ring-line">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold uppercase tracking-wide">Features</p>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative hover:bg-negative/15"
+            >
+              Close
+            </button>
+          </div>
+          <Field label="Fare">
+            <input value={value.fare} onChange={(e) => set({ fare: e.target.value })} placeholder="Economy Basic" className={inputClass} />
+          </Field>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={value.personalItem} onChange={(e) => set({ personalItem: e.target.checked })} className="h-4 w-4" />
+            Personal item
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={value.carryOn} onChange={(e) => set({ carryOn: e.target.checked })} className="h-4 w-4" />
+            Carry-on bag
+          </label>
+          <label className="flex items-center justify-between gap-2">
+            <span>Checked bags (total)</span>
+            <input
+              type="number"
+              min={0}
+              max={99}
+              inputMode="numeric"
+              value={value.checkedBags || ""}
+              placeholder="0"
+              onChange={(e) => set({ checkedBags: Math.max(0, Math.trunc(Number(e.target.value) || 0)) })}
+              className={`${inputClass} w-16! text-center`}
+            />
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// The Flights section's own buttons: light blue so they read as clickable,
+// with the same sky-100 / sky-400 hover as the rest of the app's outlined buttons.
+const FLIGHT_ACTION =
+  "inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-sky-800 shadow-sm ring-1 ring-sky-300 transition hover:bg-sky-100 hover:ring-sky-400 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-700 dark:hover:bg-sky-900/50";
+const FLIGHT_ACTION_ON =
+  "inline-flex items-center gap-1.5 rounded-lg bg-sky-100 px-3 py-1.5 text-sm font-semibold text-sky-900 shadow-sm ring-1 ring-sky-400 transition hover:bg-sky-200 dark:bg-sky-900/50 dark:text-sky-100 dark:ring-sky-600 dark:hover:bg-sky-900/70";

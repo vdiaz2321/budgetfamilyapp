@@ -205,11 +205,11 @@ export function CarModal({
               </Field>
             </div>
             {days != null ? (
-              <p className="text-[11px] text-muted">
+              <p className="text-xs text-muted">
                 {days} day{days === 1 ? "" : "s"}
               </p>
             ) : null}
-            {tripNote ? <p className="text-[11px] font-medium text-negative">{tripNote}</p> : null}
+            {tripNote ? <p className="text-xs font-medium text-negative">{tripNote}</p> : null}
           </div>
         </Section>
 
@@ -219,6 +219,8 @@ export function CarModal({
             showMore ? <CurrencyConverter
               blue
               defaultFrom={foreignCurrency}
+              // Once bought, at the booking date's rate — what the card charged.
+              date={isEstimate ? undefined : reservedOn}
               // Fills Planned or Spent — whichever was clicked last, else
               // Planned while it is still a plan.
               onUse={(cents, from) => {
@@ -255,11 +257,6 @@ export function CarModal({
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-              {card ? (
-                <span className="mt-1 block text-[10px] font-semibold" style={{ color: "var(--viz-savings)" }}>
-                  {card.currentPoints.toLocaleString()} pts
-                </span>
-              ) : null}
             </Field>
             <div className={showMore ? "contents" : "hidden"}>
             <Field label="Card used (if not linked)">
@@ -287,7 +284,7 @@ export function CarModal({
                 className={inputClass}
               />
               {impliedMicros ? (
-                <span className="mt-0.5 block text-[10px] font-medium text-muted">
+                <span className="mt-0.5 block text-[11px] font-medium text-muted">
                   <span style={{ color: "var(--viz-savings)" }}>{formatCentsPerPoint(impliedMicros / 10_000)}/pt</span> ={" "}
                   {formatMoneyWhole(costCents, currency)} ÷ {pointsTyped.toLocaleString()} pts
                 </span>
@@ -382,7 +379,7 @@ export function CarModal({
         </div>
         )}
         {draw !== 0 ? (
-          <p className="text-[11px] text-muted">
+          <p className="text-xs text-muted">
             Saving {draw < 0 ? "returns" : "takes"} {Math.abs(draw).toLocaleString()} pts {draw < 0 ? "to" : "from"} {card?.name} on Accounts.
           </p>
         ) : null}

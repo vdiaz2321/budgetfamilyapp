@@ -60,8 +60,8 @@
   --viz-soft: #93c5fd;     /* blue-300 — light blue (FI + travel bars) */
   --viz-positive-soft: #9fd0ac; /* soft sage — big green fills (FI "free" bars), as light as --viz-soft */
   --viz-savings: #1d4ed8;  /* blue-700 (dark) */
-  --viz-bills: #0d9488;    /* teal-600 */
-  --viz-expenses: #38bdf8; /* sky-400 (light) */
+  --viz-bills: #0f766e;    /* teal-700 — darkened from teal-600: too faint as text on white */
+  --viz-expenses: #0284c7; /* sky-600 — darkened from sky-400: too faint as text on white */
   --viz-debt: #e11d48;     /* rose-600 */
   --viz-grid: #e5e7eb;     /* gridlines */
   --viz-sel: #eff6ff;      /* selected-period wash (blue-50) */
@@ -164,6 +164,11 @@
   --color-emerald-900: #224e34;
   --color-emerald-950: #132c1e;
 }
+
+/* Travel page: its small labels and secondary figures read too faint at the
+   default --muted, so the page darkens it (light) and lifts it (dark). */
+.ink-strong { --muted: #374151; }
+:root[data-theme="dark"] .ink-strong { --muted: #e3e5e8; }
 
 @theme inline {
   --color-background: var(--background);

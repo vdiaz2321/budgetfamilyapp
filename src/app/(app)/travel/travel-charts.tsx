@@ -52,7 +52,7 @@ export function CostBars({
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-center gap-5 text-[11px] font-medium text-muted">
+      <div className="mb-4 flex items-center justify-center gap-5 text-xs font-medium text-muted">
         <Key color="var(--viz-soft)" label="Hotel cost" />
         <Key color="var(--viz-debt)" label="Pocket cost" />
       </div>
@@ -62,7 +62,7 @@ export function CostBars({
           {GRIDLINES.map((g) => (
             <span
               key={g}
-              className="absolute right-0 -translate-y-1/2 text-[10px] tabular-nums text-muted"
+              className="absolute right-0 -translate-y-1/2 text-[11px] tabular-nums text-muted"
               style={{ top: `${(1 - g) * 100}%` }}
             >
               {axisMoney(max * g, currency)}
@@ -115,7 +115,7 @@ export function CostBars({
             {years.map((y) => (
               <span
                 key={y.year}
-                className={`flex-1 text-center text-[10px] tabular-nums ${
+                className={`flex-1 text-center text-[11px] tabular-nums ${
                   selected?.includes(y.year) ? "font-bold text-foreground" : "text-muted"
                 }`}
               >
@@ -225,7 +225,7 @@ export function SavedLine({
               y={y(v) - 8}
               // The end labels would run off the viewBox if they were centred.
               textAnchor={i === 0 ? "start" : i === saved.length - 1 ? "end" : "middle"}
-              className="fill-current text-[10px] font-semibold tabular-nums"
+              className="fill-current text-[11px] font-semibold tabular-nums"
               style={{ fill: "var(--positive)", opacity: years[i].partial ? 0.65 : 1 }}
             >
               {formatMoneyWhole(v, currency).replace(/\.\d\d$/, "")}
@@ -234,7 +234,7 @@ export function SavedLine({
               x={x(i)}
               y={H - 4}
               textAnchor={i === 0 ? "start" : i === saved.length - 1 ? "end" : "middle"}
-              className="text-[10px] tabular-nums"
+              className="text-[11px] tabular-nums"
               style={{ fill: selected?.includes(years[i].year) ? "var(--foreground)" : "var(--muted)" }}
             >
               {years[i].year}
@@ -285,7 +285,7 @@ function YearTip({ point, currency }: { point: YearPoint; currency: string }) {
     { color: "var(--positive)", value: point.hotel - point.pocket, label: "saved", tone: "text-positive" },
   ];
   return (
-    <div className="whitespace-nowrap rounded-md bg-surface px-2.5 py-1.5 text-[11px] shadow-lg ring-1 ring-line">
+    <div className="whitespace-nowrap rounded-md bg-surface px-2.5 py-1.5 text-xs shadow-lg ring-1 ring-line">
       <p className="font-bold tabular-nums">
         {point.year}
         {/* Says outright that the figures below are a running total, so a

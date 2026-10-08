@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { CurrencyConverter, type ConvertedFrom } from "@/components/currency-converter";
+import { CurrencyConverter, loadFxRates, type ConvertedFrom } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, foreignSymbol, formatForeignWhole, formatMoneyWhole } from "@/lib/money";
 import { saveTripExpenses } from "./expense-actions";
 import { CurrencySelect, Field, inputClass } from "./travel-form";
@@ -35,7 +35,7 @@ const show = (cents: number | null | undefined) => (cents == null ? "" : centsTo
 function BookedCell({ label, value }: { label: string; value: string }) {
   return (
     <span className="block min-w-0">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">{label}</span>
+      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted sm:hidden">{label}</span>
       <span className="block py-1.5 text-sm tabular-nums text-muted sm:text-center">{value}</span>
     </span>
   );
@@ -152,6 +152,42 @@ export function MiscModal({
   const update = (category: ExpenseCategory, patch: Partial<Row>) =>
     setRows((all) => all.map((r) => (r.category === category ? { ...r, ...patch } : r)));
 
+  // Typing in a foreign box fills that row's dollars beside it. Planned
+  // converts at today's rate; Spent at the trip's first day's (today's while
+  // the trip is still ahead). The rates load when a foreign box is clicked into.
+  const fxRates = useRef<{ planned: Record<string, number> | null; actual: Record<string, number> | null; actualOn: string }>({
+    planned: null, actual: null, actualOn: "",
+  });
+  const toUsd = (raw: string, slot: Slot): string | null => {
+    const rate = fxRates.current[slot]?.[foreignCurrency];
+    if (!rate) return null;
+    if (!raw.trim()) return "";
+    const n = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(n) ? centsToDisplay(Math.round((n / rate) * 100)) : null;
+  };
+  // Spent dollars backed by tagged purchases are shown, not typed.
+  const usdLocked = (r: Row, slot: Slot) => slot === "actual" && r.txCount > 0;
+  function typeForeign(r: Row, slot: Slot, value: string) {
+    const usd = toUsd(value, slot);
+    update(r.category, usd == null || usdLocked(r, slot) ? { [`${slot}Eur`]: value } : { [`${slot}Eur`]: value, [slot]: usd });
+  }
+  function loadRatesFor(category: ExpenseCategory, slot: Slot) {
+    const have = slot === "actual" ? fxRates.current.actual && fxRates.current.actualOn === startOn : fxRates.current.planned;
+    if (have) return;
+    const on = slot === "actual" ? startOn : "";
+    loadFxRates(on || undefined).then((rates) => {
+      fxRates.current = slot === "actual" ? { ...fxRates.current, actual: rates, actualOn: on } : { ...fxRates.current, planned: rates };
+      // A figure typed before the rates arrived gets its dollars now.
+      setRows((all) =>
+        all.map((r) => {
+          if (r.category !== category || usdLocked(r, slot) || !r[`${slot}Eur`].trim() || r[slot].trim()) return r;
+          const usd = toUsd(r[`${slot}Eur`], slot);
+          return usd ? { ...r, [slot]: usd } : r;
+        }),
+      );
+    });
+  }
+
   function applyConverted(cents: number, from: ConvertedFrom) {
     const target = focused.current ?? { category: rows[0].category, slot: "actual" as Slot };
     update(target.category, {
@@ -206,7 +242,7 @@ export function MiscModal({
   // A Difference figure: its own labelled line on a phone, a column on a wide screen.
   const diffSlot = (d: number | null, foreign = false) => (
     <span className="col-span-2 flex items-baseline justify-between text-sm font-semibold sm:col-span-1 sm:block sm:text-center">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted sm:hidden">
         Difference ({foreign ? fx : currencySymbol(currency)})
       </span>
       {diffCell(d, foreign)}
@@ -219,18 +255,24 @@ export function MiscModal({
   // each category is its own card, so every box keeps its own label.
   const money = (r: Row, key: "planned" | "plannedEur" | "actual" | "actualEur", label: string) => (
     <label className="block min-w-0">
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted sm:hidden">{label}</span>
+      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted sm:hidden">{label}</span>
       {key === "actual" && r.txCount > 0 ? (
         // Backed by tagged purchases: shown, not typed. The count says why.
         <span className="relative block">
           <input value={centsToDisplay(Math.max(0, r.txActualCents ?? 0))} readOnly tabIndex={-1} className={`${inputClass} opacity-70 sm:text-center`} />
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-muted">{r.txCount} tx</span>
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-muted">{r.txCount} tx</span>
         </span>
       ) : (
       <input
         value={r[key]}
-        onChange={(e) => update(r.category, { [key]: e.target.value })}
-        onFocus={() => (focused.current = { category: r.category, slot: key.startsWith("planned") ? "planned" : "actual" })}
+        onChange={(e) =>
+          key.endsWith("Eur") ? typeForeign(r, key.startsWith("planned") ? "planned" : "actual", e.target.value) : update(r.category, { [key]: e.target.value })
+        }
+        onFocus={() => {
+          const slot: Slot = key.startsWith("planned") ? "planned" : "actual";
+          focused.current = { category: r.category, slot };
+          if (key.endsWith("Eur")) loadRatesFor(r.category, slot);
+        }}
         inputMode="decimal"
         className={`${inputClass} sm:text-center`}
       />
@@ -287,9 +329,16 @@ export function MiscModal({
             </div>
           </div>
 
+          <div className="relative">
+          {/* The blue frame round the Spent columns, header to Total — the
+              same frame as the flight form, laid over the rows as one more
+              grid in the same columns. Wide screens only. */}
+          <div aria-hidden className={`pointer-events-none absolute -inset-y-1.5 inset-x-0 hidden gap-x-2 ${COLS} sm:grid`}>
+            <span className="-mx-1 rounded-lg ring-2 ring-sky-400 dark:ring-sky-500" style={{ gridColumn: showFx ? "4 / span 2" : "3 / span 1" }} />
+          </div>
           {/* Two-level header, the same as the flight form: Planned and Spent
               each span their two columns, with the currency under each. */}
-          <div className={`hidden ${COLS} items-end gap-x-2 gap-y-1 pb-1.5 text-center text-[11px] font-bold uppercase tracking-wide sm:grid`}>
+          <div className={`hidden ${COLS} items-end gap-x-2 gap-y-1 pb-1.5 text-center text-xs font-bold uppercase tracking-wide sm:grid`}>
             <span className="row-span-2 self-end pb-0.5 text-left text-muted">Category</span>
             <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-line pb-0.5 text-muted`}>Planned</span>
             <span className={`${showFx ? "col-span-2" : ""} border-b-2 border-sky-400 pb-0.5 text-foreground dark:border-sky-500`}>Spent</span>
@@ -312,7 +361,7 @@ export function MiscModal({
               >
                 <span className="col-span-2 flex items-baseline gap-2 text-sm font-semibold sm:col-span-1">
                   {b.label}
-                  <span className="text-[10px] font-normal uppercase tracking-wide text-muted">Booked</span>
+                  <span className="text-[11px] font-normal uppercase tracking-wide text-muted">Booked</span>
                 </span>
                 <BookedCell label={`Planned (${currencySymbol(currency)})`} value={b.planned ? formatMoneyWhole(b.planned, currency) : "—"} />
                 {showFx ? <BookedCell label={`Planned (${fx})`} value={b.fx.planned ? formatForeignWhole(b.fx.planned, foreignCurrency) : "—"} /> : null}
@@ -345,20 +394,21 @@ export function MiscModal({
 
           <div className={`mt-3 grid grid-cols-2 gap-2 border-t border-line pt-2 text-sm font-bold tabular-nums ${COLS} sm:text-center`}>
             <span className="col-span-2 sm:col-span-1 sm:text-left">Total</span>
-            <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Planned </span>{formatMoneyWhole(totals.planned, currency)}</span>
+            <span><span className="text-[11px] font-semibold uppercase text-muted sm:hidden">Planned </span>{formatMoneyWhole(totals.planned, currency)}</span>
             {showFx ? <span>{formatForeignWhole(totals.plannedEur, foreignCurrency)}</span> : null}
-            <span><span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Spent </span>{formatMoneyWhole(totals.actual, currency)}</span>
+            <span><span className="text-[11px] font-semibold uppercase text-muted sm:hidden">Spent </span>{formatMoneyWhole(totals.actual, currency)}</span>
             {showFx ? <span>{formatForeignWhole(totals.actualEur, foreignCurrency)}</span> : null}
             <span className="col-span-2 sm:col-span-1">
-              <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference </span>
+              <span className="text-[11px] font-semibold uppercase text-muted sm:hidden">Difference </span>
               {diffCell(totalDiff)}
             </span>
             {showFx ? (
               <span className="col-span-2 sm:col-span-1">
-                <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Difference ({fx}) </span>
+                <span className="text-[11px] font-semibold uppercase text-muted sm:hidden">Difference ({fx}) </span>
                 {diffCell(totalDiffFx, true)}
               </span>
             ) : null}
+          </div>
           </div>
         </section>
 

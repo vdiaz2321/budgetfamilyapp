@@ -7,7 +7,7 @@ export function OpenFullWidthButton({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="hidden items-center gap-1.5 rounded-md border border-black/25 bg-background px-2 py-1 text-[11px] font-semibold transition hover:border-sky-400 hover:bg-sky-100 sm:inline-flex dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+      className="hidden items-center gap-1.5 rounded-md border border-black/25 bg-background px-2 py-1 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 sm:inline-flex dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
     >
       Open full width
       <svg

@@ -352,11 +352,11 @@ export function StayModal({
               className={`${inputClass} ${datesOutOfOrder ? "ring-2 ring-negative" : ""}`}
             />
             {datesOutOfOrder ? (
-              <span className="mt-0.5 block text-[10px] font-medium text-negative">
+              <span className="mt-0.5 block text-[11px] font-medium text-negative">
                 Before the reservation date — check the year
               </span>
             ) : tripNote ? (
-              <span className="mt-0.5 block text-[10px] font-medium text-negative">{tripNote}</span>
+              <span className="mt-0.5 block text-[11px] font-medium text-negative">{tripNote}</span>
             ) : null}
           </Field>
           <Field label="Check-out date">
@@ -410,7 +410,7 @@ export function StayModal({
               // One line under the picker: the field is ~173px wide on desktop,
               // so the caps are short ("35k pt night cap") and anything that
               // still doesn't fit is cut with an ellipsis rather than wrapped.
-              <span className="mt-1 flex min-w-0 flex-nowrap gap-x-2 overflow-hidden whitespace-nowrap text-[10px] font-semibold">
+              <span className="mt-1 flex min-w-0 flex-nowrap gap-x-2 overflow-hidden whitespace-nowrap text-[11px] font-semibold">
                 <span className="shrink-0" style={{ color: "var(--viz-savings)" }}>
                   {card.currentPoints.toLocaleString()} pts
                 </span>
@@ -458,6 +458,8 @@ export function StayModal({
               <CurrencyConverter
                 blue
                 defaultFrom={foreignCurrency}
+                // Once bought, at the booking date's rate — what the card charged.
+                date={isEstimate ? undefined : reservedOn}
                 // Fills Planned or Spent — whichever was clicked last, else
                 // Planned while it is still a plan.
                 onUse={(cents, from) => {
@@ -541,7 +543,7 @@ export function StayModal({
             />
             {/* Whether the night fits inside the card's yearly certificate. */}
             {overAllotment > 0 ? (
-              <span className="mt-0.5 block text-[10px] font-medium text-negative">
+              <span className="mt-0.5 block text-[11px] font-medium text-negative">
                 {overAllotment.toLocaleString()} pts over the{" "}
                 {card?.freeNightPointsLimit?.toLocaleString()} allotted — you pay the difference
               </span>
@@ -563,7 +565,7 @@ export function StayModal({
                 once the rate has been typed over, so a hand-entered number can
                 be read against what the room actually prices points at. */}
             {showRateHint ? (
-              <span className="mt-0.5 block text-[10px] font-medium text-muted">
+              <span className="mt-0.5 block text-[11px] font-medium text-muted">
                 <span style={{ color: "var(--viz-savings)" }}>
                   {formatCentsPerPoint(impliedMicros / 10_000)}/pt
                 </span>{" "}
@@ -682,7 +684,7 @@ export function StayModal({
           />
         </div>
         {freeNightUsed && (card || (Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints))) ? (
-          <p className="sm:col-span-2 -mt-1 text-[11px] font-medium text-muted">
+          <p className="sm:col-span-2 -mt-1 text-xs font-medium text-muted">
             {card ? (
               <>Saving sets <span className="font-semibold text-foreground">{card.name}</span>&apos;s Booked date to {checkIn || "the check-in date"}. No points come off the card.</>
             ) : null}
@@ -704,7 +706,7 @@ export function StayModal({
         ) : null}
 
         {draw && (draw.points !== 0 || draw.credit !== 0) ? (
-          <p className="sm:col-span-2 text-[11px] text-muted">
+          <p className="sm:col-span-2 text-xs text-muted">
             Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
             {[
               draw.points ? `${Math.abs(draw.points).toLocaleString()} pts` : null,
@@ -871,7 +873,7 @@ function Field({
 }) {
   return (
     <label className={`block ${className ?? ""}`}>
-      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
     </label>
   );

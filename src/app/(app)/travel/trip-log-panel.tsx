@@ -204,14 +204,14 @@ export function TripLogPanel({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1400px] text-sm">
         <thead>
-          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-muted">
+          <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
             <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Travel location</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Dates</th>
             <th className="px-2 py-2 text-center font-semibold">Nights</th>
             {MONEY_COLUMNS.map((c) => (
               <th key={c.label} className="px-2 py-2 text-center font-semibold">{c.label}</th>
             ))}
-            <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Spent</th>
+            <th className="whitespace-nowrap border-t-2 border-x-2 border-sky-400 dark:border-sky-500 px-2 py-2 text-center font-semibold">Spent</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Planned</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Pts used</th>
             <th className="px-2 py-2 text-center font-semibold">Saved</th>
@@ -246,7 +246,7 @@ export function TripLogPanel({
                   {pickCell(t, c.label, c.read(t), c.plan(t))}
                 </td>
               ))}
-              <td className="whitespace-nowrap px-1 py-1.5 text-center font-bold tabular-nums text-negative">
+              <td className="whitespace-nowrap border-x-2 border-sky-400 dark:border-sky-500 px-1 py-1.5 text-center font-bold tabular-nums text-negative">
                 {pickCell(t, "Spent", t.spent, 0)}
               </td>
               <td className="whitespace-nowrap px-1 py-1.5 text-center font-semibold tabular-nums text-muted">
@@ -270,7 +270,7 @@ export function TripLogPanel({
               {MONEY_COLUMNS.map((c) => (
                 <td key={c.label} className={`whitespace-nowrap px-2 py-2 text-center tabular-nums ${planClass(sum(c.read), sum(c.plan))}`}>{money(sum(c.read))}</td>
               ))}
-              <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-negative">{money(totalSpent)}</td>
+              <td className="whitespace-nowrap border-b-2 border-x-2 border-sky-400 dark:border-sky-500 px-2 py-2 text-center tabular-nums text-negative">{money(totalSpent)}</td>
               <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">{money(totalPlanned)}</td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {sum((t) => t.points) > 0 ? sum((t) => t.points).toLocaleString() : DASH}
@@ -312,16 +312,16 @@ export function TripLogPanel({
             header — trips, spent, planned — and the year they cover. Only the
             search stays inside, since it filters the table. */}
         <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[0]}`}>
-          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
+          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
           <span className="text-sm font-semibold tabular-nums">{shown.length}</span>
         </span>
         <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[1]}`}>
-          <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
+          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
           <span className="text-sm font-semibold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
         </span>
         {totalPlanned > 0 ? (
           <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[2]}`}>
-            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
+            <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
             <span className="text-sm font-semibold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
           </span>
         ) : null}
@@ -341,7 +341,7 @@ export function TripLogPanel({
                 <>
                   {pickFigures.map((f) => (
                     <span key={f.label} className="flex items-baseline gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{f.label}</span>
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{f.label}</span>
                       <span className={`text-sm font-semibold tabular-nums ${f.tone}`}>{formatMoneyWhole(f.cents, currency)}</span>
                     </span>
                   ))}
@@ -357,16 +357,16 @@ export function TripLogPanel({
               ) : (
               <>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
                 <span className="text-sm font-semibold tabular-nums">{shown.length}</span>
               </span>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
                 <span className="text-sm font-semibold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
               </span>
               {totalPlanned > 0 ? (
                 <span className="flex items-baseline gap-1.5">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
                   <span className="text-sm font-semibold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
                 </span>
               ) : null}
@@ -386,10 +386,10 @@ export function TripLogPanel({
               <div className="overflow-x-auto">
                 <table className="min-w-[28rem] text-sm">
                   <thead>
-                    <tr className="text-[10px] uppercase tracking-wide text-muted">
+                    <tr className="text-[11px] uppercase tracking-wide text-muted">
                       <th className="px-3 py-1 text-center font-semibold">Year</th>
                       <th className="px-3 py-1 text-center font-semibold">Trips</th>
-                      <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Spent</th>
+                      <th className="whitespace-nowrap border-t-2 border-x-2 border-sky-400 dark:border-sky-500 px-3 py-1 text-center font-semibold">Spent</th>
                       <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Planned</th>
                       <th className="whitespace-nowrap px-3 py-1 text-center font-semibold">Pts used</th>
                       <th className="px-3 py-1 text-center font-semibold">Saved</th>
@@ -400,7 +400,7 @@ export function TripLogPanel({
                       <tr key={y} className="border-t border-line/60">
                         <td className="px-3 py-1.5 text-center font-semibold tabular-nums">{y}</td>
                         <td className="px-3 py-1.5 text-center tabular-nums">{row ? row.trips : DASH}</td>
-                        <td className="px-3 py-1.5 text-center font-semibold tabular-nums text-negative">
+                        <td className="border-x-2 border-sky-400 dark:border-sky-500 px-3 py-1.5 text-center font-semibold tabular-nums text-negative">
                           {row ? money(row.total) : DASH}
                         </td>
                         <td className="px-3 py-1.5 text-center tabular-nums text-muted">
@@ -418,7 +418,7 @@ export function TripLogPanel({
                     <tr className="border-t-2 border-line font-bold">
                       <td className="px-3 py-1.5 text-center">Total</td>
                       <td className="px-3 py-1.5 text-center tabular-nums">{byYearTotals.trips}</td>
-                      <td className="px-3 py-1.5 text-center tabular-nums text-negative">
+                      <td className="border-b-2 border-x-2 border-sky-400 dark:border-sky-500 px-3 py-1.5 text-center tabular-nums text-negative">
                         {formatMoneyWhole(byYearTotals.total, currency)}
                       </td>
                       <td className="px-3 py-1.5 text-center tabular-nums text-muted">

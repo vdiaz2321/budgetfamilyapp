@@ -33,7 +33,7 @@ function DaysPill({ days, className }: { days: number; className: string }) {
   const soon = days <= 7;
   return (
     <span
-      className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold tabular-nums ${
+      className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${
         soon ? `${AQUA_FILL} text-[#0e4140] dark:text-[#0e1f1e]` : "bg-black/5 text-muted dark:bg-white/10"
       } ${className}`}
     >
@@ -131,7 +131,7 @@ export function TripCards({
           <>
             {upcomingFigures.map((f, i) => (
               <span key={f.label} className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[i] ?? ""}`}>
-                <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">{f.label}:</span>
+                <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">{f.label}:</span>
                 <span className={`text-sm font-semibold tabular-nums ${f.tone}`}>{f.value}</span>
               </span>
             ))}
@@ -139,7 +139,7 @@ export function TripCards({
                 only, where it fits on the same line as the totals. */}
             {!open && next ? (
               <span className="hidden min-w-0 items-baseline gap-1.5 2xl:flex">
-                <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-muted">Next:</span>
+                <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Next:</span>
                 <span className="text-sm font-semibold">
                   {next.trip.name.split(" · ")[0]}{" "}
                   <span className="font-medium text-muted">{nextDays > 0 ? `in ${plural(nextDays, "day")}` : "now"}</span>
@@ -187,7 +187,7 @@ export function TripCards({
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-2">
                         <span className="truncate text-base font-semibold">{name}</span>
-                        {sub ? <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${TEAL_TEXT}`}>· {sub}</span> : null}
+                        {sub ? <span className={`shrink-0 text-[11px] font-semibold uppercase tracking-wide ${TEAL_TEXT}`}>· {sub}</span> : null}
                       </span>
                       {/* One line from sm up; under the dates on a phone. */}
                       <span className="block text-xs tabular-nums text-muted">
@@ -231,7 +231,7 @@ export function TripCards({
                     </span>
                     <span className="mt-2 flex items-baseline justify-between gap-2">
                       <span className="flex items-baseline gap-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Spent</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Spent</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(t.spent, currency)}</span>
                       </span>
                       <span
@@ -239,7 +239,7 @@ export function TripCards({
                         style={fullyPaid ? { color: "var(--positive)" } : undefined}
                       >{t.spent > 0 && whole > 0 ? `${paidPct}% paid` : ""}</span>
                       <span className="flex items-baseline gap-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Planned</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(planned, currency)}</span>
                       </span>
                     </span>

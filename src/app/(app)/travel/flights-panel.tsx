@@ -43,22 +43,22 @@ export function FlightsList({
               <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:basis-0 sm:flex-row sm:items-center sm:gap-x-3">
                 <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:shrink-0">
                   <span className="truncate text-sm font-semibold">{route(f) || f.airline}</span>
-                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
                     {f.airline}
                     {f.bookingCode ? <span className="text-slate-700 dark:text-neutral-200"> · {f.bookingCode}</span> : null}
                   </span>
                   {f.isEstimate ? (
-                    <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+                    <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-muted dark:bg-white/10">
                       Planned fare
                     </span>
                   ) : null}
                   {f.cancelledAt ? (
-                    <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+                    <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-muted dark:bg-white/10">
                       Cancelled
                     </span>
                   ) : null}
                 </span>
-                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-[11px] text-muted">
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-muted">
                   <span className="tabular-nums">
                     {sheetDateRange(first, last)}
                   </span>
@@ -100,7 +100,7 @@ function Figure({
 }) {
   return (
     <span className="flex items-baseline gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
       <span className={`text-sm font-semibold tabular-nums ${className ?? ""}`} style={style}>{value}</span>
     </span>
   );

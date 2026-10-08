@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // Shared by Add transaction and the Travel Log forms: type a receipt amount in
 // its own currency, "Use" hands the dollar figure to the form.
@@ -14,21 +14,54 @@ export const FX_CURRENCIES = [
   "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "THB", "ZAR",
 ] as const;
 
-// Module-level cache so the modal doesn't re-fetch every time it opens.
-let cachedRates: { rates: Record<string, number>; fetchedAt: number } | null = null;
+/** USD-based rates plus the day they're from — null for today's live rates.
+ *  A weekend date gets the Friday before, the last day the ECB published. */
+export type FxRates = { rates: Record<string, number>; asOf: string | null };
 
-/** The USD-based rates, fetched once per session and shared with the
- *  converter's cache. Resolves to null when they can't be loaded. */
-export function loadFxRates(): Promise<Record<string, number> | null> {
-  if (cachedRates) return Promise.resolve(cachedRates.rates);
-  return fetch("https://open.er-api.com/v6/latest/USD")
-    .then((r) => r.json())
-    .then((d) => {
-      if (!d?.rates || typeof d.rates !== "object") return null;
-      cachedRates = { rates: d.rates, fetchedAt: Date.now() };
-      return d.rates as Record<string, number>;
-    })
-    .catch(() => null);
+// Module-level caches so the modal doesn't re-fetch every time it opens.
+let cachedRates: { rates: Record<string, number>; fetchedAt: number } | null = null;
+const pastRates = new Map<string, Promise<FxRates | null>>();
+
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Rates for `date` (YYYY-MM-DD). A past day uses that day's ECB rate, so a
+ *  purchase logged late converts the way it did when it was bought; no date,
+ *  today or later uses today's rates. Resolves to null when they can't load. */
+export function loadFxRatesOn(date?: string): Promise<FxRates | null> {
+  if (!date || date >= todayIso()) {
+    if (cachedRates) return Promise.resolve({ rates: cachedRates.rates, asOf: null });
+    return fetch("https://open.er-api.com/v6/latest/USD")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d?.rates || typeof d.rates !== "object") return null;
+        cachedRates = { rates: d.rates, fetchedAt: Date.now() };
+        return { rates: d.rates as Record<string, number>, asOf: null };
+      })
+      .catch(() => null);
+  }
+  let p = pastRates.get(date);
+  if (!p) {
+    p = fetch(`https://api.frankfurter.dev/v1/${date}?base=USD`)
+      .then((r) => r.json())
+      .then((d) =>
+        d?.rates && typeof d.rates === "object"
+          ? { rates: d.rates as Record<string, number>, asOf: String(d.date ?? date) }
+          : null,
+      )
+      .catch(() => null);
+    // A failed load isn't kept, so the next try fetches again.
+    p.then((r) => { if (!r) pastRates.delete(date); });
+    pastRates.set(date, p);
+  }
+  return p;
+}
+
+/** Just the rates — see loadFxRatesOn. */
+export function loadFxRates(date?: string): Promise<Record<string, number> | null> {
+  return loadFxRatesOn(date).then((r) => r?.rates ?? null);
 }
 
 /** What was typed into the converter, for forms that keep the receipt's own
@@ -39,10 +72,13 @@ export function CurrencyConverter({
   onUse,
   blue = false,
   defaultFrom,
+  date,
 }: {
   onUse: (usdCents: number, from: ConvertedFrom) => void;
   /** The currency it opens on — a Travel booking's own foreign currency. */
   defaultFrom?: string;
+  /** The purchase date; a past day converts at that day's rate. */
+  date?: string;
   /** Blue instead of the indigo brand colour — the Travel forms use no purple. */
   blue?: boolean;
 }) {
@@ -51,27 +87,33 @@ export function CurrencyConverter({
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [from, setFrom] = useState<string>("EUR");
-  const [rates, setRates] = useState<Record<string, number> | null>(cachedRates?.rates ?? null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // What loaded, and for which date: "loading" is just "nothing yet for this
+  // date", so changing the date shows … until its rates arrive.
+  const [loaded, setLoaded] = useState<{ for: string; fx: FxRates | null } | null>(null);
+  const dateKey = date ?? "";
+  const current = loaded?.for === dateKey ? loaded : null;
+  const fx = current?.fx ?? null;
+  const loading = open && !current;
+  const error = current && !current.fx ? "Couldn't load rates" : null;
 
-  // Fetching belongs in the handler for the interaction that needs it, not in
-  // an effect watching `open` — opening the panel IS the event. Rates cached
-  // for the session are good enough: FX moves slowly at family-budget scale
-  // and one-tap "Use $X.XX" always shows the number.
+  // Loads while the panel is open, and again when the form's date changes —
+  // the rate belongs to the purchase day, not to when it's typed in.
+  useEffect(() => {
+    if (!open) return;
+    let stale = false;
+    loadFxRatesOn(date).then((r) => {
+      if (!stale) setLoaded({ for: date ?? "", fx: r });
+    });
+    return () => { stale = true; };
+  }, [open, date]);
+
   function openConverter() {
     setOpen(true);
     if (defaultFrom) setFrom(defaultFrom);
-    if (rates) return;
-    setLoading(true);
-    setError(null);
-    loadFxRates()
-      .then((r) => (r ? setRates(r) : setError("Couldn't load rates")))
-      .finally(() => setLoading(false));
   }
 
   const num = parseFloat(amount);
-  const rate = rates?.[from];
+  const rate = loading ? undefined : fx?.rates[from];
   const usd = rate && !isNaN(num) && num > 0 ? num / rate : null;
   const usdCents = usd != null ? Math.round(usd * 100) : null;
 
@@ -94,6 +136,13 @@ export function CurrencyConverter({
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setAmount("")}
+            className="rounded-md bg-black/5 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
             onClick={() => setOpen(false)}
             className="rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative hover:bg-negative/15"
           >
@@ -103,7 +152,7 @@ export function CurrencyConverter({
             <button
               type="button"
               onClick={() => { onUse(usdCents, { currency: from, amountCents: Math.round(num * 100) }); setOpen(false); setAmount(""); }}
-              className="rounded-md bg-positive/15 px-3.5 py-2 text-sm font-bold text-positive transition hover:bg-positive/25"
+              className="rounded-md bg-positive/15 px-3 py-1.5 text-xs font-semibold text-positive transition hover:bg-positive/25"
             >
               Use
             </button>
@@ -135,7 +184,10 @@ export function CurrencyConverter({
         <p className="mt-2 text-xs text-negative">{error}</p>
       ) : rate ? (
         <p className="mt-1.5 text-[10px] text-muted">
-          1 USD = {rate.toFixed(4)} {from}
+          1 USD = {rate.toFixed(4)} {from} ·{" "}
+          {fx?.asOf
+            ? `rate on ${new Date(`${fx.asOf}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`
+            : "today's rate"}
         </p>
       ) : null}
     </div>

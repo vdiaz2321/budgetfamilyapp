@@ -183,6 +183,8 @@ export type TravelFlight = {
    *  then Pocket cost comes from them and the forms show it locked. */
   paidCents?: number | null;
   remarks: string | null;
+  /** What the fare includes, from the form's Features popup. */
+  baggage: FlightBaggage | null;
   cancelledAt: string | null;
   rewardActivityId: string | null;
   legs: FlightLeg[];
@@ -190,6 +192,9 @@ export type TravelFlight = {
 };
 
 // A first name on the managed family list the passenger picker offers.
+/** A flight booking's fare features. checkedBags is the booking's total. */
+export type FlightBaggage = { fare: string; personalItem: boolean; carryOn: boolean; checkedBags: number };
+
 export type Traveller = { id: string; name: string };
 
 // ---- Cars: a rental booking, or a drive in the family car (fuel and tolls).

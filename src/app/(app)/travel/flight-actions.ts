@@ -35,6 +35,8 @@ export type FlightPayload = {
   /** Typed in cents per point: "1.2" = 1.2¢. */
   pointsValueCents: string;
   remarks: string;
+  /** Fare features; null when none are set. */
+  baggage: { fare: string; personalItem: boolean; carryOn: boolean; checkedBags: number } | null;
   /** The second currency the foreign figures are in ("EUR", "GBP", …). */
   foreignCurrency: string;
   legs: Array<{
@@ -60,6 +62,18 @@ export type FlightPayload = {
 function plannedTotal<T>(rows: T[], pick: (row: T) => number | null): number | null {
   const typed = rows.map(pick).filter((v): v is number => v != null);
   return typed.length ? typed.reduce((a, b) => a + b, 0) : null;
+}
+
+// Nothing set reads as no features at all, so a blank popup stores NULL.
+function cleanBaggage(b: FlightPayload["baggage"]) {
+  if (!b) return null;
+  const out = {
+    fare: (b.fare ?? "").trim(),
+    personalItem: Boolean(b.personalItem),
+    carryOn: Boolean(b.carryOn),
+    checkedBags: Math.max(0, Math.min(99, Math.trunc(Number(b.checkedBags) || 0))),
+  };
+  return out.fare || out.personalItem || out.carryOn || out.checkedBags ? out : null;
 }
 
 const flightNote = (airline: string, bookingCode: string | null) =>
@@ -197,6 +211,7 @@ export async function saveTravelFlight(payload: FlightPayload) {
     planned_cost_cents: isEstimate ? pocketCost : plannedTotal(passengers, (p) => (p.pointsUsed ? null : p.plannedFareCents)),
     planned_cost_foreign_cents: plannedTotal(passengers, (p) => p.plannedFareForeignCents),
     remarks: clean(payload.remarks),
+    baggage: cleanBaggage(payload.baggage),
     updated_at: new Date().toISOString(),
   };
   const meta = { occurredOn: reservedOn || firstFlightOn, bookedOn: null, note: flightNote(airline, bookingCode) };

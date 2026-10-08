@@ -177,13 +177,13 @@ export function MatchPurchasesModal({
                     <span className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm font-semibold">{r.payee ?? r.itemName}</span>
-                        <span className="truncate text-[11px] text-muted">
+                        <span className="truncate text-xs text-muted">
                           <span className="tabular-nums">{sheetDate(r.date)}</span> · {r.itemName}
                           {r.catchAll ? "" : ` → ${columnLabel(r.column)}`}
                         </span>
                         {/* Its own line, so a phone's truncation can't hide it. */}
                         {r.onTripItem ? null : (
-                          <span className="text-[11px] text-muted">Moves off {r.itemName} on Budget</span>
+                          <span className="text-xs text-muted">Moves off {r.itemName} on Budget</span>
                         )}
                       </span>
                       {r.catchAll ? (

@@ -2,7 +2,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { loadCreditCardBoardData } from "@/lib/credit-card-data";
 import { throwIfAny } from "@/lib/supabase-result";
 import { TravelBoard } from "./travel-board";
-import type { CarKind, ExpenseCategory, PocketPaidWith, TravelBrand, TravelCar, TravelCard, TravelFlight, TravelStay, TravelTrip, TripExpense, TripTaggedPurchase, Traveller } from "./types";
+import type { CarKind, ExpenseCategory, FlightBaggage, PocketPaidWith, TravelBrand, TravelCar, TravelCard, TravelFlight, TravelStay, TravelTrip, TripExpense, TripTaggedPurchase, Traveller } from "./types";
 
 export const metadata = { title: "Travel Log · Capitall" };
 
@@ -29,7 +29,7 @@ export default async function TravelPage() {
     supabase
       .from("travel_flights")
       .select(
-        "id, trip_id, account_id, card_label, holder, airline, booking_code, reserved_on, first_flight_on, points_cost, points_used, points_value_micros, flight_cost_cents, flight_cost_eur_cents, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, foreign_currency, pocket_cost_cents, remarks, cancelled_at, reward_activity_id",
+        "id, trip_id, account_id, card_label, holder, airline, booking_code, reserved_on, first_flight_on, points_cost, points_used, points_value_micros, flight_cost_cents, flight_cost_eur_cents, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, foreign_currency, pocket_cost_cents, remarks, baggage, cancelled_at, reward_activity_id",
       )
       .eq("household_id", household.id)
       .order("first_flight_on", { ascending: false }),
@@ -242,6 +242,7 @@ export default async function TravelPage() {
     pocketCostCents: Number(f.pocket_cost_cents ?? 0),
     paidCents: paidFor(`flight:${f.id}`),
     remarks: f.remarks ?? null,
+    baggage: (f.baggage as FlightBaggage | null) ?? null,
     cancelledAt: f.cancelled_at ?? null,
     rewardActivityId: f.reward_activity_id ?? null,
     legs: (legs.data ?? [])

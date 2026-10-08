@@ -85,7 +85,7 @@ export function EditTripPicker({ trips, onPick }: { trips: TravelTrip[]; onPick:
             {current.map(row)}
             {past.length > 0 ? (
               <>
-                <li className="mt-1 border-t border-line/60 px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                <li className="mt-1 border-t border-line/60 px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
                   Earlier trips
                 </li>
                 {past.map(row)}
