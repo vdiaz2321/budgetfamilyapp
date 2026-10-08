@@ -13,8 +13,10 @@ const KEYS = new Set<string>(EXPENSE_CATEGORIES.map((c) => c.key));
 export type ExpensePayload = {
   tripId: string;
   newTripName: string;
-  startOn: string;
-  endOn: string;
+  /** The trip's dates. Left out (the form opened from a trip, which shows no
+   *  date boxes) keeps the trip's own — the save never touches them. */
+  startOn?: string;
+  endOn?: string;
   /** The currency the second Planned / Spent columns are in; blank is None
    *  (dollars only), and left out keeps the trip's own. */
   foreignCurrency?: string;
@@ -40,8 +42,9 @@ export async function saveTripExpenses(payload: ExpensePayload) {
   if (!payload.tripId && !payload.newTripName.trim()) {
     return { error: "Pick the trip this spending belongs to, or name a new one." };
   }
-  const startOn = payload.startOn.trim() || null;
-  const endOn = payload.endOn.trim() || null;
+  const keepDates = payload.startOn === undefined && payload.endOn === undefined;
+  const startOn = payload.startOn?.trim() || null;
+  const endOn = payload.endOn?.trim() || null;
   if ((startOn && !isDate(startOn)) || (endOn && !isDate(endOn))) return { error: "Enter valid trip dates." };
   if (startOn && endOn && endOn < startOn) return { error: "The trip ends before it starts — check the year." };
 
@@ -55,8 +58,7 @@ export async function saveTripExpenses(payload: ExpensePayload) {
   const { error: tripError } = await supabase
     .from("travel_trips")
     .update({
-      start_on: startOn,
-      end_on: endOn,
+      ...(keepDates ? {} : { start_on: startOn, end_on: endOn }),
       ...(payload.foreignCurrency === undefined
         ? {}
         : { spending_currency: /^[A-Z]{3}$/.test(payload.foreignCurrency) ? payload.foreignCurrency : null }),

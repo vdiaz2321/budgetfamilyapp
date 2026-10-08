@@ -1511,11 +1511,9 @@ export function TravelBoard({
 
       {openTrip ? (
         <TripDetailModal
-          // Remounted per trip so notes and edit state start fresh on a switch.
+          // Remounted per trip so notes and edit state start fresh.
           key={`trip-${openTrip.trip.id}`}
           summary={openTrip}
-          allTrips={tripSummaries}
-          onSwitchTrip={setOpenTripId}
           currency={currency}
           onEditBooking={(b) =>
             b.kind === "flight" ? setEditingFlight(b.flight) : b.kind === "stay" ? setEditing(b.stay) : setEditingCar(b.car)

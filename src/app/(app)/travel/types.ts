@@ -28,6 +28,8 @@ export type TravelStay = {
   /** Linked transactions added up, or null/absent when none are linked —
    *  then Pocket cost comes from them and the forms show it locked. */
   paidCents?: number | null;
+  /** Those linked transactions, oldest first — listed under the booking's Spent. */
+  payments?: TripTaggedPurchase[];
   pocketPaidWith: PocketPaidWith;
   remarks: string | null;
   // Breakfast came with the room. Lived inside `remarks` on the imported
@@ -182,6 +184,8 @@ export type TravelFlight = {
   /** Linked transactions added up, or null/absent when none are linked —
    *  then Pocket cost comes from them and the forms show it locked. */
   paidCents?: number | null;
+  /** Those linked transactions, oldest first — listed under the booking's Spent. */
+  payments?: TripTaggedPurchase[];
   remarks: string | null;
   /** What the fare includes, from the form's Features popup. */
   baggage: FlightBaggage | null;
@@ -233,6 +237,8 @@ export type TravelCar = {
   /** Linked transactions added up, or null/absent when none are linked —
    *  then Pocket cost comes from them and the forms show it locked. */
   paidCents?: number | null;
+  /** Those linked transactions, oldest first — listed under the booking's Spent. */
+  payments?: TripTaggedPurchase[];
   remarks: string | null;
   cancelledAt: string | null;
   rewardActivityId: string | null;

@@ -180,6 +180,12 @@ export type PayeeLineItem = {
   kind: "subscription" | "irregular";
 };
 
+// A saved payee for the Payee autocomplete. usualSubId / usualAccountId are
+// the budget item and account its recent purchases nearly always used (null
+// when they're mixed); the form fills them in when the payee is picked. See
+// listPayees().
+export type PayeeOption = { id: string; name: string; usualSubId?: string | null; usualAccountId?: string | null };
+
 // A bill or subscription that is due soon. Pressing Paid opens the normal
 // transaction form; it never creates a transaction by itself.
 export type DueItem = {
@@ -232,7 +238,7 @@ export type TxData = {
   // Every part of a split purchase shares this id (null on a plain one), and
   // each part carries the whole split so the modal can open it as one.
   splitGroupId?: string | null;
-  splitParts?: { subId: string; amountCents: number }[];
+  splitParts?: { subId: string; amountCents: number; travelCategory?: string | null }[];
 };
 
 // What the item panel's "Prev Mo Spent" chip hands the transaction modal:
@@ -307,6 +313,8 @@ export type TripPurchaseCandidate = {
 export type TripTagging = {
   trips: { id: string; name: string; startOn: string | null; endOn: string | null }[];
   bookingsByTrip: Record<string, TripBookingOption[]>;
+  /** The Spending rows each trip card shows (planned or with tagged purchases), keyed by trip id. */
+  spendingRowsByTrip: Record<string, string[]>;
 };
 
 /**

@@ -16,7 +16,7 @@ import { getSessionContext } from "@/lib/auth-context";
 import { bookingColumns, bookingRefOf, resolveBookingRef, syncBookingPayment, type BookingRef, type PassengerPoints } from "@/app/(app)/travel/booking-payments";
 import { parseShares, type PassengerShare } from "@/lib/share-out";
 import { centsPerPointToMicros } from "@/app/(app)/travel/points-value";
-import type { TripPurchaseCandidate, TripTagging } from "./types";
+import type { PayeeOption, TripPurchaseCandidate, TripTagging } from "./types";
 
 const TRAVEL_CATEGORY_KEYS = new Set(["restaurants", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash", "other"]);
 
@@ -84,27 +84,41 @@ function bookingTypedOf(formData: FormData, booking: BookingRef | null, accountI
   };
 }
 
-// The Travel Log row picked on the form for a trip purchase on the catch-all
-// item (its own row is "Other"). Kept only when it applies — a trip, no
-// booking, that item — and only when it differs from the item's row, so
-// null always means "the item decides".
+// The Travel Log row picked on the form for a trip purchase on one of the two
+// trip items: the catch-all (its own row is "Other"; field travelCategory) or
+// Restaurant Travel, the trip food item (Restaurants or Groceries; field
+// foodColumn — its own field, so a split holding both items keeps both picks).
+// Kept only when it applies — a trip, no booking, that item — and only when it
+// differs from the item's row, so null always means "the item decides".
+// Groceries is never a catch-all column: trip groceries are trip food.
 function travelCategoryOf(
   formData: FormData,
   itemCategory: string | null | undefined,
   tripId: string | null,
   booking: BookingRef | null,
 ): string | null {
-  if (!tripId || booking || itemCategory !== "other") return null;
+  if (!tripId || booking) return null;
+  if (itemCategory === "restaurants") {
+    return String(formData.get("foodColumn") ?? "").trim() === "groceries" ? "groceries" : null;
+  }
+  if (itemCategory !== "other") return null;
   const raw = String(formData.get("travelCategory") ?? "").trim();
-  return TRAVEL_CATEGORY_KEYS.has(raw) && raw !== "other" ? raw : null;
+  return TRAVEL_CATEGORY_KEYS.has(raw) && raw !== "other" && raw !== "groceries" ? raw : null;
 }
+
+// The trip item a Travel Log row's spending is saved on: Restaurants and
+// Groceries on the trip food item (Restaurant Travel), the rest on the
+// catch-all — the same split v_trip_budget_plans makes for the plans.
+const tripItemRole = (column: string) => (column === "restaurants" || column === "groceries" ? "restaurants" : "other");
 
 // Trip spending belongs on the trip items (Restaurant Travel, Traveling/Trips —
 // subcategories.receives_trip_plans), never on everyday Groceries, Fuel or
 // Entertainment, or it eats their monthly budget. A trip purchase on another
-// item with a Travel Log row moves to the trip item for that row when there is
-// one (Restaurants → Restaurant Travel), else to the catch-all, keeping its
-// row on the purchase (Groceries → Traveling/Trips, Groceries column). The
+// item with a Travel Log row moves to the trip item for that row (tripItemRole:
+// Restaurants and Groceries → Restaurant Travel, the rest → the catch-all),
+// keeping its row on the purchase when the item's own row differs
+// (Groceries → Restaurant Travel, Groceries column; Fuel → Traveling/Trips,
+// Fuel column). The
 // form shows the same move; this is where it is enforced, one split at a time.
 // Booking payments are left alone — they settle a booking, not a column.
 const TRIP_SUB_SELECT = "id, category_id, name, linked_bucket_id, linked_account_id, travel_category, receives_trip_plans, categories(kind)";
@@ -137,13 +151,13 @@ async function routeTripPurchase<S extends TripRoutableSub>(
     "trip budget items",
   ) ?? [];
   const target =
-    tripItems.find((t) => t.travel_category === sub.travel_category) ??
+    tripItems.find((t) => t.travel_category === tripItemRole(sub.travel_category!)) ??
     tripItems.find((t) => t.travel_category === "other");
   if (!target) return keep;
   return {
     subcategoryId: target.id,
     sub: target as unknown as S,
-    forcedCategory: target.travel_category === "other" ? sub.travel_category : null,
+    forcedCategory: target.travel_category !== sub.travel_category ? sub.travel_category : null,
   };
 }
 
@@ -238,16 +252,55 @@ const CUSTOM_GROUP_KINDS = new Set(["income", "bills", "expenses", "savings"]);
 // Payee autocomplete list, fetched on demand instead of shipped with every
 // budget page render — the full list is ~28KB of RSC payload for a control
 // most page loads never open. Read-only, so no revalidate.
-export async function listPayees(): Promise<{ id: string; name: string }[]> {
+// Each payee comes with its usual budget item and account, which the
+// transaction form fills in when the payee is picked: whichever is behind at
+// least 60% of that payee's last 10 purchases. A payee spread across items
+// (USAA, Amazon) gets no item, so it never guesses wrong. Split parts are
+// left out — a split is several items by design.
+export async function listPayees(): Promise<PayeeOption[]> {
   const { supabase, householdId } = await requireHousehold();
-  const data = unwrap(
-    await supabase
-      .from("payees")
-      .select("id, name")
-      .eq("household_id", householdId),
-    "payees",
-  );
-  return data ?? [];
+  const [payees, recent] = await Promise.all([
+    supabase.from("payees").select("id, name").eq("household_id", householdId),
+    supabase
+      .from("transactions")
+      .select("payee_id, subcategory_id, account_id")
+      .eq("household_id", householdId)
+      .not("payee_id", "is", null)
+      .is("split_group_id", null)
+      .order("occurred_on", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1000),
+  ]);
+  const payeeRows = unwrap(payees, "payees") ?? [];
+  const recentRows = unwrap(recent, "payee history") ?? [];
+
+  // Newest first, so each payee's list holds its last 10 values.
+  const lastTen = (field: "subcategory_id" | "account_id") => {
+    const byPayee = new Map<string, string[]>();
+    for (const r of recentRows) {
+      const value = r[field] as string | null;
+      if (!value) continue;
+      const list = byPayee.get(r.payee_id as string) ?? [];
+      if (list.length < 10) list.push(value);
+      byPayee.set(r.payee_id as string, list);
+    }
+    return byPayee;
+  };
+  const usual = (list: string[] | undefined): string | null => {
+    if (!list?.length) return null;
+    const counts = new Map<string, number>();
+    for (const id of list) counts.set(id, (counts.get(id) ?? 0) + 1);
+    const [top, n] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    return n / list.length >= 0.6 ? top : null;
+  };
+  const items = lastTen("subcategory_id");
+  const accounts = lastTen("account_id");
+  return payeeRows.map((p) => ({
+    id: p.id,
+    name: p.name,
+    usualSubId: usual(items.get(p.id)),
+    usualAccountId: usual(accounts.get(p.id)),
+  }));
 }
 
 
@@ -1273,17 +1326,21 @@ export async function listTripTagging(): Promise<TripTagging> {
   if (error) throw new Error(`Could not load the trips: ${error.message}`);
   const trips = (data ?? []).map((t) => ({ id: t.id, name: t.name, startOn: t.start_on ?? null, endOn: t.end_on ?? null }));
   const tripIds = trips.map((t) => t.id);
-  if (tripIds.length === 0) return { trips, bookingsByTrip: {} };
+  if (tripIds.length === 0) return { trips, bookingsByTrip: {}, spendingRowsByTrip: {} };
 
-  const [stays, flights, cars, legs, pax, paid] = await Promise.all([
+  const [stays, flights, cars, legs, pax, paid, plannedRows, taggedRows] = await Promise.all([
     supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, hotel_cost_cents, planned_cost_cents, points_value_micros, foreign_currency, free_night_used, hotel_credit_cents").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, flight_cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_cars").select("id, trip_id, company, pickup_on, return_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flight_legs").select("flight_id, flight_on, from_place, to_place, sort_order").eq("household_id", householdId).order("sort_order"),
     supabase.from("travel_flight_passengers").select("flight_id, name, sort_order, fare_cents, fare_eur_cents, planned_fare_cents, planned_fare_foreign_cents, points_used, points_cost").eq("household_id", householdId).order("sort_order"),
     supabase.from("transactions").select("id, amount_cents, travel_stay_id, travel_flight_id, travel_car_id, booking_passengers").eq("household_id", householdId).in("trip_id", tripIds).or("travel_stay_id.not.is.null,travel_flight_id.not.is.null,travel_car_id.not.is.null"),
+    // The Spending rows each trip card shows: its typed rows, plus any row
+    // its tagged purchases have opened (see travel/page.tsx).
+    supabase.from("travel_trip_expenses").select("trip_id, category").eq("household_id", householdId).in("trip_id", tripIds),
+    supabase.from("transactions").select("trip_id, travel_category, subcategories(travel_category)").eq("household_id", householdId).in("trip_id", tripIds).is("travel_stay_id", null).is("travel_flight_id", null).is("travel_car_id", null),
   ]);
-  const problem = stays.error ?? flights.error ?? cars.error ?? legs.error ?? pax.error ?? paid.error;
+  const problem = stays.error ?? flights.error ?? cars.error ?? legs.error ?? pax.error ?? paid.error ?? plannedRows.error ?? taggedRows.error;
   if (problem) throw new Error(`Could not load the trips' bookings: ${problem.message}`);
   const day = (iso: string) => {
     const [y, m, d] = iso.split("-");
@@ -1412,7 +1469,18 @@ export async function listTripTagging(): Promise<TripTagging> {
       endOn: t.endOn ?? b?.to ?? null,
     };
   });
-  return { trips: datedTrips, bookingsByTrip };
+  const spendingRowsByTrip: TripTagging["spendingRowsByTrip"] = {};
+  const addRow = (tripId: string | null, category: string | null | undefined) => {
+    if (!tripId || !category) return;
+    const list = (spendingRowsByTrip[tripId] ??= []);
+    if (!list.includes(category)) list.push(category);
+  };
+  for (const e of plannedRows.data ?? []) addRow(e.trip_id, e.category);
+  for (const t of taggedRows.data ?? []) {
+    const sub = Array.isArray(t.subcategories) ? t.subcategories[0] : t.subcategories;
+    addRow(t.trip_id, t.travel_category ?? (sub as { travel_category: string | null } | null)?.travel_category);
+  }
+  return { trips: datedTrips, bookingsByTrip, spendingRowsByTrip };
 }
 
 // ---- "Match purchases": back-tagging a trip's purchases in one go --------
@@ -1588,6 +1656,11 @@ export async function tagTripPurchases(
       const picked = columnOf.get(t.id);
       const column = picked && TRAVEL_CATEGORY_KEYS.has(picked) ? picked : target.forcedCategory;
       target = { ...target, forcedCategory: column && column !== "other" ? column : null };
+      // Groceries picked for it: trip food, so it goes to Restaurant Travel.
+      if (column === "groceries") {
+        const food = await routeTripPurchase(supabase, householdId, sub.id, { ...sub, travel_category: "groceries", receives_trip_plans: false }, trip, null);
+        if (food.sub.travel_category === "restaurants") target = { ...food, forcedCategory: "groceries" };
+      }
     }
     // Moved off its own item (Groceries -> Traveling/Trips)? Record where it
     // was (transactions.pre_trip_subcategory_id).

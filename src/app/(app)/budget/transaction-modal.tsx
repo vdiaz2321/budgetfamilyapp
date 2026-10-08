@@ -9,7 +9,7 @@ import { Fragment } from "react";
 import { CATEGORY_KINDS, type CategoryKind } from "@/lib/categories";
 import { addTransaction, addSplitTransaction, replaceWithSplit, updateTransaction, deleteTransaction, deletePayee, toggleCleared } from "./actions";
 import { refreshTripTagging, useTripTagging } from "./trip-tagging-cache";
-import type { AccountOption, BucketsByAccount, PayeeLineItem, SubOption, TxData } from "./types";
+import type { AccountOption, BucketsByAccount, PayeeLineItem, PayeeOption, SubOption, TxData } from "./types";
 import { EXPENSE_CATEGORIES } from "../travel/types";
 
 // Button label (short), plus tab labels.
@@ -117,7 +117,6 @@ function TransactionModalForm({
   initialIsRefund = false,
   initialMemo,
   restrictToInitialKind = false,
-  defaultTripId,
   onAddRefund,
   onClose,
 }: {
@@ -127,7 +126,7 @@ function TransactionModalForm({
   subOptions: SubOption[];
   accountOptions: AccountOption[];
   bucketsByAccount?: BucketsByAccount;
-  payeeOptions?: { id: string; name: string }[];
+  payeeOptions?: PayeeOption[];
   payeeLineItems?: PayeeLineItem[];
   // Property accounts this transaction can be tagged to. Empty for a
   // household that owns none, and then the field never renders.
@@ -142,8 +141,6 @@ function TransactionModalForm({
   initialIsRefund?: boolean;
   initialMemo?: string;
   restrictToInitialKind?: boolean;
-  // The trip picked when none covers the date (Travel Log: the next trip).
-  defaultTripId?: string;
   // Set by the wrapper below: swaps this form for a new refund of the
   // saved purchase being edited.
   onAddRefund?: (tx: TxData) => void;
@@ -234,6 +231,43 @@ function TransactionModalForm({
     }
   }
 
+  // A saved payee's usual budget item and account (see listPayees) fill those
+  // fields when the payee is picked — but only into an empty field, or over a
+  // value a previous payee filled, so they never replace one chosen by hand. A
+  // payee with no usual value (null) takes back what the last payee filled.
+  // A Subscription/Irregular match (handlePayeeMatch) sets the item itself,
+  // so then only the account comes from here.
+  function handleUsualPicks(payee: PayeeOption | null, itemMatched: boolean) {
+    if (!itemMatched) handleUsualItem(payee?.usualSubId ?? null);
+    handleUsualAccount(payee?.usualAccountId ?? null);
+  }
+  const autoFilledAccountId = useRef<string | null>(null);
+  function handleUsualAccount(accountId: string | null) {
+    if (selectedAccountId && selectedAccountId !== autoFilledAccountId.current) return;
+    const next = accountId && accountOptions.some((a) => a.id === accountId) ? accountId : "";
+    autoFilledAccountId.current = next || null;
+    if (next === selectedAccountId) return;
+    setSelectedAccountId(next);
+    setSelectedBucketId("");
+    if (next) clearErrors();
+  }
+  const autoFilledSubId = useRef<string | null>(null);
+  function handleUsualItem(subId: string | null) {
+    const current = splits.length === 1 ? splits[0].subId : null;
+    if (splits.length > 1 || (current && current !== autoFilledSubId.current)) return;
+    const kind = subId ? subOptions.find((s) => s.id === subId)?.kind : undefined;
+    if (!subId || !kind || (restrictToInitialKind && initialKind && kind !== initialKind)) {
+      if (current) setSplits([]);
+      autoFilledSubId.current = null;
+      return;
+    }
+    if (current === subId) return;
+    autoFilledSubId.current = subId;
+    clearErrors();
+    setTxType(kind);
+    setSplits([{ subId, amountCents: totalCents }]);
+  }
+
   // When txType changes, clear splits (stale subcategories no longer valid).
   // Only when the list actually changes (Income ↔ Expense) — re-tapping the
   // active Expense tab on an edit mustn't wipe the item it already has.
@@ -243,6 +277,7 @@ function TransactionModalForm({
   }
 
   function handlePickerConfirm(selectedIds: string[]) {
+    autoFilledSubId.current = null;
     setPickerOpen(false);
     clearErrors();
     setSplits((prev) => {
@@ -260,24 +295,21 @@ function TransactionModalForm({
   const defaultDate = editTx?.date ?? initialDate ?? (today.startsWith(monthKey) ? today : firstOfMonth);
   // ---- Trip tag. A purchase on a trip is tagged to it here, once, and
   // shows on the Travel Log as that trip's Actual spending — no retyping.
-  // The list is loaded when the page opens (trip-tagging-cache.ts); the trip
-  // whose dates cover the transaction's date is picked on its own until one
-  // is chosen by hand.
-  const { trips, bookingsByTrip } = useTripTagging();
+  // The list is loaded when the page opens (trip-tagging-cache.ts). A new
+  // transaction starts as "Not part of a trip" — the trip is only ever
+  // picked by hand, never guessed from the date.
+  const { trips, bookingsByTrip, spendingRowsByTrip } = useTripTagging();
   const [dateValue, setDateValue] = useState(defaultDate);
   const [tripId, setTripId] = useState(editTx?.tripId ?? "");
-  const [tripTouched, setTripTouched] = useState(isEdit);
-  const tripForDate = trips.find((t) => t.startOn && t.endOn && dateValue >= t.startOn && dateValue <= t.endOn) ?? null;
-  const effectiveTripId = tripTouched ? tripId : tripForDate?.id ?? defaultTripId ?? "";
   // The dropdown lists trips still running this year or ahead — plus
   // whichever trip is selected, however old, so an edit never loses it.
   const thisYearStart = `${new Date().getFullYear()}-01-01`;
   const tripChoices = trips.filter(
-    (t) => !t.startOn || (t.endOn ?? t.startOn) >= thisYearStart || t.id === effectiveTripId,
+    (t) => !t.startOn || (t.endOn ?? t.startOn) >= thisYearStart || t.id === tripId,
   );
   // What the payment is for: one of the trip's bookings (its pocket cost
   // follows this payment) or nothing in particular (day-to-day spending).
-  const bookings = (effectiveTripId && bookingsByTrip[effectiveTripId]) || [];
+  const bookings = (tripId && bookingsByTrip[tripId]) || [];
   // Points typed beside the payment. Blank leaves the booking's own figure.
   const [bookingPoints, setBookingPoints] = useState("");
   const [bookingPointsValue, setBookingPointsValue] = useState("");
@@ -286,10 +318,26 @@ function TransactionModalForm({
   const [bookingCredit, setBookingCredit] = useState("");
   const [bookingRef, setBookingRef] = useState(editTx?.bookingRef ?? "");
   const bookingOk = bookings.some((b) => b.ref === bookingRef);
-  // Which Travel Log column a trip purchase on the catch-all item
-  // (Traveling/Trips, whose own column is Other) lands in. Every other item
-  // has one fixed column, set on its item form.
-  const [travelCategory, setTravelCategory] = useState(editTx?.travelCategory ?? "other");
+  // Which Travel Log column a trip purchase lands in when it's on one of the
+  // two trip items: the catch-all (Traveling/Trips, own column Other) or the
+  // trip food item (Restaurant Travel: Restaurants or Groceries). Every other
+  // item has one fixed column, set on its item form. Each is read from its own
+  // part of a split, whichever row was opened.
+  const savedColumnOn = (itemColumn: string) => {
+    const onItem = (subId: string | null | undefined) => subOptions.find((o) => o.id === subId && o.receivesTripPlans)?.travelCategory === itemColumn;
+    const part = editParts?.find((p) => onItem(p.subId));
+    return part ? part.travelCategory ?? null : onItem(editTx?.subId) ? editTx?.travelCategory ?? null : null;
+  };
+  const [travelCategory, setTravelCategory] = useState(savedColumnOn("other") ?? "other");
+  const [foodColumn, setFoodColumn] = useState(savedColumnOn("restaurants") === "groceries" ? "groceries" : "restaurants");
+  // The catch-all's choices are the rows the trip's card shows — Other always,
+  // as the default — plus the one already saved. A trip with no rows yet offers
+  // all. Never Groceries: trip groceries are trip food (Restaurant Travel).
+  const CATCH_ALL_COLUMNS = ["other", "entertainment", "transport", "fuel_tolls", "parking", "cash"] as const;
+  const tripRows = (tripId && spendingRowsByTrip[tripId]) || [];
+  const columnChoices = tripRows.length
+    ? CATCH_ALL_COLUMNS.filter((key) => key === "other" || key === travelCategory || tripRows.includes(key))
+    : CATCH_ALL_COLUMNS;
   const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
   // A flight payment split per passenger — each share is that passenger's
   // Spent on the Travel Log, in dollars and the flight's other currency, as on
@@ -347,28 +395,33 @@ function TransactionModalForm({
     const parts = shareOut(points, flightPax.map(() => 1));
     setPaxPoints(Object.fromEntries(flightPax.map((p, i) => [p.name, parts[i] ? String(parts[i]) : ""])));
   }
-  // On a trip, an item with a travel twin — a trip item (receivesTripPlans)
-  // on the same Travel Log column (Restaurants → Restaurant Travel) —
-  // switches to that twin, so the meal counts on the trip budget, not the
-  // everyday one. Taking the trip off switches it back. Adjusted during render
-  // (not in an effect) so the form never shows the wrong item for a frame.
+  // On a trip, an item with a travel twin — the trip item for its Travel Log
+  // column (Restaurants and Groceries → Restaurant Travel, the trip food item)
+  // — switches to that twin, so the purchase counts on the trip budget, not
+  // the everyday one; Groceries keeps its column there. Taking the trip off
+  // switches it back. Adjusted during render (not in an effect) so the form
+  // never shows the wrong item for a frame. Same rule as the server's
+  // routeTripPurchase.
+  const tripItemRole = (column: string) => (column === "restaurants" || column === "groceries" ? "restaurants" : "other");
   const travelTwinOf = (subId: string) => {
     const o = subOptions.find((x) => x.id === subId);
     if (!o?.travelCategory || o.receivesTripPlans) return null;
-    return subOptions.find((x) => x.id !== o.id && x.receivesTripPlans && x.travelCategory === o.travelCategory)?.id ?? null;
+    const role = tripItemRole(o.travelCategory);
+    if (role === "other") return null;
+    return subOptions.find((x) => x.id !== o.id && x.receivesTripPlans && x.travelCategory === role)?.id ?? null;
   };
   // Items with a Travel Log column but no twin (Groceries, Fuel,
   // Entertainment…) are saved on the catch-all trip item instead, keeping
   // their column — the server does the move per split; this only names it.
   const tripCatchAll = subOptions.find((x) => x.receivesTripPlans && x.travelCategory === "other") ?? null;
-  const movedToCatchAll = effectiveTripId && !bookingOk && tripCatchAll
+  const movedToCatchAll = tripId && !bookingOk && tripCatchAll
     ? splits
         .map((sp) => subOptions.find((o) => o.id === sp.subId))
         .filter((o): o is SubOption => Boolean(o?.travelCategory && !o.receivesTripPlans && !travelTwinOf(o.id)))
     : [];
   // twin id → the item it replaced, for switching back.
   const [swappedFrom, setSwappedFrom] = useState<Record<string, string>>({});
-  if (effectiveTripId) {
+  if (tripId) {
     const next = splits.map((sp) => {
       const twin = travelTwinOf(sp.subId);
       return twin && !splits.some((o) => o.subId === twin) ? { ...sp, subId: twin } : sp;
@@ -376,7 +429,12 @@ function TransactionModalForm({
     if (next.some((sp, i) => sp.subId !== splits[i].subId)) {
       const record = { ...swappedFrom };
       next.forEach((sp, i) => {
-        if (sp.subId !== splits[i].subId) record[sp.subId] = splits[i].subId;
+        if (sp.subId !== splits[i].subId) {
+          record[sp.subId] = splits[i].subId;
+          // Groceries moved onto the food item keeps its Groceries column.
+          const from = subOptions.find((o) => o.id === splits[i].subId)?.travelCategory;
+          if (from === "groceries" || from === "restaurants") setFoodColumn(from);
+        }
       });
       setSplits(next);
       setSwappedFrom(record);
@@ -575,6 +633,7 @@ function TransactionModalForm({
           accountByGroup={accountByGroup}
           selectedAccountId={selectedAccountId}
           onSelect={(accountId) => {
+            autoFilledAccountId.current = null;
             setSelectedAccountId(accountId);
             setSelectedBucketId("");
             setAccountPickerOpen(false);
@@ -712,6 +771,7 @@ function TransactionModalForm({
                 payeeOptions={payeeOptions}
                 payeeLineItems={payeeLineItems}
                 onMatch={handlePayeeMatch}
+                onUsualPicks={handleUsualPicks}
               />
             </div>
 
@@ -857,10 +917,9 @@ function TransactionModalForm({
               <div>
                 <select
                   name="tripId"
-                  value={effectiveTripId}
+                  value={tripId}
                   onChange={(e) => {
                     setTripId(e.target.value);
-                    setTripTouched(true);
                     // A booking belongs to one trip; changing trips unlinks it.
                     pickBooking("");
                   }}
@@ -871,7 +930,7 @@ function TransactionModalForm({
                     <option key={t.id} value={t.id}>Trip: {t.name}</option>
                   ))}
                 </select>
-                {effectiveTripId && bookings.length > 0 ? (
+                {tripId && bookings.length > 0 ? (
                   <select
                     name="bookingRef"
                     value={bookingOk ? bookingRef : ""}
@@ -933,14 +992,14 @@ function TransactionModalForm({
                     />
                   </>
                 ) : null}
-                {effectiveTripId && !bookingOk && splits.some((sp) => subOptions.find((o) => o.id === sp.subId)?.travelCategory === "other") ? (
+                {tripId && !bookingOk && splits.some((sp) => subOptions.find((o) => o.id === sp.subId)?.travelCategory === "other") ? (
                   <select
                     name="travelCategory"
                     value={travelCategory}
                     onChange={(e) => setTravelCategory(e.target.value)}
                     className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
-                    {(["other", "groceries", "entertainment", "transport", "fuel_tolls", "parking", "cash"] as const).map((key) => (
+                    {columnChoices.map((key) => (
                       <option key={key} value={key}>
                         {/* In a split only the catch-all item's part uses it — say which. */}
                         {splits.length > 1
@@ -951,11 +1010,28 @@ function TransactionModalForm({
                     ))}
                   </select>
                 ) : null}
-                {effectiveTripId && !bookingOk ? (
+                {tripId && !bookingOk && splits.some((sp) => subOptions.find((o) => o.id === sp.subId && o.receivesTripPlans)?.travelCategory === "restaurants") ? (
+                  <select
+                    name="foodColumn"
+                    value={foodColumn}
+                    onChange={(e) => setFoodColumn(e.target.value)}
+                    className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  >
+                    {(["restaurants", "groceries"] as const).map((key) => (
+                      <option key={key} value={key}>
+                        {splits.length > 1
+                          ? `${subOptions.find((o) => o.receivesTripPlans && o.travelCategory === "restaurants")?.name ?? "Restaurant Travel"} column: `
+                          : "Travel Log column: "}
+                        {EXPENSE_CATEGORIES.find((c) => c.key === key)?.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {tripId && !bookingOk ? (
                   <span className="mt-1 block px-1 text-[11px] text-muted">
                     {bookingOk
                       ? null
-                      : `Counts on the Travel Log as this trip's spending${!tripTouched && tripForDate ? " (picked from the date)" : ""}.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}${movedToCatchAll.length ? ` ${movedToCatchAll.map((o) => o.name).join(", ")} will save on ${tripCatchAll!.name} (${movedToCatchAll.map((o) => EXPENSE_CATEGORIES.find((c) => c.key === o.travelCategory)?.label ?? o.name).join(", ")} column), not your everyday budget.` : ""}`}
+                      : `Counts on the Travel Log as this trip's spending.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}${movedToCatchAll.length ? ` ${movedToCatchAll.map((o) => o.name).join(", ")} will save on ${tripCatchAll!.name} (${movedToCatchAll.map((o) => EXPENSE_CATEGORIES.find((c) => c.key === o.travelCategory)?.label ?? o.name).join(", ")} column), not your everyday budget.` : ""}`}
                   </span>
                 ) : null}
               </div>
@@ -1414,7 +1490,7 @@ function AccountPicker({
   }, [activeAccount?.id]);
 
   return (
-    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface pt-[max(env(safe-area-inset-top),1.75rem)] sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4 sm:pt-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface pt-[max(env(safe-area-inset-top),1.75rem)] sm:h-auto sm:items-center sm:justify-start sm:bg-black/50 sm:p-4 sm:pt-[10vh]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
       <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
         <button type="button" onClick={onClose} className="text-sm font-medium text-muted hover:text-foreground">
@@ -1634,7 +1710,7 @@ function BudgetItemPicker({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:h-auto sm:items-center sm:justify-center sm:bg-black/50 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-surface sm:h-auto sm:items-center sm:justify-start sm:bg-black/50 sm:p-4 sm:pt-[10vh]" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface sm:h-auto sm:max-h-[80vh] sm:w-full sm:max-w-lg sm:flex-none sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-line">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:rounded-t-2xl">
@@ -1759,14 +1835,16 @@ function PayeeField({
   payeeOptions,
   payeeLineItems = [],
   onMatch,
+  onUsualPicks,
   invalid = false,
   onDirty,
 }: {
   placeholder: string;
   defaultValue: string;
-  payeeOptions?: { id: string; name: string }[];
+  payeeOptions?: PayeeOption[];
   payeeLineItems?: PayeeLineItem[];
   onMatch?: (item: PayeeLineItem) => void;
+  onUsualPicks?: (payee: PayeeOption | null, itemMatched: boolean) => void;
   invalid?: boolean;
   onDirty?: () => void;
 }) {
@@ -1799,6 +1877,7 @@ function PayeeField({
     setHighlighted(-1);
     const item = payeeLineItems.find((i) => i.name.toLowerCase() === name.toLowerCase());
     if (item) onMatch?.(item);
+    onUsualPicks?.(payeeOptions?.find((p) => p.name.toLowerCase() === name.toLowerCase()) ?? null, Boolean(item));
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -1832,7 +1911,13 @@ function PayeeField({
         value={value}
         onChange={(e) => { setValue(e.target.value); onDirty?.(); setOpen(e.target.value.trim().length > 0); setHighlighted(-1); }}
         onFocus={() => { if (value.trim().length > 0) setOpen(true); }}
-        onBlur={() => { setOpen(false); setHighlighted(-1); }}
+        onBlur={() => {
+          setOpen(false);
+          setHighlighted(-1);
+          // A payee typed out in full has no suggestion left to tap (exact
+          // matches drop off the list), so its usual item fills on leaving.
+          onUsualPicks?.(payeeOptions?.find((p) => !deletedIds.has(p.id) && p.name.toLowerCase() === q) ?? null, lineItemNames.has(q));
+        }}
         onKeyDown={handleKeyDown}
         className={
           "w-full rounded-xl bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { TransactionModal } from "../budget/transaction-modal";
 import { listPayees } from "../budget/actions";
 import { loadTxFormOptions } from "../budget/tx-form-options";
-import { usePrefetchTripTagging, useTripTagging } from "../budget/trip-tagging-cache";
+import { usePrefetchTripTagging } from "../budget/trip-tagging-cache";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 
 // The same add-transaction form as the Transactions page, opened from the
@@ -15,15 +15,6 @@ import { useScrollLock } from "@/lib/use-scroll-lock";
 export function AddTransactionButton() {
   usePrefetchTripTagging();
   const [options, setOptions] = useState<Awaited<ReturnType<typeof loadTxFormOptions>> | null>(null);
-  // Opened from the Travel Log, a purchase is most likely for the next trip:
-  // it's the fallback when no trip's dates cover the purchase date (a trip
-  // under way still wins, as it does everywhere else).
-  const { trips } = useTripTagging();
-  const today = new Date().toISOString().slice(0, 10);
-  const nextTripId =
-    trips
-      .filter((t) => t.startOn && t.startOn > today)
-      .sort((a, b) => (a.startOn! < b.startOn! ? -1 : 1))[0]?.id ?? undefined;
   const [payees, setPayees] = useState<{ id: string; name: string }[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,7 +91,6 @@ export function AddTransactionButton() {
               payeeOptions={payees}
               payeeLineItems={options.payeeLineItems}
               initialKind="expenses"
-              defaultTripId={nextTripId}
               onClose={() => {
                 setOpen(false);
                 // A save moves balances and Remaining: refresh in the

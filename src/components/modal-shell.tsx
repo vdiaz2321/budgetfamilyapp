@@ -54,6 +54,7 @@ export function ModalShell({
   mobileAlign = "bottom",
   headerExtra,
   headerActions,
+  headerActionsBelow = false,
 }: {
   // Usually text; a control (a picker) can stand in for it.
   title: React.ReactNode;
@@ -65,6 +66,9 @@ export function ModalShell({
   headerExtra?: React.ReactNode;
   // Buttons that act on the whole body (e.g. expand all), shown after the title.
   headerActions?: React.ReactNode;
+  // Put headerActions on their own line under the title at every width (the
+  // trip popup's actions + dates row), instead of beside it from sm up.
+  headerActionsBelow?: boolean;
   // Where the panel sits on phones. "bottom" (default) is right for long,
   // scroll-heavy forms the thumb works through. "top" suits short forms, which
   // otherwise end up with their action buttons pinned in the very corner of the
@@ -97,7 +101,7 @@ export function ModalShell({
           <h2 className="min-w-0 truncate text-lg font-bold">{title}</h2>
           {/* Beside the title on wide screens; its own line under it on a phone. */}
           {headerActions ? (
-            <div className="order-last flex basis-full flex-wrap items-center gap-2 sm:order-none sm:basis-auto">
+            <div className={`order-last flex basis-full flex-wrap items-center gap-2 ${headerActionsBelow ? "" : "sm:order-none sm:basis-auto"}`}>
               {headerActions}
             </div>
           ) : null}

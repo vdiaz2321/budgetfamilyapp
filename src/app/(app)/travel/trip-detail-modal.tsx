@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { formatForeignWhole, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { bookingForeign, bookingPlanActual, bookingWhen, sheetDateRange, tripDate, type Booking, type TripSummary } from "./trip-summary";
+import { bookingForeign, bookingPlanActual, bookingWhen, tripDate, type Booking, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES, actualCents, type TripTaggedPurchase } from "./types";
 import { MatchPurchasesModal } from "./match-purchases-modal";
 
@@ -36,7 +36,7 @@ function KindDay({ booking, className = "" }: { booking: Booking; className?: st
   return (
     <span className={`flex shrink-0 flex-col items-center gap-0.5 ${className}`}>
       <KindChip kind={booking.kind} />
-      <span className="text-[11px] font-semibold text-muted">{day}</span>
+      <span className="text-[11px] font-semibold text-foreground">{day}</span>
     </span>
   );
 }
@@ -47,7 +47,7 @@ function bookingRemarks(booking: Booking) {
 }
 function BookingRemarks({ booking }: { booking: Booking }) {
   const remarks = bookingRemarks(booking);
-  return remarks ? <span className="whitespace-pre-line text-xs text-foreground/85">{remarks}</span> : null;
+  return remarks ? <span className="whitespace-pre-line text-xs text-foreground">{remarks}</span> : null;
 }
 
 function KindChip({ kind, className = "" }: { kind: keyof typeof KIND_LABEL; className?: string }) {
@@ -62,6 +62,11 @@ function KindChip({ kind, className = "" }: { kind: keyof typeof KIND_LABEL; cla
 }
 // A flight's seats, one line each, on the same planned / spent rule as the
 // flight itself: a flight not bought yet has only a plan.
+// The transactions linked to a booking on the Budget ("Pays for").
+function bookingPayments(b: Booking) {
+  return (b.kind === "flight" ? b.flight.payments : b.kind === "stay" ? b.stay.payments : b.car.payments) ?? [];
+}
+
 function flightSeats(b: Booking) {
   if (b.kind !== "flight" || b.flight.passengers.length < 2) return [];
   const f = b.flight;
@@ -95,8 +100,14 @@ const PLAN_BLUE = "text-sky-700 dark:text-sky-300";
 // background so it reads as a button, not a faint outline. Hover is a light
 // blue wash — grey read as disabled, black as too heavy, and Victor rejects
 // the purple brand colour anywhere new.
+// Sized like the Travel Log's own buttons, a step down for the popup (16px
+// bold) — the 13.5px version read as a tiny chip. Labels never wrap.
 const SECTION_BUTTON =
-  "rounded-md border border-black/25 bg-background px-2.5 py-1 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40";
+  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-black/25 bg-background px-3 py-1.5 text-sm font-bold text-foreground shadow-sm transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40";
+// Adding is a different act from editing, so it gets the filled blue of the
+// page's own "Add Trip" button rather than the outline one.
+const ADD_BUTTON =
+  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-sky-700 bg-sky-700 px-3 py-1.5 text-sm font-bold text-white shadow-sm transition hover:bg-sky-800";
 
 /**
  * One trip, whole: its bookings in date order, its spending planned against
@@ -105,8 +116,6 @@ const SECTION_BUTTON =
  */
 export function TripDetailModal({
   summary: t,
-  allTrips,
-  onSwitchTrip,
   currency,
   onEditBooking,
   onAddBooking,
@@ -114,9 +123,6 @@ export function TripDetailModal({
   onClose,
 }: {
   summary: TripSummary;
-  /** Every trip, for the title's dropdown — pick one to jump to it. */
-  allTrips: TripSummary[];
-  onSwitchTrip: (tripId: string) => void;
   currency: string;
   onEditBooking: (booking: Booking) => void;
   onAddBooking: () => void;
@@ -215,19 +221,59 @@ export function TripDetailModal({
   // its own hid the plan's total (Victor, 2026-09-30).
   // The plan's figures in PLAN_BLUE, so they read apart from the spent
   // figure above them (red once anything is spent).
-  const planNote = (planned: number, left: number, label = "Planned") => {
-    const total = Math.max(planned, left);
-    if (total <= 0) return undefined;
-    return (
-      <>
-        {label}: <span className={PLAN_BLUE}>{formatMoneyWhole(total, currency)}</span>
-        {left > 0 && left !== total ? (
-          <>
-            {" "}· left <span className={PLAN_BLUE}>{formatMoneyWhole(left, currency)}</span>
-          </>
-        ) : null}
-      </>
-    );
+  // The summary cards match the tables' columns: Planned / Spent /
+  // Difference. Spent = money that left the wallet; Planned = every planned
+  // figure (bookings + spending rows); Difference = the two tables'
+  // Difference totals, by their rule — a row counts once it has both a plan
+  // and spending. (Replaced Flights / Stays / Spending / Total spent / Saved,
+  // which repeated Planned twice and called points value "Saved" —
+  // Victor, 2026-10-08.)
+  const spentFlights = t.flights - t.planOnly.flights;
+  const spentStays = t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals;
+  const spentSpending = t.miscTotal - t.planOnly.miscTotal;
+  const plannedBookings = bookingTotals.planned;
+  const plannedFlights = bookingTotals.flightPlanned;
+  const plannedTotal = plannedBookings + t.plannedMisc;
+  // What the Difference compares, and its planned and spent totals — shown
+  // under it as "Planned $1,660 / Spent $830". Same rule as the Spending
+  // popup: each booking type (all flights, all stays, all rentals) compares
+  // its whole plan with what's been paid so far — an unpaid flight's plan is
+  // money still to go (Victor, 2026-10-08) — and a spending row counts once
+  // it has both a plan and spending. Nothing paid, or no plan: left out.
+  const live = t.bookings.filter((b) => !b.cancelled);
+  const byKind = (["flight", "stay", "car"] as const).map((kind) =>
+    live
+      .filter((b) => b.kind === kind)
+      .map((b) => bookingPlanActual(b))
+      .reduce<{ planned: number; actual: number }>(
+        (sum, x) => ({ planned: sum.planned + (x.planned ?? 0), actual: sum.actual + (x.actual ?? 0) }),
+        { planned: 0, actual: 0 },
+      ),
+  );
+  const compared = [
+    ...byKind.filter((k) => k.planned > 0 && k.actual > 0),
+    ...t.expenses
+      .map((e) => ({ planned: e.plannedCents, actual: actualCents(e) }))
+      .filter((x): x is { planned: number; actual: number } => x.planned != null && x.actual != null),
+  ];
+  const comparedPlanned = compared.reduce((sum, x) => sum + x.planned, 0);
+  const comparedSpent = compared.reduce((sum, x) => sum + x.actual, 0);
+  const differenceCents = compared.length ? comparedPlanned - comparedSpent : null;
+  // "Flights: $0 / Spending: $320" under a card's figure. Flights and
+  // Spending always show, $0 included; Stays only on a trip that has a stay
+  // or rental, so most trips aren't padded with "Stays: $0".
+  const hasStays = t.bookings.some((b) => !b.cancelled && b.kind !== "flight");
+  const parts = (flights: number, stays: number, spending: number) => {
+    const list: [string, number][] = [["Flights", flights], ...(hasStays || stays ? [["Stays", stays] as [string, number]] : []), ["Spending", spending]];
+    // One part per line on a phone (no slashes); "a / b" from sm up, each
+    // part an unbreakable block so a long line wraps between parts, never
+    // mid-figure, and a wrapped line starts with a label.
+    return list.map(([label, cents], i) => (
+      <span key={label} className="block whitespace-nowrap sm:inline-block">
+        {label}: {formatMoneyWhole(cents, currency)}
+        {i < list.length - 1 ? <span className="hidden sm:inline">&nbsp;/&nbsp;</span> : null}
+      </span>
+    ));
   };
 
   // What this trip adds to the Budget (view v_trip_budget_plans): its spending
@@ -253,27 +299,23 @@ export function TripDetailModal({
 
   return (
     <ModalShell
-      title={
-        // The title is the trip picker: another trip opens in place.
-        <select
-          aria-label="Trip"
-          value={t.trip.id}
-          onChange={(e) => onSwitchTrip(e.target.value)}
-          className="max-w-full cursor-pointer truncate rounded-md bg-transparent py-0.5 pr-1 text-lg font-bold [field-sizing:content] hover:bg-sky-100 focus:outline-none dark:hover:bg-sky-900/40"
-        >
-          {allTrips.map((x) => (
-            <option key={x.trip.id} value={x.trip.id}>
-              {x.trip.name}
-            </option>
-          ))}
-        </select>
-      }
-      onClose={onClose}
-      className="sm:max-w-[min(94vw,68rem)]"
-      mobileAlign="top"
-    >
-      <div className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+      // Plain trip name — the old trip-switching dropdown went (Victor,
+      // 2026-10-08): another trip is opened from its card. The trip's actions,
+      // dates and nights/pax sit on their own line under it in the header,
+      // pinned while the body scrolls.
+      title={t.trip.name}
+      headerActionsBelow
+      headerActions={
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-foreground">
+          {/* The trip's two actions side by side: add a flight/stay/rental,
+              then edit the trip itself. */}
+          <button
+            type="button"
+            onClick={onAddBooking}
+            className={ADD_BUTTON}
+          >
+            Add to this trip
+          </button>
           {mode !== "edit" ? (
             <button
               type="button"
@@ -284,29 +326,51 @@ export function TripDetailModal({
                 setNotes(t.trip.notes ?? "");
                 setMode("edit");
               }}
-              className={`${SECTION_BUTTON} text-foreground`}
+              className={SECTION_BUTTON}
             >
+              <svg aria-hidden viewBox="0 0 20 20" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13.5 3.5l3 3L7 16H4v-3z" />
+              </svg>
               Edit trip
             </button>
           ) : null}
-          {t.start ? (
-            <span className="tabular-nums">
-              {sheetDateRange(t.start, t.end)}
-            </span>
-          ) : (
-            <span>No dates yet</span>
-          )}
-          {t.nights != null ? <span>{t.nights} night{t.nights === 1 ? "" : "s"}</span> : null}
-          {t.pax ? <span>{t.pax} pax</span> : null}
-          {budgetPlanCents > 0 ? (
-            budgetMonth ? (
-              <span className="font-semibold text-foreground">Total Estimated Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(budgetPlanCents, currency)}</span></span>
+          {/* Each end of the trip: its weekday over the full date. The plan
+              total isn't repeated here — the cards below already show it. */}
+          {/* The dates on a light-blue pill (the Flight tag's tint — never
+              grey), weekday centred over each; nights and pax plain beside
+              it, on their own line on a phone. All bold. */}
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 font-semibold tabular-nums text-foreground">
+            {t.start ? (
+              <span className="flex items-end gap-2 rounded-full bg-sky-100 px-4 py-1.5 dark:bg-sky-900/50">
+                <TripDay iso={t.start} />
+                {t.end && t.end !== t.start ? (
+                  <>
+                    <span>–</span>
+                    <TripDay iso={t.end} />
+                  </>
+                ) : null}
+              </span>
             ) : (
-              <span className="font-semibold text-negative">Add dates to put its plan on the Budget</span>
-            )
+              <span>No dates yet</span>
+            )}
+            {t.nights != null || t.pax ? (
+              <span className="basis-full whitespace-nowrap sm:basis-auto">
+                {t.nights != null ? `${t.nights} night${t.nights === 1 ? "" : "s"}` : null}
+                {t.nights != null && t.pax ? <>&nbsp;&nbsp;/&nbsp;&nbsp;</> : null}
+                {t.pax ? `${t.pax} pax` : null}
+              </span>
+            ) : null}
+          </span>
+          {budgetPlanCents > 0 && !budgetMonth ? (
+            <span className="self-end font-semibold text-negative">Add dates to put its plan on the Budget</span>
           ) : null}
-        </div>
-
+                </div>
+      }
+      onClose={onClose}
+      className="sm:max-w-[min(94vw,68rem)]"
+      mobileAlign="top"
+    >
+      <div className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
         {/* ---- Edit trip (name, dates, notes) opens right under the button
              that starts it; otherwise the notes read here. */}
         {mode === "edit" ? (
@@ -334,7 +398,7 @@ export function TripDetailModal({
                 <button type="submit" disabled={pending} className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
                   {pending ? "Saving…" : "Save trip"}
                 </button>
-                <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:text-foreground">
+                <button type="button" onClick={() => setMode("view")} className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground hover:underline">
                   Cancel
                 </button>
               </div>
@@ -344,55 +408,49 @@ export function TripDetailModal({
           <p className="whitespace-pre-line text-xs">{t.trip.notes}</p>
         ) : null}
 
-        {/* What the trip came to, left to right as it adds up: the three parts,
-            then their total, then what the points and credits saved. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {/* Each box counts only money that left the wallet; what's still
-              a plan (unbought bookings, spending with no actual yet) sits
-              under it as "Plan left: $X" — a paid item drops out of the plan. */}
+        {/* The trip at a glance, in the tables' own columns: Planned, Spent,
+            Difference. Each card says one thing; its breakdown sits under. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <Stat
-            label="Flights"
-            value={formatMoneyWhole(t.flights - t.planOnly.flights, currency)}
-            className={t.flights - t.planOnly.flights > 0 ? "text-negative" : undefined}
-            note={planNote(bookingTotals.flightPlanned, t.planOnly.flights)}
+            label="Total Planned"
+            value={plannedTotal > 0 ? formatMoneyWhole(plannedTotal, currency) : "—"}
+            className={plannedTotal > 0 ? PLAN_BLUE : undefined}
+            note={parts(plannedFlights, plannedBookings - plannedFlights, t.plannedMisc)}
           />
           <Stat
-            label="Stays/Rentals"
-            value={formatMoneyWhole(t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals, currency)}
-            className={t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals > 0 ? "text-negative" : undefined}
-            note={planNote(bookingTotals.planned - bookingTotals.flightPlanned, t.planOnly.hotels + t.planOnly.rentals)}
-          />
-          <Stat
-            label="Spending"
-            value={formatMoneyWhole(t.miscTotal - t.planOnly.miscTotal, currency)}
-            className={t.miscTotal - t.planOnly.miscTotal > 0 ? "text-negative" : undefined}
-            note={planNote(t.plannedMisc, t.planOnly.miscTotal) ?? "day to day"}
-          />
-          <Stat
-            label="Total spent"
+            label="Total Spent"
             value={formatMoneyWhole(t.spent, currency)}
             className={t.spent > 0 ? "text-negative" : undefined}
-            note={planNote(bookingTotals.planned + t.plannedMisc, t.planOnly.total, "Total Planned")}
+            note={
+              <>
+                {parts(spentFlights, spentStays, spentSpending)}
+                {t.points > 0 ? <span className="block">+ {t.points.toLocaleString()} pts</span> : null}
+              </>
+            }
           />
           <Stat
             wide
-            label={t.points > 0 ? "Pts used · saved" : "Saved"}
-            value={t.points > 0 ? `${t.points.toLocaleString()} · ${formatMoneyWhole(t.saved, currency)}` : formatMoneyWhole(t.saved, currency)}
-            className="text-positive"
+            label="Total Difference"
+            value={differenceCents == null ? "—" : `${differenceCents < 0 ? "−" : ""}${formatMoneyWhole(Math.abs(differenceCents), currency)}`}
+            className={differenceCents == null ? undefined : differenceCents >= 0 ? "text-positive" : "text-negative"}
+            note={
+              differenceCents == null ? (
+                "nothing to compare yet"
+              ) : (
+                <>
+                  Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(comparedPlanned, currency)}</span> / Spent:{" "}
+                  <span className="text-negative">{formatMoneyWhole(comparedSpent, currency)}</span>
+                </>
+              )
+            }
           />
         </div>
 
         {/* ---- Bookings */}
         <section>
-          <div className="mb-1 flex items-center gap-3">
+          {/* Phones only: the desktop table's own header names the section. */}
+          <div className="mb-1.5 sm:hidden">
             <h3 className="text-xs font-bold uppercase tracking-wide">Flights/Stays/Rentals</h3>
-            <button
-              type="button"
-              onClick={onAddBooking}
-              className={SECTION_BUTTON}
-            >
-              + Add to this trip
-            </button>
           </div>
           {t.bookings.length ? (
             // Planned against actual, like Spending below. A flight not bought
@@ -415,9 +473,9 @@ export function TripDetailModal({
                           <span className="text-[13px] font-semibold">
                             {b.title}
                             <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
-                            {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-muted">Cancelled</span> : null}
+                            {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-foreground">Cancelled</span> : null}
                           </span>
-                          <span className="text-xs text-foreground/85">
+                          <span className="text-xs text-foreground">
                             <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
                           </span>
                           <BookingRemarks booking={b} />
@@ -429,7 +487,7 @@ export function TripDetailModal({
                             <>
                               {formatMoneyWhole(planned, currency)}
                               {fx.planned != null ? (
-                                <span className="block text-xs text-foreground/85">{formatForeignWhole(fx.planned, fx.code)}</span>
+                                <span className="block text-xs text-foreground">{formatForeignWhole(fx.planned, fx.code)}</span>
                               ) : null}
                             </>
                           ) : DASH
@@ -442,7 +500,7 @@ export function TripDetailModal({
                               <span className="font-normal text-muted">{DASH}</span>
                             )}
                             {actual != null && fx.actual != null ? (
-                              <span className="block text-xs font-normal text-foreground/85">{formatForeignWhole(fx.actual, fx.code)}</span>
+                              <span className="block text-xs font-normal text-foreground">{formatForeignWhole(fx.actual, fx.code)}</span>
                             ) : null}
                             {b.points > 0 ? (
                               <span className="block text-xs font-semibold" style={{ color: "var(--viz-savings)" }}>
@@ -464,6 +522,18 @@ export function TripDetailModal({
                         diffClass={diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}
                       />
                     </button>
+                    {bookingPayments(b).length ? (
+                      <div className="-mt-1 px-3 pb-2">
+                        <PurchasesToggle
+                          count={bookingPayments(b).length}
+                          noun="payment"
+                          open={openRow === `booking:${b.id}`}
+                          onClick={() => setOpenRow(openRow === `booking:${b.id}` ? null : `booking:${b.id}`)}
+                          className=""
+                        />
+                        {openRow === `booking:${b.id}` ? <TaggedPurchaseList list={bookingPayments(b)} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
+                      </div>
+                    ) : null}
                     {flightSeats(b).length ? (
                       <div className="-mt-1 px-3 pb-2">
                         <PaxToggle open={openSeats.has(b.id)} onClick={() => toggleSeats(b.id)} />
@@ -473,7 +543,7 @@ export function TripDetailModal({
                         <span className="mx-3 mb-2 block space-y-0.5 border-t border-line/60 pt-1.5">
                           {flightSeats(b).map((p) => (
                             <span key={p.key} className="grid grid-cols-[minmax(0,1fr)_repeat(3,4.5rem)] items-baseline gap-1 rounded px-1 py-0.5 text-xs tabular-nums even:bg-black/[0.035] dark:even:bg-white/[0.05]">
-                              <span className="truncate text-muted">{p.name}</span>
+                              <span className="truncate text-foreground">{p.name}</span>
                               <span className="text-center">{p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}</span>
                               <span className="text-center">
                                 {p.points > 0 ? (
@@ -506,7 +576,7 @@ export function TripDetailModal({
                         <>
                           {formatMoneyWhole(bookingTotals.planned, currency)}
                           {bookingFxTotals?.planned ? (
-                            <span className="block text-xs font-normal text-foreground/85">{formatForeignWhole(bookingFxTotals.planned, bookingFxTotals.code)}</span>
+                            <span className="block text-xs font-normal text-foreground">{formatForeignWhole(bookingFxTotals.planned, bookingFxTotals.code)}</span>
                           ) : null}
                         </>
                       ) : DASH
@@ -516,7 +586,7 @@ export function TripDetailModal({
                         <>
                           <span className="text-negative">{formatMoneyWhole(bookingTotals.actual, currency)}</span>
                           {bookingFxTotals?.actual ? (
-                            <span className="block text-xs font-normal text-foreground/85">{formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
+                            <span className="block text-xs font-normal text-foreground">{formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
                           ) : null}
                         </>
                       ) : DASH
@@ -556,13 +626,15 @@ export function TripDetailModal({
                     const remarks = bookingRemarks(b);
                     const allSeats = flightSeats(b);
                     const seats = openSeats.has(b.id) ? allSeats : [];
+                    const payments = bookingPayments(b);
+                    const paymentsOpen = openRow === `booking:${b.id}` && payments.length > 0;
                     return (
                       <tbody
                         key={`${b.kind}-${b.id}`}
                         onClick={() => onEditBooking(b)}
                         className={`cursor-pointer border-b border-line/60 transition hover:bg-sky-50 dark:hover:bg-sky-900/20 ${b.cancelled ? "opacity-60" : ""}`}
                       >
-                      <tr className={remarks || seats.length ? "[&>td]:pb-0" : ""}>
+                      <tr className={remarks || seats.length || paymentsOpen ? "[&>td]:pb-0" : ""}>
                         <td className="px-3 py-2 text-left">
                           <button type="button" onClick={(e) => { e.stopPropagation(); onEditBooking(b); }} className="flex min-w-0 items-start gap-2 text-left">
                             <KindDay booking={b} />
@@ -570,9 +642,9 @@ export function TripDetailModal({
                               <span className="text-sm font-semibold">
                                 {b.title}
                                 <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
-                                {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-muted">Cancelled</span> : null}
+                                {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-foreground">Cancelled</span> : null}
                               </span>
-                              <span className="text-xs text-foreground/85">
+                              <span className="text-xs text-foreground">
                                 <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
                               </span>
                             </span>
@@ -586,7 +658,7 @@ export function TripDetailModal({
                         <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
                           {planned != null ? formatMoneyWhole(planned, currency) : DASH}
                           {planned != null && fx.planned != null ? (
-                            <span className="text-foreground/85"> / {formatForeignWhole(fx.planned, fx.code)}</span>
+                            <span className="text-foreground"> / {formatForeignWhole(fx.planned, fx.code)}</span>
                           ) : null}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-center font-semibold tabular-nums">
@@ -596,11 +668,17 @@ export function TripDetailModal({
                             <span className="font-normal text-muted">{DASH}</span>
                           )}
                           {actual != null && fx.actual != null ? (
-                            <span className="font-normal text-foreground/85"> / {formatForeignWhole(fx.actual, fx.code)}</span>
+                            <span className="font-normal text-foreground"> / {formatForeignWhole(fx.actual, fx.code)}</span>
                           ) : null}
                           {b.points > 0 ? (
                             <span className="block text-xs font-semibold" style={{ color: "var(--viz-savings)" }}>
                               {b.points.toLocaleString()} pts
+                            </span>
+                          ) : null}
+                          {/* The transactions paying for it (Budget "Pays for"). */}
+                          {payments.length ? (
+                            <span className="block">
+                              <PurchasesToggle count={payments.length} noun="payment" open={paymentsOpen} onClick={() => setOpenRow(paymentsOpen ? null : `booking:${b.id}`)} className="" />
                             </span>
                           ) : null}
                         </td>
@@ -620,7 +698,7 @@ export function TripDetailModal({
                           <td className="whitespace-nowrap px-3 text-center">
                             {p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}
                             {p.planned != null && p.plannedFx != null ? (
-                              <span className="text-foreground/85"> / {formatForeignWhole(p.plannedFx, p.code)}</span>
+                              <span className="text-foreground"> / {formatForeignWhole(p.plannedFx, p.code)}</span>
                             ) : null}
                           </td>
                           <td className="whitespace-nowrap px-3 text-center">
@@ -632,7 +710,7 @@ export function TripDetailModal({
                             ) : p.actual != null ? (
                               <>
                                 <span className={p.actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(p.actual, currency)}</span>
-                                {p.actualFx != null ? <span className="text-foreground/85"> / {formatForeignWhole(p.actualFx, p.code)}</span> : null}
+                                {p.actualFx != null ? <span className="text-foreground"> / {formatForeignWhole(p.actualFx, p.code)}</span> : null}
                               </>
                             ) : (
                               <span className="text-muted">{DASH}</span>
@@ -643,9 +721,10 @@ export function TripDetailModal({
                           </td>
                         </tr>
                       ))}
+                      {paymentsOpen ? <PurchaseRows list={payments} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
                       {remarks ? (
                         <tr>
-                          <td colSpan={4} className={`whitespace-pre-line px-3 pb-2 pl-[5.25rem] text-xs text-foreground/85 ${seats.length ? "pt-1.5" : ""}`}>
+                          <td colSpan={4} className={`whitespace-pre-line px-3 pb-2 pl-[5.25rem] text-xs text-foreground ${seats.length || paymentsOpen ? "pt-1.5" : ""}`}>
                             {remarks}
                           </td>
                         </tr>
@@ -660,13 +739,13 @@ export function TripDetailModal({
                       <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
                         {bookingTotals.planned ? formatMoneyWhole(bookingTotals.planned, currency) : DASH}
                         {bookingTotals.planned && bookingFxTotals?.planned ? (
-                          <span className="font-normal text-foreground/85"> / {formatForeignWhole(bookingFxTotals.planned, bookingFxTotals.code)}</span>
+                          <span className="font-normal text-foreground"> / {formatForeignWhole(bookingFxTotals.planned, bookingFxTotals.code)}</span>
                         ) : null}
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-center tabular-nums">
                         {bookingTotals.actual ? <span className="text-negative">{formatMoneyWhole(bookingTotals.actual, currency)}</span> : DASH}
                         {bookingTotals.actual && bookingFxTotals?.actual ? (
-                          <span className="font-normal text-foreground/85"> / {formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
+                          <span className="font-normal text-foreground"> / {formatForeignWhole(bookingFxTotals.actual, bookingFxTotals.code)}</span>
                         ) : null}
                       </td>
                       <td />
@@ -677,20 +756,20 @@ export function TripDetailModal({
             </div>
             </>
           ) : (
-            <p className="rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-line">No flights, stays or rentals in this trip yet.</p>
+            <p className="rounded-lg px-3 py-2 text-xs text-foreground ring-1 ring-line">No flights, stays or rentals in this trip yet.</p>
           )}
         </section>
 
         {/* ---- Spending, planned against actual */}
         <section>
-          <div className="mb-1 flex items-center gap-3">
-            <h3 className="text-xs font-bold uppercase tracking-wide">Spending</h3>
+          <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h3 className="text-xs font-bold uppercase tracking-wide sm:hidden">Spending</h3>
             <button
               type="button"
               onClick={onEditSpending}
               className={SECTION_BUTTON}
             >
-              {t.expenses.length ? "Edit spending" : "+ Add spending"}
+              {t.expenses.length ? "Edit Spending Category" : "Add Spending Category"}
             </button>
             {/* Tags the card purchases dated inside the trip — how a trip from
                 before trip tagging gets its real actuals. */}
@@ -721,13 +800,13 @@ export function TripDetailModal({
                       planned={
                         <>
                           {money(e.plannedCents)}
-                          {e.plannedEurCents != null ? <span className="block text-xs text-foreground/85">{euros(e.plannedEurCents)}</span> : null}
+                          {e.plannedEurCents != null ? <span className="block text-xs text-foreground">{euros(e.plannedEurCents)}</span> : null}
                         </>
                       }
                       actual={
                         <>
                           {redIfSpent(actual)}
-                          {actualEur(e) != null ? <span className="block text-xs font-normal text-foreground/85">{euros(actualEur(e))}</span> : null}
+                          {actualEur(e) != null ? <span className="block text-xs font-normal text-foreground">{euros(actualEur(e))}</span> : null}
                         </>
                       }
                       diff={
@@ -752,13 +831,13 @@ export function TripDetailModal({
                   planned={
                     <>
                       {money(t.plannedMisc)}
-                      {eurTotal("plannedEurCents") != null ? <span className="block text-xs font-normal text-foreground/85">{euros(eurTotal("plannedEurCents"))}</span> : null}
+                      {eurTotal("plannedEurCents") != null ? <span className="block text-xs font-normal text-foreground">{euros(eurTotal("plannedEurCents"))}</span> : null}
                     </>
                   }
                   actual={
                     <>
                       {redIfSpent(t.actualMisc)}
-                      {eurTotal("actualEurCents") != null ? <span className="block text-xs font-normal text-foreground/85">{euros(eurTotal("actualEurCents"))}</span> : null}
+                      {eurTotal("actualEurCents") != null ? <span className="block text-xs font-normal text-foreground">{euros(eurTotal("actualEurCents"))}</span> : null}
                     </>
                   }
                   diff={
@@ -787,7 +866,7 @@ export function TripDetailModal({
                 </colgroup>
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Category</th>
+                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spending Category</th>
                     <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
                     <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spent</th>
                     <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Difference</th>
@@ -803,20 +882,23 @@ export function TripDetailModal({
                     const diff = spendingDiff(e.plannedCents, actual);
                     return (
                       <Fragment key={key}>
-                      <tr className="border-b border-line/60 last:border-0 hover:bg-sky-100/70 dark:hover:bg-sky-900/30">
+                      {/* Open, the divider moves below its purchases so they read as the row's. */}
+                      <tr className={`${openRow === key ? "" : "border-b border-line/60 last:border-0"} hover:bg-sky-100/70 dark:hover:bg-sky-900/30`}>
                         <td className="px-3 py-1.5 text-left font-semibold">{label}</td>
                         <td className="px-3 py-1.5 text-center tabular-nums">
                           {money(e.plannedCents)}
-                          {e.plannedEurCents != null ? <span className="text-foreground/85"> / {euros(e.plannedEurCents)}</span> : null}
+                          {e.plannedEurCents != null ? <span className="text-foreground"> / {euros(e.plannedEurCents)}</span> : null}
                         </td>
-                        {/* One line: the amount and "8 purchases ▾" side by side
-                            (the Actual column is sized for it). */}
                         <td className="whitespace-nowrap px-3 py-1.5 text-center font-semibold tabular-nums">
                           {redIfSpent(actual)}
-                          {actualEur(e) != null ? <span className="font-normal text-foreground/85"> / {euros(actualEur(e))}</span> : null}
+                          {actualEur(e) != null ? <span className="font-normal text-foreground"> / {euros(actualEur(e))}</span> : null}
                           {/* From the Budget: how many tagged purchases make this
                               figure — click to list them under the row. */}
-                          {e.txCount > 0 ? <PurchasesToggle count={e.txCount} open={openRow === key} onClick={() => setOpenRow(openRow === key ? null : key)} /> : null}
+                          {e.txCount > 0 ? (
+                            <span className="block">
+                              <PurchasesToggle count={e.txCount} open={openRow === key} onClick={() => setOpenRow(openRow === key ? null : key)} className="" />
+                            </span>
+                          ) : null}
                         </td>
                         <td className={`px-3 py-1.5 text-center tabular-nums ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
                           {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
@@ -825,13 +907,7 @@ export function TripDetailModal({
                           ) : null}
                         </td>
                       </tr>
-                      {openRow === key ? (
-                        <tr className="border-b border-line/60">
-                          <td colSpan={4} className="px-3 pb-2">
-                            <TaggedPurchaseList list={e.txList} currency={currency} tripYear={t.start?.slice(0, 4)} />
-                          </td>
-                        </tr>
-                      ) : null}
+                      {openRow === key ? <PurchaseRows list={e.txList} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
                       </Fragment>
                     );
                   })}
@@ -841,11 +917,11 @@ export function TripDetailModal({
                     <td className="px-3 py-1.5 text-left">Total</td>
                     <td className="px-3 py-1.5 text-center tabular-nums">
                       {money(t.plannedMisc)}
-                      {eurTotal("plannedEurCents") != null ? <span className="font-normal text-foreground/85"> / {euros(eurTotal("plannedEurCents"))}</span> : null}
+                      {eurTotal("plannedEurCents") != null ? <span className="font-normal text-foreground"> / {euros(eurTotal("plannedEurCents"))}</span> : null}
                     </td>
                     <td className="px-3 py-1.5 text-center tabular-nums">
                       {redIfSpent(t.actualMisc)}
-                      {eurTotal("actualEurCents") != null ? <span className="font-normal text-foreground/85"> / {euros(eurTotal("actualEurCents"))}</span> : null}
+                      {eurTotal("actualEurCents") != null ? <span className="font-normal text-foreground"> / {euros(eurTotal("actualEurCents"))}</span> : null}
                     </td>
                     {(() => {
                       const diff = spendingTotalDiff;
@@ -863,7 +939,7 @@ export function TripDetailModal({
             </div>
             </>
           ) : (
-            <p className="rounded-lg px-3 py-2 text-xs text-muted ring-1 ring-line">No restaurants, groceries or other spending yet.</p>
+            <p className="rounded-lg px-3 py-2 text-xs text-foreground ring-1 ring-line">No restaurants, groceries or other spending yet.</p>
           )}
         </section>
 
@@ -871,7 +947,7 @@ export function TripDetailModal({
         <section className="border-t border-line pt-3">
           {mode === "delete" ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-muted">Delete this trip and everything in it — its stays, flights, rentals and spending?</span>
+              <span className="text-foreground">Delete this trip and everything in it — its stays, flights, rentals and spending?</span>
               <button
                 type="button"
                 disabled={pending}
@@ -880,7 +956,7 @@ export function TripDetailModal({
               >
                 Delete trip
               </button>
-              <button type="button" onClick={() => setMode("view")} className="px-2 py-1.5 font-semibold text-muted hover:text-foreground">
+              <button type="button" onClick={() => setMode("view")} className="px-2 py-1.5 font-semibold text-foreground hover:underline">
                 Keep
               </button>
             </div>
@@ -911,13 +987,13 @@ export function TripDetailModal({
 
 function Stat({ label, value, className, note, wide }: { label: string; value: string; className?: string; note?: React.ReactNode; wide?: boolean }) {
   return (
-    // `wide` takes the whole row on a phone, so an odd box count leaves no gap.
+    // `wide` takes the whole row on a phone, so the odd third card leaves no gap.
     <div className={`rounded-lg bg-background/60 px-3 py-2 text-center ring-1 ring-line ${wide ? "col-span-2 sm:col-span-1" : ""}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-normal text-foreground/75 sm:text-xs sm:tracking-wide">{label}</p>
-      <p className={`text-base font-bold tabular-nums ${className ?? ""}`}>{value}</p>
+      <p className="text-xs font-bold uppercase tracking-wide text-foreground sm:text-sm">{label}</p>
+      <p className={`text-xl font-bold tabular-nums sm:text-2xl ${className ?? ""}`}>{value}</p>
       {/* Readable, not a faint grey caption — the plan under the spent
           figure was hard to see in dark mode (Victor, 2026-09-30). */}
-      {note ? <p className="mt-0.5 text-xs font-semibold tabular-nums text-foreground/90">{note}</p> : null}
+      {note ? <p className="mt-0.5 text-xs font-semibold tabular-nums text-foreground sm:text-sm">{note}</p> : null}
     </div>
   );
 }
@@ -945,7 +1021,7 @@ function MobileFigures({
 }) {
   const cell = (label: string, value: React.ReactNode, className = "") => (
     <span className="flex flex-col items-center">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground">{label}</span>
       <span className={`text-sm tabular-nums ${className}`}>{value}</span>
     </span>
   );
@@ -977,15 +1053,21 @@ function PaxToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
   );
 }
 
-function PurchasesToggle({ count, open, onClick }: { count: number; open: boolean; onClick: () => void }) {
+// "2 purchases ▾" (a Spending row's tagged purchases) or "1 payment ▾" (the
+// transactions paying a booking). Inline beside a phone row's name; on the
+// desktop table it sits on its own line under the Spent figure (`className`).
+function PurchasesToggle({ count, open, onClick, noun = "purchase", className = "ml-1.5" }: { count: number; open: boolean; onClick: () => void; noun?: string; className?: string }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       aria-expanded={open}
-      className="ml-1.5 inline-flex items-center gap-0.5 rounded px-1 text-xs font-semibold text-sky-700 underline decoration-sky-700/40 underline-offset-2 transition hover:decoration-sky-700 dark:text-sky-300 dark:decoration-sky-300/40 dark:hover:decoration-sky-300"
+      className={`${className} inline-flex items-center gap-0.5 rounded px-1 text-xs font-semibold text-sky-700 underline decoration-sky-700/40 underline-offset-2 transition hover:decoration-sky-700 dark:text-sky-300 dark:decoration-sky-300/40 dark:hover:decoration-sky-300`}
     >
-      {count} purchase{count === 1 ? "" : "s"}
+      {count} {noun}{count === 1 ? "" : "s"}
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={open ? "rotate-180" : ""}>
         <path d="M6 9l6 6 6-6" />
       </svg>
@@ -993,9 +1075,24 @@ function PurchasesToggle({ count, open, onClick }: { count: number; open: boolea
   );
 }
 
-// A booking's day(s), beside its title: "STR → Lisbon  28-Mar".
+// One end of the trip in the popup header: "Thursday" over "8 Oct 2026".
+function TripDay({ iso }: { iso: string }) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return (
+    <span className="flex flex-col items-center leading-tight">
+      <span className="text-xs font-semibold">{d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })}</span>
+      <span>{d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}</span>
+    </span>
+  );
+}
+
+// A booking's day(s), beside its title: "STR → Lisbon  28-Mar". Left off a
+// flight whose legs already print their own days underneath — the range
+// beside the title only repeated them.
 function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string | undefined }) {
-  return <span className="ml-2 whitespace-nowrap text-xs font-medium tabular-nums text-foreground/85">{bookingWhen(booking, tripYear).date}</span>;
+  const { date, legs } = bookingWhen(booking, tripYear);
+  if (legs.some((l) => l.day)) return null;
+  return <span className="ml-2 whitespace-nowrap text-xs font-medium tabular-nums text-foreground">{date}</span>;
 }
 
 // Under the title: a flight's legs in columns — day, Depart, Arrive — so a
@@ -1028,21 +1125,63 @@ function BookingWhen({ booking, tripYear }: { booking: Booking; tripYear: string
   );
 }
 
+// The same list on the desktop table: one row per transaction in the table's
+// own columns — what it was set against the Spent column, its amount under
+// Spent. Each row is tinted light teal (fill only, no lines) with a receipt
+// mark, so it reads as a transaction behind the figure above — not another
+// plan row. Teal, not blue: a booking row turns sky-blue on hover, and blue
+// on blue blended; white blended too and grey was unreadable.
+// Text stays full colour. The amount is regular weight, not the row's bold
+// red, so it isn't mistaken for a second total. Read-only; a click on a row
+// stays on it (a booking's rows otherwise open the booking).
+function PurchaseRows({ list, currency, tripYear }: { list: TripTaggedPurchase[]; currency: string; tripYear: string | undefined }) {
+  return (
+    <>
+      {list.map((p, i) => (
+        <tr
+          key={p.id}
+          onClick={(e) => e.stopPropagation()}
+          className={`cursor-default bg-teal-100 tabular-nums text-foreground dark:bg-teal-900/40 [&>td]:py-1.5 ${i === list.length - 1 ? "border-b border-line/60" : ""}`}
+        >
+          <td colSpan={2} className="truncate px-3 pl-6 text-right">
+            <svg aria-hidden viewBox="0 0 24 24" className="mr-2 inline h-4 w-4 -translate-y-px align-middle text-teal-700 dark:text-teal-300" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" />
+              <path d="M9 8h6M9 12h6" />
+            </svg>
+            <span>{tripDate(p.date, tripYear)}</span>
+            <span className="ml-3 font-semibold">{p.payee ?? "—"}</span>
+            <span> · {p.item}</span>
+          </td>
+          <td className="whitespace-nowrap px-3 text-center">
+            {p.amountCents < 0 ? "+" : ""}
+            {formatMoneyWhole(Math.abs(p.amountCents), currency)}
+          </td>
+          <td />
+        </tr>
+      ))}
+    </>
+  );
+}
+
 // The tagged purchases behind one Spending row, one line each — a read-only
 // look at what makes up the Actual. (A Remove button was built and taken out
 // on Victor's call, 2026-09-23: taking a purchase off a trip changes nothing
 // outside the Travel Log, so it read as a delete that wasn't one.)
 function TaggedPurchaseList({ list, currency, tripYear }: { list: TripTaggedPurchase[]; currency: string; tripYear: string | undefined }) {
   return (
-    <ul className="mt-1.5 divide-y divide-line/60 rounded-md bg-background/60 text-xs ring-1 ring-line">
+    // Same light-teal transaction look as the desktop rows (PurchaseRows).
+    <ul className="mt-1.5 divide-y divide-line/60 rounded-md bg-teal-100 text-xs text-foreground dark:bg-teal-900/40">
       {list.map((p) => (
         <li key={p.id} className="flex items-center gap-3 px-2.5 py-1.5">
-          <span className="shrink-0 whitespace-nowrap tabular-nums text-muted">{tripDate(p.date, tripYear)}</span>
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{tripDate(p.date, tripYear)}</span>
           <span className="min-w-0 flex-1 truncate">
             <span className="font-semibold">{p.payee ?? "—"}</span>
-            <span className="text-muted"> · {p.item}</span>
+            <span> · {p.item}</span>
           </span>
-          <span className="shrink-0 font-semibold tabular-nums">{formatMoneyWhole(p.amountCents, currency)}</span>
+          <span className="shrink-0 tabular-nums">
+            {p.amountCents < 0 ? "+" : ""}
+            {formatMoneyWhole(Math.abs(p.amountCents), currency)}
+          </span>
         </li>
       ))}
     </ul>

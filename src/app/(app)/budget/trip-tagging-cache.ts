@@ -9,7 +9,7 @@ import type { TripTagging } from "./types";
 // "Pays for" and column pickers are ready the moment the modal opens instead
 // of appearing a second later. Each page visit and each save refreshes it.
 
-const EMPTY: TripTagging = { trips: [], bookingsByTrip: {} };
+const EMPTY: TripTagging = { trips: [], bookingsByTrip: {}, spendingRowsByTrip: {} };
 let latest: TripTagging | null = null;
 let inFlight: Promise<void> | null = null;
 const listeners = new Set<() => void>();

@@ -311,20 +311,19 @@ export function bookingTotalsFor(
   stays: TravelStay[],
   flights: TravelFlight[],
   cars: TravelCar[],
-): Record<"stay" | "flight" | "car", { planned: number; actual: number }> {
+): Record<"stay" | "flight" | "car", { planned: number; actual: number; count: number }> {
   const add = (
     rows: { tripId: string | null; cancelledAt: string | null; isEstimate: boolean; plannedCostCents: number | null; pocketCostCents: number }[],
-  ) =>
-    rows
-      .filter((r) => r.tripId === tripId && !r.cancelledAt)
-      .reduce(
-        (totals, r) => ({
-          // Not booked yet: the price on it IS the plan, and nothing is spent.
-          planned: totals.planned + (r.isEstimate ? r.pocketCostCents : r.plannedCostCents ?? 0),
-          actual: totals.actual + (r.isEstimate ? 0 : r.pocketCostCents),
-        }),
-        { planned: 0, actual: 0 },
-      );
+  ) => {
+    const live = rows.filter((r) => r.tripId === tripId && !r.cancelledAt);
+    return {
+      // Not booked yet: the price on it IS the plan, and nothing is spent.
+      planned: live.reduce((t, r) => t + (r.isEstimate ? r.pocketCostCents : r.plannedCostCents ?? 0), 0),
+      actual: live.reduce((t, r) => t + (r.isEstimate ? 0 : r.pocketCostCents), 0),
+      // How many live bookings of this kind — none means the row is hidden.
+      count: live.length,
+    };
+  };
   return { stay: add(stays), flight: add(flights), car: add(cars) };
 }
 

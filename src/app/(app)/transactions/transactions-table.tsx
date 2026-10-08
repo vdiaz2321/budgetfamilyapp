@@ -41,7 +41,8 @@ const kindPillStyle = (kind: CategoryKind): React.CSSProperties => ({
 // checkbox itself, but it also carries the "CLEAR" / "SELECT" header, which
 // needs 35px and 40px at 11px uppercase + tracking-wide. At 2rem (32px) that
 // label painted out of its own track and into the Amount column beside it.
-const GRID ="grid-cols-[5rem_3.25rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem]";
+// lg: wider date/amount columns for the larger desktop text (rows are 18px there).
+const GRID ="grid-cols-[5rem_3.25rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem] lg:grid-cols-[5.75rem_3.5rem_7.5rem_8rem_minmax(9rem,1.1fr)_minmax(8rem,1.25fr)_minmax(8rem,1.15fr)_2rem]";
 const CalendarIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -313,7 +314,7 @@ export function TransactionsTable({
           onClick={() => setSearchOpen((open) => !open)}
           aria-label="Search transactions"
           aria-expanded={searchOpen}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${searchOpen || query ? "bg-brand text-white shadow-sm" : "bg-surface text-brand ring-1 ring-brand/15 hover:bg-brand-soft"}`}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${searchOpen || query ? "bg-brand text-white shadow-sm" : "bg-surface text-brand ring-1 ring-inset ring-brand/15 hover:bg-brand-soft"}`}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
@@ -500,7 +501,7 @@ export function TransactionsTable({
       {/* Register — desktop table */}
       <div className="hidden overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 sm:block dark:ring-white/10">
         {selectMode && selectedIds.size > 0 ? (
-          <div className="flex items-center gap-3 bg-brand-soft px-4 py-2.5 text-xs">
+          <div className="flex items-center gap-3 bg-brand-soft px-4 py-2.5 text-xs lg:text-sm">
             <div className="flex items-center gap-3">
               <span className="font-semibold text-brand">{selectedIds.size} selected</span>
               <span className="text-muted">·</span>
@@ -528,10 +529,10 @@ export function TransactionsTable({
             // second line. Nothing here lines up with a data column anyway.
             className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-positive/5 px-4 py-2.5 dark:bg-positive/10"
           >
-            <span className="whitespace-nowrap text-xs font-medium text-muted">
+            <span className="whitespace-nowrap text-xs font-medium text-muted lg:text-sm">
               {filtered.length} {filtered.length === 1 ? "transaction" : "transactions"}
             </span>
-            <span className="whitespace-nowrap text-xs text-muted">
+            <span className="whitespace-nowrap text-xs text-muted lg:text-sm">
               <span className="font-bold text-foreground">Received</span>{" "}
               <span className="tabular-nums font-semibold text-positive">{formatMoney(incomeTotal, currency)}</span>
               <span className="mx-1.5">/</span>
@@ -586,25 +587,25 @@ export function TransactionsTable({
             wraps taller the table just gets a little shorter — it still
             scrolls, nothing clips. */}
         <div ref={tableScrollRef} className="max-h-[calc(100dvh-14rem)] min-h-[20rem] overflow-auto md:max-h-none md:h-full">
-          <div className="min-w-[56.5rem]">
+          <div className="min-w-[56.5rem] lg:min-w-[58rem]">
             {/* Header */}
             <div className={`sticky top-0 z-10 grid ${GRID} items-center gap-2 border-b border-line bg-surface px-4 py-2.5`}>
               <button
                 type="button"
                 onClick={cycleDateSort}
-                className="flex w-full items-center justify-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted hover:text-primary"
+                className="flex w-full items-center justify-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted hover:text-primary lg:text-xs"
               >
                 Date
-                <span className="text-[10px] leading-none">
+                <span className="text-[10px] leading-none lg:text-[11px]">
                   {dateSort === "desc" ? "▼" : "▲"}
                 </span>
               </button>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">{selectMode ? "Select" : "Clear"}</span>
-              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted">Amount</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Type</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Category</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Payee</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted">Account</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">{selectMode ? "Select" : "Clear"}</span>
+              <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Amount</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Type</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Category</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Payee</span>
+              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Account</span>
               <span />
             </div>
 
@@ -834,11 +835,11 @@ function TxLine({
   return (
     <li
       onClick={selectMode ? onSelect : canEdit ? onEdit : undefined}
-      className={`group grid ${GRID} ${selectMode || canEdit ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 ${
+      className={`group grid ${GRID} ${selectMode || canEdit ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 lg:py-2.5 ${
         tx.cleared && !selected ? "opacity-60" : ""
       } ${selected ? "bg-brand-soft/40" : ""}`}
     >
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default">
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="text-left text-sm tabular-nums disabled:cursor-default lg:text-[1.125rem]">
         {tx.date.slice(5, 7)}/{tx.date.slice(8, 10)}/{tx.date.slice(2, 4)}
       </button>
       <span onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} className="flex justify-center">
@@ -848,7 +849,7 @@ function TxLine({
             checked={selected}
             onChange={onSelect}
             aria-label="Select this transaction"
-            className="h-4 w-4 rounded accent-[var(--brand)]"
+            className="h-4 w-4 rounded accent-[var(--brand)] lg:h-[18px] lg:w-[18px]"
           />
         ) : (
           <input
@@ -857,7 +858,7 @@ function TxLine({
             disabled={clearPending}
             onChange={(e) => onToggle(e.target.checked)}
             aria-label="Cleared"
-            className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50"
+            className="h-4 w-4 rounded accent-[var(--positive)] disabled:opacity-50 lg:h-[18px] lg:w-[18px]"
           />
         )}
       </span>
@@ -884,7 +885,7 @@ function TxLine({
             }
           }}
           aria-label={`Edit amount for ${tx.payee ?? tx.subName}`}
-          className="w-20 rounded-md border border-brand bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums outline-none ring-2 ring-brand/30 disabled:opacity-60"
+          className="w-20 rounded-md border border-brand bg-surface px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums outline-none ring-2 ring-brand/30 disabled:opacity-60 lg:w-24 lg:text-[1.125rem]"
         />
       ) : (
         <button
@@ -895,8 +896,7 @@ function TxLine({
             setAmountEditing(true);
           }}
           onDoubleClick={(e) => e.stopPropagation()}
-          title={canEdit ? "Click to edit amount" : "Card payment — edit it from the card account"}
-          className={`rounded-md px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums transition hover:bg-brand-soft hover:text-brand-strong focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit ${
+          className={`rounded-md px-1.5 py-0.5 text-center text-sm font-semibold tabular-nums lg:text-[1.125rem] transition hover:bg-brand-soft hover:text-brand-strong focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-inherit ${
           isIncome || tx.amountCents < 0 ? "text-positive" : "text-foreground"
         }`}
       >
@@ -909,18 +909,18 @@ function TxLine({
       )}
       <span className="min-w-0 truncate text-sm text-muted">
         {tx.amountCents < 0 ? (
-          <span className="rounded bg-positive/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-positive">
+          <span className="rounded bg-positive/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-positive lg:text-xs">
             Refund
           </span>
         ) : tx.isTransfer || tx.isInvestmentTransfer || tx.isCardPayment ? (
           // Money moving between your own accounts has no budget category, so
           // it gets a neutral pill rather than borrowing a category's color.
-          <span className="inline-block max-w-full truncate rounded-full bg-black/5 px-2 py-0.5 align-middle text-xs font-medium text-muted dark:bg-white/10">
+          <span className="inline-block max-w-full truncate rounded-full bg-black/5 px-2 py-0.5 align-middle text-xs font-medium text-muted lg:text-sm dark:bg-white/10">
             {tx.isTransfer ? "Transfer" : tx.isInvestmentTransfer ? "Investment transfer" : "Card payment"}
           </span>
         ) : tx.kind ? (
           <span
-            className="inline-block max-w-full truncate rounded-full px-2 py-0.5 align-middle text-xs font-medium"
+            className="inline-block max-w-full truncate rounded-full px-2 py-0.5 align-middle text-xs font-medium lg:text-sm"
             style={kindPillStyle(tx.kind)}
           >
             {KIND_LABEL[tx.kind]}
@@ -931,12 +931,12 @@ function TxLine({
       </span>
       <button type="button" disabled={!canEdit} onClick={onEdit} className="flex min-w-0 items-center gap-1.5 text-left disabled:cursor-default">
         {tx.kind ? <span className={`h-2 w-2 shrink-0 rounded-full ${KIND_DOT[tx.kind]}`} /> : null}
-        <span className="truncate text-sm">{tx.subName}</span>
+        <span className="truncate text-sm lg:text-[1.125rem]">{tx.subName}</span>
       </button>
-      <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default">
+      <button type="button" disabled={!canEdit} onClick={onEdit} className="truncate text-left text-sm font-medium disabled:cursor-default lg:text-[1.125rem]">
         {tx.payee ?? "—"}
       </button>
-      <span className="truncate text-xs text-muted">{accountName}</span>
+      <span className="truncate text-xs text-muted lg:text-sm">{accountName}</span>
       <form
         action={(fd) => startDel(async () => { await deleteTransaction(fd); })}
         onClick={(e) => e.stopPropagation()}

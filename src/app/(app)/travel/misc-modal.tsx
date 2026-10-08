@@ -99,6 +99,10 @@ export function MiscModal({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [ownTrip, setTripChoice] = useTripChoice(defaultTripId);
+  // Opened from a trip's popup ("Edit Spending Category"): it's that trip's
+  // spending only — no trip picker and no date boxes (edit those with Edit
+  // trip), and the save leaves the trip's dates alone.
+  const lockedToTrip = !embed && Boolean(defaultTripId);
   const trip = embed ? embed.trip : ownTrip;
   const current = trips.find((t) => t.id === trip.tripId) ?? null;
   const [ownStartOn, setStartOn] = useState(current?.startOn ?? "");
@@ -208,11 +212,13 @@ export function MiscModal({
   // Their figures in the trip's other currency — from bookings kept in that
   // same currency only.
   const bookedFx = bookingForeignTotalsFor(trip.tripId, stays, flights, cars, foreignCurrency);
-  const bookedRows: { label: string; planned: number; actual: number; fx: { planned: number | null; actual: number | null } }[] = [
+  // Only the kinds this trip actually has — no "Rental · Booked" row on a
+  // trip without a rental (Victor, 2026-10-08).
+  const bookedRows = [
     { label: "Stays", ...booked.stay, fx: bookedFx.stay },
     { label: "Flights", ...booked.flight, fx: bookedFx.flight },
     { label: "Rental", ...booked.car, fx: bookedFx.car },
-  ];
+  ].filter((b) => b.count > 0);
   const bookedFxSum = (side: "planned" | "actual") => bookedRows.reduce((t, r) => t + (r.fx[side] ?? 0), 0);
   const bookedPlanned = bookedRows.reduce((t, r) => t + r.planned, 0);
   const bookedActual = bookedRows.reduce((t, r) => t + r.actual, 0);
@@ -222,16 +228,29 @@ export function MiscModal({
     actual: rows.reduce((total, r) => total + rowActual(r), 0) + bookedActual,
     actualEur: sum("actualEur") + bookedFxSum("actual"),
   };
-  // Planned less actual, in dollars, with a blank counted as zero — plain
-  // arithmetic, so the Total row's difference is exactly its planned minus its
-  // actual. Positive is under plan, negative over. Empty rows show a dash.
+  // Planned less spent — only once a row has BOTH, the trip popup's rule. A
+  // plan with nothing spent yet isn't "under plan" (it read +$840 green before
+  // the trip), and spending with no plan isn't "over"; both show a dash. The
+  // Total's difference adds up the rows that compare, so it matches the trip
+  // popup's Total Difference. Positive is under plan, negative over.
   const cents = (v: string) => (v.trim() ? Math.max(0, displayToCents(v)) : 0);
-  const difference = (r: Row) => (r.planned.trim() || hasActual(r) ? cents(r.planned) - rowActual(r) : null);
-  const totalDiff = totals.planned || totals.actual ? totals.planned - totals.actual : null;
-  // The same sum in the trip's other currency, from its own two columns.
+  const difference = (r: Row) => (r.planned.trim() && hasActual(r) ? cents(r.planned) - rowActual(r) : null);
+  const sumDiffs = (vals: (number | null)[]) => {
+    const real = vals.filter((v): v is number => v != null);
+    return real.length ? real.reduce((a, b) => a + b, 0) : null;
+  };
+  // A booking row (all of a trip's flights, say) compares its whole plan with
+  // what's been paid so far — $1,660 planned less $830 paid is $830 still to
+  // go, the unpaid Lisbon flight included (Victor, 2026-10-08). Same dash rule:
+  // nothing paid yet, or no plan, shows a dash.
+  const bookedDiff = (b: { planned: number; actual: number }) => (b.planned && b.actual ? b.planned - b.actual : null);
+  const bookedDiffFx = (b: { fx: { planned: number | null; actual: number | null } }) =>
+    b.fx.planned && b.fx.actual ? b.fx.planned - b.fx.actual : null;
+  const totalDiff = sumDiffs([...bookedRows.map(bookedDiff), ...rows.map(difference)]);
+  // The same in the trip's other currency, from its own two columns.
   const differenceFx = (r: Row) =>
-    r.plannedEur.trim() || r.actualEur.trim() ? cents(r.plannedEur) - cents(r.actualEur) : null;
-  const totalDiffFx = totals.plannedEur || totals.actualEur ? totals.plannedEur - totals.actualEur : null;
+    r.plannedEur.trim() && r.actualEur.trim() ? cents(r.plannedEur) - cents(r.actualEur) : null;
+  const totalDiffFx = sumDiffs([...bookedRows.map(bookedDiffFx), ...rows.map(differenceFx)]);
   const diffCell = (d: number | null, foreign = false) => (
     <span className={`tabular-nums ${d == null ? "text-muted" : d >= 0 ? "text-positive" : "text-negative"}`}>
       {d == null
@@ -287,7 +306,9 @@ export function MiscModal({
           if (embed) return;
           start(async () => {
             setError(null);
-            const result = await saveTripExpenses({ ...trip, startOn, endOn, foreignCurrency, rows });
+            const result = await saveTripExpenses(
+              lockedToTrip ? { ...trip, foreignCurrency, rows } : { ...trip, startOn, endOn, foreignCurrency, rows },
+            );
             if (result.error) setError(result.error);
             else {
               router.refresh();
@@ -301,7 +322,7 @@ export function MiscModal({
             left, the trip's own dates on the right. Inside the Add Travel Log
             popup both live in that popup's header instead, so neither is typed
             twice. */}
-        {embed ? null : (
+        {embed || lockedToTrip ? null : (
           <TripPicker
             trips={trips}
             value={trip}
@@ -320,9 +341,8 @@ export function MiscModal({
           />
         )}
 
-        <section className={embed ? "" : "border-t border-line pt-3"}>
+        <section className={embed || lockedToTrip ? "" : "border-t border-line pt-3"}>
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wide">Spending for the whole trip</h3>
             <CurrencySelect value={foreignCurrency} onChange={setForeignCurrency} />
             <div className="has-[.rounded-xl]:basis-full sm:ml-auto">
               <CurrencyConverter onUse={applyConverted} blue defaultFrom={foreignCurrency} />
@@ -367,10 +387,8 @@ export function MiscModal({
                 {showFx ? <BookedCell label={`Planned (${fx})`} value={b.fx.planned ? formatForeignWhole(b.fx.planned, foreignCurrency) : "—"} /> : null}
                 <BookedCell label={`Spent (${currencySymbol(currency)})`} value={b.actual ? formatMoneyWhole(b.actual, currency) : "—"} />
                 {showFx ? <BookedCell label={`Spent (${fx})`} value={b.fx.actual ? formatForeignWhole(b.fx.actual, foreignCurrency) : "—"} /> : null}
-                {/* Nothing to compare against when the booking never was an
-                    estimate — a dash, not a red "over by the full price". */}
-                {diffSlot(b.planned ? b.planned - b.actual : null)}
-                {showFx ? diffSlot(b.fx.planned ? b.fx.planned - (b.fx.actual ?? 0) : null, true) : null}
+                {diffSlot(bookedDiff(b))}
+                {showFx ? diffSlot(bookedDiffFx(b), true) : null}
               </li>
             ))}
             {rows.map((r) => {
@@ -438,7 +456,18 @@ export function MiscModal({
       </form>
   );
   return embed ? body : (
-    <ModalShell title="Trip spending" onClose={onClose} className="sm:max-w-4xl">
+    <ModalShell
+      // The full name doesn't fit a phone's header beside Close (it cut off
+      // and pushed Close to its own line), so phones get the short one.
+      title={
+        <>
+          <span className="sm:hidden">Spending Categories</span>
+          <span className="hidden sm:inline">Spending Planned / Spent Categories</span>
+        </>
+      }
+      onClose={onClose}
+      className="sm:max-w-4xl"
+    >
       {body}
     </ModalShell>
   );
