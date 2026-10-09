@@ -5,6 +5,7 @@ import { TransactionsTable } from "./transactions-table";
 import { throwIfAny } from "@/lib/supabase-result";
 import { attachSplitParts } from "@/lib/split-parts";
 import { loadTxFormData } from "@/lib/tx-form-options";
+import { loadTravelCells } from "./travel-cells";
 
 export const metadata = { title: "Transactions · Capitall" };
 
@@ -97,9 +98,12 @@ export default async function TransactionsPage({
 
   // The modal's pickers (budget items, accounts, buckets, payee auto-fill)
   // come from the shared loader Travel Log's "Add transaction" also uses.
-  const [txForm, txRows, { data: payees, error: payeesError }] = await Promise.all([
+  // The Trip / Pays for columns' bookings load as soon as the rows are in,
+  // alongside the pickers rather than after them.
+  const [txForm, txRows, travelCells, { data: payees, error: payeesError }] = await Promise.all([
     loadTxFormData(supabase, household.id, month.firstOfMonth),
     transactionRowsPromise,
+    transactionRowsPromise.then((rows) => loadTravelCells(supabase, household.id, rows)),
     supabase
       // Names only — used server-side (payeeById) to label each row. The
       // autocomplete list is fetched on demand by the client (listPayees).
@@ -185,6 +189,7 @@ export default async function TransactionsPage({
       transferBuckets={buckets.map((b) => ({ id: b.id, accountId: b.account_id, name: b.name }))}
       payeeLineItems={payeeLineItems}
       dateRange={{ from: from ?? null, to: to ?? null }}
+      travelCells={travelCells}
     />
   );
 }

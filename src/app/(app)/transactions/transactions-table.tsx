@@ -13,6 +13,7 @@ import { DOT as KIND_DOT } from "../budget/category-icons";
 import type { AccountOption, PayeeLineItem, SubOption, TxData } from "../budget/types";
 import { usePrefetchTripTagging } from "../budget/trip-tagging-cache";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import type { TravelCells } from "./travel-cells";
 
 const KIND_LABEL: Record<CategoryKind, string> = {
   income: "Income",
@@ -42,7 +43,34 @@ const kindPillStyle = (kind: CategoryKind): React.CSSProperties => ({
 // needs 35px and 40px at 11px uppercase + tracking-wide. At 2rem (32px) that
 // label painted out of its own track and into the Amount column beside it.
 // lg: wider date/amount columns for the larger desktop text (rows are 18px there).
-const GRID ="grid-cols-[5rem_3.25rem_6.5rem_8.5rem_minmax(8rem,1.3fr)_minmax(7rem,1.2fr)_minmax(7rem,1.1fr)_2rem] lg:grid-cols-[5.75rem_3.5rem_7.5rem_8rem_minmax(9rem,1.1fr)_minmax(8rem,1.25fr)_minmax(8rem,1.15fr)_2rem]";
+// The four before the delete button are the travel columns (Trip, Pays for,
+// Points / Free night, Hotel credit). The lg minimums add up to the table's
+// min-width below, sized so all twelve fit beside the open sidebar on a
+// ~1470px screen; narrower scrolls sideways instead of squeezing. Wider
+// screens hand the extra room to the fr columns.
+const GRID ="gap-x-2 grid-cols-[5rem_3.25rem_6.5rem_5.75rem_minmax(7rem,1.2fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(6rem,1fr)_minmax(7rem,1.3fr)_5.5rem_5rem_1.5rem] lg:gap-x-1.5 lg:grid-cols-[5.25rem_3.25rem_7rem_5.75rem_minmax(7rem,1.2fr)_minmax(6rem,1fr)_minmax(5.75rem,0.9fr)_minmax(5.75rem,1fr)_minmax(7rem,1.3fr)_5rem_4.75rem_1.5rem]";
+const TABLE_MIN_W = "min-w-[72rem] lg:min-w-[70.25rem]";
+
+// The columns the header can filter on, Excel-style.
+type ColKey = "type" | "category" | "payee" | "account" | "trip" | "paysFor" | "points" | "hotelCredit";
+const BLANK = "(Blanks)";
+const typeLabel = (t: TxData) =>
+  t.amountCents < 0
+    ? "Refund"
+    : t.isTransfer
+      ? "Transfer"
+      : t.isInvestmentTransfer
+        ? "Investment transfer"
+        : t.isCardPayment
+          ? "Card payment"
+          : t.kind
+            ? KIND_LABEL[t.kind]
+            : "";
+const pointsLabel = (c: TravelCells | undefined) => {
+  if (!c) return "";
+  const pts = c.points > 0 ? c.points.toLocaleString("en-US") : "";
+  return c.freeNight ? (pts ? `${pts} + Free night` : "Free night") : pts;
+};
 const CalendarIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -61,6 +89,8 @@ type Props = {
   transferBuckets?: { id: string; accountId: string; name: string }[];
   payeeLineItems?: PayeeLineItem[];
   dateRange: { from: string | null; to: string | null };
+  /** Trip / booking details per transaction id; untagged rows are absent. */
+  travelCells?: Record<string, TravelCells>;
 };
 
 export function TransactionsTable({
@@ -74,6 +104,7 @@ export function TransactionsTable({
   transferBuckets = [],
   payeeLineItems = [],
   dateRange,
+  travelCells = {},
 }: Props) {
   // Trips for the transaction modal's pickers, ready before it opens.
   usePrefetchTripTagging();
@@ -111,6 +142,16 @@ export function TransactionsTable({
   // Which property's rows to show ("" = all). Local state like the other
   // filters, so it clears itself when the page is left.
   const [propertyFilter, setPropertyFilter] = useState("");
+  // Header filters: per column, the values left ticked. A column with no
+  // entry isn't filtered. Local state like the chips above.
+  const [colFilters, setColFilters] = useState<Partial<Record<ColKey, Set<string>>>>({});
+  const setColFilter = (key: ColKey, next: Set<string> | undefined) =>
+    setColFilters((f) => {
+      const copy = { ...f };
+      if (next) copy[key] = next; else delete copy[key];
+      return copy;
+    });
+  const anyColFilter = Object.keys(colFilters).length > 0;
   const hasRange = Boolean(dateRange.from || dateRange.to);
 
   useEffect(() => {
@@ -196,6 +237,7 @@ export function TransactionsTable({
       [
         "Date", "Cleared", "Amount", "Type", "Category", "Payee", "Account",
         ...(withProperty ? ["Property"] : []),
+        "Trip", "Pays For", "Points/Free Night Used", "Hotel Credit",
         "Remarks",
       ].join(","),
       ...filtered.map((t) =>
@@ -208,6 +250,10 @@ export function TransactionsTable({
           qf(t.payee),
           qf(t.accountId ? accountName.get(t.accountId) : ""),
           ...(withProperty ? [qf(t.propertyId ? propertyName.get(t.propertyId) : "")] : []),
+          qf(cellText(t, "trip")),
+          qf(cellText(t, "paysFor")),
+          qf(cellText(t, "points")),
+          qf(travelCells[t.id]?.hotelCreditCents ? (travelCells[t.id].hotelCreditCents / 100).toFixed(2) : ""),
           qf(t.memo),
         ].join(",")
       ),
@@ -238,11 +284,30 @@ export function TransactionsTable({
   }
 
 
+  // What each filterable column shows for a row — the header lists these.
+  function cellText(t: TxData, key: ColKey): string {
+    const travel = travelCells[t.id];
+    switch (key) {
+      case "type": return typeLabel(t);
+      case "category": return t.subName;
+      case "payee": return t.payee ?? "";
+      case "account": return t.accountId ? accountName.get(t.accountId) ?? "" : "";
+      case "trip": return travel?.trip ?? "";
+      case "paysFor": return travel?.paysFor ?? "";
+      case "points": return pointsLabel(travel);
+      case "hotelCredit": return travel?.hotelCreditCents ? formatMoney(travel.hotelCreditCents, currency) : "";
+    }
+  }
+
   const searchTerms = query.toLowerCase().split(/[;,\s]+/).map((term) => term.trim()).filter(Boolean);
-  const filtered = transactions.filter((t) => {
+  // Search, the chips and the header filters. `skipCol` leaves one header
+  // filter out, so that column's own list still offers the values it has
+  // hidden — as Excel's does.
+  const passesFilters = (t: TxData, skipCol?: ColKey) => {
     const amountText = (t.amountCents / 100).toFixed(2);
     const accountLabel = t.accountId ? accountName.get(t.accountId) ?? "" : "";
-    const searchableText = [t.payee, t.subName, t.memo, accountLabel].filter(Boolean).join(" ").toLowerCase();
+    const travel = travelCells[t.id];
+    const searchableText = [t.payee, t.subName, t.memo, accountLabel, travel?.trip, travel?.paysFor].filter(Boolean).join(" ").toLowerCase();
     const matchesSearch = searchTerms.every((term) => {
       const amountQuery = term.replace(/[$,]/g, "");
       return searchableText.includes(term) || amountText.includes(amountQuery.replace(/^-/, "")) || `-${amountText}`.includes(amountQuery);
@@ -250,8 +315,33 @@ export function TransactionsTable({
     if (!matchesSearch) return false;
     if (uncleredOnly && t.cleared) return false;
     if (propertyFilter && t.propertyId !== propertyFilter) return false;
-    return true;
-  });
+    return (Object.entries(colFilters) as [ColKey, Set<string>][]).every(
+      ([key, allowed]) => key === skipCol || allowed.has(cellText(t, key) || BLANK),
+    );
+  };
+  const filtered = transactions.filter((t) => passesFilters(t));
+  // The values a header filter lists, with how many rows carry each.
+  function columnValues(key: ColKey) {
+    const counts = new Map<string, number>();
+    for (const t of transactions) {
+      if (!passesFilters(t, key)) continue;
+      const v = cellText(t, key) || BLANK;
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    return [...counts]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) =>
+        a.value === BLANK ? 1 : b.value === BLANK ? -1 : a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: "base" }),
+      );
+  }
+  const headerFilter = (key: ColKey, label: string) => (
+    <ColumnFilter
+      label={label}
+      values={columnValues(key)}
+      selected={colFilters[key]}
+      onChange={(next) => setColFilter(key, next)}
+    />
+  );
   {
     const dir = dateSort === "desc" ? -1 : 1;
     filtered.sort((a, b) => (a.date < b.date ? -dir : a.date > b.date ? dir : 0));
@@ -273,7 +363,7 @@ export function TransactionsTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden">
+    <div className="mx-auto w-full max-w-[120rem] space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden">
       {/* Frozen on every width. This used to slide away on phones when you
           scrolled down; Victor reads the month, the filters, the range and
           the totals line while scrolling the register, so the header stays
@@ -477,6 +567,15 @@ export function TransactionsTable({
             ))}
           </select>
         ) : null}
+        {anyColFilter ? (
+          <button
+            type="button"
+            onClick={() => setColFilters({})}
+            className="order-4 hidden rounded-xl px-3 py-1.5 font-medium text-muted transition hover:bg-brand-soft hover:text-foreground sm:block"
+          >
+            Clear column filters
+          </button>
+        ) : null}
         {query ? (
           <button
             type="button"
@@ -587,9 +686,9 @@ export function TransactionsTable({
             wraps taller the table just gets a little shorter — it still
             scrolls, nothing clips. */}
         <div ref={tableScrollRef} className="max-h-[calc(100dvh-14rem)] min-h-[20rem] overflow-auto md:max-h-none md:h-full">
-          <div className="min-w-[56.5rem] lg:min-w-[58rem]">
+          <div className={TABLE_MIN_W}>
             {/* Header */}
-            <div className={`sticky top-0 z-10 grid ${GRID} items-center gap-2 border-b border-line bg-surface px-4 py-2.5`}>
+            <div className={`sticky top-0 z-10 grid ${GRID} items-center border-b border-line bg-surface px-4 py-2.5`}>
               <button
                 type="button"
                 onClick={cycleDateSort}
@@ -602,11 +701,26 @@ export function TransactionsTable({
               </button>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">{selectMode ? "Select" : "Clear"}</span>
               <span className="flex w-full justify-center text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Amount</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Type</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Category</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Payee</span>
-              <span className="flex w-full justify-start text-[11px] font-medium uppercase tracking-wide text-muted lg:text-xs">Account</span>
+              {headerFilter("type", "Type")}
+              {headerFilter("category", "Category")}
+              {headerFilter("payee", "Payee")}
+              {headerFilter("account", "Account")}
+              {headerFilter("trip", "Trip")}
+              {headerFilter("paysFor", "Pays for")}
+              {headerFilter("points", "Points /\nFree night")}
+              {headerFilter("hotelCredit", "Hotel\ncredit")}
               <span />
+              {/* Column dividers, header row only. An overlay on the same
+                  grid puts each line mid-gap between two headers; a border
+                  on the headers themselves would hug their text. */}
+              <div aria-hidden className={`pointer-events-none absolute inset-0 grid ${GRID} px-4`}>
+                {Array.from({ length: 12 }, (_, i) => (
+                  <span
+                    key={i}
+                    className={i >= 1 && i <= 10 ? "relative before:absolute before:inset-y-0 before:-left-1 before:w-px before:bg-line lg:before:-left-[3.5px]" : ""}
+                  />
+                ))}
+              </div>
             </div>
 
             {filtered.length === 0 ? (
@@ -623,6 +737,7 @@ export function TransactionsTable({
                     tx={t}
                     currency={currency}
                     accountName={t.accountId ? accountName.get(t.accountId) ?? "—" : "—"}
+                    travel={travelCells[t.id]}
                     selectMode={selectMode}
                     selected={selectedIds.has(t.id)}
                     onSelect={() => toggleSelected(t.id)}
@@ -634,7 +749,6 @@ export function TransactionsTable({
                 ))}
               </ul>
             )}
-
           </div>
         </div>
       </section>
@@ -779,6 +893,7 @@ function TxLine({
   tx,
   currency,
   accountName,
+  travel,
   selectMode,
   selected,
   onSelect,
@@ -787,6 +902,7 @@ function TxLine({
   tx: TxData;
   currency: string;
   accountName: string;
+  travel: TravelCells | undefined;
   selectMode: boolean;
   selected: boolean;
   onSelect: () => void;
@@ -835,7 +951,7 @@ function TxLine({
   return (
     <li
       onClick={selectMode ? onSelect : canEdit ? onEdit : undefined}
-      className={`group grid ${GRID} ${selectMode || canEdit ? "cursor-pointer" : "cursor-default"} select-none items-center gap-2 px-4 py-2 hover:bg-brand-soft/25 lg:py-2.5 ${
+      className={`group grid ${GRID} ${selectMode || canEdit ? "cursor-pointer" : "cursor-default"} select-none items-center px-4 py-2 hover:bg-brand-soft/25 lg:py-2.5 ${
         tx.cleared && !selected ? "opacity-60" : ""
       } ${selected ? "bg-brand-soft/40" : ""}`}
     >
@@ -937,6 +1053,19 @@ function TxLine({
         {tx.payee ?? "—"}
       </button>
       <span className="truncate text-xs text-muted lg:text-sm">{accountName}</span>
+      {/* Travel columns — blank on a purchase not tagged to a trip, so the
+          travel rows stand out down the register. */}
+      <span className="truncate text-sm font-medium lg:text-base">{travel?.trip ?? ""}</span>
+      <span className={`truncate text-xs lg:text-sm ${travel?.paysFor === "Day-to-day spending" ? "text-muted" : "text-foreground"}`}>
+        {travel?.paysFor ?? ""}
+      </span>
+      <span className="flex min-w-0 flex-col items-center text-center text-sm font-semibold leading-tight tabular-nums">
+        {travel?.points ? <span style={{ color: "var(--viz-savings)" }}>{travel.points.toLocaleString("en-US")}</span> : null}
+        {travel?.freeNight ? <span className="text-xs" style={{ color: "var(--viz-bills)" }}>Free night</span> : null}
+      </span>
+      <span className="text-center text-sm font-semibold tabular-nums" style={{ color: "var(--viz-bills)" }}>
+        {travel?.hotelCreditCents ? formatMoney(travel.hotelCreditCents, currency) : ""}
+      </span>
       <form
         action={(fd) => startDel(async () => { await deleteTransaction(fd); })}
         onClick={(e) => e.stopPropagation()}
@@ -1130,5 +1259,171 @@ function TxCard({
         </button>
       </div>
     </li>
+  );
+}
+
+const funnel = (filled: boolean) => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" aria-hidden className="shrink-0">
+    <path d="M3 4h18l-7 8.5V19l-4 2v-8.5z" />
+  </svg>
+);
+
+// A column header that opens an Excel-style filter: a search box, Select all,
+// and every value in the column with its row count, each ticked while shown.
+// `selected` undefined = not filtered. The list is `position: fixed` so the
+// table's scroll box can't clip it at the right edge.
+function ColumnFilter({
+  label,
+  values,
+  selected,
+  onChange,
+}: {
+  label: string;
+  values: { value: string; count: number }[];
+  selected: Set<string> | undefined;
+  onChange: (next: Set<string> | undefined) => void;
+}) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [search, setSearch] = useState("");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const open = pos !== null;
+  const active = selected !== undefined;
+  // The label on one line, for the button's name and the search box.
+  const name = label.replace("\n", " ");
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setPos(null);
+    const onPointer = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!panelRef.current?.contains(target) && !buttonRef.current?.contains(target)) close();
+    };
+    // Scrolling the table would leave the list hanging where the header was;
+    // scrolling the list itself is fine.
+    const onScroll = (e: Event) => {
+      if (!panelRef.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("pointerdown", onPointer);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const toggleOpen = () => {
+    if (open) { setPos(null); return; }
+    const r = buttonRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = 272;
+    setSearch("");
+    setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), top: r.bottom + 6 });
+  };
+
+  const q = search.trim().toLowerCase();
+  const visible = q ? values.filter((v) => v.value.toLowerCase().includes(q)) : values;
+  const isChecked = (v: string) => !selected || selected.has(v);
+  const allVisibleChecked = visible.length > 0 && visible.every((v) => isChecked(v.value));
+  // A set holding every value listed means "not filtered".
+  const commit = (next: Set<string>) =>
+    onChange(values.every((v) => next.has(v.value)) ? undefined : next);
+  const toggle = (v: string) => {
+    const next = new Set(selected ?? values.map((x) => x.value));
+    if (next.has(v)) next.delete(v); else next.add(v);
+    commit(next);
+  };
+  const toggleAll = () => {
+    if (!q) {
+      onChange(allVisibleChecked ? new Set() : undefined);
+      return;
+    }
+    // Searching, as in Excel: ticking "Select all" keeps just the matches.
+    if (allVisibleChecked) {
+      const next = new Set(selected ?? values.map((x) => x.value));
+      for (const v of visible) next.delete(v.value);
+      commit(next);
+    } else {
+      commit(new Set(visible.map((v) => v.value)));
+    }
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={toggleOpen}
+        aria-expanded={open}
+        aria-label={`Filter ${name}`}
+        className={`flex w-full min-w-0 items-center gap-1 rounded-md py-0.5 text-[11px] font-medium uppercase leading-tight tracking-wide transition hover:text-foreground lg:text-xs justify-center text-center ${active ? "font-bold" : "text-muted"}`}
+        style={active ? { color: "var(--viz-savings)" } : undefined}
+      >
+        {/* A label too long for its narrow column ("Points /\nFree night")
+            reads as two lines, with the funnel beside the first. Left to
+            wrap on its own, the funnel was pushed to the column's edge. */}
+        {label.includes("\n") ? (
+          <span className="flex min-w-0 flex-col items-center">
+            <span className="flex items-center gap-1">{label.split("\n")[0]}{funnel(active)}</span>
+            <span className="whitespace-nowrap tracking-normal">{label.split("\n")[1]}</span>
+          </span>
+        ) : (
+          <>
+            <span className="min-w-0">{label}</span>
+            {funnel(active)}
+          </>
+        )}
+      </button>
+      {open ? (
+        <div
+          ref={panelRef}
+          className="fixed z-50 w-[17rem] rounded-xl bg-surface p-2 text-sm normal-case tracking-normal shadow-lg ring-1 ring-black/10 dark:ring-white/15"
+          style={{ left: pos.left, top: pos.top }}
+        >
+          <input
+            autoFocus
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={`Search ${name.toLowerCase()}`}
+            className="w-full rounded-lg bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-md border-b border-line px-1.5 pb-2 pt-1 font-semibold hover:bg-black/5 dark:hover:bg-white/10">
+            <input type="checkbox" checked={allVisibleChecked} onChange={toggleAll} className="h-4 w-4 accent-[var(--viz-savings)]" />
+            {q ? "Select all results" : "Select all"}
+          </label>
+          <ul className="mt-1 max-h-64 overflow-y-auto">
+            {visible.length === 0 ? (
+              <li className="px-1.5 py-2 text-muted">No matches</li>
+            ) : (
+              visible.map((v) => (
+                <li key={v.value}>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-black/5 dark:hover:bg-white/10">
+                    <input type="checkbox" checked={isChecked(v.value)} onChange={() => toggle(v.value)} className="h-4 w-4 shrink-0 accent-[var(--viz-savings)]" />
+                    <span className={`min-w-0 flex-1 truncate ${v.value === BLANK ? "italic text-muted" : ""}`}>{v.value}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted">{v.count}</span>
+                  </label>
+                </li>
+              ))
+            )}
+          </ul>
+          <div className="mt-2 flex justify-end border-t border-line pt-2">
+            <button
+              type="button"
+              disabled={!active}
+              onClick={() => onChange(undefined)}
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-muted ring-1 ring-line transition hover:border-sky-400 hover:bg-sky-100 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/10"
+            >
+              Clear filter
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

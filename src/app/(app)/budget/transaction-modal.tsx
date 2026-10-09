@@ -555,7 +555,8 @@ function TransactionModalForm({
     setErrorFields(problems.fields);
     setErrorSplitIds(problems.splitIds);
     if (problems.messages.length > 0) return;
-    setBusy(fd.get("cleared") === "on" ? "clear" : "save");
+    // Clear / Unclear on an edit sends "on" / "off"; Clear on an add, "on".
+    setBusy(fd.get("cleared") ? (isEdit ? "toggle" : "clear") : "save");
     start(async () => {
       // A split is saved in one server call (one transaction per item). If
       // it throws — a lookup failing on a weak connection is the realistic
@@ -576,6 +577,15 @@ function TransactionModalForm({
           fd.set("subcategoryId", splits[0].subId);
           fd.set("amount", (splits[0].amountCents / 100).toFixed(2));
           note(await updateTransaction(fd));
+          // The edit's Clear / Unclear: the update leaves Cleared alone, so
+          // set it after. (A split's parts are rewritten with it instead.)
+          const clearedPick = fd.get("cleared");
+          if (clearedPick) {
+            const cfd = new FormData();
+            cfd.set("id", editTx!.id);
+            cfd.set("cleared", clearedPick === "on" ? "true" : "false");
+            await toggleCleared(cfd);
+          }
         }
         if (warnings.length) return setSavedWarning(warnings.join(" "));
         onClose();
@@ -1162,19 +1172,15 @@ function TransactionModalForm({
                 >
                   {pending && busy === "delete" ? "Deleting..." : "Delete"}
                 </button>
+                {/* A save too, like Clear when adding: it used to flip only
+                    the cleared tick and close, dropping every other change
+                    on the form — a trip taken off read as "didn't save". */}
                 <button
-                  type="button"
+                  type="submit"
+                  form="tx-form"
+                  name="cleared"
+                  value={editTx.cleared ? "off" : "on"}
                   disabled={pending}
-                  onClick={() => {
-                    setBusy("toggle");
-                    start(async () => {
-                      const fd = new FormData();
-                      fd.set("id", editTx.id);
-                      fd.set("cleared", editTx.cleared ? "false" : "true");
-                      await toggleCleared(fd);
-                      onClose();
-                    });
-                  }}
                   className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold text-foreground ring-1 transition disabled:opacity-60 ${
                     editTx.cleared
                       ? "bg-positive/25 ring-positive/40 hover:bg-positive/35"
