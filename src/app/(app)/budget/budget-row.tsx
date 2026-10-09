@@ -128,7 +128,7 @@ type Props = {
 function DueAccountIndicator({ dueDay, accountName, compact = false }: { dueDay: number; accountName: string | null; compact?: boolean }) {
   const due = compact ? `D${dueDay}` : `Due ${dueDay}`;
   return (
-    <span className="flex min-w-0 max-w-full items-baseline gap-1 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-muted ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+    <span className="flex min-w-0 max-w-full items-baseline gap-1 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-foreground ring-1 ring-sky-200 dark:bg-sky-900/50 dark:ring-sky-800">
       <span className="shrink-0 whitespace-nowrap">
         {accountName ? (compact ? `${due} ·` : `${due} · Linked:`) : `${due} · linked`}
       </span>
@@ -250,7 +250,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
         </button>
 
         <div
-          className="relative -ml-3 -mr-3 col-span-full mt-1.5 h-1.5 overflow-hidden rounded-none bg-[#eee9df] dark:bg-white/10"
+          className="relative -ml-3 -mr-3 col-span-full mt-1.5 h-1.5 overflow-hidden rounded-none bg-sky-100 dark:bg-sky-900/50"
           aria-label={`Current month progress: ${displayPct}%`}
         >
           {greenBarPct > 0 ? (
@@ -388,7 +388,7 @@ export function BudgetRow({ row, kind, currency, monthKey, selected, isDragOver,
       {detailsExpanded ? (
         <div className="hidden @md:col-span-8 @md:block @md:pb-0.5 @md:pl-6 @md:pr-2">
           <div
-            className="relative h-1.5 w-full overflow-hidden rounded-sm bg-[#eee9df] dark:bg-white/10"
+            className="relative h-1.5 w-full overflow-hidden rounded-sm bg-sky-100 dark:bg-sky-900/50"
             aria-label={`Current month progress: ${displayPct}%`}
           >
             {greenBarPct > 0 ? (

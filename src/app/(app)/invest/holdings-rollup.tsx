@@ -303,7 +303,7 @@ export function AllHoldingsTable({
             <select
               value={accountFilter}
               onChange={(event) => setAccountFilter(event.target.value)}
-              className="rounded-md bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">All accounts</option>
               {accountLabels.map((label) => <option key={label} value={label}>{label}</option>)}

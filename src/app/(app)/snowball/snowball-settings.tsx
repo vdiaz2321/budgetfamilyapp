@@ -50,7 +50,7 @@ export function SnowballSettings({
             name="currency"
             defaultValue={currency}
             maxLength={3}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </Field>
         <div>
@@ -143,14 +143,14 @@ function AddPeriodForm() {
           name="startMonth"
           type="date"
           required
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </Field>
       <Field label="End month (blank = ongoing)">
         <input
           name="endMonth"
           type="date"
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </Field>
       <Field label="Extra / mo">
@@ -160,7 +160,7 @@ function AddPeriodForm() {
           step="0.01"
           placeholder="0.00"
           onFocus={(e) => e.currentTarget.select()}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </Field>
       <div className="flex gap-2">

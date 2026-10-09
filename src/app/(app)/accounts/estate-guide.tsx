@@ -303,7 +303,7 @@ export function EstateGuideModal({
           <button
             type="button"
             onClick={() => setPrinting(true)}
-            className="rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-white/10"
+            className="rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
           >
             Print
           </button>
@@ -358,7 +358,7 @@ export function EstateGuideModal({
                     type="button"
                     onClick={() => toggleSection(section.label)}
                     aria-expanded={isOpen}
-                    className="flex w-full items-center gap-2 bg-black/[0.03] px-3 py-2 text-left transition hover:bg-sky-100 dark:bg-white/[0.04] dark:hover:bg-white/10"
+                    className="flex w-full items-center gap-2 bg-sky-100 px-3 py-2 text-left transition hover:bg-sky-100 dark:bg-sky-900/50 dark:hover:bg-sky-900"
                   >
                     <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${isOpen ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 7.5 10 12.5 15 7.5" />
@@ -393,7 +393,7 @@ export function EstateGuideModal({
                                 type="button"
                                 disabled={pending}
                                 onClick={() => save(() => saveAccountEstateField(a.id, "hidden", "1"))}
-                                className="rounded-md px-2 py-0.5 text-xs font-semibold text-muted ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-white/10"
+                                className="rounded-md px-2 py-0.5 text-xs font-semibold text-muted ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-950/40"
                               >
                                 Hide
                               </button>
@@ -459,7 +459,7 @@ export function EstateGuideModal({
                   type="button"
                   onClick={() => toggleSection(HIDDEN)}
                   aria-expanded={openSections.has(HIDDEN)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-sky-100 dark:hover:bg-white/10"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-sky-100 dark:hover:bg-sky-950/40"
                 >
                   <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${openSections.has(HIDDEN) ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 7.5 10 12.5 15 7.5" />
@@ -476,7 +476,7 @@ export function EstateGuideModal({
                           type="button"
                           disabled={pending}
                           onClick={() => save(() => saveAccountEstateField(a.id, "hidden", ""))}
-                          className="rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-white/10"
+                          className="rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-950/40"
                         >
                           Show
                         </button>
@@ -514,7 +514,7 @@ export function EstateGuideModal({
                   type="button"
                   disabled={pending}
                   onClick={() => save(() => addEstateItem(p.kind, p.name))}
-                  className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-white/10"
+                  className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 disabled:opacity-60 dark:hover:bg-sky-950/40"
                 >
                   + {p.name}
                 </button>
@@ -611,7 +611,7 @@ export function EstateAddFields({ names }: { names: string[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="justify-self-start rounded-md px-2.5 py-1.5 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:col-span-2 dark:hover:bg-white/10"
+        className="justify-self-start rounded-md px-2.5 py-1.5 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:col-span-2 dark:hover:bg-sky-950/40"
       >
         + Add estate details
       </button>
@@ -707,7 +707,7 @@ function AddOther({ disabled, onAdd }: { disabled: boolean; onAdd: (name: string
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-white/10"
+        className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
       >
         + Other
       </button>
@@ -750,7 +750,7 @@ function EstatePrint({
   const g = estate.guide;
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const cell = "border border-black/30 px-1.5 py-1 align-top";
-  const head = `${cell} bg-black/5 text-left font-semibold`;
+  const head = `${cell} bg-sky-100 text-left font-semibold`;
   return (
     <div id="estate-print" className="text-[11px] leading-snug">
       <h1 className="text-lg font-bold">Estate guide</h1>

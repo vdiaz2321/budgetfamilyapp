@@ -419,7 +419,7 @@ export function TransactionsTable({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search categories, payees, accounts, or amounts"
-              className="w-full rounded-lg bg-background py-2 pl-3 pr-10 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background py-2 pl-3 pr-10 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
             {query ? (
               <button
@@ -457,7 +457,7 @@ export function TransactionsTable({
               setFromDate(e.target.value);
               applyRange(e.target.value, toDate);
             }}
-            className={`w-full cursor-pointer appearance-none rounded-lg bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`w-full cursor-pointer appearance-none rounded-lg bg-sky-50 dark:bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
           <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
         </div>
@@ -478,7 +478,7 @@ export function TransactionsTable({
               setToDate(e.target.value);
               applyRange(fromDate, e.target.value);
             }}
-            className={`w-full cursor-pointer appearance-none rounded-lg bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`w-full cursor-pointer appearance-none rounded-lg bg-sky-50 dark:bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
           <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
         </div>
@@ -489,7 +489,7 @@ export function TransactionsTable({
             setToDate("");
             applyRange("2000-01-01", "");
           }}
-          className="shrink-0 rounded-lg bg-black/10 px-2 py-1.5 font-medium text-foreground ring-1 ring-black/10 transition hover:bg-black/20 sm:px-3 dark:bg-white/15 dark:ring-white/15 dark:hover:bg-white/25"
+          className="shrink-0 rounded-lg bg-sky-200 px-2 py-1.5 font-medium text-foreground ring-1 ring-black/10 transition hover:bg-black/20 sm:px-3 dark:bg-sky-900/50 dark:ring-white/15 dark:hover:bg-white/25"
         >
           All time
         </button>
@@ -527,7 +527,7 @@ export function TransactionsTable({
           className={`order-2 flex shrink-0 items-center gap-1 rounded-xl px-2 py-1 text-[11px] font-semibold transition sm:order-4 sm:px-3 sm:py-1.5 sm:text-sm ${
             uncleredOnly
               ? "text-white shadow-sm ring-1"
-              : "bg-surface text-foreground ring-1 ring-line hover:bg-black/5 dark:hover:bg-white/10"
+              : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
           }`}
           style={
             uncleredOnly
@@ -553,7 +553,7 @@ export function TransactionsTable({
             className={`order-2 shrink-0 rounded-xl px-2 py-1 text-[11px] font-semibold transition sm:order-4 sm:px-3 sm:py-1.5 sm:text-sm ${
               propertyFilter
                 ? "text-white ring-1"
-                : "bg-surface text-foreground ring-1 ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
             }`}
             style={
               propertyFilter
@@ -867,7 +867,7 @@ function BatchActionButtons({
           type="button"
           onClick={onUnclear}
           disabled={pending}
-          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-black/5 text-muted hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20`}
+          className={`${buttonClass} flex items-center justify-center gap-1.5 bg-sky-100 text-muted hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900`}
         >
           {pending && pendingAction === "unclear" ? <Spinner /> : null}
           {pending && pendingAction === "unclear" ? "Unclearing…" : "Unclear"}
@@ -1031,7 +1031,7 @@ function TxLine({
         ) : tx.isTransfer || tx.isInvestmentTransfer || tx.isCardPayment ? (
           // Money moving between your own accounts has no budget category, so
           // it gets a neutral pill rather than borrowing a category's color.
-          <span className="inline-block max-w-full truncate rounded-full bg-black/5 px-2 py-0.5 align-middle text-xs font-medium text-muted lg:text-sm dark:bg-white/10">
+          <span className="inline-block max-w-full truncate rounded-full bg-sky-100 px-2 py-0.5 align-middle text-xs font-medium text-muted lg:text-sm dark:bg-sky-900/50">
             {tx.isTransfer ? "Transfer" : tx.isInvestmentTransfer ? "Investment transfer" : "Card payment"}
           </span>
         ) : tx.kind ? (
@@ -1391,9 +1391,9 @@ function ColumnFilter({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={`Search ${name.toLowerCase()}`}
-            className="w-full rounded-lg bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
-          <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-md border-b border-line px-1.5 pb-2 pt-1 font-semibold hover:bg-black/5 dark:hover:bg-white/10">
+          <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-md border-b border-line px-1.5 pb-2 pt-1 font-semibold hover:bg-sky-50 dark:hover:bg-sky-950/40">
             <input type="checkbox" checked={allVisibleChecked} onChange={toggleAll} className="h-4 w-4 accent-[var(--viz-savings)]" />
             {q ? "Select all results" : "Select all"}
           </label>
@@ -1403,7 +1403,7 @@ function ColumnFilter({
             ) : (
               visible.map((v) => (
                 <li key={v.value}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-black/5 dark:hover:bg-white/10">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-sky-50 dark:hover:bg-sky-950/40">
                     <input type="checkbox" checked={isChecked(v.value)} onChange={() => toggle(v.value)} className="h-4 w-4 shrink-0 accent-[var(--viz-savings)]" />
                     <span className={`min-w-0 flex-1 truncate ${v.value === BLANK ? "italic text-muted" : ""}`}>{v.value}</span>
                     <span className="shrink-0 text-xs tabular-nums text-muted">{v.count}</span>
@@ -1417,7 +1417,7 @@ function ColumnFilter({
               type="button"
               disabled={!active}
               onClick={() => onChange(undefined)}
-              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-muted ring-1 ring-line transition hover:border-sky-400 hover:bg-sky-100 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-white/10"
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold text-muted ring-1 ring-line transition hover:border-sky-400 hover:bg-sky-100 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-sky-950/40"
             >
               Clear filter
             </button>

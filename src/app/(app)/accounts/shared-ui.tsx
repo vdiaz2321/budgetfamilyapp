@@ -49,7 +49,7 @@ export function LabeledInput({
                 /* no-op */
               }
             }}
-            className="w-full cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full cursor-pointer rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
           {dateVal ? (
             <button
@@ -73,17 +73,17 @@ export function LabeledInput({
         {label}
       </span>
       {prefix ? (
-        <div className="flex items-center rounded-md ring-1 ring-line focus-within:ring-2 focus-within:ring-brand bg-background">
+        <div className="flex items-center rounded-md ring-1 ring-line focus-within:ring-2 focus-within:ring-brand bg-sky-50 dark:bg-background">
           <span className="pl-2 text-sm text-muted select-none">{prefix}</span>
           <input
             {...inputProps}
-            className="min-w-0 flex-1 rounded-md bg-background px-1.5 py-1.5 text-sm focus:outline-none"
+            className="min-w-0 flex-1 rounded-md bg-sky-50 dark:bg-background px-1.5 py-1.5 text-sm focus:outline-none"
           />
         </div>
       ) : (
         <input
           {...inputProps}
-          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       )}
       {hint ? <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-muted">{hint}</span> : null}
@@ -96,11 +96,11 @@ export function LabeledInput({
 export type StatTone = "emerald" | "sky" | "teal" | "rose" | "slate";
 const STAT_TONES: Record<StatTone, { bg: string; ring: string; label: string; value: string; activeBg: string }> = {
   slate: {
-    bg: "bg-slate-500/10",
-    ring: "ring-slate-500/30",
-    label: "text-slate-700 dark:text-neutral-400",
-    value: "text-slate-700 dark:text-neutral-300",
-    activeBg: "bg-slate-500/25",
+    bg: "bg-blue-500/10",
+    ring: "ring-sky-300/30",
+    label: "text-foreground dark:text-foreground",
+    value: "text-foreground dark:text-foreground",
+    activeBg: "bg-blue-500/25",
   },
   emerald: {
     bg: "bg-emerald-500/10",
@@ -242,7 +242,7 @@ export function PayCardModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            className="rounded-md p-1 text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"
             aria-label="Close"
           >
             ✕
@@ -319,7 +319,7 @@ export function PayCardModal({
               value={sourceId}
               onChange={(e) => { setSourceId(e.target.value); setBucketId(""); }}
               required
-              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               {nonCardAccounts.length === 0 ? (
                 <option value="">No accounts available</option>
@@ -352,7 +352,7 @@ export function PayCardModal({
                 value={bucketId}
                 onChange={(e) => setBucketId(e.target.value)}
                 required
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Choose a bucket…</option>
                 {sourceBuckets.map((b) => (
@@ -375,7 +375,7 @@ export function PayCardModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>
@@ -443,7 +443,7 @@ function MatchStatement({ cardId, onDone }: { cardId: string; onDone: () => void
           defaultValue="0.00"
           autoFocus
           onFocus={(e) => e.currentTarget.select()}
-          className="w-28 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-28 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
         <button
           type="submit"
@@ -455,7 +455,7 @@ function MatchStatement({ cardId, onDone }: { cardId: string; onDone: () => void
         <button
           type="button"
           onClick={() => { setOpen(false); setError(null); }}
-          className="rounded-md px-2 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+          className="rounded-md px-2 py-1.5 text-xs font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
         >
           Cancel
         </button>
@@ -538,7 +538,7 @@ export function FreeNightCapField({ pointsLimit, categoryMax }: { pointsLimit: n
               type="button"
               aria-pressed={kind === option}
               onClick={() => setKind(option)}
-              className={`rounded-md px-2 py-0.5 transition ${kind === option ? "bg-black/10 text-foreground dark:bg-white/15" : "text-muted hover:bg-black/5 dark:hover:bg-white/10"}`}
+              className={`rounded-md px-2 py-0.5 transition ${kind === option ? "bg-sky-200 text-foreground dark:bg-sky-900/50" : "text-muted hover:bg-sky-200 dark:hover:bg-sky-900"}`}
             >
               {option === "points" ? "Points" : "Category"}
             </button>
@@ -554,13 +554,13 @@ export function FreeNightCapField({ pointsLimit, categoryMax }: { pointsLimit: n
           min="0"
           defaultValue={pointsLimit ?? ""}
           placeholder="35000"
-          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       ) : (
         <select
           name="freeNightCategoryMax"
           defaultValue={String(categoryMax ?? 4)}
-          className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         >
           {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
             <option key={n} value={n}>{n === 1 ? "Category 1" : `Category 1\u2013${n}`}</option>

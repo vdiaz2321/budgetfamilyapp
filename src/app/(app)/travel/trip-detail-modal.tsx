@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { formatForeignWhole, formatMoneyWhole } from "@/lib/money";
@@ -133,6 +133,17 @@ export function TripDetailModal({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"view" | "edit" | "delete">("view");
+  // The stat cards stay pinned while the popup scrolls (desktop), so the
+  // tables' sticky headers sit just under them — their height feeds `top`.
+  const statsRef = useRef<HTMLDivElement>(null);
+  const [statsHeight, setStatsHeight] = useState(0);
+  useEffect(() => {
+    const el = statsRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setStatsHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const [matching, setMatching] = useState(false);
   // The Spending row whose tagged purchases are listed under it.
   const [openRow, setOpenRow] = useState<string | null>(null);
@@ -233,7 +244,7 @@ export function TripDetailModal({
   const spentSpending = t.miscTotal - t.planOnly.miscTotal;
   const plannedBookings = bookingTotals.planned;
   const plannedFlights = bookingTotals.flightPlanned;
-  const plannedTotal = plannedBookings + t.plannedMisc;
+  const plannedTotal = t.plannedTotal;
   // What the Difference compares, and its planned and spent totals — shown
   // under it as "Planned $1,660 / Spent $830". Same rule as the Spending
   // popup: each booking type (all flights, all stays, all rentals) compares
@@ -259,21 +270,25 @@ export function TripDetailModal({
   const comparedPlanned = compared.reduce((sum, x) => sum + x.planned, 0);
   const comparedSpent = compared.reduce((sum, x) => sum + x.actual, 0);
   const differenceCents = compared.length ? comparedPlanned - comparedSpent : null;
-  // "Flights: $0 / Spending: $320" under a card's figure. Flights and
-  // Spending always show, $0 included; Stays only on a trip that has a stay
+  // "Flights: $0 / Spending: $320" under a card's figure — "Spending" on the
+  // Planned card (money set aside), "Spent" on the Spent card. Flights and
+  // the third part always show, $0 included; Stays only on a trip that has a stay
   // or rental, so most trips aren't padded with "Stays: $0".
   const hasStays = t.bookings.some((b) => !b.cancelled && b.kind !== "flight");
-  const parts = (flights: number, stays: number, spending: number) => {
-    const list: [string, number][] = [["Flights", flights], ...(hasStays || stays ? [["Stays", stays] as [string, number]] : []), ["Spending", spending]];
-    // One part per line on a phone (no slashes); "a / b" from sm up, each
-    // part an unbreakable block so a long line wraps between parts, never
-    // mid-figure, and a wrapped line starts with a label.
-    return list.map(([label, cents], i) => (
-      <span key={label} className="block whitespace-nowrap sm:inline-block">
-        {label}: {formatMoneyWhole(cents, currency)}
-        {i < list.length - 1 ? <span className="hidden sm:inline">&nbsp;/&nbsp;</span> : null}
-      </span>
-    ));
+  const parts = (flights: number, stays: number, spending: number, spendingLabel: string) => {
+    const list: [string, number][] = [["Flights", flights], ...(hasStays || stays ? [["Stays", stays] as [string, number]] : []), [spendingLabel, spending]];
+    // One part per line on a phone (no slashes); "Flights / Stays" from sm
+    // up with Spending/Spent always on its own second line, so every card
+    // breaks in the same place instead of wherever its width runs out.
+    return list.map(([label, cents], i) => {
+      const last = i === list.length - 1;
+      return (
+        <span key={label} className={`block whitespace-nowrap ${last ? "" : "sm:inline-block"}`}>
+          {label}: {formatMoneyWhole(cents, currency)}
+          {i < list.length - 2 ? <span className="hidden sm:inline">&nbsp;/&nbsp;</span> : null}
+        </span>
+      );
+    });
   };
 
   // What this trip adds to the Budget (view v_trip_budget_plans): its spending
@@ -370,7 +385,10 @@ export function TripDetailModal({
       className="sm:max-w-[min(94vw,68rem)]"
       mobileAlign="top"
     >
-      <div className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
+      <div
+        className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
+        style={{ "--trip-stats-h": `${statsHeight}px` } as React.CSSProperties}
+      >
         {/* ---- Edit trip (name, dates, notes) opens right under the button
              that starts it; otherwise the notes read here. */}
         {mode === "edit" ? (
@@ -405,17 +423,23 @@ export function TripDetailModal({
             </form>
           </section>
         ) : t.trip.notes ? (
-          <p className="whitespace-pre-line text-xs">{t.trip.notes}</p>
+          // A labelled box, so the trip's notes don't read as a footnote to
+          // the header above them.
+          <p className="whitespace-pre-line rounded-lg px-3 py-2 text-xs ring-1 ring-line">
+            <span className="font-bold uppercase tracking-wide">Notes/Remarks:</span> {t.trip.notes}
+          </p>
         ) : null}
 
         {/* The trip at a glance, in the tables' own columns: Planned, Spent,
             Difference. Each card says one thing; its breakdown sits under. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {/* Pinned from sm up; on a phone the stacked cards would eat a third
+            of the screen, so they scroll away there. */}
+        <div ref={statsRef} className="grid grid-cols-2 gap-2 sm:sticky sm:top-0 sm:z-20 sm:-mx-5 sm:grid-cols-3 sm:bg-surface sm:px-5 sm:py-2">
           <Stat
             label="Total Planned"
             value={plannedTotal > 0 ? formatMoneyWhole(plannedTotal, currency) : "—"}
             className={plannedTotal > 0 ? PLAN_BLUE : undefined}
-            note={parts(plannedFlights, plannedBookings - plannedFlights, t.plannedMisc)}
+            note={parts(plannedFlights, plannedBookings - plannedFlights, t.plannedMisc, "Spending")}
           />
           <Stat
             label="Total Spent"
@@ -423,7 +447,7 @@ export function TripDetailModal({
             className={t.spent > 0 ? "text-negative" : undefined}
             note={
               <>
-                {parts(spentFlights, spentStays, spentSpending)}
+                {parts(spentFlights, spentStays, spentSpending, "Spent")}
                 {t.points > 0 ? <span className="block">+ {t.points.toLocaleString()} pts</span> : null}
               </>
             }
@@ -438,8 +462,8 @@ export function TripDetailModal({
                 "nothing to compare yet"
               ) : (
                 <>
-                  Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(comparedPlanned, currency)}</span> / Spent:{" "}
-                  <span className="text-negative">{formatMoneyWhole(comparedSpent, currency)}</span>
+                  <span className="block">Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(comparedPlanned, currency)}</span></span>
+                  <span className="block">Spent: <span className="text-negative">{formatMoneyWhole(comparedSpent, currency)}</span></span>
                 </>
               )
             }
@@ -466,7 +490,7 @@ export function TripDetailModal({
                 const diff = planned != null && actual != null ? planned - actual : null;
                 return (
                   <li key={`${b.kind}-${b.id}`} className={b.cancelled ? "opacity-60" : ""}>
-                    <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-black/[0.04] dark:active:bg-white/[0.06]">
+                    <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-sky-50 dark:active:bg-sky-950/40">
                       <span className="flex min-w-0 items-start gap-2">
                         <KindDay booking={b} className="mt-0.5" />
                         <span className="flex min-w-0 flex-col">
@@ -542,7 +566,7 @@ export function TripDetailModal({
                       {openSeats.has(b.id) ? (
                         <span className="mx-3 mb-2 block space-y-0.5 border-t border-line/60 pt-1.5">
                           {flightSeats(b).map((p) => (
-                            <span key={p.key} className="grid grid-cols-[minmax(0,1fr)_repeat(3,4.5rem)] items-baseline gap-1 rounded px-1 py-0.5 text-xs tabular-nums even:bg-black/[0.035] dark:even:bg-white/[0.05]">
+                            <span key={p.key} className="grid grid-cols-[minmax(0,1fr)_repeat(3,4.5rem)] items-baseline gap-1 rounded px-1 py-0.5 text-xs tabular-nums  ">
                               <span className="truncate text-foreground">{p.name}</span>
                               <span className="text-center">{p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}</span>
                               <span className="text-center">
@@ -609,10 +633,10 @@ export function TripDetailModal({
                 </colgroup>
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Flight/Stay/Rental</th>
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spent</th>
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Difference</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Flight/Stay/Rental</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spent</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Difference</th>
                   </tr>
                 </thead>
                 {/* One <tbody> per booking: its figures row, then its remarks
@@ -693,7 +717,7 @@ export function TripDetailModal({
                           columns — so the total reads as the seats added up. */}
                       {seats.map((p, i) => (
                         // Clicking a seat opens the flight's form, like the rest of the booking.
-                        <tr key={p.key} className={`tabular-nums even:bg-black/[0.035] dark:even:bg-white/[0.05] hover:bg-sky-100/70 dark:hover:bg-sky-900/30 [&>td]:py-0.5 ${i === 0 ? "[&>td]:pt-1.5" : ""} ${i === seats.length - 1 && !remarks ? "[&>td]:pb-2" : ""}`}>
+                        <tr key={p.key} className={`tabular-nums   hover:bg-sky-100/70 dark:hover:bg-sky-900/30 [&>td]:py-0.5 ${i === 0 ? "[&>td]:pt-1.5" : ""} ${i === seats.length - 1 && !remarks ? "[&>td]:pb-2" : ""}`}>
                           <td className="truncate px-3 pl-[5.25rem] text-left">{p.name}</td>
                           <td className="whitespace-nowrap px-3 text-center">
                             {p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}
@@ -866,10 +890,10 @@ export function TripDetailModal({
                 </colgroup>
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spending Category</th>
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spent</th>
-                    <th className="sticky top-0 z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Difference</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spending Category</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spent</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Difference</th>
                   </tr>
                 </thead>
                 <tbody>

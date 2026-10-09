@@ -197,6 +197,9 @@ export type TripSummary = {
   };
   /** Money that actually left the wallet: total less planOnly.total. */
   spent: number;
+  /** The trip's whole plan: every live booking's planned cost (bought or
+   *  not) plus every Spending row's plan — the popup's "Total Planned". */
+  plannedTotal: number;
   /** Cash value of flights, hotels and rentals, less what was paid for them. */
   saved: number;
   points: number;
@@ -291,6 +294,9 @@ export function summarizeTrips(
           total: planTotal,
         },
         spent: flightsPaid + hotelsPaid + rentalsPaid + miscTotal - planTotal,
+        plannedTotal:
+          live.reduce((sum, b) => sum + (bookingPlanActual(b).planned ?? 0), 0) +
+          tripExpenses.reduce((s, e) => s + (e.plannedCents ?? 0), 0),
         saved: Math.max(0, cashValue - (flightsPaid + hotelsPaid + rentalsPaid)),
         points: live.reduce((sum, b) => sum + b.points, 0),
         counts,

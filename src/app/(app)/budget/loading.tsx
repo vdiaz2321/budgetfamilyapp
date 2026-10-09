@@ -5,7 +5,7 @@
 // layout (hero card, toolbar, group rows, right rail) so the switch reads as
 // the same page loading rather than a different page appearing.
 function Bar({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-black/10 dark:bg-white/10 ${className}`} />;
+  return <div className={`animate-pulse rounded bg-sky-100 dark:bg-sky-900/50 ${className}`} />;
 }
 
 export default function BudgetLoading() {

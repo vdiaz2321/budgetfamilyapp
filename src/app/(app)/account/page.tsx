@@ -101,7 +101,7 @@ export default async function AccountPage({
               defaultValue={profile?.display_name ?? ""}
               maxLength={60}
               placeholder={user.email?.split("@")[0] ?? ""}
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
             />
           </Field>
           <SubmitBtn label="Save name" />
@@ -122,7 +122,7 @@ export default async function AccountPage({
               required
               autoComplete="email"
               placeholder={user.email ?? ""}
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
             />
           </Field>
           <Field id="emailCurrentPassword" label="Current password" hint="For your security, confirm your password before changing email.">
@@ -132,7 +132,7 @@ export default async function AccountPage({
               type="password"
               required
               autoComplete="current-password"
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
             />
           </Field>
           <SubmitBtn label="Send confirmation link" />
@@ -152,7 +152,7 @@ export default async function AccountPage({
               type="password"
               required
               autoComplete="current-password"
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
             />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -164,7 +164,7 @@ export default async function AccountPage({
                 required
                 minLength={6}
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
               />
             </Field>
             <Field id="confirmPassword" label="Confirm new password">
@@ -175,7 +175,7 @@ export default async function AccountPage({
                 required
                 minLength={6}
                 autoComplete="new-password"
-                className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
               />
             </Field>
           </div>

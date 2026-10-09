@@ -202,7 +202,7 @@ export function TransactionsPanel({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search transactions"
-            className="w-full rounded-lg bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
         {hasKindFilter || hasSubFilter ? (

@@ -259,7 +259,7 @@ export function BookingPaymentPanel({
                 className={`mt-0.5 w-full rounded-lg px-2 py-1.5 text-sm font-semibold ring-1 transition ${
                   nightOn
                     ? "bg-brand text-white ring-brand"
-                    : "bg-surface text-foreground ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    : "bg-surface text-foreground ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 }`}
               >
                 {nightOn ? "Used" : "Not used"}

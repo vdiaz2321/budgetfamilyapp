@@ -289,7 +289,7 @@ export function ProjectionSection({
           <div className="max-h-[70vh] overflow-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
-                <tr className="text-[11px] uppercase tracking-wide text-foreground/75">
+                <tr className="text-[11px] uppercase tracking-wide text-foreground">
                   <th className="px-2.5 py-2 text-center font-semibold">Year</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Age</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Income</th>
@@ -307,8 +307,8 @@ export function ProjectionSection({
                     <tr
                       key={y.year}
                       onClick={() => setEditing(y)}
-                      className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${
-                        y.year === thisYear ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""
+                      className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-200 dark:hover:bg-sky-900 ${
+                        y.year === thisYear ? "bg-sky-100 dark:bg-sky-900/50" : ""
                       }`}
                     >
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
@@ -323,11 +323,11 @@ export function ProjectionSection({
                         {/* Where the year's income comes from once the income
                             lines are paying, and the tax taken off them. */}
                         {militaryRetireYear != null && y.year >= militaryRetireYear ? (
-                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground">
                             after {y.taxPct ?? defaultTaxPct}% tax
                           </span>
                         ) : y.incomeCents !== y.workIncomeCents && y.year >= thisYear ? (
-                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground">
                             incl. {formatMoneyWhole(y.incomeCents - y.workIncomeCents, currency)} other
                           </span>
                         ) : null}
@@ -336,7 +336,7 @@ export function ProjectionSection({
                       <td className="px-2.5 py-2 text-center tabular-nums text-negative">
                         {formatMoneyWhole(y.spendingCents, currency)}
                         {y.spendingCents - y.baseSpendingCents + y.debtFreedCents > 0 ? (
-                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                          <span className="block whitespace-nowrap text-[11px] font-normal text-foreground">
                             incl. {formatMoneyWhole(y.spendingCents - y.baseSpendingCents + y.debtFreedCents, currency)} health
                           </span>
                         ) : null}
@@ -367,7 +367,7 @@ export function ProjectionSection({
                             const banked = y.actualGainsCents ?? y.runningGainsCents ?? 0;
                             const total = (y.actualSavedCents ?? 0) + banked;
                             return total ? (
-                              <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+                              <span className="block whitespace-nowrap text-[11px] font-normal text-foreground">
                                 Currently: {formatMoneyWhole(total, currency)}
                               </span>
                             ) : null;
@@ -410,7 +410,7 @@ export function ProjectionSection({
                           <>
                             {formatMoneyWhole(y.actualCents, currency)}
                             {y.inProgress ? (
-                              <span className="block text-[11px] font-normal text-foreground/75">
+                              <span className="block text-[11px] font-normal text-foreground">
                                 {y.monthsDone > 0 ? `${MONTH_NAMES[y.monthsDone - 1]} close` : "Currently"}
                               </span>
                             ) : null}
@@ -474,7 +474,7 @@ export function ProjectionSection({
                 type="button"
                 disabled={pending}
                 onClick={() => setConfirming("add")}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
               >
                 {pending ? "Working…" : `Add 5 years${last ? ` (through ${last.year + 5})` : ""}`}
               </button>
@@ -547,7 +547,7 @@ function ForecastBreakdown({
   const grown = f.monthEndCents - f.startCents;
   const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
   return (
-    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-black/5 px-3 py-2 text-xs tabular-nums text-foreground/80 dark:bg-white/10">
+    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs tabular-nums text-foreground dark:bg-sky-900/50">
       <p className="pb-0.5 font-semibold text-foreground">
         Forecast breakdown and the &quot;Proj Forecast NW&quot; card:
       </p>
@@ -605,7 +605,7 @@ function ConfirmModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="rounded-md px-3 py-1.5 text-sm font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Cancel
           </button>
@@ -767,8 +767,8 @@ function YearModal({
         {/* What the rest of the app recorded for this year — the figures to
             copy in at year end, shown where they are needed rather than on
             another page. */}
-        <div className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 dark:bg-white/10">
-          <p className="text-center text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+        <div className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 dark:bg-sky-900/50">
+          <p className="text-center text-[11px] font-semibold uppercase tracking-wide text-foreground">
             {row.inProgress ? "Total Current Amounts From Pages" : `${row.year}: actual from other pages`}
           </p>
           <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-5 text-center">
@@ -879,7 +879,7 @@ function YearModal({
             spending + gains + one-off = Proj EOY NW. Every box shows whole
             dollars; the two calculated ones are locked, so there is only ever
             one way to change a number (Victor, 2026-09-28). */}
-        <p className="sm:col-span-2 border-t border-line pt-3 text-center text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+        <p className="sm:col-span-2 border-t border-line pt-3 text-center text-[11px] font-semibold uppercase tracking-wide text-foreground">
           NW Estimated Projection: {row.year}
         </p>
         {/* Read left to right, top to bottom, as the sum itself:
@@ -995,7 +995,7 @@ function YearModal({
         {/* Explained in full sentences under the boxes, where there's width for
             them — squeezed under a narrow box they wrapped into fragments
             ("House, car, windfall. This year only") that said nothing. */}
-        <div className="sm:col-span-2 space-y-1 text-left text-xs text-foreground/80">
+        <div className="sm:col-span-2 space-y-1 text-left text-xs text-foreground">
           <p>
             <span className="font-semibold text-foreground">One-off:</span> {row.year} only
             — bonus, inheritance, closing costs.
@@ -1015,7 +1015,7 @@ function YearModal({
 
         {/* Exactly what would change, before it changes. */}
         {preview ? (
-          <div className="sm:col-span-2 rounded-md bg-black/5 px-3 py-2 dark:bg-white/10">
+          <div className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 dark:bg-sky-900/50">
             <p className="text-xs font-semibold">
               Replace your estimates for {row.year} with what was recorded?
             </p>
@@ -1044,7 +1044,7 @@ function YearModal({
                 {missCents >= 0 ? "better than planned" : "short of plan"}
               </span>
             </p>
-            <p className="mt-1 text-xs text-foreground/80">
+            <p className="mt-1 text-xs text-foreground">
               Nothing is saved until you press Save year. What actually happened
               in {row.year} stays in {row.year} — later years keep their own
               income and spending and only their balances re-chain.
@@ -1060,7 +1060,7 @@ function YearModal({
               <button
                 type="button"
                 onClick={() => setPreview(false)}
-                className="rounded-md px-3 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                className="rounded-md px-3 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 Cancel
               </button>
@@ -1073,7 +1073,7 @@ function YearModal({
             <button
               type="button"
               onClick={() => setPreview((v) => !v)}
-              className="mr-auto rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              className="mr-auto rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Use {row.year} actuals
             </button>
@@ -1132,7 +1132,7 @@ function ProjectionEmpty({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-          <p className="text-xs text-foreground/80">
+          <p className="text-xs text-foreground">
             Measured from {seed.fromMonth} to {seed.toMonth}. Creates {thisYear}–
             {thisYear + 24}.
           </p>
@@ -1165,9 +1165,9 @@ function ProjectionEmpty({
 function SeedTile({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
     <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground/75">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-foreground">{label}</p>
       <p className="text-sm font-bold tabular-nums">{value}</p>
-      <p className="text-[11px] text-foreground/75">{sub}</p>
+      <p className="text-[11px] text-foreground">{sub}</p>
     </div>
   );
 }
@@ -1192,7 +1192,7 @@ function Actual({
   const running = row.year === thisYear;
   if (!running && row.actualMonths < MIN_MONTHS_FOR_ACTUALS) return null;
   return (
-    <span className="block whitespace-nowrap text-[11px] font-normal text-foreground/75">
+    <span className="block whitespace-nowrap text-[11px] font-normal text-foreground">
       {/* A named figure reads as "$21,208 Saved" — the Actual column beside it
           already says the year is still running, so "so far" only wrapped the
           cell onto extra lines. */}
@@ -1226,13 +1226,13 @@ function Recorded({
   const t = valueTone(tone, cents);
   return (
     <span className={`block ${className}`}>
-      <span className="block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+      <span className="block text-[11px] font-semibold uppercase tracking-wide text-foreground">
         {label}
       </span>
       <span className={`block font-semibold tabular-nums ${t.className}`} style={t.style}>
         {cents ? formatMoneyWhole(cents, currency) : "—"}
       </span>
-      <span className="block text-[11px] text-foreground/75">{from}</span>
+      <span className="block text-[11px] text-foreground">{from}</span>
     </span>
   );
 }
@@ -1281,12 +1281,12 @@ function Field({
 }) {
   return (
     <label className={`block text-center ${className}`}>
-      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">
         {label}
       </span>
       {children}
       {hint ? (
-        <span className={`mt-0.5 block text-xs ${hintTone ?? "text-foreground/80"}`}>{hint}</span>
+        <span className={`mt-0.5 block text-xs ${hintTone ?? "text-foreground"}`}>{hint}</span>
       ) : null}
     </label>
   );
@@ -1318,13 +1318,13 @@ function Figure({
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
-      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75">{label}</p>
+      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</p>
       <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
         {value}
       </p>
-      {sub ? <p className={`text-[11px] leading-tight ${subClassName ?? "text-foreground/75"}`}>{sub}</p> : null}
+      {sub ? <p className={`text-[11px] leading-tight ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
       {bar != null ? (
-        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
           <div
             className="h-full rounded-full"
             style={{ width: `${Math.round(Math.min(1, Math.max(0, bar)) * 100)}%`, backgroundColor: "var(--viz-savings)" }}

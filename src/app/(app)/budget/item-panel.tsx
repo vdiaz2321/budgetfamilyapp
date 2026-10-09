@@ -120,7 +120,7 @@ function CoverOverspend({
               value={fromId}
               onChange={(e) => setFromId(e.target.value)}
               aria-label="Move from"
-              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Take from…</option>
               {donors.map((d) => (
@@ -134,7 +134,7 @@ function CoverOverspend({
               onChange={(e) => setAmount(e.target.value)}
               inputMode="decimal"
               aria-label="Amount to move"
-              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
             <div className="flex gap-2">
               <button
@@ -493,7 +493,7 @@ function InlineNameEdit({ subId, name }: { subId: string; name: string }) {
           if (e.key === "Escape") setEditing(false);
         }}
         disabled={pending}
-        className="w-full min-w-0 rounded bg-white px-2 py-1 text-lg font-bold text-gray-900 shadow-sm outline-none ring-2 ring-white/70"
+        className="w-full min-w-0 rounded bg-white px-2 py-1 text-lg font-bold text-foreground shadow-sm outline-none ring-2 ring-white/70"
       />
     </form>
   );
@@ -810,7 +810,7 @@ function PlannedForm({
         onFocus={(e) => e.currentTarget.select()}
         disabled={autoPlanned}
         placeholder="0.00"
-        className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand disabled:cursor-not-allowed disabled:opacity-50"
       />
     </label>
   );
@@ -859,7 +859,7 @@ function PlannedForm({
                   placeholder="—"
                   defaultValue={dueDay ?? ""}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </label>
             </div>
@@ -871,7 +871,7 @@ function PlannedForm({
                   key={paymentAccountId ?? "none"}
                   name="paymentAccountId"
                   defaultValue={paymentAccountId ?? ""}
-                  className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   <option value="">No linked account</option>
                   {paymentAccountOptions.map((account) => (
@@ -1021,7 +1021,7 @@ function ItemDetailsPopover({
                 value={toSubId}
                 onChange={(e) => setToSubId(e.target.value)}
                 required
-                className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Pick a budget item…</option>
                 {subOptions.filter((s) => s.id !== subId).map((s) => (
@@ -1040,7 +1040,7 @@ function ItemDetailsPopover({
                 autoComplete="off"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </label>
             {error ? <p className="text-xs font-medium text-negative">{error}</p> : null}
@@ -1106,7 +1106,7 @@ function DebtForm({
             step="0.01"
             defaultValue={centsToDisplay(row.plannedCents)}
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
         <Grid>
@@ -1123,7 +1123,7 @@ function DebtForm({
             key={d.debtKind ?? "none"}
             name="debtKind"
             defaultValue={d.debtKind ?? ""}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             <option value="">Not set</option>
             {DEBT_KINDS.map((k) => (
@@ -1146,7 +1146,7 @@ function DebtForm({
               key={d.accountId ?? "none"}
               name="accountId"
               defaultValue={d.accountId ?? ""}
-              className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Not linked</option>
               {accountOptions.map((a) => (
@@ -1169,7 +1169,7 @@ function DebtForm({
             defaultValue={d.notes ?? ""}
             rows={2}
             placeholder="Anything worth remembering about this debt…"
-            className="w-full resize-none rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full resize-none rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
       </form>
@@ -1276,7 +1276,7 @@ function SavingsForm({ row, bucketOptions, monthKey, formId, runSave }: { row: R
                     ? `account:${s.linkedAccountId}`
                     : s.linkedBucketId ?? ""
                 }
-                className="w-full rounded-lg bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Not linked</option>
                 {(() => {
@@ -1337,7 +1337,7 @@ function Labeled({
         // Select the existing value on focus so typing replaces a "0" or
         // "0.00" placeholder instead of requiring it to be deleted first.
         onFocus={onFocus ?? ((e) => e.currentTarget.select())}
-        className="w-full rounded-lg bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </label>
   );

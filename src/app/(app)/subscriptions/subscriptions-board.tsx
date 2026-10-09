@@ -348,7 +348,7 @@ export function SubscriptionForm({
           type="text"
           required
           defaultValue={row?.name ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:text-sm"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:text-sm"
         />
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted">
@@ -360,7 +360,7 @@ export function SubscriptionForm({
           min="0"
           inputMode="decimal"
           defaultValue={row ? centsToDisplay(row.amountCents) : ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-24 md:text-sm"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-24 md:text-sm"
         />
         </label>
         <label className="flex flex-col gap-1 text-xs text-muted">
@@ -369,7 +369,7 @@ export function SubscriptionForm({
           name="billingCycle"
           defaultValue={row?.billingCycle ?? "monthly"}
           onChange={(e) => setCycle(e.target.value)}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
         >
           {Object.entries(CYCLE_LABEL).map(([v, l]) => (
             <option key={v} value={v}>{l}</option>
@@ -383,7 +383,7 @@ export function SubscriptionForm({
             <select
               name="accountId"
               defaultValue={row?.accountId ?? ""}
-              className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
             >
               <option value="">None</option>
               {creditCards.map((c) => (
@@ -425,7 +425,7 @@ export function SubscriptionForm({
             type="text"
             defaultValue={row?.notes ?? ""}
             autoComplete="off"
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:text-sm"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:text-sm"
           />
         </label>
         <div className="flex items-center justify-end gap-2 pb-0.5 md:ml-auto md:mt-0">
@@ -442,7 +442,7 @@ export function SubscriptionForm({
         <button
           type="button"
           onClick={onDone}
-          className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+          className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
         >
           Cancel
         </button>
@@ -673,7 +673,7 @@ function IrregularBillForm({
           type="text"
           required
           defaultValue={row?.name ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-36 md:text-sm"
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-muted">
@@ -685,7 +685,7 @@ function IrregularBillForm({
           min="0"
           inputMode="decimal"
           defaultValue={row ? centsToDisplay(row.typicalAmountCents) : ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-28 md:text-sm"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-28 md:text-sm"
         />
       </label>
       <label className="flex flex-col gap-1 text-xs text-muted">
@@ -694,7 +694,7 @@ function IrregularBillForm({
           name="notes"
           type="text"
           defaultValue={row?.notes ?? ""}
-          className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-40 md:text-sm"
+          className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-40 md:text-sm"
         />
       </label>
       {creditCards.length > 0 && (
@@ -703,7 +703,7 @@ function IrregularBillForm({
           <select
             name="accountId"
             defaultValue={row?.accountId ?? ""}
-            className="w-full rounded-lg bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-base text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand md:w-auto md:text-sm"
           >
             <option value="">None</option>
             {creditCards.map((c) => (
@@ -716,7 +716,7 @@ function IrregularBillForm({
         <button
           type="button"
           onClick={onDone}
-          className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+          className="rounded-lg px-3 py-1.5 text-sm font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
         >
           Cancel
         </button>
@@ -808,7 +808,7 @@ function RenewalDatePicker({ defaultValue, cycle }: { defaultValue?: string; cyc
           placeholder="1–31"
           value={dayDisplay}
           onChange={(e) => setDayDisplay(e.target.value)}
-          className="w-16 rounded-lg bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-16 rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </div>
     );
@@ -826,7 +826,7 @@ function RenewalDatePicker({ defaultValue, cycle }: { defaultValue?: string; cyc
           const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
           setFullDisplay(digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits);
         }}
-        className="w-20 rounded-lg bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-20 rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </div>
   );

@@ -98,7 +98,8 @@ export function ModalShell({
           the content, and is dropped from `sm:` up where there is no notch. */}
       <div className={`relative z-50 flex max-h-[95vh] w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-lg ring-1 ring-black/5 dark:ring-white/10 sm:max-h-[85vh] sm:rounded-2xl sm:pt-0 ${alignsTop ? "rounded-2xl pt-[max(env(safe-area-inset-top),0.5rem)]" : "rounded-t-2xl"}${className ? ` ${className}` : ""}`}>
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-5 py-3.5">
-          <h2 className="min-w-0 truncate text-lg font-bold">{title}</h2>
+          {/* A popup whose tabs already say what it shows can pass no title. */}
+          {title ? <h2 className="min-w-0 truncate text-lg font-bold">{title}</h2> : null}
           {/* Beside the title on wide screens; its own line under it on a phone. */}
           {headerActions ? (
             <div className={`order-last flex basis-full flex-wrap items-center gap-2 ${headerActionsBelow ? "" : "sm:order-none sm:basis-auto"}`}>

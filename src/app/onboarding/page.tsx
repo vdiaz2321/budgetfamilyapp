@@ -95,12 +95,12 @@ export default async function OnboardingPage({
   if (existing.data) redirect("/budget");
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
+    <div className="min-h-screen bg-sky-100 dark:bg-sky-900/50">
       <div className="mx-auto max-w-xl px-6 py-16">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+        <h1 className="text-2xl font-semibold text-foreground dark:text-foreground">
           {isJoin ? "Join a household" : "Set up your household"}
         </h1>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="mt-2 text-sm text-foreground dark:text-foreground">
           {isJoin
             ? "Enter the invite code your spouse shared with you. You'll land in the same household — same budget, same accounts, same data."
             : "A one-time step. Everything in the app lives under a household so spouses (and later a mobile app) can share the same data. On the next screen you'll build your own Categories, Bills, Expenses, Savings, and Debt — just like the Start tab of a spreadsheet."}
@@ -111,7 +111,7 @@ export default async function OnboardingPage({
             href="/onboarding"
             className={
               isJoin
-                ? "text-zinc-500 underline dark:text-zinc-400"
+                ? "text-foreground underline dark:text-foreground"
                 : "font-medium text-emerald-700 dark:text-emerald-400"
             }
           >
@@ -122,7 +122,7 @@ export default async function OnboardingPage({
             className={
               isJoin
                 ? "font-medium text-emerald-700 dark:text-emerald-400"
-                : "text-zinc-500 underline dark:text-zinc-400"
+                : "text-foreground underline dark:text-foreground"
             }
           >
             Join with a code
@@ -134,7 +134,7 @@ export default async function OnboardingPage({
             <div>
               <label
                 htmlFor="code"
-                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-sm font-medium text-foreground dark:text-foreground"
               >
                 Invite code
               </label>
@@ -145,13 +145,13 @@ export default async function OnboardingPage({
                 required
                 autoCapitalize="characters"
                 placeholder="e.g. A1B2C3D4"
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm uppercase tracking-widest shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+                className="mt-1 w-full rounded-lg border border-sky-300 bg-white px-3 py-2 text-sm uppercase tracking-widest shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-sky-700 dark:bg-sky-900/50"
               />
             </div>
             <div>
               <label
                 htmlFor="displayNameJoin"
-                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-sm font-medium text-foreground dark:text-foreground"
               >
                 Your display name
               </label>
@@ -160,7 +160,7 @@ export default async function OnboardingPage({
                 name="displayNameJoin"
                 type="text"
                 placeholder="First name"
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+                className="mt-1 w-full rounded-lg border border-sky-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-sky-700 dark:bg-sky-900/50"
               />
             </div>
 
@@ -180,7 +180,7 @@ export default async function OnboardingPage({
             <div>
               <label
                 htmlFor="name"
-                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-sm font-medium text-foreground dark:text-foreground"
               >
                 Household name
               </label>
@@ -190,13 +190,13 @@ export default async function OnboardingPage({
                 type="text"
                 required
                 placeholder="e.g. Smith Family"
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+                className="mt-1 w-full rounded-lg border border-sky-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-sky-700 dark:bg-sky-900/50"
               />
             </div>
             <div>
               <label
                 htmlFor="displayName"
-                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-sm font-medium text-foreground dark:text-foreground"
               >
                 Your display name
               </label>
@@ -205,7 +205,7 @@ export default async function OnboardingPage({
                 name="displayName"
                 type="text"
                 placeholder="First name"
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+                className="mt-1 w-full rounded-lg border border-sky-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-sky-700 dark:bg-sky-900/50"
               />
             </div>
 

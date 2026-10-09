@@ -102,7 +102,7 @@ export function TripLogPanel({
   // (and unbought bookings) are expected to cost. They used to be one "Total
   // spent" figure, so plans for 2027 read as money already gone.
   const totalSpent = sum((t) => t.spent);
-  const totalPlanned = sum((t) => t.planOnly.total);
+  const totalPlanned = sum((t) => t.plannedTotal);
 
   // The sheet's year block: what each year's trips came to.
   const byYear = useMemo(() => {
@@ -113,7 +113,7 @@ export function TripLogPanel({
       const row = map.get(y) ?? { trips: 0, total: 0, planned: 0, saved: 0, points: 0 };
       row.trips += 1;
       row.total += t.spent;
-      row.planned += t.planOnly.total;
+      row.planned += t.plannedTotal;
       row.saved += t.saved;
       row.points += t.points;
       map.set(y, row);
@@ -186,8 +186,8 @@ export function TripLogPanel({
           active
             ? "bg-sky-100 ring-1 ring-sky-400 hover:bg-sky-200 dark:bg-sky-900/40 dark:ring-sky-500 dark:hover:bg-sky-900/60"
             : pill
-              ? "bg-black/[0.07] hover:bg-black/[0.12] dark:bg-white/[0.12] dark:hover:bg-white/[0.18]"
-              : "hover:bg-black/[0.06] dark:hover:bg-white/[0.10]"
+              ? "bg-sky-100 hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+              : "hover:bg-sky-200 dark:hover:bg-sky-900"
         }`}
       >
         {formatMoneyWhole(cents, currency)}
@@ -222,7 +222,7 @@ export function TripLogPanel({
             <tr
               key={t.trip.id}
               onClick={() => onOpenTrip(t.trip.id)}
-              className="group cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+              className="group cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               {/* The sticky name cell needs an opaque fill so columns scroll
                   under it, which hides the row's see-through hover — it takes
@@ -250,7 +250,7 @@ export function TripLogPanel({
                 {pickCell(t, "Spent", t.spent, 0)}
               </td>
               <td className="whitespace-nowrap px-1 py-1.5 text-center font-semibold tabular-nums text-muted">
-                {pickCell(t, "Planned", t.planOnly.total, t.planOnly.total, { pill: false })}
+                {pickCell(t, "Planned", t.plannedTotal, t.plannedTotal, { pill: false })}
               </td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {t.points > 0 ? t.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
@@ -298,7 +298,7 @@ export function TripLogPanel({
           button stays so the card is still reachable by keyboard. */}
       <div
         onClick={() => setExpanded(true)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         <button
           type="button"
@@ -306,7 +306,7 @@ export function TripLogPanel({
           className={`flex min-w-0 items-center gap-2 text-left ${HEAD_TITLE_COL}`}
         >
           <ExpandIcon />
-          <span className="text-sm font-bold sm:text-base sm:truncate">All Trips</span>
+          <span className="text-sm font-bold sm:whitespace-nowrap sm:text-base">All Trips Categories Breakdown</span>
         </button>
         {/* Collapsed, the card carries the same figures as the open log's
             header — trips, spent, planned — and the year they cover. Only the
@@ -330,7 +330,7 @@ export function TripLogPanel({
 
       {expanded ? (
         <ModalShell
-          title="All Trips"
+          title="All Trips Categories Breakdown"
           onClose={() => { setExpanded(false); setPicked(new Map()); }}
           className="sm:max-w-[96vw]"
           headerExtra={

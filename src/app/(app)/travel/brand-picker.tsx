@@ -98,7 +98,7 @@ export function BrandPicker({
   return (
     <div ref={box} className="relative">
       <input type="hidden" name="brand" value={value} />
-      <div className="flex items-center gap-1 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
+      <div className="flex items-center gap-1 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
         <input
           value={open ? query : value}
           placeholder={value || "Type to search"}
@@ -142,7 +142,7 @@ export function BrandPicker({
                 <button
                   type="button"
                   onClick={() => pick("")}
-                  className="w-full px-2 py-1.5 text-left text-sm text-muted transition hover:bg-black/5 dark:hover:bg-white/10"
+                  className="w-full px-2 py-1.5 text-left text-sm text-muted transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
                   Clear
                 </button>
@@ -153,7 +153,7 @@ export function BrandPicker({
                 <button
                   type="button"
                   onClick={() => pick(b.name)}
-                  className={`flex-1 px-2 py-1.5 text-left text-sm transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                  className={`flex-1 px-2 py-1.5 text-left text-sm transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${
                     b.name === value ? "font-semibold" : ""
                   }`}
                 >
@@ -183,7 +183,7 @@ export function BrandPicker({
               type="button"
               disabled={pending}
               onClick={() => add(typed)}
-              className="w-full border-t border-line px-2 py-2 text-left text-sm font-semibold transition hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
+              className="w-full border-t border-line px-2 py-2 text-left text-sm font-semibold transition hover:bg-sky-50 disabled:opacity-50 dark:hover:bg-sky-950/40"
             >
               {pending ? "Adding…" : `Add “${typed}”`}
             </button>

@@ -115,12 +115,12 @@ export function TripPicker({
           aria-label="Trip"
           value={creating ? NEW : value.tripId}
           onChange={(e) => pick(e.target.value)}
-          className="min-w-0 max-w-full rounded-md bg-background px-2 py-1 text-sm font-medium ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+          className="min-w-0 max-w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm font-medium ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
         >
           {options}
         </select>
         {creating
-          ? nameInput("min-w-0 w-48 rounded-md bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500")
+          ? nameInput("min-w-0 w-48 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500")
           : null}
       </div>
     );

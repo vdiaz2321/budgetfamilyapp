@@ -360,7 +360,7 @@ function SubtypeSelect({
         <button
           type="button"
           onClick={() => setCustom(false)}
-          className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-muted hover:bg-black/5 dark:hover:bg-white/10"
+          className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
         >
           Use list
         </button>
@@ -721,14 +721,14 @@ export function AccountsBoard({
           <button
             type="button"
             onClick={() => setMonthEndOpen(true)}
-            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Month-end update
           </button>
           <button
             type="button"
             onClick={() => setEstateOpen(true)}
-            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Estate guide
             {/* Accounts still to fill in — a new account shows up here, so
@@ -742,7 +742,7 @@ export function AccountsBoard({
             onClick={() => setTransferOpen(true)}
             // Secondary: outlined, so Add account is the one filled button.
             // Two filled buttons side by side read as equal weight.
-            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Transfer Funds
           </button>
@@ -777,7 +777,7 @@ export function AccountsBoard({
         <button
           type="button"
           onClick={() => setOverviewCollapsed((c) => ({ ...c, overview: !c.overview }))}
-          className="absolute right-1.5 top-1.5 z-10 grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+          className="absolute right-1.5 top-1.5 z-10 grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-sky-200 dark:hover:bg-sky-900"
           aria-expanded={overviewOpen}
           aria-label={overviewOpen ? "Collapse account groups" : "Expand account groups"}
         >
@@ -882,7 +882,7 @@ export function AccountsBoard({
         const renderCard = ({ section, extras }: (typeof items)[number]) => (
           <div
             key={section.key}
-            className="@container relative overflow-hidden rounded-lg bg-black/[0.03] ring-1 ring-black/[0.06] dark:bg-white/[0.04] dark:ring-white/[0.08]"
+            className="@container relative overflow-hidden rounded-lg bg-sky-100 ring-1 ring-black/[0.06] dark:bg-sky-900/50 dark:ring-white/[0.08]"
           >
           {/* Edge tint in the group's dot color, so each tile reads as its own. */}
           <span aria-hidden className={`pointer-events-none absolute inset-y-0 left-0 w-1 ${section.dot}`} />
@@ -1102,7 +1102,7 @@ function CreditCardListSection({
           title and chevron buttons' clicks bubble up to this one. */}
       <div
         onClick={onToggle}
-        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition hover:bg-black/[0.02] sm:px-6 dark:hover:bg-white/[0.04]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 transition hover:bg-sky-50 sm:px-6 dark:hover:bg-sky-950/40"
       >
         <button type="button" className="min-w-0 shrink-0 text-left" aria-expanded={open}>
           <span className="inline-flex items-center gap-2">
@@ -1115,7 +1115,7 @@ function CreditCardListSection({
         <Link
           href="/travel"
           onClick={(e) => e.stopPropagation()}
-          className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
+          className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
         >
           Points & rewards →
         </Link>
@@ -1129,7 +1129,7 @@ function CreditCardListSection({
         </div>
         <button
           type="button"
-          className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+          className="ml-auto grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted transition hover:bg-sky-200 dark:hover:bg-sky-900"
           aria-label={open ? `Collapse ${section.label}` : `Expand ${section.label}`}
         >
           <svg
@@ -1170,7 +1170,7 @@ function CreditCardListSection({
                     // A soft fill instead of a ring: the tile shape still
                     // handles the ragged last row, without a border inside
                     // the card's own border.
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-2 text-left transition hover:bg-black/[0.08] dark:bg-white/[0.04] dark:hover:bg-white/[0.1]"
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-sky-100 px-2.5 py-2 text-left transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
                   >
                     {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
@@ -1196,7 +1196,7 @@ function CreditCardListSection({
                     </svg>
                   </button>
                 ) : (
-                  <div className="flex w-full items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
+                  <div className="flex w-full items-center gap-2 rounded-lg bg-sky-100 px-2.5 py-2 dark:bg-sky-900/50">
                     {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{a.name}</span>
                     {(a.owedCents ?? 0) > 0 ? (
@@ -1269,7 +1269,7 @@ function TransferModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5"
+            className="rounded-md p-1 text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"
             aria-label="Close"
           >
             ✕
@@ -1305,7 +1305,7 @@ function TransferModal({
               value={fromId}
               onChange={(e) => { setFromId(e.target.value); setFromBucketId(""); }}
               required
-              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               {movable.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
@@ -1322,7 +1322,7 @@ function TransferModal({
                 value={fromBucketId}
                 onChange={(e) => setFromBucketId(e.target.value)}
                 required
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Choose a bucket…</option>
                 {fromBuckets.map((b) => (
@@ -1341,7 +1341,7 @@ function TransferModal({
               value={toId}
               onChange={(e) => { setToId(e.target.value); setToBucketId(""); }}
               required
-              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               {movable.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
@@ -1358,7 +1358,7 @@ function TransferModal({
                 value={toBucketId}
                 onChange={(e) => setToBucketId(e.target.value)}
                 required
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Choose a bucket…</option>
                 {toBuckets.map((b) => (
@@ -1374,7 +1374,7 @@ function TransferModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>
@@ -1680,7 +1680,7 @@ function AccountSection({
           if (open) setEditingId(null);
           onToggle();
         }}
-        className="flex cursor-pointer items-center gap-1.5 py-3 pl-3.5 pr-3 transition @[17rem]:gap-2 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer items-center gap-1.5 py-3 pl-3.5 pr-3 transition @[17rem]:gap-2 hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         {/* On a wide tile the name never truncates — the Debt/Loan Page link
             gives way first. On a narrow tile (link hidden) the name is what
@@ -1766,7 +1766,7 @@ function AccountSection({
             className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium shadow-sm ring-1 transition ${
               sumMode
                 ? "bg-brand/15 font-semibold text-brand ring-brand/50 hover:bg-brand/25"
-                : "bg-surface text-foreground ring-black/10 hover:bg-black/5 dark:ring-white/15 dark:hover:bg-white/10"
+                : "bg-surface text-foreground ring-black/10 hover:bg-sky-50 dark:ring-white/15 dark:hover:bg-sky-950/40"
             }`}
           >
             {sumMode ? "Done Selecting" : "Select Values to Calculate"}
@@ -1775,7 +1775,7 @@ function AccountSection({
             <button
               type="button"
               onClick={onTransfer}
-              className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Transfer Funds
             </button>
@@ -1966,7 +1966,7 @@ function AccountRow({
   const balanceFor = (a: AccountData, columnIndex: number): number | null =>
     a.balancesByMonth?.[historyMonths[columnIndex]] ?? null;
 
-  const rowBg = editing ? "bg-black/5 dark:bg-white/10" : "hover:bg-black/[0.03] dark:hover:bg-white/[0.05]";
+  const rowBg = editing ? "bg-sky-100 dark:bg-sky-900/50" : "hover:bg-sky-50 dark:hover:bg-sky-950/40";
 
   return (
     <li
@@ -1981,7 +1981,7 @@ function AccountRow({
             onClick={onToggleBuckets}
             aria-label={bucketsOpen ? "Hide buckets" : "Show buckets"}
             aria-expanded={bucketsOpen}
-            className="self-stretch flex w-full items-center justify-center rounded text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+            className="self-stretch flex w-full items-center justify-center rounded text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"
           >
             <svg
               width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -2004,14 +2004,14 @@ function AccountRow({
             {account.name}
           </span>
           {account.ownership === "joint" ? (
-            <EditPill onClick={onToggleEdit} className="hidden bg-black/5 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-white/10">
+            <EditPill onClick={onToggleEdit} className="hidden bg-sky-100 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-sky-900/50">
               Joint
             </EditPill>
           ) : null}
           {section.key === "banking" && account.bankGroup ? (
             <EditPill
               onClick={onToggleEdit}
-              className={`${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-black/5 text-muted hover:ring-muted dark:bg-white/10"}`}
+              className={`${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-sky-100 text-muted hover:ring-muted dark:bg-sky-900/50"}`}
             >
               {account.bankGroup === "savings" ? "Savings" : "Checking"}
             </EditPill>
@@ -2026,7 +2026,7 @@ function AccountRow({
             // split into buckets. It used to be @[560px]-only text, which the
             // half-width section cards never reached, so no account ever
             // showed it.
-            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-white/10">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-sky-900/50">
               {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
             </span>
           ) : null}
@@ -2851,7 +2851,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 type="button"
                 onClick={() => setCardTab(id)}
                 aria-pressed={cardTab === id}
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${cardTab === id ? "bg-brand text-white" : "text-muted hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/5"}`}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${cardTab === id ? "bg-brand text-white" : "text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"}`}
               >
                 {label}
               </button>
@@ -2872,7 +2872,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 <LabeledInput label="Card URL" name="cardUrl" type="url" placeholder="https://issuer.com/card" />
                 <label className="block">
                   <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
-                  <select name="benefitCadence" defaultValue="annual" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                  <select name="benefitCadence" defaultValue="annual" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                     <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option><option value="anniversary">Card anniversary</option>
                   </select>
                 </label>
@@ -2888,19 +2888,19 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
               <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
               <label className="block">
                 <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Ownership</span>
-                <select name="ownership" defaultValue="sole" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="sole">Sole</option><option value="joint">Joint</option></select>
+                <select name="ownership" defaultValue="sole" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="sole">Sole</option><option value="joint">Joint</option></select>
               </label>
               <div className="space-y-2"><LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" /><label className="flex items-center gap-1.5 px-0.5 text-xs text-muted"><input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Fee waived (e.g. military benefit)</label></div>
               <LabeledInput label="Date opened" name="dateOpened" type="date" />
               <LabeledInput label="Date closed" name="dateClosed" type="date" />
-              <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
+              <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
               <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
               <LabeledInput label="Value per pt (¢)" name="pointsValueCents" type="number" step="any" min="0" hint={
                 <a
                   href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-neutral-950 dark:text-sky-400 dark:hover:bg-sky-900/40"
+                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-sky-900/50 dark:text-sky-400 dark:hover:bg-sky-900/40"
                 >
                   TPG point values <span aria-hidden>↗</span>
                 </a>
@@ -2911,7 +2911,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
               <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" placeholder="3000" />
               <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" />
               <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted"><input type="checkbox" name="bonusEarned" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Bonus earned</label>
-              <div className="sm:col-span-2"><label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label><input name="remarks" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></div>
+              <div className="sm:col-span-2"><label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label><input name="remarks" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></div>
             </div>
           </div>
 
@@ -2974,7 +2974,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
             Account type
             <select
               name="kind"
-              className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               {kindKeys.map((k) => (
                 <option key={k} value={k}>{section.kindLabels[k]}</option>
@@ -2988,7 +2988,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
         {section.offerSubtype ? section.key === "loans" ? (
           <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Debt type
-            <select name="subtype" defaultValue="" required onChange={(e) => setDebtSubtype(e.target.value)} className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+            <select name="subtype" defaultValue="" required onChange={(e) => setDebtSubtype(e.target.value)} className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
               <option value="">Choose a debt type</option>
               {DEBT_KINDS.map((debtKind) => <option key={debtKind.value} value={debtKind.value}>{debtKind.label}</option>)}
             </select>
@@ -3025,7 +3025,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
               <select
                 name="taxTreatment"
                 defaultValue="taxable"
-                className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 {TAX_TREATMENTS.map((t) => (
                   <option key={t} value={t}>
@@ -3066,7 +3066,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
         <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
         <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
           Ownership
-          <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+          <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
             <option value="sole">Sole</option>
             <option value="joint">Joint</option>
           </select>
@@ -3211,7 +3211,7 @@ function PropertyEquityLine({ account, currency }: { account: AccountData; curre
   const loan = loanOnProperty.get(account.id);
   if (!loan) return null;
   return (
-    <p className="-mt-1 px-4 pb-1.5 pl-12 text-xs text-foreground/80">
+    <p className="-mt-1 px-4 pb-1.5 pl-12 text-xs text-foreground">
       Equity <span className="font-semibold text-foreground">{formatMoney(account.balanceCents - loan, currency)}</span>
       {" "}· value − {formatMoney(loan, currency)} mortgage
     </p>

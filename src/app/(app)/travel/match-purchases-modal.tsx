@@ -164,7 +164,7 @@ export function MatchPurchasesModal({
             <ul className="divide-y divide-line/60 rounded-lg ring-1 ring-line">
               {taggable.map((r) => (
                 <li key={r.id}>
-                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]">
+                  <label className="flex cursor-pointer items-center gap-3 px-3 py-2 transition hover:bg-sky-50 dark:hover:bg-sky-950/40">
                     <input
                       type="checkbox"
                       checked={checked.has(r.id)}
@@ -192,7 +192,7 @@ export function MatchPurchasesModal({
                           onChange={(e) => setColumns((prev) => ({ ...prev, [r.id]: e.target.value }))}
                           onClick={(e) => e.stopPropagation()}
                           aria-label={`Travel Log column for ${r.payee ?? r.itemName}`}
-                          className="self-start rounded-md bg-background px-1.5 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:shrink-0 sm:self-auto"
+                          className="self-start rounded-md bg-sky-50 dark:bg-background px-1.5 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:shrink-0 sm:self-auto"
                         >
                           {CATCH_ALL_COLUMNS.map((key) => (
                             <option key={key} value={key}>{columnLabel(key)}</option>
@@ -261,7 +261,7 @@ export function MatchPurchasesModal({
             {pending ? "Tagging…" : `Tag ${checked.size} purchase${checked.size === 1 ? "" : "s"}`}
           </button>
           ) : null}
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 dark:hover:bg-white/10">
+          <button type="button" onClick={onClose} className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 dark:hover:bg-sky-950/40">
             {taggable.length ? "Cancel" : "Close"}
           </button>
         </div>

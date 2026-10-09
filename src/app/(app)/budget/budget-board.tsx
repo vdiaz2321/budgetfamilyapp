@@ -610,7 +610,7 @@ export function BudgetBoard({
               className={`group relative hidden h-7 items-center rounded-full p-1 transition sm:flex ${
                 detailsExpanded
                   ? "bg-brand-soft text-brand ring-1 ring-brand/20"
-                  : "bg-[#ebe8e1] text-muted ring-1 ring-black/10 hover:text-foreground dark:bg-white/10 dark:ring-white/10"
+                  : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
               }`}
             >
               <span
@@ -1091,7 +1091,7 @@ function AssignLeftover({
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
                 autoFocus
-                className="w-full rounded-xl bg-background px-3 py-2.5 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-base font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </label>
 
@@ -1105,7 +1105,7 @@ function AssignLeftover({
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Search items…"
                 aria-label="Filter budget items"
-                className="mb-2 w-full rounded-xl bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="mb-2 w-full rounded-xl bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
               <div className="max-h-56 overflow-y-auto rounded-xl ring-1 ring-line">
                 {grouped.length === 0 ? (
@@ -1128,7 +1128,7 @@ function AssignLeftover({
                           className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition ${
                             toId === o.id
                               ? trimming ? "bg-negative/10 font-semibold" : "bg-brand-soft font-semibold"
-                              : "hover:bg-black/5 dark:hover:bg-white/10"
+                              : "hover:bg-sky-50 dark:hover:bg-sky-950/40"
                           }`}
                         >
                           <span className="min-w-0 truncate">{o.name}</span>
@@ -1241,7 +1241,7 @@ function MatchSpentButton({
             setSnapshot(null);
           });
         }}
-        className="mt-1.5 inline-flex w-fit whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"
+        className="mt-1.5 inline-flex w-fit whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
       >
         {undoPending ? "Undoing…" : "↩ Undo Match"}
       </button>
@@ -1261,7 +1261,7 @@ function MatchSpentButton({
         type="button"
         // Nothing-spent items start unticked; see matchCandidates.
         onClick={() => { setError(null); setSkipped(new Set(candidates.filter((c) => c.spentCents === 0).map((c) => c.subId))); setOpen(true); }}
-        className="mt-1.5 inline-flex w-fit cursor-pointer items-center whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
+        className="mt-1.5 inline-flex w-fit cursor-pointer items-center whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         {label}
       </button>
@@ -1288,7 +1288,7 @@ function MatchSpentButton({
                 // The change to Income left to budget: green adds to it, red takes from it.
                 const diff = leftDelta(c);
                 return (
-                  <label key={c.subId} className={`${rowGrid} cursor-pointer gap-y-0.5 border-t border-line px-2 py-1.5 text-xs transition sm:px-3 sm:text-sm hover:bg-black/5 dark:hover:bg-white/10`}>
+                  <label key={c.subId} className={`${rowGrid} cursor-pointer gap-y-0.5 border-t border-line px-2 py-1.5 text-xs transition sm:px-3 sm:text-sm hover:bg-sky-50 dark:hover:bg-sky-950/40`}>
                     <input
                       type="checkbox"
                       checked={on}
@@ -1432,7 +1432,7 @@ function CategoryProgressCard({
           </span>
         </span>
       </div>
-      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
         <div
           className={`h-full rounded-full transition-[width] duration-400 ease-out ${fillClass}`}
           style={{ width: `${pct}%` }}
@@ -1630,7 +1630,7 @@ function DueItemsList({
               type="button"
               onClick={() => onOpen?.(item)}
               disabled={!onOpen}
-              className="-my-1.5 -ml-2 min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+              className="-my-1.5 -ml-2 min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition hover:bg-sky-100 dark:hover:bg-sky-950/40"
             >
               <div className="flex min-w-0 items-baseline gap-x-2">
                 <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>{dueItemDateLabel(item.dueDate)}</span>
@@ -1685,7 +1685,7 @@ function DueItemsList({
                     <button
                       type="button"
                       onClick={() => onPayDue(item, item.prevSpentCents)}
-                      className="whitespace-nowrap rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/[0.08] dark:hover:bg-white/15"
+                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
                     >
                       <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
                     </button>
@@ -1701,7 +1701,7 @@ function DueItemsList({
                           setSkippingId(null);
                         });
                       }}
-                      className="whitespace-nowrap rounded-md bg-black/[0.04] px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/10 disabled:opacity-60 dark:bg-white/[0.08] dark:hover:bg-white/15"
+                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 disabled:opacity-60 dark:bg-sky-900/50 dark:hover:bg-sky-900"
                     >
                       {skippingId === item.id ? "Saving…" : <>Skip<span className="hidden sm:inline"> month</span></>}
                     </button>
@@ -1866,7 +1866,7 @@ function RollInPlanControl({
                   setSnapshot(null);
                 });
               }}
-              className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
+              className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-bold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40 disabled:opacity-60"
             >
               {undoPending ? "Undoing…" : `↩ Undo ${shortMonth(prevMonthLabel)} Planned roll-in`}
             </button>
@@ -1900,7 +1900,7 @@ function RollInPlanControl({
                 type="button"
                 disabled={copyPending}
                 onClick={() => setConfirming(false)}
-                className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-60"
+                className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -1909,7 +1909,7 @@ function RollInPlanControl({
             <button
               type="button"
               onClick={() => setConfirming(true)}
-              className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10"
+              className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               {`↓ Roll in ${shortMonth(prevMonthLabel)} Planned`}
             </button>

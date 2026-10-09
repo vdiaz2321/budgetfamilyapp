@@ -11,21 +11,6 @@ task with: one line saying what changed, 2–4 short bullets (how it was checked
 anything skipped), and at most one question or suggestion. Plain words, no
 repeating a point, no restating what the screenshot already shows.
 
-# Server-component pages in (app)/
-
-Every page under `src/app/(app)/` MUST get its auth + household from `getSessionContext()` in `src/lib/auth-context.ts` — do NOT re-run the `getUser → profile → household` chain manually. The layout already calls it; `getSessionContext` is `React.cache`'d so both share one result. Skipping this doubles the auth round-trips per page load, which is our biggest latency cost.
-
-```ts
-import { getSessionContext } from "@/lib/auth-context";
-
-export default async function SomePage() {
-  const { supabase, household } = await getSessionContext();
-  // ... use supabase client + household.id / household.currency here
-}
-```
-
-The helper returns `{ supabase, user, profile, household }`. Household includes `id, name, currency, snowball_monthly_extra_cents, snowball_start_date` — if you need another column on `households`, add it there rather than re-querying. Same rule for server actions that read auth: prefer `getSessionContext()` over hand-rolling the chain.
-
 # No purple / no orange in charts, stats, or accents
 
 Victor has repeatedly rejected purple/indigo and amber-orange in the app's visualizations and stat displays. Read this before styling any chart, stat card, badge, progress bar, subtitle text, filter chip, or category dot — anywhere you'd otherwise reach for `text-brand`, `bg-brand`, `bg-brand-soft`, `--brand`, `text-accent`, `--cat-orange`, `--cat-bills` (amber), or `--cat-expenses` (amber). These are all violations in a stat/chart context.
@@ -35,7 +20,7 @@ Victor has repeatedly rejected purple/indigo and amber-orange in the app's visua
 - `--viz-savings` (blue-700), `--viz-bills` (teal-600), `--viz-expenses` (sky-400), `--viz-debt` (rose-600) — flow colors
 - `--viz-grid` (chart gridlines), `--viz-sel` (selected-period wash)
 
-For non-flow accents (subtitle text, filter chips, hover backgrounds, ranked bars), use neutral tokens: `text-muted`, `bg-black/5 dark:bg-white/10`, or a `--viz-*` color that matches the metric.
+For non-flow accents (subtitle text, filter chips, hover backgrounds, ranked bars), use a light-blue tint — `bg-sky-100 dark:bg-sky-900/50` for chips/pills, `bg-sky-50 dark:bg-sky-950/40` for hover or expanded rows — with full `text-foreground`, or a `--viz-*` color that matches the metric. Never grey: no `text-muted`, `bg-black/N`, `bg-white/N`, or `gray-*`/`slate-*`/`zinc-*`/`neutral-*` — Victor reads grey as disabled and has rejected it repeatedly.
 
 **The `--brand` color stays confined to app chrome** — the sidebar, the primary CTA buttons, focus rings on inputs. Since 2026-09-25 `--brand` is a muted blue (`#3b64b0` light / `#8aa9d8` dark), not indigo: Victor rejected purple app-wide, and Tailwind `blue-600` read too bright. Never hard-code `indigo-*`, `violet-*`, `purple-*`, or `blue-600` for a button — use `bg-brand` so every page follows the token. Everything a user reads as *data* (money values, category dots, chart marks, deltas, "% of income" text, hero-card colored numbers) uses the `--viz-*` palette.
 

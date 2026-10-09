@@ -317,8 +317,8 @@ export function BudgetGroup({
           aria-pressed={leftOnly}
           className={`col-span-2 min-w-0 cursor-pointer rounded-md px-0 py-1 text-center leading-tight tabular-nums ring-1 transition ${
             leftOnly
-              ? "bg-black/[0.06] ring-black/15 dark:bg-white/10 dark:ring-white/20"
-              : "ring-transparent hover:bg-black/5 dark:hover:bg-white/10"
+              ? "bg-sky-100 ring-sky-300 dark:bg-sky-900/50 dark:ring-sky-700"
+              : "ring-transparent hover:bg-sky-50 dark:hover:bg-sky-950/40"
           }`}
         >
           <span className="block whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted">Remaining</span>
@@ -567,7 +567,7 @@ function CategoryGroupMenu({ group, className = "" }: { group: GroupData; classN
                     name="name"
                     required
                     defaultValue={group.name}
-                    className="min-w-0 flex-1 rounded-lg bg-background px-3 py-2 ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                    className="min-w-0 flex-1 rounded-lg bg-sky-50 dark:bg-background px-3 py-2 ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                   />
                   <button
                     type="submit"
@@ -673,7 +673,7 @@ function AddItemForm({
         placeholder="New item name…"
         required
         autoFocus
-        className="flex-1 rounded-md bg-background px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="flex-1 rounded-md bg-sky-50 dark:bg-background px-3 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       {hasDue ? (
         <input
@@ -682,7 +682,7 @@ function AddItemForm({
           min={1}
           max={31}
           placeholder="Due"
-          className="w-16 rounded-md bg-background px-2 py-1.5 text-right text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-16 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-right text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       ) : null}
       {allowRecurring && isRecurring ? <input type="hidden" name="isRecurring" value="on" /> : null}

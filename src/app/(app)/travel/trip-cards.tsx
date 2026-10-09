@@ -34,7 +34,7 @@ function DaysPill({ days, className }: { days: number; className: string }) {
   return (
     <span
       className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${
-        soon ? `${AQUA_FILL} text-[#0e4140] dark:text-[#0e1f1e]` : "bg-black/5 text-muted dark:bg-white/10"
+        soon ? `${AQUA_FILL} text-[#0e4140] dark:text-[#0e1f1e]` : "bg-sky-100 text-muted dark:bg-sky-900/50"
       } ${className}`}
     >
       {days > 0 ? `in ${plural(days, "day")}` : "Now"}
@@ -47,7 +47,7 @@ function Chip({ icon, missing, children }: { icon: keyof typeof CHIP_ICONS; miss
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-        missing ? "border border-dashed border-line text-negative" :"bg-black/5 text-foreground dark:bg-white/10"
+        missing ? "border border-dashed border-line text-negative" :"bg-sky-100 text-foreground dark:bg-sky-900/50"
       }`}
     >
       <svg viewBox="0 0 24 24" className={`h-3 w-3 ${missing ? "" : TEAL_TEXT}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -95,7 +95,7 @@ export function TripCards({
   const upcomingFigures = [
     { label: "Total trips", value: String(ahead.length), tone: "" },
     { label: "Total spent", value: formatMoneyWhole(sumOf((t) => t.spent), currency), tone: "text-negative" },
-    { label: "Total planned", value: formatMoneyWhole(sumOf((t) => t.planOnly.total), currency), tone: "text-muted" },
+    { label: "Total planned", value: formatMoneyWhole(sumOf((t) => t.plannedTotal), currency), tone: "text-muted" },
     // Points actually redeemed and the cash they replaced — shown even at 0.
     { label: "Total pts used", value: upcomingPts.toLocaleString(), tone: "" },
     { label: "Total cash saved", value: formatMoneyWhole(upcomingSaved, currency), tone: upcomingSaved > 0 ? "text-positive" : "" },
@@ -107,7 +107,7 @@ export function TripCards({
         type="button"
         onClick={() => setState({ open: !open })}
         aria-expanded={open}
-        className="flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+        className="flex w-full flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         {/* Same title and figure columns as All Trips / Bookings Log below. */}
         <span className={`flex items-center gap-2 ${HEAD_TITLE_COL}`}>
@@ -160,19 +160,20 @@ export function TripCards({
             // Two upcoming trips to the same place get their month beside
             // the name, so "Greece" and "Greece" can be told apart.
             const sub = nameCounts.get(name)! > 1 ? MONTHS[Number(start.slice(5, 7)) - 1] : null;
-            // "Planned" is money not paid yet, so the bar is the share of the
-            // trip's whole cost already paid.
-            const planned = t.planOnly.total;
-            const whole = t.spent + planned;
-            const paidPct = whole > 0 ? Math.round((t.spent / whole) * 100) : 0;
-            const fullyPaid = t.spent > 0 && planned <= 0;
+            // "Planned" is the trip's whole plan — the popup's Total Planned —
+            // so the bar is how much of that plan is spent. Green once nothing
+            // is left to pay; red past the plan.
+            const planned = t.plannedTotal;
+            const fullyPaid = t.spent > 0 && t.planOnly.total <= 0;
+            const overPlan = planned > 0 && t.spent > planned;
+            const paidPct = fullyPaid || overPlan ? 100 : planned > 0 ? Math.round((t.spent / planned) * 100) : 0;
             const booked = t.counts.flight + t.counts.stay + t.counts.car > 0;
             // What's been paid for each kind of booking — the same split as
             // Spent below (plan-only bookings left out). Blank when nothing is
             // paid yet; "Pts" when it went on points with no cash.
             const paidFor = (kind: Booking["kind"], total: number, planOnly: number) => {
               const cash = total - planOnly;
-              if (cash > 0) return ` · ${formatMoneyWhole(cash, currency)}`;
+              if (cash > 0) return ` · ${formatMoneyWhole(cash, currency)} paid`;
               const onPoints = t.bookings.some((b) => b.kind === kind && !b.cancelled && b.points > 0);
               return onPoints ? " · Pts" : "";
             };
@@ -220,13 +221,13 @@ export function TripCards({
 
                   <span className="mt-auto block">
                     <span
-                      className="block h-3 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10"
+                      className="block h-3 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50"
                       style={t.spent === 0 ? { backgroundImage: "repeating-linear-gradient(-45deg, transparent 0 5px, rgb(0 0 0 / 0.05) 5px 10px)" } : undefined}
                     >
                       {/* Green once everything is paid. */}
                       <span
-                        className={`block h-full rounded-full transition-[width] duration-700 ${fullyPaid ? "" : AQUA_FILL}`}
-                        style={{ width: `${paidPct}%`, ...(fullyPaid ? { backgroundColor: "var(--positive)" } : {}) }}
+                        className={`block h-full rounded-full transition-[width] duration-700 ${fullyPaid || overPlan ? "" : AQUA_FILL}`}
+                        style={{ width: `${paidPct}%`, ...(fullyPaid ? { backgroundColor: "var(--positive)" } : overPlan ? { backgroundColor: "var(--negative)" } : {}) }}
                       />
                     </span>
                     <span className="mt-2 flex items-baseline justify-between gap-2">
@@ -235,9 +236,9 @@ export function TripCards({
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(t.spent, currency)}</span>
                       </span>
                       <span
-                        className={`hidden whitespace-nowrap text-sm font-semibold tabular-nums min-[400px]:inline ${fullyPaid ? "" : TEAL_TEXT}`}
-                        style={fullyPaid ? { color: "var(--positive)" } : undefined}
-                      >{t.spent > 0 && whole > 0 ? `${paidPct}% paid` : ""}</span>
+                        className={`hidden whitespace-nowrap text-sm font-semibold tabular-nums min-[400px]:inline ${fullyPaid || overPlan ? "" : TEAL_TEXT}`}
+                        style={overPlan ? { color: "var(--negative)" } : fullyPaid ? { color: "var(--positive)" } : undefined}
+                      >{overPlan ? "Over plan" : t.spent > 0 && planned > 0 ? `${paidPct}% paid` : ""}</span>
                       <span className="flex items-baseline gap-1.5">
                         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Planned</span>
                         <span className="text-sm font-semibold tabular-nums">{formatMoneyWhole(planned, currency)}</span>

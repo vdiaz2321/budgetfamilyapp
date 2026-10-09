@@ -68,7 +68,7 @@ export function PeriodPicker({
 
   return (
     <div className="relative">
-      <div className="inline-flex items-center rounded-full bg-black/[0.06] p-1 sm:gap-0.5 dark:bg-white/10">
+      <div className="inline-flex items-center rounded-full bg-sky-100 p-1 sm:gap-0.5 dark:bg-sky-900/50">
         <button type="button" className={seg(isLastMonth)} onClick={() => go("monthly", lastMonth)}>
           Last month
         </button>
@@ -111,7 +111,7 @@ export function PeriodPicker({
                   key={g.value}
                   type="button"
                   onClick={() => setSubmenu(g.value)}
-                  className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium transition hover:bg-black/5 dark:hover:bg-white/10"
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
                   {g.label}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -124,7 +124,7 @@ export function PeriodPicker({
                 <button
                   type="button"
                   onClick={() => setSubmenu(null)}
-                  className="flex w-full items-center gap-1.5 border-b border-line px-3 py-2 text-left text-sm font-semibold transition hover:bg-black/5 dark:hover:bg-white/10"
+                  className="flex w-full items-center gap-1.5 border-b border-line px-3 py-2 text-left text-sm font-semibold transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M15 18l-6-6 6-6" />
@@ -139,7 +139,7 @@ export function PeriodPicker({
                         key={o.key}
                         type="button"
                         onClick={() => go(submenu, o.key)}
-                        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm transition hover:bg-black/5 dark:hover:bg-white/10"
+                        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                       >
                         {o.label}
                         {selected ? (

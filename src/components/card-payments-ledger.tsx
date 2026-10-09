@@ -235,7 +235,7 @@ export function CardPaymentsLedger({
             <span className="min-w-0 text-sm font-bold">{labels.title}</span>
           </button>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-0.5 rounded-lg bg-black/5 p-0.5 dark:bg-white/10">
+            <div className="flex items-center gap-0.5 rounded-lg bg-sky-100 p-0.5 dark:bg-sky-900/50">
               {(["month", "year"] as const).map((v) => (
                 <button
                   key={v}
@@ -260,7 +260,7 @@ export function CardPaymentsLedger({
                 onChange={(e) => setYear(e.target.value)}
                 aria-hidden={view !== "month"}
                 tabIndex={view === "month" ? undefined : -1}
-                className={`cursor-pointer rounded-lg bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
+                className={`cursor-pointer rounded-lg bg-sky-50 dark:bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
                   view === "month" ? "" : "invisible"
                 }`}
               >
@@ -334,7 +334,7 @@ export function CardPaymentsLedger({
                   <tr
                     key={r.cardId}
                     onClick={() => setDetailCardId(r.cardId)}
-                    className="group cursor-pointer border-b border-line last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.05]"
+                    className="group cursor-pointer border-b border-line last:border-0 hover:bg-sky-50 dark:hover:bg-sky-950/40"
                   >
                     <th
                       scope="row"
@@ -567,7 +567,7 @@ function PaymentRow({
             value={date}
             onChange={(e) => setDate(e.target.value)}
             aria-label="Payment date"
-            className="w-full rounded-md bg-background px-1.5 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-2"
+            className="w-full rounded-md bg-sky-50 dark:bg-background px-1.5 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-2"
           />
         </label>
         <MoneyBox label="Paid" value={paid} onChange={setPaid} bold />
@@ -600,7 +600,7 @@ function PaymentRow({
                 type="button"
                 onClick={reset}
                 disabled={pending}
-                className="rounded-md px-2.5 py-1 text-xs font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/10"
+                className="rounded-md px-2.5 py-1 text-xs font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 Cancel
               </button>
@@ -747,7 +747,7 @@ function BalanceChangeWarning({
             type="button"
             onClick={onCancel}
             disabled={pending}
-            className="rounded-md px-3 py-1.5 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/10"
+            className="rounded-md px-3 py-1.5 text-sm font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             {mode === "remove" ? "Keep payment" : "Cancel"}
           </button>
@@ -783,7 +783,7 @@ function MoneyBox({
 }) {
   return (
     <label className="block">
-      <span className="flex w-full items-center gap-1 rounded-md bg-background px-1 py-1 text-[14px] ring-1 sm:px-2 sm:text-sm ring-line focus-within:ring-2 focus-within:ring-brand">
+      <span className="flex w-full items-center gap-1 rounded-md bg-sky-50 dark:bg-background px-1 py-1 text-[14px] ring-1 sm:px-2 sm:text-sm ring-line focus-within:ring-2 focus-within:ring-brand">
         <span className="hidden text-muted sm:inline">$</span>
         <input
           type="text"
@@ -807,7 +807,7 @@ function SortButton({ label, dir, onClick }: { label: string; dir: "asc" | "desc
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10 ${
+      className={`inline-flex items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40 ${
         dir ? "text-foreground" : ""
       }`}
     >

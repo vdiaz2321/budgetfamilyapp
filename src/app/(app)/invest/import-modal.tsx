@@ -144,27 +144,27 @@ export function ImportInvestmentModal({ accounts, onClose, onImported }: Props) 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
               File type
-              <select value={kind} onChange={(event) => changeKind(event.target.value as ImportKind)} className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+              <select value={kind} onChange={(event) => changeKind(event.target.value as ImportKind)} className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                 <option value="positions">Portfolio positions</option>
                 <option value="performance">Monthly performance</option>
               </select>
             </label>
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
               CSV file
-              <input type="file" accept=".csv,text/csv" onChange={(event) => void handleFile(event.target.files?.[0])} className="mt-1 block w-full rounded-md bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line file:mr-2 file:rounded file:border-0 file:bg-brand-soft file:px-2 file:py-1 file:text-xs file:font-semibold file:text-brand" />
+              <input type="file" accept=".csv,text/csv" onChange={(event) => void handleFile(event.target.files?.[0])} className="mt-1 block w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line file:mr-2 file:rounded file:border-0 file:bg-brand-soft file:px-2 file:py-1 file:text-xs file:font-semibold file:text-brand" />
             </label>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
               Investment account
-              <select value={accountId} onChange={(event) => { setAccountId(event.target.value); setBucketId(""); }} className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+              <select value={accountId} onChange={(event) => { setAccountId(event.target.value); setBucketId(""); }} className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                 {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.isKids ? " · Kids Funding" : ""}</option>)}
               </select>
             </label>
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
               Bucket (optional)
-              <select value={bucketId} onChange={(event) => setBucketId(event.target.value)} className="mt-1 w-full rounded-md bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+              <select value={bucketId} onChange={(event) => setBucketId(event.target.value)} className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                 <option value="">Account total</option>
                 {selectedBuckets.map((bucket) => <option key={bucket.id} value={bucket.id}>{bucket.name}</option>)}
               </select>

@@ -85,7 +85,7 @@ function TotalBand({ pad, plain, children }: { pad: string; plain?: boolean; chi
   return (
     <span
       className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line px-1 ${
-        plain ? "" : "bg-black/[0.035] dark:bg-white/[0.05]"
+        plain ? "" : "bg-sky-100 dark:bg-sky-900/50"
       }`}
     >
       {children}
@@ -240,7 +240,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
               className="scroll-handle overflow-x-auto"
             >
               <div style={{ minWidth: minW }}>
-                <div className="grid items-center gap-2 border-b border-line bg-black/[0.05] pr-4 py-2 dark:bg-white/[0.08]" style={gridStyle}>
+                <div className="grid items-center gap-2 border-b border-line bg-sky-100 pr-4 py-2 dark:bg-sky-900/50" style={gridStyle}>
                   <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-muted">
                     Category
                   </span>
@@ -708,7 +708,7 @@ function SelectionRow({
   const tint = (v: number) => (signed ? (v < 0 ? "text-negative" : "text-positive") : "");
   return (
     <div
-      className={`grid items-center gap-2 bg-black/[0.03] pr-4 py-2 dark:bg-white/[0.06] ${
+      className={`grid items-center gap-2 bg-sky-100 pr-4 py-2 dark:bg-sky-900/50 ${
         dividerAbove
           ? "border-t-[3px] border-foreground/80"
           : "border-t border-line"
@@ -721,7 +721,7 @@ function SelectionRow({
           <button
             type="button"
             onClick={onClear}
-            className="rounded-md bg-black/5 px-2 py-0.5 text-[12px] font-semibold transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20"
+            className="rounded-md bg-sky-100 px-2 py-0.5 text-[12px] font-semibold transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
           >
             Clear
           </button>

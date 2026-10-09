@@ -72,7 +72,7 @@ export function DeleteAccountButton({ soloOwner }: Props) {
                   required
                   autoFocus
                   autoComplete="off"
-                  className="mt-1 w-full rounded-lg border border-line bg-background px-3 py-2 text-sm font-mono text-foreground focus:border-negative focus:outline-none focus:ring-1 focus:ring-negative"
+                  className="mt-1 w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm font-mono text-foreground focus:border-negative focus:outline-none focus:ring-1 focus:ring-negative"
                 />
               </div>
 
@@ -89,7 +89,7 @@ export function DeleteAccountButton({ soloOwner }: Props) {
                   type="password"
                   required
                   autoComplete="current-password"
-                  className="mt-1 w-full rounded-lg border border-line bg-background px-3 py-2 text-sm text-foreground focus:border-negative focus:outline-none focus:ring-1 focus:ring-negative"
+                  className="mt-1 w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm text-foreground focus:border-negative focus:outline-none focus:ring-1 focus:ring-negative"
                 />
               </div>
 

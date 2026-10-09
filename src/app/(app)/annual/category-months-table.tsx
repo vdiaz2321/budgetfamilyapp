@@ -458,7 +458,7 @@ function Group({
 export function YearBand({ pad, children }: { pad: "-my-2" | "-my-2.5" | "-my-1.5"; children: React.ReactNode }) {
   return (
     <span
-      className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-black/[0.035] px-1 dark:bg-white/[0.05]`}
+      className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-sky-100 px-1 dark:bg-sky-900/50`}
     >
       {children}
     </span>

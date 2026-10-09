@@ -523,8 +523,8 @@ function CreditCardSection({
   // mode the values use lifted versions of the data palette. Each slot has a
   // fixed min width so the Travel and Hotel rows line up in columns.
   const bannerChip = (label: string, text: string, valueClass: string, extra = "", slot = "") => (
-    <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${slot} ${extra || "bg-background ring-line dark:bg-white/[0.06] dark:ring-white/10"}`}>
-      <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted dark:text-slate-400">{label}:</span>
+    <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${slot} ${extra || "bg-surface ring-line dark:ring-white/10"}`}>
+      <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted dark:text-foreground">{label}:</span>
       <span className={`whitespace-nowrap text-sm font-semibold tabular-nums ${valueClass}`}>{text}</span>
     </span>
   );
@@ -532,11 +532,11 @@ function CreditCardSection({
     const { points, value, redeemable, unvalued } = groupRewards(cards);
     return (
       <>
-        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative dark:text-rose-300" : "text-muted dark:text-slate-300", "", "sm:min-w-[9.5rem]")}
+        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative dark:text-rose-300" : "text-muted dark:text-foreground", "", "sm:min-w-[9.5rem]")}
         {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-positive dark:text-emerald-300", "", "sm:min-w-[11.25rem]") : null}
         {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-positive dark:text-emerald-300", "", "sm:min-w-[11.25rem]") : null}
         {redeemable > 0
-          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-700 dark:text-sky-200", "bg-sky-50 ring-sky-700/20 dark:bg-sky-400/15 dark:ring-sky-300/30", "sm:min-w-[11.25rem]")
+          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-700 dark:text-sky-200", "bg-surface ring-sky-700/20 dark:ring-sky-300/30", "sm:min-w-[11.25rem]")
           : null}
         {/* Only as complete as the cents-per-point typed on the cards. */}
         {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-negative dark:text-rose-300") : null}
@@ -568,7 +568,7 @@ function CreditCardSection({
         // banner; switched on it fills solid.
         className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition lg:ml-auto ${
           active
-            ? "bg-teal-600 text-white ring-teal-600 dark:bg-teal-400 dark:text-slate-900 dark:ring-teal-300"
+            ? "bg-teal-600 text-white ring-teal-600 dark:bg-teal-400 dark:text-foreground dark:ring-teal-300"
             : "bg-teal-50 text-teal-800 ring-teal-600/30 hover:bg-teal-100 dark:bg-teal-400/15 dark:text-teal-200 dark:ring-teal-300/30 dark:hover:bg-teal-400/25"
         }`}
       >
@@ -583,14 +583,15 @@ function CreditCardSection({
   };
   // A group's header: a banner with the name and the group's figures as
   // chips. Clicking anywhere on it folds the group.
+  // A row inside the shared Travel / Hotel box, not a card of its own.
   const groupBanner = (cat: "travel" | "hotel", isOpen: boolean, owed: number, cards: AccountData[]) => (
-    <div className="px-4 pt-4 sm:px-6">
+    <div>
       <div
         onClick={() => toggleGroup(cat)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 rounded-2xl bg-slate-100 px-4 py-3.5 text-foreground shadow-sm ring-1 ring-line sm:px-5 dark:bg-neutral-800 dark:text-white dark:ring-white/10"
+        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 px-4 py-3.5 text-foreground transition hover:bg-sky-50 sm:px-5 dark:text-white dark:hover:bg-sky-950/40"
       >
         <button type="button" aria-expanded={isOpen} className="flex min-w-0 shrink-0 items-center gap-3 text-left sm:w-[12rem]">
-          <span className="text-muted dark:text-slate-400"><GroupChevron open={isOpen} /></span>
+          <span className="text-muted dark:text-foreground"><GroupChevron open={isOpen} /></span>
           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ${cat === "travel" ? "bg-sky-100 text-sky-700 ring-sky-700/20 dark:bg-sky-400/15 dark:text-sky-300 dark:ring-sky-300/30" : "bg-teal-100 text-teal-700 ring-teal-700/20 dark:bg-teal-400/15 dark:text-teal-300 dark:ring-teal-300/30"}`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               {cat === "travel" ? (
@@ -615,12 +616,9 @@ function CreditCardSection({
       </div>
     </div>
   );
-  // A group's cards sit in their own rounded box under its banner.
+  // A group's cards open under its row, inside the same shared box.
   const groupList = (list: React.ReactNode) => (
-    // Full width on a phone, where the stacked card rows need every pixel.
-    <div className="pt-3 sm:px-6">
-      <div className="overflow-hidden border-y border-line bg-background sm:rounded-2xl sm:border-0 sm:ring-1 sm:ring-line">{list}</div>
-    </div>
+    <div className="border-t border-line bg-surface">{list}</div>
   );
   const renderCards = (cards: AccountData[]) => (
     <>
@@ -758,10 +756,219 @@ function CreditCardSection({
     if (nights > 0) parts.push(`+${nights} free night${nights === 1 ? "" : "s"}`);
     return parts.length ? parts.join(" · ") : undefined;
   };
+  // Fees, card counts and the filters. On the main section they head the box
+  // holding the Travel and Hotel groups, so the controls sit with what they
+  // narrow; `frame` styles the strip for where it lands.
+  const feesBar = (frame: string) => (
+    <div className={`p-3 text-sm text-foreground ${frame}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {allStats.feesPaid > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowOnlyFeeCards((v) => !v)}
+          className={`rounded-xl px-3 py-1.5 font-semibold shadow-sm ring-1 transition ${showOnlyFeeCards ? "bg-negative/10 ring-negative/40" : "bg-surface ring-line hover:ring-negative/40"}`}
+        >
+          <span className="text-negative">Active fees:</span> <span className="tabular-nums text-foreground">{formatMoneyWhole(feesPaid, currency)}/yr</span>
+        </button>
+      ) : null}
+      {allStats.feesAll > 0 ? (
+        <span>
+          Total fees w/out waiver: <span className="font-semibold tabular-nums text-foreground">{formatMoneyWhole(feesAll, currency)}/yr</span>
+        </span>
+      ) : null}
+      {/* One control in place of four. Closed it still says what is
+          narrowing the list, so a filter left on is never invisible —
+          that, not the space, is what a hidden filter row costs. */}
+      {(() => {
+        const on = [bankFilter, holderFilter, openedFrom || openedTo ? "opened" : null].filter(Boolean) as string[];
+        return (
+          <span className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setFiltersOpen((v) => !v)}
+              aria-expanded={filtersOpen}
+              // Outlined with a funnel, like the other pressable chips
+              // on this card — as bare text it read as a label.
+              className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold transition ${
+                on.length > 0
+                  ? "border-transparent text-white"
+                  : "border-black/25 bg-surface text-foreground hover:bg-sky-200 dark:border-white/30 dark:hover:bg-sky-900"
+              }`}
+              style={on.length > 0 ? { backgroundColor: "var(--viz-savings)" } : undefined}
+            >
+              <svg
+                width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                className="shrink-0" aria-hidden
+              >
+                <path d="M3 5h18l-7 8v6l-4 2v-8L3 5z" />
+              </svg>
+              Filters{on.length > 0 ? `: ${on.join(" · ")}` : ""}
+              <svg
+                width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                className={`shrink-0 transition-transform ${filtersOpen ? "" : "-rotate-90"}`}
+                aria-hidden
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {/* Getting back to every card without first reopening the
+                panel that hid the filter. */}
+            {on.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setBankFilter(null);
+                  setHolderFilter(null);
+                  setOpenedFrom("");
+                  setOpenedTo("");
+                }}
+                className="rounded-md px-2 py-1 font-semibold text-foreground transition hover:bg-sky-200 dark:hover:bg-sky-900"
+              >
+                Clear
+              </button>
+            ) : null}
+          </span>
+        );
+      })()}
+      {/* The card counts double as the column filter: travel shows the
+          travel column alone, hotel the hotel one, total puts both
+          back with Other underneath. */}
+      {(() => {
+        const scoped = holderScoped(accounts);
+        const count = (cat: "travel" | "hotel" | null) =>
+          cat === null
+            ? scoped.length
+            : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
+        // Outlined so all three read as pressable, filled only when
+        // one is actually narrowing the list. "Total" is the resting
+        // state, so a filled pill there said a filter was on when
+        // none was.
+        const countChip = (cat: "travel" | "hotel" | null, label: string) => {
+          const active = cat !== null && categoryFilter === cat;
+          return (
+            <button
+              type="button"
+              // Clicking the chip that's already on clears the filter,
+              // so getting back to everything doesn't mean hunting for
+              // "total".
+              onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
+              className={`rounded-md border px-1.5 py-0.5 transition ${
+                active
+                  ? "border-transparent text-white"
+                  : "border-line bg-surface hover:bg-sky-100 dark:border-white/10 dark:hover:bg-sky-900/40"
+              }`}
+              style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
+            >
+              <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
+                {count(cat)}
+              </span>{" "}
+              {label}
+            </button>
+          );
+        };
+        return (
+          <span className="flex items-center gap-1">
+            {countChip("travel", "travel")}
+            {countChip("hotel", "hotel")}
+            {countChip(null, "total")}
+          </span>
+        );
+      })()}
+      </div>
+      {/* The knobs themselves. Shut by default; whatever is on is
+          named on the button above, so closing never hides state. */}
+      {filtersOpen ? (
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
+      {/* Bank and owner pills. Inside the panel since 2026-10-05 — the
+          Filters button names whichever is on, so they stay visible. */}
+      {(() => {
+        const banks = [...new Set(allCreditCards.map(cardBank).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+        const holders = [...new Set(allCreditCards.map((x) => (x.holder ?? "").trim()).filter(Boolean))].sort();
+        // Labelled dropdowns, styled like the Date Opened row beside them.
+        const group = (label: string, options: string[], value: string | null, set: (v: string | null) => void) =>
+          options.length < 2 ? null : (
+            <label className="flex items-center gap-1.5">
+              <span className="shrink-0 font-semibold text-foreground">{label}:</span>
+              <select
+                value={value ?? ""}
+                onChange={(e) => set(e.target.value || null)}
+                className="cursor-pointer rounded-md bg-sky-50 dark:bg-background px-1.5 py-1 text-center text-sm font-semibold ring-1 ring-line [text-align-last:center] focus:outline-none focus:ring-2 focus:ring-sky-500"
+              >
+                <option value="">All</option>
+                {options.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </label>
+          );
+        return (
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {group("Bank", banks, bankFilter, setBankFilter)}
+            {group("Owner", holders, holderFilter, setHolderFilter)}
+          </span>
+        );
+      })()}
+      {/* Opened-on range. Application spacing is the one card question
+          this board couldn't answer — "what did we open between these
+          dates" — and the dates are already on every card. */}
+      {(() => {
+        // A date input carries its own intrinsic width, and two of
+        // them plus the label are wider than a phone. They take the
+        // row and share it from min-w-0 up, rather than running off
+        // the right edge.
+        const dateBox =
+          "min-w-0 flex-1 sm:flex-none rounded-md bg-background px-1.5 py-1 text-sm font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500";
+        const active = Boolean(openedFrom || openedTo);
+        return (
+          <div className="flex w-full items-center gap-1.5 sm:w-auto">
+            {/* Named for the card field it filters on ("Date opened"
+                in the edit form), with From/To spelled out, so it is
+                obvious which value the range is reading. */}
+            <span className="shrink-0 font-semibold text-foreground">Date Opened:</span>
+            <span className="shrink-0 pl-1 font-semibold text-foreground">From</span>
+            <input
+              type="date"
+              value={openedFrom}
+              max={openedTo || undefined}
+              onChange={(e) => setOpenedFrom(e.target.value)}
+              aria-label="Date opened from"
+              className={dateBox}
+            />
+            <span className="shrink-0 pl-1 font-semibold text-foreground">To</span>
+            <input
+              type="date"
+              value={openedTo}
+              min={openedFrom || undefined}
+              onChange={(e) => setOpenedTo(e.target.value)}
+              aria-label="Date opened to"
+              className={dateBox}
+            />
+            {active ? (
+              <button
+                type="button"
+                onClick={() => { setOpenedFrom(""); setOpenedTo(""); }}
+                className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-foreground transition hover:bg-sky-200 dark:hover:bg-sky-900"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+        );
+      })()}
+      </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <section id={section.key === "credit" ? "credit-cards" : undefined} className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
       {isMain ? (
-        <div className="px-4 py-4 sm:px-6 sm:py-5">
+        <div className={`px-4 pt-4 sm:px-6 sm:pt-5 ${open ? "" : "pb-4 sm:pb-5"}`}>
+          {/* Open, no bottom padding: the Travel / Hotel rows below bring
+              their own top gap, so the fees row sits as close to them as they
+              sit to each other — one block, not two. */}
           {/* The whole header row toggles, not just the title text and the
               chevron — a click in the empty space beside the chips did
               nothing. The chips and the calculator link keep their own jobs. */}
@@ -791,7 +998,7 @@ function CreditCardSection({
               <span className="min-w-0">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="text-base font-bold sm:text-lg">Travel & Credit Card Rewards</span>
-                  <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs font-semibold text-foreground/80 ring-1 ring-line dark:bg-white/10">
+                  <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold text-foreground ring-1 ring-line dark:bg-sky-900/50">
                     {allStats.openCards.length} active cards
                   </span>
                 </span>
@@ -830,7 +1037,7 @@ function CreditCardSection({
                 className={`shrink-0 rounded-md border px-2 py-1 text-left text-xs font-bold transition ${
                   showOnlyAnnivDue
                     ? "border-transparent text-white"
-                    : "bg-background hover:bg-black/5 dark:hover:bg-white/10"
+                    : "bg-background hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 }`}
                 style={
                   showOnlyAnnivDue
@@ -856,7 +1063,7 @@ function CreditCardSection({
             <button
               type="button"
               onClick={onToggle}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-foreground/75 transition hover:bg-slate-100 dark:hover:bg-neutral-800"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-xl text-foreground transition hover:bg-sky-200 dark:hover:bg-sky-900"
               aria-label={open ? "Collapse credit card rewards" : "Expand credit card rewards"}
             >
               <svg
@@ -969,208 +1176,9 @@ function CreditCardSection({
               machinery for narrowing them, and it stays shut until asked for
               — four controls had accreted onto this line, and the figures
               worth reading were competing with the knobs for the same width. */}
-          {open ? (
-            <div className="mt-4 rounded-2xl bg-black/[0.03] p-3 text-xs text-foreground/75 ring-1 ring-line dark:bg-white/[0.04]">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              {allStats.feesPaid > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => setShowOnlyFeeCards((v) => !v)}
-                  className={`rounded-xl px-3 py-1.5 font-semibold shadow-sm ring-1 transition ${showOnlyFeeCards ? "bg-negative/10 ring-negative/40" : "bg-background ring-line hover:ring-negative/40"}`}
-                >
-                  <span className="text-negative">Active fees:</span> <span className="tabular-nums text-foreground">{formatMoneyWhole(feesPaid, currency)}/yr</span>
-                </button>
-              ) : null}
-              {allStats.feesAll > 0 ? (
-                <span>
-                  Total fees w/out waiver: <span className="font-semibold tabular-nums text-foreground">{formatMoneyWhole(feesAll, currency)}/yr</span>
-                </span>
-              ) : null}
-              {/* One control in place of four. Closed it still says what is
-                  narrowing the list, so a filter left on is never invisible —
-                  that, not the space, is what a hidden filter row costs. */}
-              {(() => {
-                const on = [bankFilter, holderFilter, openedFrom || openedTo ? "opened" : null].filter(Boolean) as string[];
-                return (
-                  <span className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setFiltersOpen((v) => !v)}
-                      aria-expanded={filtersOpen}
-                      // Outlined with a funnel, like the other pressable chips
-                      // on this card — as bare text it read as a label.
-                      className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold transition ${
-                        on.length > 0
-                          ? "border-transparent text-white"
-                          : "border-black/25 bg-background text-foreground hover:bg-slate-100 dark:border-white/30 dark:hover:bg-neutral-800"
-                      }`}
-                      style={on.length > 0 ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                    >
-                      <svg
-                        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                        className="shrink-0" aria-hidden
-                      >
-                        <path d="M3 5h18l-7 8v6l-4 2v-8L3 5z" />
-                      </svg>
-                      Filters{on.length > 0 ? `: ${on.join(" · ")}` : ""}
-                      <svg
-                        width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                        className={`shrink-0 transition-transform ${filtersOpen ? "" : "-rotate-90"}`}
-                        aria-hidden
-                      >
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </button>
-                    {/* Getting back to every card without first reopening the
-                        panel that hid the filter. */}
-                    {on.length > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBankFilter(null);
-                          setHolderFilter(null);
-                          setOpenedFrom("");
-                          setOpenedTo("");
-                        }}
-                        className="rounded-md px-2 py-1 font-semibold text-foreground transition hover:bg-slate-100 dark:hover:bg-neutral-800"
-                      >
-                        Clear
-                      </button>
-                    ) : null}
-                  </span>
-                );
-              })()}
-              {/* The card counts double as the column filter: travel shows the
-                  travel column alone, hotel the hotel one, total puts both
-                  back with Other underneath. */}
-              {(() => {
-                const scoped = holderScoped(accounts);
-                const count = (cat: "travel" | "hotel" | null) =>
-                  cat === null
-                    ? scoped.length
-                    : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
-                // Outlined so all three read as pressable, filled only when
-                // one is actually narrowing the list. "Total" is the resting
-                // state, so a filled pill there said a filter was on when
-                // none was.
-                const countChip = (cat: "travel" | "hotel" | null, label: string) => {
-                  const active = cat !== null && categoryFilter === cat;
-                  return (
-                    <button
-                      type="button"
-                      // Clicking the chip that's already on clears the filter,
-                      // so getting back to everything doesn't mean hunting for
-                      // "total".
-                      onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
-                      className={`rounded-md border px-1.5 py-0.5 transition ${
-                        active
-                          ? "border-transparent text-white"
-                          : "border-sky-200 bg-sky-50 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:hover:bg-sky-900/40"
-                      }`}
-                      style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
-                    >
-                      <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
-                        {count(cat)}
-                      </span>{" "}
-                      {label}
-                    </button>
-                  );
-                };
-                return (
-                  <span className="flex items-center gap-1">
-                    {countChip("travel", "travel")}
-                    {countChip("hotel", "hotel")}
-                    {countChip(null, "total")}
-                  </span>
-                );
-              })()}
-              </div>
-              {/* The knobs themselves. Shut by default; whatever is on is
-                  named on the button above, so closing never hides state. */}
-              {filtersOpen ? (
-              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-line pt-2.5">
-              {/* Bank and owner pills. Inside the panel since 2026-10-05 — the
-                  Filters button names whichever is on, so they stay visible. */}
-              {(() => {
-                const banks = [...new Set(allCreditCards.map(cardBank).filter(Boolean))].sort((x, y) => x.localeCompare(y));
-                const holders = [...new Set(allCreditCards.map((x) => (x.holder ?? "").trim()).filter(Boolean))].sort();
-                // Labelled dropdowns, styled like the Date Opened row beside them.
-                const group = (label: string, options: string[], value: string | null, set: (v: string | null) => void) =>
-                  options.length < 2 ? null : (
-                    <label className="flex items-center gap-1.5">
-                      <span className="shrink-0 font-semibold text-foreground">{label}:</span>
-                      <select
-                        value={value ?? ""}
-                        onChange={(e) => set(e.target.value || null)}
-                        className="cursor-pointer rounded-md bg-background px-1.5 py-1 text-center text-xs font-semibold ring-1 ring-line [text-align-last:center] focus:outline-none focus:ring-2 focus:ring-sky-500"
-                      >
-                        <option value="">All</option>
-                        {options.map((o) => (
-                          <option key={o} value={o}>{o}</option>
-                        ))}
-                      </select>
-                    </label>
-                  );
-                return (
-                  <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    {group("Bank", banks, bankFilter, setBankFilter)}
-                    {group("Owner", holders, holderFilter, setHolderFilter)}
-                  </span>
-                );
-              })()}
-              {/* Opened-on range. Application spacing is the one card question
-                  this board couldn't answer — "what did we open between these
-                  dates" — and the dates are already on every card. */}
-              {(() => {
-                // A date input carries its own intrinsic width, and two of
-                // them plus the label are wider than a phone. They take the
-                // row and share it from min-w-0 up, rather than running off
-                // the right edge.
-                const dateBox =
-                  "min-w-0 flex-1 sm:flex-none rounded-md bg-background px-1.5 py-1 text-xs font-semibold tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500";
-                const active = Boolean(openedFrom || openedTo);
-                return (
-                  <div className="flex w-full items-center gap-1.5 sm:w-auto">
-                    {/* Named for the card field it filters on ("Date opened"
-                        in the edit form), with From/To spelled out, so it is
-                        obvious which value the range is reading. */}
-                    <span className="shrink-0 font-semibold text-foreground">Date Opened:</span>
-                    <span className="shrink-0 pl-1 font-semibold text-foreground">From</span>
-                    <input
-                      type="date"
-                      value={openedFrom}
-                      max={openedTo || undefined}
-                      onChange={(e) => setOpenedFrom(e.target.value)}
-                      aria-label="Date opened from"
-                      className={dateBox}
-                    />
-                    <span className="shrink-0 pl-1 font-semibold text-foreground">To</span>
-                    <input
-                      type="date"
-                      value={openedTo}
-                      min={openedFrom || undefined}
-                      onChange={(e) => setOpenedTo(e.target.value)}
-                      aria-label="Date opened to"
-                      className={dateBox}
-                    />
-                    {active ? (
-                      <button
-                        type="button"
-                        onClick={() => { setOpenedFrom(""); setOpenedTo(""); }}
-                        className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-foreground transition hover:bg-slate-100 dark:hover:bg-neutral-800"
-                      >
-                        Clear
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              })()}
-              </div>
-              ) : null}
-            </div>
-          ) : null}
+          {/* Fees and filters moved down into the box that holds the Travel /
+              Hotel groups they act on — see feesBar. Other sections keep it here. */}
+          {open && !isMain ? feesBar("mt-4 rounded-2xl bg-background ring-1 ring-line") : null}
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2 px-4 py-2.5">
@@ -1182,13 +1190,13 @@ function CreditCardSection({
           >
             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${section.dot}`} />
             <span className="font-semibold">{section.label}</span>
-            <span className="rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-foreground/75 dark:bg-white/10">
+            <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50">
               {accounts.length} card{accounts.length !== 1 ? "s" : ""}
             </span>
             <svg
               width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className={`text-foreground/75 transition-transform ${open ? "" : "-rotate-90"}`}
+              className={`text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
               aria-hidden
             >
               <path d="M6 9l6 6 6-6" />
@@ -1196,7 +1204,7 @@ function CreditCardSection({
           </button>
           {totalOwed > 0 ? (
             <span className="flex items-baseline gap-1.5">
-              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Total owed:</span>
+              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground">Total owed:</span>
               <span className="whitespace-nowrap text-xs font-semibold tabular-nums text-negative sm:text-sm">
                 {formatMoneyWhole(totalOwed, currency)}
               </span>
@@ -1206,12 +1214,14 @@ function CreditCardSection({
       )}
 
       {open ? (
-        <div className="border-t-2 border-foreground/25">
+        // No divider line: the fees/filters row above and the Travel / Hotel
+        // groups below are one section, and a rule between them split it.
+        <div>
           {reorderError ? (
             <p className="border-b border-line px-4 py-1.5 text-xs font-medium text-negative">{reorderError}</p>
           ) : null}
           {localAccounts.length === 0 ? (
-            <p className="px-4 py-2.5 text-sm text-foreground/75">
+            <p className="px-4 py-2.5 text-sm text-foreground">
               {isArchived ? "No archived cards." : "No credit cards yet — add one below."}
             </p>
           ) : isMain ? (
@@ -1219,19 +1229,27 @@ function CreditCardSection({
               {/* Travel stacks above Hotel at every width. Side-by-side halves
                   squeezed each card's badges into a 3-4 line pile; full width
                   lets the per-card metrics line up in columns left-to-right. */}
-              <div className="grid grid-cols-1">
+              {/* One box: the fees / filters strip heads it and the Travel and
+                  Hotel groups are its rows, so the controls read as acting on
+                  them. Three separate rounded cards looked unrelated. */}
+              <div className="px-4 py-4 sm:px-6">
+              <div className="overflow-hidden rounded-2xl bg-background shadow-sm ring-1 ring-line dark:ring-white/10">
+              {feesBar("border-b border-line")}
+              <div className="grid grid-cols-1 divide-y divide-line">
                 {hideTravelColumn ? null : (
                 <section>
                   {groupBanner("travel", travelOpen, travelOwed, travelCards)}
-                  {!travelOpen ? null : travelCards.length > 0 ? groupList(renderCards(travelCards)) : <p className="px-6 py-4 text-sm text-foreground/75">No travel cards yet.</p>}
+                  {!travelOpen ? null : travelCards.length > 0 ? groupList(renderCards(travelCards)) : <p className="px-6 py-4 text-sm text-foreground">No travel cards yet.</p>}
                 </section>
                 )}
                 {hideHotelColumn ? null : (
                 <section>
                   {groupBanner("hotel", hotelOpen, hotelOwed, hotelCards)}
-                  {!hotelOpen ? null : hotelCards.length > 0 ? groupList(renderCards(hotelCards)) : <p className="px-6 py-4 text-sm text-foreground/75">No hotel cards yet.</p>}
+                  {!hotelOpen ? null : hotelCards.length > 0 ? groupList(renderCards(hotelCards)) : <p className="px-6 py-4 text-sm text-foreground">No hotel cards yet.</p>}
                 </section>
                 )}
+              </div>
+              </div>
               </div>
               {/* Value per pt against what points have actually bought, per
                   card. Below the Travel and Hotel groups: the cards come
@@ -1246,7 +1264,7 @@ function CreditCardSection({
                 <section className="border-t border-line">
                   <div
                     onClick={() => toggleGroup("other")}
-                    className="flex cursor-pointer items-center gap-2.5 border-b-2 border-foreground/25 bg-slate-500/[0.06] px-4 py-3 dark:bg-neutral-500/10"
+                    className="flex cursor-pointer items-center gap-2.5 border-b-2 border-foreground/25 bg-sky-50 px-4 py-3 dark:bg-sky-950/40"
                   >
                     <button
                       type="button"
@@ -1254,18 +1272,18 @@ function CreditCardSection({
                       className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                     >
                     <GroupChevron open={otherOpen} />
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-500/15 text-slate-600 dark:text-neutral-400">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-100 text-foreground dark:bg-sky-900/50 dark:text-foreground">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <rect x="2" y="5" width="20" height="14" rx="2" />
                         <path d="M2 10h20" />
                       </svg>
                     </span>
                     <span className="whitespace-nowrap text-sm font-bold text-foreground sm:text-base">Other Cards</span>
-                    <span className="shrink-0 whitespace-nowrap rounded-md bg-slate-500/15 px-2 py-0.5 text-xs font-semibold text-slate-700 dark:text-neutral-300">
+                    <span className="shrink-0 whitespace-nowrap rounded-md bg-sky-100 px-2 py-0.5 dark:bg-sky-900/50 text-xs font-semibold text-foreground dark:text-foreground">
                       {otherCards.length} card{otherCards.length !== 1 ? "s" : ""}
                     </span>
                     </button>
-                    <span className="ml-auto text-xs text-foreground/75">Choose Travel or Hotel when editing a card.</span>
+                    <span className="ml-auto text-xs text-foreground">Choose Travel or Hotel when editing a card.</span>
                   </div>
                   {otherOpen ? renderCards(otherCards) : null}
                 </section>
@@ -1292,8 +1310,8 @@ function CreditCardSection({
                       className={isBankDragOver ? "ring-2 ring-inset ring-sky-500/50" : ""}
                     >
                       <div
-                        className={`flex items-center gap-1 pl-2 pr-4 py-1.5 bg-black/[0.04] dark:bg-white/[0.05] ${
-                          isBankDragOver ? "bg-sky-100/40" : "hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                        className={`flex items-center gap-1 pl-2 pr-4 py-1.5 bg-sky-100 dark:bg-sky-900/50 ${
+                          isBankDragOver ? "bg-sky-100/40" : "hover:bg-sky-200 dark:hover:bg-sky-900"
                         }`}
                       >
                         <GripHandle size="sm" onMouseDown={() => startBankDrag(group.bank)} />
@@ -1305,7 +1323,7 @@ function CreditCardSection({
                           <svg
                             width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                            className={`shrink-0 text-foreground/75 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+                            className={`shrink-0 text-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`}
                             aria-hidden
                           >
                             <path d="M6 9l6 6 6-6" />
@@ -1313,7 +1331,7 @@ function CreditCardSection({
                           <span className="text-xs font-bold uppercase tracking-wide text-foreground">
                             {group.bank}
                           </span>
-                          <span className="text-xs font-medium text-foreground/75">
+                          <span className="text-xs font-medium text-foreground">
                             {group.cards.length} card{group.cards.length !== 1 ? "s" : ""}
                           </span>
                         </button>
@@ -1435,7 +1453,7 @@ function GroupChevron({ open }: { open: boolean }) {
     <svg
       width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-      className={`shrink-0 text-foreground/75 transition-transform ${open ? "" : "-rotate-90"}`}
+      className={`shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
       aria-hidden
     >
       <path d="M6 9l6 6 6-6" />
@@ -1588,7 +1606,7 @@ function PointsByCard({
           <button
             type="button"
             onClick={() => setEditingCard(card)}
-            className={`block w-full cursor-pointer px-4 py-2.5 text-left transition hover:bg-black/[0.04] dark:hover:bg-white/[0.05] ${cols}`}
+            className={`block w-full cursor-pointer px-4 py-2.5 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${cols}`}
           >
             {body}
           </button>
@@ -1614,7 +1632,7 @@ function PointsByCard({
         <svg
           width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-          className={`shrink-0 text-foreground/75 transition-transform ${open ? "" : "-rotate-90"}`}
+          className={`shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
           aria-hidden
         >
           <path d="M6 9l6 6 6-6" />
@@ -1624,7 +1642,7 @@ function PointsByCard({
         {total.redeemed.points > 0 ? (
           <>
             <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[16.75rem]">
-              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground">
                 Total pts used:
               </span>
               <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
@@ -1632,7 +1650,7 @@ function PointsByCard({
               </span>
             </span>
             <span className="flex shrink-0 items-baseline gap-1.5">
-              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground">
                 Total cash saved:
               </span>
               <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
@@ -1644,7 +1662,7 @@ function PointsByCard({
       </button>
       {open ? (
         <ul className="divide-y divide-line border-t border-line">
-          <li aria-hidden className={`hidden px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-foreground/75 ${cols}`}>
+          <li aria-hidden className={`hidden px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-foreground ${cols}`}>
             <span>Card</span>
             <span className="text-center">Balance</span>
             <span className="text-center">Value per pt</span>
@@ -1693,7 +1711,7 @@ function MetricCell({
   if (omit) return <span aria-hidden className="hidden min-[420px]:block" />;
   return (
     <span className={`min-w-0 text-center ${empty ? "hidden min-[420px]:block" : "block"}`}>
-      <span className={`block text-[11px] font-semibold uppercase tracking-wide text-foreground/75 ${tableLg ? "lg:hidden" : ""}`}>
+      <span className={`block text-[11px] font-semibold uppercase tracking-wide text-foreground ${tableLg ? "lg:hidden" : ""}`}>
         {mobileLabel ? (
           <>
             <span className="sm:hidden">{mobileLabel}</span>
@@ -1702,7 +1720,7 @@ function MetricCell({
         ) : label}
       </span>
       <span className="block truncate text-[12px] leading-tight">
-        {empty ? <span className="text-foreground/75/60">&mdash;</span> : children}
+        {empty ? <span className="text-foreground/60">&mdash;</span> : children}
       </span>
     </span>
   );
@@ -1750,13 +1768,21 @@ function RewardsActivityLedger({
     </span>
   );
   const list = visibleEntries.length === 0 ? (
-    <p className="px-4 py-4 text-sm text-foreground/75">
+    <p className="px-4 py-4 text-sm text-foreground">
       {entries.length === 0
         ? "No rewards activity yet. Open a card and choose “Rewards Activity Log” to create the first entry."
         : `No rewards activity in ${yearsListLabel(year)}.`}
     </p>
   ) : (
     <ul className="divide-y divide-line bg-background/70">
+      {/* Column headers — desktop only; the phone row is stacked. */}
+      <li className="hidden px-4 py-2 text-xs font-semibold uppercase tracking-wide text-foreground sm:grid sm:grid-cols-[6.5rem_8.5rem_14rem_minmax(0,1fr)_auto] sm:gap-3">
+        <span className="text-center">Date</span>
+        <span className="text-center">Points</span>
+        <span>Card</span>
+        <span>Activity</span>
+        <span />
+      </li>
       {visibleEntries.map((entry) => {
         const amount = (
           <span className={`whitespace-nowrap font-semibold tabular-nums ${entry.pointsDelta > 0 || entry.hotelCreditDeltaCents > 0 ? "text-positive" : "text-negative"}`}>
@@ -1766,7 +1792,7 @@ function RewardsActivityLedger({
         const cash = entry.cash ? ` · ${formatMoney(entry.cash.cents, currency)} ${entry.cash.toAccountId ? "deposit" : "credit"}` : "";
         const detail = `${entry.cash ? "Cashed out" : labels[entry.type]}${cash}${entry.bookedOn ? ` · Booked ${entry.bookedOn}` : ""}${entry.note ? ` · ${entry.note}` : ""}`;
         return (
-        <li key={entry.id} className="flex items-center gap-3 px-4 py-2.5 text-xs hover:bg-black/[0.03] sm:grid sm:grid-cols-[5.5rem_11rem_minmax(0,1fr)_auto_auto] sm:gap-2 dark:hover:bg-white/[0.04]">
+        <li key={entry.id} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-sky-50 sm:grid sm:grid-cols-[6.5rem_8.5rem_14rem_minmax(0,1fr)_auto] sm:gap-3 dark:hover:bg-sky-950/40">
           {/* Every row opens the edit popup. It used to jump to the card
               and open its "Log points" form, which read as a new entry
               instead of the one you clicked. Delete keeps its own hit
@@ -1776,21 +1802,21 @@ function RewardsActivityLedger({
             onClick={() => setEditingId(entry.id)}
             className="min-w-0 flex-1 cursor-pointer text-left sm:contents"
           >
-            {/* Phone: card and amount on one line, date and detail under
+            {/* Phone: points then card on one line, date and detail under
                 it — four cells in a row left no room for the card name. */}
             <span className="block min-w-0 sm:hidden">
-              <span className="flex items-baseline justify-between gap-2">
-                <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
+              <span className="flex items-baseline gap-2">
                 {amount}
+                <span className="min-w-0 truncate font-semibold">{entry.cardName}</span>
               </span>
-              <span className="mt-0.5 block truncate text-foreground/75">
+              <span className="mt-0.5 block truncate text-foreground">
                 <span className="tabular-nums">{entry.occurredOn}</span> · {detail}
               </span>
             </span>
-            <span className="hidden text-foreground/75 tabular-nums sm:block">{entry.occurredOn}</span>
+            <span className="hidden text-center text-foreground tabular-nums sm:block">{entry.occurredOn}</span>
+            <span className="hidden text-center sm:block">{amount}</span>
             <span className="hidden min-w-0 truncate font-semibold sm:block">{entry.cardName}</span>
-            <span className="hidden min-w-0 truncate text-foreground/75 sm:block">{detail}</span>
-            <span className="hidden sm:block">{amount}</span>
+            <span className="hidden min-w-0 truncate text-foreground sm:block">{detail}</span>
           </button>
           {/* A booking's row is changed through the booking — deleting it here
               would give the points back while the booking still says paid. */}
@@ -1807,7 +1833,7 @@ function RewardsActivityLedger({
           picker stops the click. */}
       <div
         onClick={() => setExpanded(true)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
+        className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-2 px-4 py-3 transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         <button
           type="button"
@@ -1910,7 +1936,7 @@ function EditRewardActivityModal({
             value={direction === "used" ? "points_redemption" : direction === "earned" ? "points_earned" : "reward_refund"}
           />
           <div className="sm:col-span-2">
-            <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
+            <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Direction</span>
             <div className="inline-flex rounded-md ring-1 ring-line">
               {(["used", "earned", "returned"] as const).map((option) => (
                 <button
@@ -1919,7 +1945,7 @@ function EditRewardActivityModal({
                   aria-pressed={direction === option}
                   onClick={() => setDirection(option)}
                   className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                    direction === option ? "" : "text-foreground hover:bg-black/5 dark:hover:bg-white/10"
+                    direction === option ? "" : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
                   }`}
                   style={direction === option ? softPill(DIRECTION_TONE[option]) : undefined}
                 >
@@ -1943,12 +1969,12 @@ function EditRewardActivityModal({
             {...pointsCalcProps(points, setPoints)}
           />
           <div className="sm:col-span-2">
-            <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
+            <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Note (optional)</label>
             <input
               name="note"
               defaultValue={entry.note ?? ""}
               placeholder="Hotel, trip, confirmation, or redemption details"
-              className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </div>
           {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
@@ -2018,7 +2044,7 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
               <button
                 type="button"
                 onClick={() => { setConfirming(false); setError(null); }}
-                className="cursor-pointer px-1 text-xs font-medium text-foreground/75 hover:text-foreground"
+                className="cursor-pointer px-1 text-xs font-medium text-foreground hover:text-foreground"
               >
                 Cancel
               </button>
@@ -2028,7 +2054,7 @@ function RewardActivityRowActions({ entry, compact = false }: { entry: RewardAct
           <button
             type="button"
             onClick={() => setConfirming(true)}
-            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-xs font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-neutral-950 dark:hover:bg-negative/20"
+            className="cursor-pointer rounded-md border border-line bg-background px-2 py-1 text-xs font-semibold text-negative transition hover:border-negative/60 hover:bg-negative/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-negative dark:bg-sky-900/50 dark:hover:bg-negative/20"
           >
             Delete
           </button>
@@ -2048,15 +2074,17 @@ const CARD_TABLE_COLS =
 
 function CardTableHeader() {
   return (
-    <div className={`hidden border-b border-line bg-black/[0.03] px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-white/[0.04] ${CARD_TABLE_COLS}`}>
+    <div className={`hidden border-b border-line bg-sky-100 px-4 py-2.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-sky-900/50 ${CARD_TABLE_COLS}`}>
       <span className="pl-6 text-left">Card / Account</span>
       <span>Charging</span>
       <span>Current pts</span>
-      <span>Pts value</span>
-      <span>Value rate</span>
+      {/* Same words as each row's own labels below xl, so the two widths
+          never name a column differently. */}
+      <span>Total pts value</span>
+      <span>Value per pt</span>
       <span>Night credit</span>
-      <span>Benefit status</span>
-      <span>Owed</span>
+      <span>Benefit expires</span>
+      <span>Total owed</span>
       <span>Actions</span>
     </div>
   );
@@ -2070,7 +2098,7 @@ const BANK_STYLES = {
   amex: { chip: "from-sky-400 to-sky-700", tag: "bg-sky-50 text-sky-800 ring-sky-300 dark:bg-sky-950/50 dark:text-sky-300 dark:ring-sky-800" },
   cap1: { chip: "from-rose-600 to-rose-900", tag: "bg-rose-50 text-rose-800 ring-rose-300 dark:bg-rose-950/50 dark:text-rose-300 dark:ring-rose-800" },
   citi: { chip: "from-cyan-600 to-cyan-900", tag: "bg-cyan-50 text-cyan-800 ring-cyan-300 dark:bg-cyan-950/50 dark:text-cyan-300 dark:ring-cyan-800" },
-  other: { chip: "from-slate-500 to-slate-800", tag: "bg-slate-100 text-slate-700 ring-slate-300 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700" },
+  other: { chip: "from-slate-500 to-slate-800", tag: "bg-sky-100 text-foreground ring-sky-300 dark:bg-sky-900/50 dark:text-foreground dark:ring-sky-700" },
 } as const;
 
 // Capital One cards are the debt cards: red while their Budget debt still has
@@ -2225,7 +2253,7 @@ function CreditCardPanel({
             <button
               type="button"
               onClick={() => { setConfirmMark(false); setMarkError(null); }}
-              className="px-1 text-xs font-medium text-foreground/75 hover:text-foreground"
+              className="px-1 text-xs font-medium text-foreground hover:text-foreground"
             >
               Cancel
             </button>
@@ -2282,8 +2310,8 @@ function CreditCardPanel({
             {/* Labelled "Owner:" the way the authorized user is labelled "AU:"
                 — a bare name beside the bank chip read as another bank. */}
             {card.holder ? (
-              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
-                Owner: <span className="text-slate-700 dark:text-neutral-200">{card.holder}</span>
+              <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50 dark:text-foreground">
+                Owner: <span className="text-foreground dark:text-foreground">{card.holder}</span>
               </span>
             ) : null}
             {bank ? (
@@ -2295,7 +2323,7 @@ function CreditCardPanel({
                 holder -> bank -> who else can charge on it. The label stays
                 muted so it doesn't compete with the holder chip. */}
             {d?.authUser ? (
-              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-foreground/75 dark:bg-white/10">
+              <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50">
                 Authorized User: <span className="text-foreground">{d.authUser}</span>
               </span>
             ) : null}
@@ -2310,7 +2338,7 @@ function CreditCardPanel({
               </span>
             ) : null}
             {card.annualFeeCents && !card.feeWaived ? (
-              <span className="shrink-0 rounded bg-black/5 px-1.5 py-0.5 text-[11px] font-semibold text-foreground/75 dark:bg-white/10">
+              <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50">
                 Active Fee: <span className="text-negative">${Math.round(card.annualFeeCents / 100)}/yr</span>
               </span>
             ) : null}
@@ -2372,7 +2400,7 @@ function CreditCardPanel({
                         in the warning colour. */}
                     {fnDaysLeft != null ? (
                       <span
-                        className={`block text-[11px] font-bold ${fnUrgent ? "text-negative" : "text-foreground/75"}`}
+                        className={`block text-[11px] font-bold ${fnUrgent ? "text-negative" : "text-foreground"}`}
                       >
                         {expiryLabel(fnDaysLeft)}
                       </span>
@@ -2404,7 +2432,7 @@ function CreditCardPanel({
           {bonus ? (
             <span className="mt-2 block">
               <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
-                <span className="font-semibold uppercase tracking-wide text-foreground/75">Bonus spend</span>
+                <span className="font-semibold uppercase tracking-wide text-foreground">Bonus spend</span>
                 <span className="font-bold tabular-nums">
                   {bonus.spent == null ? "—" : formatMoneyWhole(bonus.spent, currency)} of{" "}
                   {formatMoneyWhole(bonus.required, currency)}
@@ -2417,12 +2445,12 @@ function CreditCardPanel({
                       : expiryLabel(bonus.days)}
                 </span>
                 {d?.bonusInfo ? (
-                  <span className="text-foreground/75">
+                  <span className="text-foreground">
                     for <span className="font-semibold text-foreground">{d.bonusInfo}</span> pts
                   </span>
                 ) : null}
               </span>
-              <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+              <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-sky-200 dark:bg-sky-900/50">
                 <span
                   className="block h-full rounded-full transition-[width]"
                   style={{ width: `${bonus.pct}%`, backgroundColor: bonus.color }}
@@ -2437,15 +2465,15 @@ function CreditCardPanel({
         <span className="ml-2 w-20 shrink-0 text-right sm:w-28">
           {/* Labelled: a bare red figure beside the chevron didn't say it was
               the card's unpaid balance. */}
-          <span className="block whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Total owed</span>
-          <span className={`block whitespace-nowrap text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-foreground/75"}`}>
+          <span className="block whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground">Total owed</span>
+          <span className={`block whitespace-nowrap text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : "text-foreground"}`}>
             {owed !== 0 ? formatMoneyWhole(owed, currency) : "—"}
           </span>
         </span>
         <svg
           width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          className={`mt-1 shrink-0 text-foreground/75 transition-transform ${expanded ? "" : "-rotate-90"}`}
+          className={`mt-1 shrink-0 text-foreground transition-transform ${expanded ? "" : "-rotate-90"}`}
           aria-hidden
         >
           <path d="M6 9l6 6 6-6" />
@@ -2460,7 +2488,7 @@ function CreditCardPanel({
             href={externalCardUrl(d.cardUrl)}
             target="_blank"
             rel="noreferrer"
-            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-12 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-neutral-950"
+            className="absolute right-[calc(0.75rem+15px+0.5rem)] top-12 inline-flex items-center gap-0.5 rounded-md border border-line bg-background px-1.5 py-0.5 text-xs font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 dark:bg-sky-900/50"
           >
             Visit site <span aria-hidden>↗</span>
           </a>
@@ -2474,7 +2502,7 @@ function CreditCardPanel({
           if ((e.target as HTMLElement).closest("a, [data-grip]")) return;
           toggleExpanded();
         }}
-        className={`hidden cursor-pointer px-4 py-3 transition-colors hover:bg-black/[0.02] dark:hover:bg-white/[0.03] ${CARD_TABLE_COLS}`}
+        className={`hidden cursor-pointer px-4 py-3 transition-colors hover:bg-sky-50 dark:hover:bg-sky-950/40 ${CARD_TABLE_COLS}`}
       >
         <span className="flex min-w-0 items-center gap-2">
           {!isArchived && onDragStart ? (
@@ -2504,7 +2532,7 @@ function CreditCardPanel({
                 <span className={`rounded px-1.5 font-semibold ring-1 ${bankStyle(bank, carryingDebt).tag}`}>{bank}</span>
               ) : null}
               {card.holder ? <span>· Owner: {card.holder}</span> : null}
-              {d?.authUser ? <span className="text-foreground/50">· AU: {d.authUser}</span> : null}
+              {d?.authUser ? <span className="text-foreground">· AU: {d.authUser}</span> : null}
               {card.annualFeeCents && !card.feeWaived ? (
                 <span>· Fee <span className="font-semibold text-negative">${Math.round(card.annualFeeCents / 100)}/yr</span></span>
               ) : null}
@@ -2512,7 +2540,7 @@ function CreditCardPanel({
             {bonus ? (
               <span className="mt-1 flex items-center gap-2 text-[11px]">
                 <span className="font-semibold uppercase tracking-wide text-muted">Bonus</span>
-                <span className="block h-1.5 w-24 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                <span className="block h-1.5 w-24 overflow-hidden rounded-full bg-sky-200 dark:bg-sky-900/50">
                   <span className="block h-full rounded-full" style={{ width: `${bonus.pct}%`, backgroundColor: bonus.color }} />
                 </span>
                 <span className="font-bold" style={{ color: bonus.color }}>
@@ -2525,7 +2553,7 @@ function CreditCardPanel({
         <span className="text-center">
           {d?.charging ? (
             // A break is allowed after a slash only ("iCloud/ Talkatone"), never mid-word.
-            <span className="inline-block max-w-full rounded-md bg-black/5 px-2 py-1 text-xs font-semibold dark:bg-white/10">{d.charging.replace(/\//g, "/\u200b")}</span>
+            <span className="inline-block max-w-full rounded-md bg-sky-100 px-2 py-1 text-xs font-semibold dark:bg-sky-900/50">{d.charging.replace(/\//g, "/\u200b")}</span>
           ) : DASH_CELL}
         </span>
         <span className="text-center text-sm font-semibold tabular-nums">
@@ -2540,7 +2568,7 @@ function CreditCardPanel({
             )
           ) : DASH_CELL}
         </span>
-        <span className="text-center text-xs font-semibold tabular-nums text-foreground/75">
+        <span className="text-center text-xs font-semibold tabular-nums text-foreground">
           {valuePerPt != null ? `${formatCentsPerPoint(valuePerPt)}/pt` : DASH_CELL}
         </span>
         <span className="text-center">
@@ -2560,7 +2588,7 @@ function CreditCardPanel({
               Check-in {shortDate(d.benefitUsedOn)}
             </span>
           ) : d?.benefitBookedOn ? (
-            <span className="inline-block whitespace-nowrap rounded-md bg-black/5 px-2 py-0.5 text-xs font-semibold text-foreground ring-1 ring-line dark:bg-white/10">
+            <span className="inline-block whitespace-nowrap rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold text-foreground ring-1 ring-line dark:bg-sky-900/50">
               Booked {shortDate(d.benefitBookedOn)}
             </span>
           ) : d?.freeNightExpiresOn ? (
@@ -2600,7 +2628,7 @@ function CreditCardPanel({
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 text-foreground/50 transition-transform ${expanded ? "" : "-rotate-90"}`}
+            className={`shrink-0 text-foreground transition-transform ${expanded ? "" : "-rotate-90"}`}
             aria-hidden
           >
             <path d="M6 9l6 6 6-6" />
@@ -2617,7 +2645,7 @@ function CreditCardPanel({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-black/[0.04] px-1.5 py-1.5 text-xs font-medium text-primary hover:bg-black/[0.08] sm:w-auto sm:shrink-0 sm:px-2 dark:bg-white/5 dark:hover:bg-white/10"
+              className="inline-flex w-full items-center justify-center gap-1 rounded-md bg-sky-100 px-1.5 py-1.5 text-xs font-medium text-primary hover:bg-sky-200 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-sky-900/50 dark:hover:bg-sky-900"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M12 20h9" />
@@ -2629,7 +2657,7 @@ function CreditCardPanel({
               <button
                 type="button"
                 onClick={() => setLoggingRewards(true)}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-neutral-950"
+                className="inline-flex w-full items-center justify-center gap-1 rounded-md border border-sky-700/35 bg-background px-1.5 py-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400 transition-colors hover:border-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 sm:w-auto sm:shrink-0 sm:px-2 dark:bg-sky-900/50"
               >
                 <span className="sm:hidden">Rewards</span><span className="hidden sm:inline">Rewards Activity Log</span>
               </button>
@@ -2862,7 +2890,7 @@ function RewardActivityForm({
           }
         />
         <div className="sm:col-span-2">
-          <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Direction</span>
+          <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Direction</span>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="inline-flex rounded-md ring-1 ring-line">
             {(["earned", "returned", "used"] as const).map((option) => (
@@ -2872,7 +2900,7 @@ function RewardActivityForm({
                 aria-pressed={direction === option}
                 onClick={() => setDirection(option)}
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                  direction === option ? "" : "text-foreground hover:bg-black/5 dark:hover:bg-white/10"
+                  direction === option ? "" : "text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 }`}
                 style={direction === option ? softPill(DIRECTION_TONE[option]) : undefined}
               >
@@ -2917,7 +2945,7 @@ function RewardActivityForm({
                       aria-pressed={receivedAs === option}
                       onClick={() => setReceivedAs(option)}
                       className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
-                        receivedAs === option ? "bg-black/10 text-foreground dark:bg-white/15" : "text-foreground/75 hover:bg-black/5 dark:hover:bg-white/10"
+                        receivedAs === option ? "bg-sky-200 text-foreground dark:bg-sky-900/50" : "text-foreground hover:bg-sky-200 dark:hover:bg-sky-900"
                       }`}
                     >
                       {option === "credit" ? "Statement credit" : "Deposit"}
@@ -2929,7 +2957,7 @@ function RewardActivityForm({
                     name="depositAccountId"
                     aria-label="Deposited into"
                     defaultValue={nonCardAccounts[0]?.id ?? ""}
-                    className="w-full min-w-0 cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 sm:w-auto sm:flex-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    className="w-full min-w-0 cursor-pointer rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 sm:w-auto sm:flex-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
                   >
                     {nonCardAccounts.map((a) => (
                       <option key={a.id} value={a.id}>{a.name}</option>
@@ -2941,8 +2969,8 @@ function RewardActivityForm({
           </>
         ) : null}
         <div className="sm:col-span-2">
-          <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Note (optional)</label>
-          <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
+          <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Note (optional)</label>
+          <input name="note" placeholder="Hotel, trip, confirmation, or redemption details" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
         </div>
         <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pt-1">
           <button type="submit" disabled={pending} className="shrink-0 rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800 disabled:opacity-60">{pending ? "Saving…" : "Add activity"}</button>
@@ -2951,7 +2979,7 @@ function RewardActivityForm({
       </form>
       {card.rewardActivities.length > 0 ? (
         <div className="mt-3 border-t border-line pt-2">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Recent rewards activity</p>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">Recent rewards activity</p>
           <ul className="space-y-1 text-xs">
             {card.rewardActivities.slice(0, 5).map((activity) => (
               // Delete lives on the row you are already looking at. It used
@@ -3006,7 +3034,7 @@ function EditCreditCardForm({
       className={`h-8 min-w-0 whitespace-nowrap px-1 text-xs font-semibold transition sm:px-2.5 sm:text-sm ${
         activeTab === id
           ? "text-sky-700 dark:text-sky-400 shadow-[inset_0_-2px_0_var(--color-sky-700)]"
-          : "text-foreground/75 hover:bg-slate-50 hover:text-foreground dark:hover:bg-neutral-900"
+          : "text-foreground hover:bg-sky-200 hover:text-foreground dark:hover:bg-sky-900"
       }`}
       aria-pressed={activeTab === id}
     >
@@ -3052,7 +3080,7 @@ function EditCreditCardForm({
         {/* Tab 1: Key fields (default) */}
         <div className={activeTab === "key" ? "" : "hidden"}>
           <div className="rounded-lg border border-line bg-background/60 p-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-slate-300 [&_select]:bg-white [&_select]:ring-slate-300 dark:[&_input]:bg-neutral-900 dark:[&_input]:ring-neutral-700 dark:[&_select]:bg-neutral-900 dark:[&_select]:ring-neutral-700">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-sky-300 [&_select]:bg-white [&_select]:ring-sky-300 dark:[&_input]:bg-neutral-900 dark:[&_input]:ring-sky-300 dark:[&_select]:bg-neutral-900 dark:[&_select]:ring-sky-300">
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
               <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
               <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
@@ -3062,7 +3090,7 @@ function EditCreditCardForm({
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
               <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
               <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground/75">Benefits reset</span>
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground">Benefits reset</span>
                 <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md px-2 py-1.5 text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-sky-500">
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
@@ -3080,7 +3108,7 @@ function EditCreditCardForm({
             <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
             <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
             <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
-            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-foreground/75">
+            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-foreground">
               <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-sky-700" />
               Fee waived (e.g. military benefit)
             </label>
@@ -3099,8 +3127,8 @@ function EditCreditCardForm({
               </datalist>
             </div>
             <label className="block">
-              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Rewards category</span>
-              <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Rewards category</span>
+              <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
                 <option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option>
               </select>
             </label>
@@ -3110,7 +3138,7 @@ function EditCreditCardForm({
                   href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-neutral-950 dark:text-sky-400 dark:hover:bg-sky-900/40"
+                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-sky-900/50 dark:text-sky-400 dark:hover:bg-sky-900/40"
                 >
                   TPG point values <span aria-hidden>↗</span>
                 </a>
@@ -3120,13 +3148,13 @@ function EditCreditCardForm({
             <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
             <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
             <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-foreground/75">
+            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-foreground">
               <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-sky-700" />
               Bonus earned
             </label>
             <div className="sm:col-span-2">
-              <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground/75">Remarks</label>
-              <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
+              <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Remarks</label>
+              <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
             </div>
           </div>
         </div>
@@ -3143,7 +3171,7 @@ function EditCreditCardForm({
               />
               <span>
                 Track this card as payoff debt
-                <span className="mt-0.5 block text-xs font-normal text-foreground/75">
+                <span className="mt-0.5 block text-xs font-normal text-foreground">
                   Off by default. Syncs balance, rate, and payment plan with Budget → Debt/Loans.
                 </span>
               </span>
@@ -3156,7 +3184,7 @@ function EditCreditCardForm({
               <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
               <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
             </div>
-            <p className="text-xs text-foreground/75">
+            <p className="text-xs text-foreground">
               APR % should be <span className="font-semibold">0</span> during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.
             </p>
           </div>
@@ -3183,7 +3211,7 @@ function EditCreditCardForm({
           </div>
           {confirmDelete ? (
             <span className="flex items-center gap-2">
-              <span className="text-xs text-foreground/75">Delete &quot;{card.name}&quot;?</span>
+              <span className="text-xs text-foreground">Delete &quot;{card.name}&quot;?</span>
               <button
                 type="button"
                 disabled={delPending}
@@ -3201,7 +3229,7 @@ function EditCreditCardForm({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(false)}
-                className="text-xs text-foreground/75 hover:text-foreground"
+                className="text-xs text-foreground hover:text-foreground"
               >
                 Cancel
               </button>

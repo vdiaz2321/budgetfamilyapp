@@ -455,7 +455,7 @@ export function FiSection({
               side by side. This used to be two long sentences, and because
               the plan spends more at retirement than at FI they quoted two
               different targets ($2.25M and $1.125M) with nothing saying why. */}
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground/80">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground">
             <button
               type="button"
               onClick={() => setEditing(true)}
@@ -482,13 +482,13 @@ export function FiSection({
                 <p className="text-center text-sm font-bold">
                   Income in {plan.targetRetireYear}
                   {plan.birthYear ? ` · age ${plan.targetRetireYear - plan.birthYear}` : ""}
-                  <span className="font-normal text-foreground/75"> · today&rsquo;s dollars</span>
+                  <span className="font-normal text-foreground"> · today&rsquo;s dollars</span>
                 </p>
                 {retireIncome.parts.length === 0 ? (
-                  <p className="mt-1 text-center text-xs text-foreground/80">No retirement income yet — add it in Edit assumptions.</p>
+                  <p className="mt-1 text-center text-xs text-foreground">No retirement income yet — add it in Edit assumptions.</p>
                 ) : (
                   <ul className="mt-1.5 divide-y divide-line/60 text-sm">
-                    <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+                    <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
                       <span />
                       <span className="flex shrink-0">
                         <span className="w-[4.5rem] text-right sm:w-20">Monthly</span>
@@ -545,7 +545,7 @@ export function FiSection({
                   </ul>
                 )}
                 {pension ? (
-                  <p className="mt-1.5 text-center text-xs text-foreground/80">
+                  <p className="mt-1.5 text-center text-xs text-foreground">
                     {/* Spelled out as the DFAS sum — service × 2.5% = the share of High-3 —
                         so the percentage is never a bare number to take on trust. */}
                     Retired pay{plan.targetRetireMonth ? ` from ${MONTHS[plan.targetRetireMonth - 1]} ${plan.targetRetireYear}` : ""}:{" "}
@@ -555,7 +555,7 @@ export function FiSection({
                     {pension.sbpTodayCents > 0 ? ` · after SBP of ${formatMoneyWhole(pension.sbpTodayCents, currency)}/mo` : ""}
                   </p>
                 ) : (
-                  <p className="mt-1.5 text-center text-xs text-foreground/80">Add service start and High-3 in Edit assumptions.</p>
+                  <p className="mt-1.5 text-center text-xs text-foreground">Add service start and High-3 in Edit assumptions.</p>
                 )}
               </div>
             ) : null}
@@ -637,7 +637,7 @@ export function FiSection({
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
               <p className="text-center text-sm font-bold">Bad-market test</p>
               <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-xs">
-                <span className="text-foreground/80">Drop in {shockYear}:</span>
+                <span className="text-foreground">Drop in {shockYear}:</span>
                 {[20, 30, 40].map((pct) => (
                   <button
                     key={pct}
@@ -647,7 +647,7 @@ export function FiSection({
                     className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${
                       dropPct === pct
                         ? "bg-negative/15 text-foreground ring-negative/30"
-                        : "bg-surface text-foreground/80 ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-white/10"
+                        : "bg-surface text-foreground ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
                     }`}
                   >
                     −{pct}%
@@ -696,7 +696,7 @@ export function FiSection({
                 </select>
               </p>
               <ul className="mt-1.5 divide-y divide-line/60 text-sm">
-                <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/75">
+                <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
                   <span>Family income</span>
                   <span className="flex shrink-0">
                     <span className="w-[4.5rem] text-right sm:w-20">Monthly</span>
@@ -773,11 +773,11 @@ export function FiSection({
                   bold
                 />
               </ul>
-              <p className="mt-1.5 text-center text-xs text-foreground/80">
+              <p className="mt-1.5 text-center text-xs text-foreground">
                 {plan.sbpEnabled ? "SBP: 55% of retired pay" : "No SBP: retired pay stops"} · VA and second job stop · larger Social Security kept
               </p>
               {insuranceCents === 0 && plan.survivorExtras.benefits.length === 0 ? (
-                <p className="mt-0.5 text-center text-xs text-foreground/80">Life insurance: add it in Accounts → Estate guide</p>
+                <p className="mt-0.5 text-center text-xs text-foreground">Life insurance: add it in Accounts → Estate guide</p>
               ) : null}
             </div>
           </div>
@@ -959,7 +959,7 @@ function FiChart({
           {gridlines.map((v) => (
             <span
               key={v}
-              className="absolute right-0 -translate-y-1/2 text-[11px] tabular-nums text-foreground/75"
+              className="absolute right-0 -translate-y-1/2 text-[11px] tabular-nums text-foreground"
               style={{ bottom: `${(v / top) * 100}%` }}
             >
               {axisMoney(v)}
@@ -1032,7 +1032,7 @@ function FiChart({
               style={{ left: `${centreOf(targetIndex)}%`, borderColor: MARKER_LINE }}
             >
               <span
-                className={`absolute z-10 top-5 whitespace-nowrap rounded bg-surface px-1 text-foreground/70 text-[11px] font-semibold ${
+                className={`absolute z-10 top-5 whitespace-nowrap rounded bg-surface px-1 text-foreground text-[11px] font-semibold ${
                   targetIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
@@ -1048,7 +1048,7 @@ function FiChart({
               style={{ left: `${centreOf(ssIndex)}%`, borderColor: MARKER_LINE }}
             >
               <span
-                className={`absolute z-10 top-10 whitespace-nowrap rounded bg-surface px-1 text-foreground/70 text-[11px] font-semibold ${
+                className={`absolute z-10 top-10 whitespace-nowrap rounded bg-surface px-1 text-foreground text-[11px] font-semibold ${
                   ssIndex > count / 2 ? "right-1" : "left-1"
                 }`}
               >
@@ -1071,7 +1071,7 @@ function FiChart({
             return (
               <span
                 key={y.year}
-                className="absolute top-0 flex flex-col items-center whitespace-nowrap text-[11px] tabular-nums leading-tight text-foreground/75"
+                className="absolute top-0 flex flex-col items-center whitespace-nowrap text-[11px] tabular-nums leading-tight text-foreground"
                 style={
                   first
                     ? { left: 0 }
@@ -1125,7 +1125,7 @@ function FiChart({
 
       {/* What the two bar colours mean. The chart has no hover state on
           purpose — the colours have to say it on their own. */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground/75">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground">
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block h-2 w-2.5 rounded-[1px]"
@@ -1170,7 +1170,7 @@ function ValueRow({
     <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
       <span className="min-w-0">
         {label}
-        {note ? <span className="block text-xs font-normal text-foreground/75">{note}</span> : null}
+        {note ? <span className="block text-xs font-normal text-foreground">{note}</span> : null}
       </span>
       <span className={`shrink-0 text-right tabular-nums ${tone}`}>{value}</span>
     </li>
@@ -1181,7 +1181,7 @@ function ValueRow({
 function Readout({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 text-center">
-      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75">{label}</p>
+      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</p>
       <p className="mt-0.5 truncate text-sm font-bold tabular-nums sm:text-base">{value}</p>
     </div>
   );
@@ -1545,9 +1545,9 @@ function PlanModal({
                 onChange={(e) => setSbpPct(e.target.value)}
                 disabled={!sbpEnabled}
                 aria-label="SBP rate %"
-                className="w-full min-w-0 rounded-md bg-background py-1.5 pl-2 pr-6 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full min-w-0 rounded-md bg-sky-50 dark:bg-background py-1.5 pl-2 pr-6 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
-              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground/75">%</span>
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground">%</span>
             </span>
           </span>
         </Field>
@@ -1570,7 +1570,7 @@ function PlanModal({
         ) : null}
 
         <h3 className={heading}>Healthcare in retirement</h3>
-        <p className="-mt-2 text-xs text-foreground/80 sm:col-span-2">
+        <p className="-mt-2 text-xs text-foreground sm:col-span-2">
           Yearly premiums for the family, in today&rsquo;s dollars. Each one is added to that year&rsquo;s spending.
         </p>
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
@@ -1578,7 +1578,7 @@ function PlanModal({
         <div className="space-y-2 sm:col-span-2">
           <span className="block text-[11px] font-bold uppercase tracking-wide text-foreground">Health plan (/yr)</span>
           {healthPlans.length === 0 ? (
-            <p className="text-xs text-foreground/80">No health plan premium before TRICARE For Life.</p>
+            <p className="text-xs text-foreground">No health plan premium before TRICARE For Life.</p>
           ) : null}
           {healthPlans.map((row) => (
             <div key={row.key} className="flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-x-3">
@@ -1586,7 +1586,7 @@ function PlanModal({
                 value={row.kind}
                 onChange={(e) => updateHealthPlan(row.key, { kind: e.target.value as HealthPlanKind })}
                 aria-label="Health plan"
-                className="w-40 cursor-pointer rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-44"
+                className="w-40 cursor-pointer rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-44"
               >
                 <option value="tricare_prime">TRICARE Prime</option>
                 <option value="tricare_select">TRICARE Select</option>
@@ -1598,7 +1598,7 @@ function PlanModal({
                 onChange={(e) => updateHealthPlan(row.key, { amount: e.target.value })}
                 placeholder="0.00"
                 aria-label="Premium per year"
-                className="w-24 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-28"
+                className="w-24 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-28"
               />
               <button
                 type="button"
@@ -1610,7 +1610,7 @@ function PlanModal({
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
-              <span className="basis-full text-xs leading-snug text-foreground/80 sm:basis-0 sm:flex-1">
+              <span className="basis-full text-xs leading-snug text-foreground sm:basis-0 sm:flex-1">
                 {row.kind === "private"
                   ? "Private or employer plan premium, from the month you retire until TRICARE For Life starts."
                   : `Retiree ${row.kind === "tricare_prime" ? "TRICARE Prime" : "TRICARE Select"} enrollment fee, from the month you retire until TRICARE For Life starts.`}
@@ -1695,7 +1695,7 @@ function PlanModal({
         </Field>
 
         <h3 className={heading}>Other income</h3>
-        <p className="-mt-2 text-xs text-foreground/80 sm:col-span-2">
+        <p className="-mt-2 text-xs text-foreground sm:col-span-2">
           Per month in today&rsquo;s dollars, before tax. If an amount changes, type an End Year on the old line,
           then + Add income with the new amount starting the year after.
         </p>
@@ -1756,7 +1756,7 @@ function PlanModal({
               <button
                 type="button"
                 onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
-                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 Remove
               </button>
@@ -1769,7 +1769,7 @@ function PlanModal({
               if (e.target.value) addLine(e.target.value as IncomeLineKind);
             }}
             aria-label="Add income"
-            className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-white/10"
+            className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-sky-950/40"
           >
             <option value="">+ Add income</option>
             {INCOME_LINE_KINDS.map((k) => (
@@ -1779,7 +1779,7 @@ function PlanModal({
         </div>
 
         <h3 className={heading}>Rental properties</h3>
-        <p className="-mt-2 text-xs text-foreground/80 sm:col-span-2">
+        <p className="-mt-2 text-xs text-foreground sm:col-span-2">
           Prices, rent and costs in today&rsquo;s dollars. Net rent counts as income (taxed when positive); equity
           (value − loan) counts toward net worth. Planning to buy? Fill it in here. Already own one? Add it on
           Accounts under Property, then pick it in Property.
@@ -1810,7 +1810,7 @@ function PlanModal({
                     {(() => {
                       const linkedLoan = plan.propertyAccounts.find((a) => a.id === r.propertyAccountId)?.loanCents ?? null;
                       return linkedLoan != null ? (
-                        <p className="col-span-2 self-center text-xs text-foreground/80">
+                        <p className="col-span-2 self-center text-xs text-foreground">
                           <span className="font-semibold">Loan {formatMoneyWhole(linkedLoan, currency)}</span> — the
                           mortgage linked to this property on Accounts.
                         </p>
@@ -1858,11 +1858,11 @@ function PlanModal({
                 <button
                   type="button"
                   onClick={() => setRentalDrafts((prev) => prev.filter((x) => x.key !== r.key))}
-                  className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                  className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
                   Remove
                 </button>
-                <p className="col-span-2 text-xs text-foreground/80 sm:col-span-4">
+                <p className="col-span-2 text-xs text-foreground sm:col-span-4">
                   {preview ? (
                     <>
                       {preview.first}:{" "}
@@ -1887,7 +1887,7 @@ function PlanModal({
           <button
             type="button"
             onClick={addRental}
-            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             + Add rental
           </button>
@@ -1951,7 +1951,7 @@ function MonthYear({
         value={month}
         onChange={(e) => onMonth(e.target.value)}
         aria-label={`${label} month`}
-        className="w-[5.5rem] shrink-0 cursor-pointer rounded-md bg-background px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-[5.5rem] shrink-0 cursor-pointer rounded-md bg-sky-50 dark:bg-background px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       >
         <option value="">Month</option>
         {MONTHS.map((m, i) => (
@@ -1967,14 +1967,14 @@ function MonthYear({
         onChange={(e) => onYear(e.target.value)}
         aria-label={`${label} year`}
         placeholder="Year"
-        className="w-full min-w-0 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-full min-w-0 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </span>
   );
 }
 
 const inputClass =
-  "w-28 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  "w-28 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 
 // Each field: bold title on top, then the box with its note beside it, so
 // the note explains the box it sits next to.
@@ -1984,7 +1984,7 @@ function Field({ label, hint, children }: { label: string; hint?: React.ReactNod
       <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-foreground">{label}</span>
       <span className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3">
         {children}
-        {hint ? <span className="text-xs leading-snug text-foreground/80">{hint}</span> : null}
+        {hint ? <span className="text-xs leading-snug text-foreground">{hint}</span> : null}
       </span>
     </label>
   );
@@ -2016,7 +2016,7 @@ function IncomeRow({
     <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
       <span className="min-w-0">
         {label}
-        {note ? <span className="block text-xs font-normal text-foreground/75">{note}</span> : null}
+        {note ? <span className="block text-xs font-normal text-foreground">{note}</span> : null}
       </span>
       <span className={`flex shrink-0 tabular-nums ${tone}`}>
         <span className="w-[4.5rem] text-right sm:w-20">{formatMoneyWhole(monthly, currency)}</span>
@@ -2049,13 +2049,13 @@ function Figure({
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
-      <div className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground/75">{label}</div>
+      <div className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</div>
       <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
         {value}
       </p>
-      {sub ? <p className={`text-[11px] leading-tight ${subClassName ?? "text-foreground/75"}`}>{sub}</p> : null}
+      {sub ? <p className={`text-[11px] leading-tight ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
       {bar != null ? (
-        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
           <div
             className="h-full rounded-full"
             style={{ width: `${Math.round(Math.min(1, Math.max(0, bar)) * 100)}%`, backgroundColor: "var(--viz-savings)" }}

@@ -417,7 +417,7 @@ function DebtCard({ row, color, selected, focus, classic, payoff, months, curren
   return (
     <button type="button" data-debt-card onClick={onClick} aria-pressed={selected} className={`flex w-[184px] shrink-0 flex-col overflow-hidden rounded-2xl border-2 text-left shadow-sm transition ${selected || focus ? "border-brand" : "border-transparent ring-1 ring-black/5 dark:ring-white/10"}`}>
       <div className={`px-3 py-2 ${color}`}>
-        <div className="flex h-5 items-center justify-between text-[10px] font-bold uppercase tracking-wide text-foreground/70">
+        <div className="flex h-5 items-center justify-between text-[10px] font-bold uppercase tracking-wide text-foreground">
           <span>{row.accountKind === "credit_card" ? "Credit card" : humanizeDebtKind(row.debtKind)}</span>
           {focus ? <span className="rounded-full bg-brand px-1.5 py-0.5 text-white">Focus</span> : null}
         </div>
@@ -826,7 +826,7 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
         <div className="grid sm:grid-cols-[210px_1fr]">
           <div className="space-y-4 border-b border-line p-4 sm:border-b-0 sm:border-r">
             <div className="border-b border-line pb-3 text-center"><p className="text-base font-bold tabular-nums">{formatMoney(row.minCents, currency)}</p><p className="text-[10px] text-muted">Required Minimum Payment</p></div>
-            <label className="block text-xs font-bold">Monthly Payment<input value={payment} onChange={(event) => setPayment(event.target.value)} type="number" min="0" step="0.01" className="mt-1 w-full rounded-md bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></label>
+            <label className="block text-xs font-bold">Monthly Payment<input value={payment} onChange={(event) => setPayment(event.target.value)} type="number" min="0" step="0.01" className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></label>
             <p className={`-mt-3 text-[10px] ${monthlyCents < row.minCents ? "text-negative" : "text-muted"}`}>
               {monthlyCents < row.minCents
                 ? `${formatMoney(monthlyCents, currency)} is less than your minimum payment.`
@@ -845,7 +845,7 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
                     choosePayoffMonth(`${y}-${event.target.value}-01`);
                   }}
                   aria-label="Payoff month"
-                  className="w-full rounded-md bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="w-full rounded-md bg-sky-50 dark:bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {!payoff ? <option value="">Beyond 40 years</option> : null}
                   {MONTHS_SHORT.map((label, i) => (
@@ -859,7 +859,7 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
                     choosePayoffMonth(`${event.target.value}-${m}-01`);
                   }}
                   aria-label="Payoff year"
-                  className="rounded-md bg-background px-2.5 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="rounded-md bg-sky-50 dark:bg-background px-2.5 py-1.5 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {!payoff ? <option value="">—</option> : null}
                   {Array.from({ length: 40 }, (_, i) => Number(startMonth.slice(0, 4)) + i).map((y) => (
@@ -869,7 +869,7 @@ function PayoffSimulator({ row, startMonth, currency, onClose }: { row: Row; sta
               </div>
             </fieldset>
             <p className="-mt-3 text-[10px] text-muted">Original payoff date: {baselinePayoff ? monthLabel(baselinePayoff) : "not projected"}.</p>
-            <label className="block text-xs font-bold">One-time extra this month<input value={oneTimeExtra} onChange={(event) => setOneTimeExtra(event.target.value)} type="number" min="0" step="0.01" className="mt-1 w-full rounded-md bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></label>
+            <label className="block text-xs font-bold">One-time extra this month<input value={oneTimeExtra} onChange={(event) => setOneTimeExtra(event.target.value)} type="number" min="0" step="0.01" className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></label>
             <p className="-mt-3 text-[10px] text-muted">Extra payments reduce principal immediately. Escrow is excluded.</p>
             {changed ? <button type="button" onClick={reset} className="text-xs font-semibold text-brand hover:underline">× Reset all changes</button> : null}
           </div>

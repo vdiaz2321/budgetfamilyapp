@@ -45,22 +45,22 @@ export default async function ResetPasswordPage({
   const hasRecoverySession = !!data.user;
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
+    <div className="min-h-screen bg-background">
       <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
-        <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-800">
+        <div className="rounded-2xl border border-line bg-surface p-8 shadow-sm">
           <p className="flex items-center gap-2 text-sm font-medium text-brand">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand text-xs font-bold text-white">
               C
             </span>
             Capitall
           </p>
-          <h1 className="mt-2 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="mt-2 text-2xl font-semibold text-foreground">
             Set a new password
           </h1>
 
           {!hasRecoverySession ? (
             <>
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              <p className="mt-2 text-sm text-foreground">
                 This reset link is invalid or has expired. Request a new one.
               </p>
               <p className="mt-6 text-sm">
@@ -74,7 +74,7 @@ export default async function ResetPasswordPage({
             </>
           ) : (
             <>
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              <p className="mt-2 text-sm text-foreground">
                 Pick a new password. You&apos;ll be signed in after saving.
               </p>
 
@@ -82,7 +82,7 @@ export default async function ResetPasswordPage({
                 <div>
                   <label
                     htmlFor="password"
-                    className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    className="block text-sm font-medium text-foreground"
                   >
                     New password
                   </label>
@@ -94,14 +94,14 @@ export default async function ResetPasswordPage({
                     minLength={6}
                     autoComplete="new-password"
                     autoFocus
-                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                    className="mt-1 w-full rounded-lg border border-line bg-sky-50 px-3 py-2 text-sm dark:bg-background text-foreground shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>
 
                 <div>
                   <label
                     htmlFor="confirm"
-                    className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    className="block text-sm font-medium text-foreground"
                   >
                     Confirm password
                   </label>
@@ -112,7 +112,7 @@ export default async function ResetPasswordPage({
                     required
                     minLength={6}
                     autoComplete="new-password"
-                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                    className="mt-1 w-full rounded-lg border border-line bg-sky-50 px-3 py-2 text-sm dark:bg-background text-foreground shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                   />
                 </div>
 

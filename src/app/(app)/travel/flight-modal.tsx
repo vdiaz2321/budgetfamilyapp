@@ -444,7 +444,7 @@ export function FlightModal({
         className="grid grid-cols-1 gap-3"
       >
         {flight?.cancelledAt ? (
-          <p className="rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
+          <p className="rounded-md bg-sky-100 px-3 py-2 text-xs font-semibold text-muted dark:bg-sky-900/50">
             Cancelled booking — kept on record, left out of every total.
           </p>
         ) : null}
@@ -609,14 +609,14 @@ export function FlightModal({
                 onBlur={() => setCountDraft(null)}
                 // Compact, to sit level with the currency and points pickers
                 // beside it.
-                className="h-7 w-14 rounded-md bg-background px-2 text-center text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="h-7 w-14 rounded-md bg-sky-50 dark:bg-background px-2 text-center text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
             </label>
             {/* Beside Total: the names are who the passenger rows pick from. */}
             <button
               type="button"
               onClick={() => setEditingNames((v) => !v)}
-              className="rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+              className="rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               {editingNames ? "Done editing names" : "Edit family names"}
             </button>
@@ -630,7 +630,7 @@ export function FlightModal({
               className={`h-7 ${PILL_CONTROL}`}
               buttonText={
                 <>
-                  <span className="text-foreground/80">Paid with points:</span>
+                  <span className="text-foreground">Paid with points:</span>
                   {pointsSummary}
                 </>
               }
@@ -928,7 +928,7 @@ export function FlightModal({
                 // restoring a cancelled booking is harmless and stays neutral.
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
                   flight.cancelledAt
-                    ? "ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
                     : "text-negative ring-negative/60 hover:bg-negative/10"
                 }`}
               >
@@ -949,7 +949,7 @@ export function FlightModal({
               type="button"
               onClick={onClose}
               disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/5"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>
@@ -1052,7 +1052,7 @@ function TravellerEditor({ travellers }: { travellers: Traveller[] }) {
           type="button"
           disabled={pending || !newName.trim()}
           onClick={() => run(() => addTraveller(newName), () => setNewName(""))}
-          className="rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 disabled:opacity-50 dark:hover:bg-white/10"
+          className="rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 disabled:opacity-50 dark:hover:bg-sky-950/40"
         >
           Add name
         </button>

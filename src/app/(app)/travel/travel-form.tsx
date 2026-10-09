@@ -52,7 +52,7 @@ export function CurrencySelect({ value, onChange }: { value: string; onChange: (
     // grey label read as disabled (Victor, 2026-09-30). Same look as the
     // form's "Paid with points" picker beside it.
     <label className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold ${PILL_CONTROL}`}>
-      <span className="text-foreground/80">Select if using other currency:</span>
+      <span className="text-foreground">Select if using other currency:</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -191,7 +191,7 @@ export function MoreDetailsToggle({ open, onToggle, className }: { open: boolean
       type="button"
       onClick={onToggle}
       aria-expanded={open}
-      className={`flex w-full items-center gap-2 rounded-md border border-dashed border-line px-3 py-2 text-left text-xs font-semibold text-foreground transition hover:bg-black/5 dark:hover:bg-white/10 ${className ?? ""}`}
+      className={`flex w-full items-center gap-2 rounded-md border border-dashed border-line px-3 py-2 text-left text-xs font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${className ?? ""}`}
     >
       <svg
         aria-hidden

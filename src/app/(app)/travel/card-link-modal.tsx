@@ -97,7 +97,7 @@ export function CardLinkModal({
               <select
                 value={picked[row.label] ?? ""}
                 onChange={(e) => setPicked((p) => ({ ...p, [row.label]: e.target.value }))}
-                className="w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
               >
                 <option value="">Not linked</option>
                 {cards.map((c) => (

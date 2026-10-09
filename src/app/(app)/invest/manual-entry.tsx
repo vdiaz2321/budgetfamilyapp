@@ -175,7 +175,7 @@ export function AddMonthForm({
       </p>
 
       {existing && ledger ? (
-        <p className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-black/5 px-2 py-1.5 text-[11px] dark:bg-white/10">
+        <p className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-sky-100 px-2 py-1.5 text-[11px] dark:bg-sky-900/50">
           <span className="text-muted">{month} is already on file at {formatMoney(existing.endingBalanceCents, currency)}. Saving replaces it.</span>
           <button
             type="button"
@@ -285,7 +285,7 @@ export function AddHoldingsForm({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => setRows((current) => [...current, blankHolding()])} className="rounded-md bg-black/5 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20">Add another holding</button>
+        <button type="button" onClick={() => setRows((current) => [...current, blankHolding()])} className="rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900">Add another holding</button>
         <span className="text-[11px] text-muted">{filled.length} holding{filled.length === 1 ? "" : "s"} · {formatMoney(total, currency)}</span>
       </div>
 

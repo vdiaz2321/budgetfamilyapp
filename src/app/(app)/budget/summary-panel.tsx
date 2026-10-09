@@ -160,7 +160,7 @@ export function SummaryPanel({ groups, currency }: Props) {
             // Fixed width, sized to the longest option: an auto-width select
             // re-measures itself on every choice, which slid the whole control
             // left and right as the label changed length.
-            className="w-40 cursor-pointer appearance-none truncate rounded-md bg-transparent py-0.5 pl-1.5 pr-5 text-xs text-muted transition hover:bg-black/5 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 dark:hover:bg-white/10"
+            className="w-40 cursor-pointer appearance-none truncate rounded-md bg-transparent py-0.5 pl-1.5 pr-5 text-xs text-muted transition hover:bg-sky-50 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/50 dark:hover:bg-sky-950/40"
           >
             <option value="remaining">Planned by category</option>
             <option value="spent">Spent by category</option>

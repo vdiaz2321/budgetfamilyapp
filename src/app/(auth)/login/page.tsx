@@ -78,23 +78,23 @@ export default async function LoginPage({
   const isSignup = mode === "signup";
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
+    <div className="min-h-screen bg-background">
       <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
-        <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-800">
+        <div className="rounded-2xl border border-line bg-surface p-8 shadow-sm">
           <p className="flex items-center gap-2 text-sm font-medium text-brand">
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand text-xs font-bold text-white">
               C
             </span>
             Capitall
           </p>
-          <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-zinc-100 p-1 text-sm font-semibold dark:bg-zinc-900">
+          <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-sky-100 p-1 text-sm font-semibold dark:bg-sky-900/50">
             <a
               href="/login"
               className={
                 "rounded-lg py-2 text-center transition " +
                 (!isSignup
-                  ? "bg-white text-brand shadow-sm dark:bg-zinc-800"
-                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200")
+                  ? "bg-surface text-brand shadow-sm"
+                  : "text-foreground")
               }
             >
               Sign in
@@ -104,18 +104,18 @@ export default async function LoginPage({
               className={
                 "rounded-lg py-2 text-center transition " +
                 (isSignup
-                  ? "bg-white text-brand shadow-sm dark:bg-zinc-800"
-                  : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200")
+                  ? "bg-surface text-brand shadow-sm"
+                  : "text-foreground")
               }
             >
               Register
             </a>
           </div>
 
-          <h1 className="mt-5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
+          <h1 className="mt-5 text-2xl font-semibold text-foreground">
             {isSignup ? "Create your account" : "Welcome back"}
           </h1>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="mt-2 text-sm text-foreground">
             {isSignup
               ? "Pick an email and a password. You'll use these on every device."
               : "Enter your email and password."}
@@ -139,7 +139,7 @@ export default async function LoginPage({
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-sm font-medium text-foreground"
               >
                 Email
               </label>
@@ -151,14 +151,14 @@ export default async function LoginPage({
                 autoComplete="email"
                 autoFocus
                 defaultValue={email}
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                className="mt-1 w-full rounded-lg border border-line bg-sky-50 px-3 py-2 text-sm dark:bg-background text-foreground shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
               />
             </div>
 
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                className="block text-sm font-medium text-foreground"
               >
                 Password
               </label>
@@ -170,7 +170,7 @@ export default async function LoginPage({
                 minLength={6}
                 autoComplete={isSignup ? "new-password" : "current-password"}
                 placeholder={isSignup ? "At least 6 characters" : ""}
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                className="mt-1 w-full rounded-lg border border-line bg-sky-50 px-3 py-2 text-sm dark:bg-background text-foreground shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
               />
             </div>
 

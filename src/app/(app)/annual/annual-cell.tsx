@@ -60,7 +60,7 @@ export function MoneyCell({
         onToggle();
       }}
       aria-pressed={active}
-      className={`mx-auto w-full rounded-md px-1 py-0.5 text-center text-[18px] tabular-nums tracking-[-0.01em] transition hover:bg-black/[0.06] dark:hover:bg-white/[0.10] ${
+      className={`mx-auto w-full rounded-md px-1 py-0.5 text-center text-[18px] tabular-nums tracking-[-0.01em] transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${
         // One weight class only: two competing ones resolve by stylesheet
         // order, not by which is listed last. Medium by default (regular reads
         // thin at 18px); a caller's own weight, e.g. the bold Remaining row, wins.

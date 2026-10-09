@@ -526,7 +526,7 @@ export function TravelBoard({
   // The year picker sits in the log's header, beside Open full width — the
   // same place the Travel Log keeps its own.
   const yearSelect = (
-    <YearPicker years={logYears} value={year} onChange={pickYear} label="Bookings Log year" />
+    <YearPicker years={logYears} value={year} onChange={pickYear} label="Hotels/Flights/Rentals Log year" />
   );
 
   const reservations = (
@@ -545,7 +545,7 @@ export function TravelBoard({
                     className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
                       bfastOnly
                         ? "text-white ring-transparent"
-                        : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                        : "bg-background ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
                     }`}
                     style={bfastOnly ? { backgroundColor: "var(--viz-bills)" } : undefined}
                   >
@@ -560,7 +560,7 @@ export function TravelBoard({
                     className={`rounded-md px-2 py-1 text-xs font-semibold ring-1 transition ${
                       ptsOnly
                         ? "text-white ring-transparent"
-                        : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                        : "bg-background ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
                     }`}
                     style={ptsOnly ? { backgroundColor: "var(--viz-savings)" } : undefined}
                   >
@@ -570,7 +570,7 @@ export function TravelBoard({
                     <select
                       value={brand}
                       onChange={(e) => setBrand(e.target.value)}
-                      className="rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                      className="rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
                     >
                       <option value={ALL}>All brands</option>
                       {brands.map((b) => <option key={b} value={b}>{b}</option>)}
@@ -587,7 +587,7 @@ export function TravelBoard({
                       const [key, dir] = e.target.value.split(":");
                       setSort({ key: key as SortKey, dir: dir as "asc" | "desc" });
                     }}
-                    className="self-center rounded-md bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:hidden"
+                    className="self-center rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 sm:hidden"
                   >
                     <option value="checkIn:desc">Newest check-in</option>
                     <option value="checkIn:asc">Oldest check-in</option>
@@ -628,9 +628,11 @@ export function TravelBoard({
               {/* Desktop: the sheet's own columns, in the sheet's own order.
                   Annual fee, Year and Card owner are the three the app doesn't
                   carry — everything else is here, left to right, as typed. */}
-              <div className="hidden overflow-x-auto sm:block">
+              {/* Scrolls in its own bounded box so the header row stays
+                  frozen — sticky does nothing in a box with no height. */}
+              <div className="hidden max-h-[55vh] overflow-auto sm:block">
                 <table className="w-full min-w-[1180px] text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-surface">
                     <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
                       <SortTh label="Reservation made" col="reservedOn" sort={sort} onSort={sortBy} nowrap />
                       <SortTh label="Check in date" col="checkIn" sort={sort} onSort={sortBy} nowrap />
@@ -653,7 +655,7 @@ export function TravelBoard({
                       <tr
                         key={s.id}
                         onClick={() => setEditing(s)}
-                        className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${s.cancelledAt ? "opacity-55" : ""}`}
+                        className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-50 dark:hover:bg-sky-950/40 ${s.cancelledAt ? "opacity-55" : ""}`}
                       >
                         <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">{sheetDate(s.reservedOn)}</td>
                         <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{sheetDate(s.checkIn)}</td>
@@ -664,12 +666,12 @@ export function TravelBoard({
                             {s.propertyName}
                           </span>
                           {s.cancelledAt ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-sky-100 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-sky-900/50">
                               Cancelled
                             </span>
                           ) : null}
                           {s.isEstimate ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-sky-100 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-sky-900/50">
                               Planned
                             </span>
                           ) : null}
@@ -744,18 +746,18 @@ export function TravelBoard({
                     <button
                       type="button"
                       onClick={() => setEditing(s)}
-                      className={`w-full px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${s.cancelledAt ? "opacity-55" : ""}`}
+                      className={`w-full px-4 py-3 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${s.cancelledAt ? "opacity-55" : ""}`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <span className="min-w-0 flex-1 text-sm font-semibold">
                           <span className={s.cancelledAt ? "line-through" : ""}>{s.propertyName}</span>
                           {s.cancelledAt ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-sky-100 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-sky-900/50">
                               Cancelled
                             </span>
                           ) : null}
                           {s.isEstimate ? (
-                            <span className="ml-1.5 rounded bg-black/5 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-white/10">
+                            <span className="ml-1.5 rounded bg-sky-100 px-1 py-0.5 text-[11px] font-bold uppercase tracking-wide text-muted dark:bg-sky-900/50">
                               Planned
                             </span>
                           ) : null}
@@ -829,7 +831,7 @@ export function TravelBoard({
         <button
           type="button"
           onClick={() => setEditing(s)}
-          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
+          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40 sm:px-6"
         >
           {/* Two lines, not one. Sharing a line with the trip
               details left the name a `truncate` box ~30px wide
@@ -842,8 +844,8 @@ export function TravelBoard({
               <span className="min-w-0 text-sm font-semibold sm:truncate">{s.propertyName}</span>
               {/* Same chip as the card panel's "Owner:" / "Bank:". */}
               {s.brand ? (
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
-                  Booked Thru: <span className="text-slate-700 dark:text-neutral-200">{s.brand}</span>
+                <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50 dark:text-foreground">
+                  Booked Thru: <span className="text-foreground dark:text-foreground">{s.brand}</span>
                 </span>
               ) : null}
             </span>
@@ -907,14 +909,14 @@ export function TravelBoard({
           <button
             type="button"
             onClick={() => setEditingFlight(f)}
-            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
+            className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40 sm:px-6"
           >
             <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:min-w-[16rem] sm:basis-0">
               <span className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
                 <span className="truncate text-sm font-semibold">{stops.join(" → ") || f.airline}</span>
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
+                <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50 dark:text-foreground">
                   {f.airline}
-                  {f.bookingCode ? <span className="text-slate-700 dark:text-neutral-200"> · {f.bookingCode}</span> : null}
+                  {f.bookingCode ? <span className="text-foreground dark:text-foreground"> · {f.bookingCode}</span> : null}
                 </span>
               </span>
               {/* The next flight: its date, number, time and route. */}
@@ -959,14 +961,14 @@ export function TravelBoard({
         <button
           type="button"
           onClick={() => setEditingCar(c)}
-          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] sm:px-6"
+          className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40 sm:px-6"
         >
           <span className="flex min-w-0 flex-1 basis-full flex-col gap-y-0.5 sm:min-w-[16rem] sm:basis-0">
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate text-sm font-semibold">{c.company ?? "Car rental"}</span>
               {c.bookingCode ? (
-                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 dark:bg-neutral-800 dark:text-neutral-400">
-                  Booking: <span className="text-slate-700 dark:text-neutral-200">{c.bookingCode}</span>
+                <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground dark:bg-sky-900/50 dark:text-foreground">
+                  Booking: <span className="text-foreground dark:text-foreground">{c.bookingCode}</span>
                 </span>
               ) : null}
             </span>
@@ -1011,7 +1013,7 @@ export function TravelBoard({
   // ---- The Bookings log: one kind at a time, picked by these chips. On the
   // page header a chip also opens the log; inside the popup it just switches.
   const kindChips = (opens: boolean) => (
-    <span className="inline-flex rounded-lg bg-black/5 p-0.5 dark:bg-white/10" role="group" aria-label="Booking kind">
+    <span className="inline-flex rounded-lg bg-sky-100 p-0.5 dark:bg-sky-900/50" role="group" aria-label="Booking kind">
       {BOOKING_KINDS.map(({ key, label }) => {
         const active = logKind === key;
         return (
@@ -1093,7 +1095,7 @@ export function TravelBoard({
 
   // The stays tally's Brand / Card switch.
   const tallySwitch = (opens: boolean) => (
-    <span className="inline-flex rounded-lg bg-black/5 p-0.5 dark:bg-white/10" role="group" aria-label="Tally by">
+    <span className="inline-flex rounded-lg bg-sky-100 p-0.5 dark:bg-sky-900/50" role="group" aria-label="Tally by">
       {(["brands", "cards"] as const).map((key) => (
         <button
           key={key}
@@ -1139,7 +1141,7 @@ export function TravelBoard({
           {rows.map(([y, row]) => (
             <tr
               key={y}
-              className={`border-b border-line/60 last:border-0 ${year.includes(y) ? "bg-black/[0.03] dark:bg-white/[0.06]" : ""}`}
+              className={`border-b border-line/60 last:border-0 ${year.includes(y) ? "bg-sky-100 dark:bg-sky-900/50" : ""}`}
             >
               <td
                 className="sticky left-0 z-10 px-2 py-2 text-center font-semibold tabular-nums"
@@ -1319,10 +1321,10 @@ export function TravelBoard({
               <button
                 type="button"
                 onClick={() => setLinking(true)}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 Link cards
-                <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[11px] tabular-nums text-muted dark:bg-white/10">
+                <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] tabular-nums text-muted dark:bg-sky-900/50">
                   {unlinked} unlinked
                 </span>
               </button>
@@ -1380,7 +1382,7 @@ export function TravelBoard({
                opens it full width on that kind; the hotel sheet's 14 columns
                only fit there. */}
           <Panel
-            title="Bookings Log"
+            title="Hotels/Flights/Rentals Log"
             titleClassName={HEAD_TITLE_COL}
             meta={logFigures(HEAD_FIGURE_COLS)}
             control={
@@ -1453,9 +1455,22 @@ export function TravelBoard({
           still hide the last columns on a laptop. */}
       {expanded ? (
         <ModalShell
-          title="Bookings Log"
+          // No title: the Hotels / Flights / Rentals tabs name it.
+          title={null}
           onClose={() => setExpanded(false)}
-          className="sm:max-w-[96vw]"
+          // A fixed height, not a content-sized one: the short Flights list
+          // shrank the popup and re-centred it, so switching tabs made the
+          // whole thing jump up and down.
+          className="h-[95vh] sm:h-[85vh] sm:max-w-[96vw]"
+          // Totals get their own line under the title, flush left — kept out
+          // of the controls row so Hotels' extra "cash saved" figure can't
+          // re-wrap the header when switching tabs.
+          headerActionsBelow
+          headerActions={
+            // On a phone Hotels' three totals wrap to two lines; holding
+            // every tab to that height keeps the list from shifting.
+            <span className="flex min-h-[47px] flex-wrap content-start items-center gap-x-4 gap-y-1 sm:min-h-0">{logFigures()}</span>
+          }
           headerExtra={
             <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
               {kindChips(false)}
@@ -1464,13 +1479,12 @@ export function TravelBoard({
                 onClick={() => setUpcomingOnly((v) => !v)}
                 aria-pressed={upcomingOnly}
                 className={`rounded-md px-2.5 py-1 text-xs font-semibold ring-1 transition ${
-                  upcomingOnly ? "text-white ring-transparent" : "bg-background ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                  upcomingOnly ? "text-white ring-transparent" : "bg-background ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 }`}
                 style={upcomingOnly ? { backgroundColor: "var(--viz-savings)" } : undefined}
               >
                 Upcoming only
               </button>
-              {logFigures()}
               {upcomingOnly ? null : (
                 <>
                   <SearchBox value={query} onChange={setQuery} placeholder="Search…" label="Search bookings" className="w-44" />
@@ -1629,7 +1643,7 @@ function Panel({
           between. The control stops the click so its own menu still works. */}
       <div
         onClick={onExpand ?? onToggle}
-        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-black/[0.03] dark:hover:bg-white/[0.06] ${inlineOpen ? "border-b border-line" : ""} ${onExpand ? "gap-y-2 px-4 py-3" : ""}`}
+        className={`flex cursor-pointer flex-wrap items-center transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${inlineOpen ? "border-b border-line" : ""} ${onExpand ? "gap-y-2 px-4 py-3" : ""}`}
       >
       <button
         type="button"
@@ -1656,7 +1670,9 @@ function Panel({
               <path d="M5 7.5 10 12.5 15 7.5" />
             </svg>
           )}
-          <span className="truncate text-sm font-bold sm:text-base">{title}</span>
+          {/* One line, never cut off: the title column (HEAD_TITLE_COL) is sized to
+              the longest title, "All Trips Categories Breakdown". */}
+          <span className="text-sm font-bold sm:whitespace-nowrap sm:text-base">{title}</span>
         </span>
         {meta ? (
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{meta}</span>
@@ -1686,7 +1702,7 @@ function Panel({
 /** Column widths shared by the Upcoming trips, All Trips and Bookings Log
  *  headers, so their titles and first three figures line up down the page.
  *  Each is a minimum sized to its widest figure today, with a little room. */
-export const HEAD_TITLE_COL = "sm:w-[9.5rem]";
+export const HEAD_TITLE_COL = "sm:w-[18rem]";
 export const HEAD_FIGURE_COLS = ["sm:min-w-[7.75rem]", "sm:min-w-[10.25rem]", "sm:min-w-[11.75rem]"] as const;
 
 /** The two diagonal arrows: this header opens a full-width popup. */

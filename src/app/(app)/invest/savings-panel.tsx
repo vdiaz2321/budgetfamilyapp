@@ -192,7 +192,7 @@ function CapsEditor({
             onChange={(e) => setElectiveDeferral(e.target.value)}
             inputMode="decimal"
             placeholder="24,500"
-            className="w-full rounded-lg bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
         <label className="block">
@@ -204,7 +204,7 @@ function CapsEditor({
             onChange={(e) => setIra(e.target.value)}
             inputMode="decimal"
             placeholder="7,500"
-            className="w-full rounded-lg bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
         {error ? <p className="text-xs font-semibold text-negative">{error}</p> : null}
@@ -212,7 +212,7 @@ function CapsEditor({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-2 text-xs font-semibold text-muted transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="rounded-lg px-3 py-2 text-xs font-semibold text-muted transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Cancel
           </button>
@@ -273,7 +273,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               that has to be visible while collapsed. */}
           {pendingYear ? (
             <span
-              className="shrink-0 whitespace-nowrap rounded-full bg-black/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide dark:bg-white/10"
+              className="shrink-0 whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide dark:bg-sky-900/50"
               style={{ color: "var(--viz-savings)" }}
             >
               {pendingYear} caps due
@@ -779,7 +779,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             inputMode="decimal"
-            className="w-full rounded-lg bg-background px-2.5 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2.5 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
         <label className="block">
@@ -788,7 +788,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
             value={monthly}
             onChange={(e) => setMonthly(e.target.value)}
             inputMode="decimal"
-            className="w-full rounded-lg bg-background px-2.5 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2.5 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
         <label className="block">
@@ -797,7 +797,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
             type="date"
             value={targetDate}
             onChange={(e) => setTargetDate(e.target.value)}
-            className="w-full rounded-lg bg-background px-2.5 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-2.5 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
       </div>

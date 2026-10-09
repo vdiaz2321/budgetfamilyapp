@@ -158,7 +158,7 @@ export function CarModal({
       >
         {embed || car ? null : <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!defaultTripId} />}
         {car?.cancelledAt ? (
-          <p className="rounded-md bg-black/5 px-3 py-2 text-xs font-semibold text-muted dark:bg-white/10">
+          <p className="rounded-md bg-sky-100 px-3 py-2 text-xs font-semibold text-muted dark:bg-sky-900/50">
             Cancelled booking — kept on record, left out of every total.
           </p>
         ) : null}
@@ -343,7 +343,7 @@ export function CarModal({
                 // restoring a cancelled booking is harmless and stays neutral.
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
                   car.cancelledAt
-                    ? "ring-line hover:bg-black/5 dark:hover:bg-white/10"
+                    ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
                     : "text-negative ring-negative/60 hover:bg-negative/10"
                 }`}
               >
@@ -364,7 +364,7 @@ export function CarModal({
               type="button"
               onClick={onClose}
               disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/5"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>

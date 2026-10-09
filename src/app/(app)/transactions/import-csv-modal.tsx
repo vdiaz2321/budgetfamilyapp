@@ -145,7 +145,7 @@ export function ImportCsvModal({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/5"
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 Cancel
               </button>

@@ -137,7 +137,7 @@ export function CurrencyConverter({
           <button
             type="button"
             onClick={() => setAmount("")}
-            className="rounded-md bg-black/5 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
+            className="rounded-md bg-sky-100 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
           >
             Clear
           </button>

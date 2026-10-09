@@ -488,7 +488,7 @@ export function InvestBoard({
               </span>
             </button>
             {showGuide ? (
-              <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground/80">
+              <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground">
                 <p className="mb-3 text-xs text-muted">Review each investment account against its year-end statement.</p>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg bg-surface/60 px-3 py-2.5">
@@ -767,7 +767,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
           >
             {addingHoldings ? "Close" : "Add holdings"}
           </button>
-          <button type="button" onClick={onImport} className="rounded-lg bg-black/5 px-3 py-2 text-xs lg:text-sm font-semibold text-foreground transition hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/20">Import CSV</button>
+          <button type="button" onClick={onImport} className="rounded-lg bg-sky-100 px-3 py-2 text-xs lg:text-sm font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900">Import CSV</button>
         </div>
       </div>
 
@@ -808,7 +808,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
               <select
                 value={destination?.key ?? ""}
                 onChange={(event) => { setDestKey(event.target.value); setAddingMonth(false); }}
-                className="rounded-md bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 {destinationGroups.map((group) => (
                   <optgroup key={group} label={group}>
@@ -889,7 +889,7 @@ function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerforma
         </thead>
         <tbody className="divide-y divide-line">
           {rows.map((row) => <tr key={row.asOfDate}>
-            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-black/5 px-1.5 py-0.5 text-[10px] lg:text-xs font-medium text-muted dark:bg-white/10">Manual</span> : null}</td>
+            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] lg:text-xs font-medium text-muted dark:bg-sky-900/50">Manual</span> : null}</td>
             <td className="px-3 py-2 text-center tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
@@ -1464,7 +1464,7 @@ function PerfTable({
         </svg>
         <h2 className="flex flex-1 items-center gap-2 text-sm lg:text-base font-bold">
           {title}
-          <span className="rounded bg-black/5 px-1.5 py-0.5 text-xs lg:text-sm font-semibold text-muted dark:bg-white/10">{year}</span>
+          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs lg:text-sm font-semibold text-muted dark:bg-sky-900/50">{year}</span>
           <span className="text-xs lg:text-sm font-normal text-muted">{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0)} account{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0) === 1 ? "" : "s"}</span>
         </h2>
         {collapsed && (
@@ -1656,7 +1656,7 @@ function PerfTable({
                         const bc = b.cells[year];
                         return (
                           <tr key={b.id} className="border-t border-line/40 bg-background/20 text-[13px] lg:text-[15px]">
-                            <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-foreground/80">
+                            <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-foreground">
                               <span className="text-brand-strong">↳</span> <span className="ml-1">{b.name}</span>
                             </td>
                             {showStart ? (
@@ -2198,7 +2198,7 @@ function TransferModal({
               required
               value={sourceAccountId}
               onChange={(e) => { setSourceAccountId(e.target.value); setSourceBucketId(""); }}
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Select investment account</option>
               {accounts.map((a) => (
@@ -2214,7 +2214,7 @@ function TransferModal({
               <select
                 value={sourceBucketId}
                 onChange={(e) => setSourceBucketId(e.target.value)}
-                className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 <option value="">Entire account (no specific bucket)</option>
                 {srcAccount!.buckets.map((b) => (
@@ -2231,7 +2231,7 @@ function TransferModal({
               required
               value={destAccountId}
               onChange={(e) => setDestAccountId(e.target.value)}
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Select destination account</option>
               {destAccounts.map((a) => (
@@ -2253,7 +2253,7 @@ function TransferModal({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg border border-line bg-background py-2 pl-7 pr-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background py-2 pl-7 pr-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
           </label>
@@ -2266,7 +2266,7 @@ function TransferModal({
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>
 
@@ -2278,7 +2278,7 @@ function TransferModal({
               placeholder="Transfer note (optional)"
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
-              className="w-full rounded-lg border border-line bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>
 

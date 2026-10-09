@@ -50,7 +50,7 @@ export function TransferEditorModal({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md p-1 text-muted hover:bg-black/5 hover:text-foreground dark:hover:bg-white/10"
+          className="rounded-md p-1 text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"
           aria-label="Close"
         >
           ✕
@@ -78,7 +78,7 @@ export function TransferEditorModal({
               inputMode="decimal"
               defaultValue={centsToGroupedDisplay(transfer.amountCents)}
               required
-              className="w-full rounded-lg bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </Field>
           <Field label="Date">
@@ -87,7 +87,7 @@ export function TransferEditorModal({
               type="date"
               defaultValue={transfer.date}
               required
-              className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </Field>
         </div>
@@ -101,7 +101,7 @@ export function TransferEditorModal({
               setFromBucketId("");
             }}
             required
-            className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             {movable.map((account) => (
               <option key={account.id} value={account.id}>{account.name}</option>
@@ -115,7 +115,7 @@ export function TransferEditorModal({
               value={fromBucketId}
               onChange={(event) => setFromBucketId(event.target.value)}
               required
-              className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Choose a bucket…</option>
               {fromBuckets.map((bucket) => (
@@ -134,7 +134,7 @@ export function TransferEditorModal({
               setToBucketId("");
             }}
             required
-            className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             {movable.map((account) => (
               <option key={account.id} value={account.id}>{account.name}</option>
@@ -148,7 +148,7 @@ export function TransferEditorModal({
               value={toBucketId}
               onChange={(event) => setToBucketId(event.target.value)}
               required
-              className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Choose a bucket…</option>
               {toBuckets.map((bucket) => (
@@ -162,7 +162,7 @@ export function TransferEditorModal({
           <input
             name="memo"
             defaultValue={transfer.memo ?? ""}
-            className="w-full rounded-lg bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </Field>
 
@@ -181,7 +181,7 @@ export function TransferEditorModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:bg-black/5 dark:hover:bg-white/10"
+              className="rounded-lg px-3 py-2 text-sm font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>

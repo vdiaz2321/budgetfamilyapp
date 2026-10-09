@@ -46,7 +46,7 @@ export default function ThemeToggle() {
       aria-label={mounted ? `Theme: ${LABEL[mode]} — click for ${LABEL[next]}` : "Theme"}
       title={mounted ? `Theme: ${LABEL[mode]} — click for ${LABEL[next]}` : "Theme"}
       suppressHydrationWarning
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/20 text-slate-400 transition hover:border-white/40 hover:text-white"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/20 text-foreground transition hover:border-white/40 hover:text-white"
     >
       {!mounted ? (
         <span className="block h-[18px] w-[18px]" aria-hidden />

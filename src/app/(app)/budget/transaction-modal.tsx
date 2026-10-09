@@ -45,7 +45,7 @@ const HEADER_TINT: Record<CategoryKind, string> = {
 const BTN_COLOR: Record<CategoryKind, string> = {
   income: "bg-emerald-200 hover:bg-emerald-300 dark:bg-emerald-800/70 dark:hover:bg-emerald-700",
   savings: "bg-sky-600 hover:bg-sky-700",
-  bills: "bg-slate-700 hover:bg-slate-800 dark:bg-neutral-500 dark:hover:bg-neutral-400",
+  bills: "bg-teal-700 hover:bg-teal-800",
   expenses: "bg-rose-100 hover:bg-rose-200 dark:bg-rose-900/50 dark:hover:bg-rose-900/70",
   debt: "bg-rose-600 hover:bg-rose-700",
 };
@@ -667,7 +667,7 @@ function TransactionModalForm({
               an add. Only exception: a locked initial kind (debt/savings from
               the Budget row context) still shows its own tab. */}
           {initialKind === "debt" || initialKind === "savings" ? (
-            <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+            <div className="flex gap-1.5 rounded-xl bg-sky-50 p-1.5 ring-1 ring-line dark:bg-background">
               <div
                 className={
                   "flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-semibold shadow-sm ring-1 ring-line " +
@@ -678,7 +678,7 @@ function TransactionModalForm({
               </div>
             </div>
           ) : (
-            <div className="flex gap-1.5 rounded-xl bg-background p-1.5 ring-1 ring-line">
+            <div className="flex gap-1.5 rounded-xl bg-sky-50 p-1.5 ring-1 ring-line dark:bg-background">
               {(["income", "expenses"] as const).map((kind) => (
                 <button
                   key={kind}
@@ -795,7 +795,7 @@ function TransactionModalForm({
                 type="button"
                 onClick={() => setAccountPickerOpen(true)}
                 className={
-                  "flex w-full items-center justify-between gap-2 rounded-xl bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand " +
+                  "flex w-full items-center justify-between gap-2 rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand " +
                   (missingAccount ? "ring-2 ring-negative" : "ring-1 ring-line")
                 }
               >
@@ -823,7 +823,7 @@ function TransactionModalForm({
                   type="button"
                   onClick={() => setPickerOpen(true)}
                   className={
-                    "w-full truncate rounded-xl bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+                    "w-full truncate rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
                     (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
                   }
                 >
@@ -854,7 +854,7 @@ function TransactionModalForm({
                   clearErrors();
                 }}
                 className={
-                  "w-[9.5rem] rounded-xl bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm " +
+                  "w-[9.5rem] rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm " +
                   (missingDate ? "ring-2 ring-negative" : "ring-1 ring-line")
                 }
               />
@@ -896,7 +896,7 @@ function TransactionModalForm({
                 name="bucketId"
                 value={selectedBucketId}
                 onChange={(e) => setSelectedBucketId(e.target.value)}
-                className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
                 <option value="">Bucket (optional)</option>
                 {availableBuckets.map((b) => (
@@ -912,7 +912,7 @@ function TransactionModalForm({
               <select
                 name="propertyId"
                 defaultValue={editTx?.propertyId ?? ""}
-                className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
                 <option value="">Property (optional)</option>
                 {propertyOptions.map((p) => (
@@ -933,7 +933,7 @@ function TransactionModalForm({
                     // A booking belongs to one trip; changing trips unlinks it.
                     pickBooking("");
                   }}
-                  className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                 >
                   <option value="">Not part of a trip</option>
                   {tripChoices.map((t) => (
@@ -945,7 +945,7 @@ function TransactionModalForm({
                     name="bookingRef"
                     value={bookingOk ? bookingRef : ""}
                     onChange={(e) => pickBooking(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className="mt-2 w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     <option value="">Pays for: day-to-day spending</option>
                     {bookings.map((b) => (
@@ -1007,7 +1007,7 @@ function TransactionModalForm({
                     name="travelCategory"
                     value={travelCategory}
                     onChange={(e) => setTravelCategory(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className="mt-2 w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     {columnChoices.map((key) => (
                       <option key={key} value={key}>
@@ -1025,7 +1025,7 @@ function TransactionModalForm({
                     name="foodColumn"
                     value={foodColumn}
                     onChange={(e) => setFoodColumn(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className="mt-2 w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     {(["restaurants", "groceries"] as const).map((key) => (
                       <option key={key} value={key}>
@@ -1053,7 +1053,7 @@ function TransactionModalForm({
               type="text"
               placeholder="Add a note (optional)"
               defaultValue={editTx?.memo ?? initialMemo ?? ""}
-              className="w-full rounded-xl bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+              className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
             {/* Delete moved into the footer next to Refund so all row-level
                 controls sit on one line — see the bottom action bar below. */}
@@ -1356,7 +1356,7 @@ function AmountInput({
             const v = parseFloat(e.target.value);
             onChangeCents(isNaN(v) ? 0 : Math.round(v * 100));
           }}
-          className={`w-full rounded-xl bg-background py-2.5 pr-2 text-base font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-brand ${invalid ? "ring-2 ring-negative" : "ring-1 ring-line"} ${focused ? "pl-3" : "pl-7"}`}
+          className={`w-full rounded-xl bg-sky-50 dark:bg-background py-2.5 pr-2 text-base font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-brand ${invalid ? "ring-2 ring-negative" : "ring-1 ring-line"} ${focused ? "pl-3" : "pl-7"}`}
         />
       </div>
     </div>
@@ -1412,7 +1412,7 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
             commit(raw);
           }
         }}
-        className="w-24 rounded-lg bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-24 rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       {focused ? (
         /* Wider than the input it belongs to — the negative margin keeps its
@@ -1435,7 +1435,7 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
                 if (k.ch === "=") { commit(raw); return; }
                 insertAtCaret(k.ch);
               }}
-              className="flex-1 rounded-lg bg-black/[0.06] px-1 py-2.5 text-base font-semibold tabular-nums text-foreground active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
+              className="flex-1 rounded-lg bg-sky-100 px-1 py-2.5 text-base font-semibold tabular-nums text-foreground active:bg-sky-200 dark:bg-sky-900/50 dark:active:bg-sky-900"
             >
               {k.label}
             </button>
@@ -1536,7 +1536,7 @@ function AccountPicker({
                 onClose();
               }
             }}
-            className="w-full rounded-xl bg-background py-2 pl-9 pr-3 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm"
+            className="w-full rounded-xl bg-sky-50 dark:bg-background py-2 pl-9 pr-3 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm"
           />
         </div>
       </div>
@@ -1561,9 +1561,9 @@ function AccountPicker({
                   data-account-id={account.id}
                   type="button"
                   onClick={() => onSelect(account.id)}
-                  className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left transition hover:bg-black/[0.03] active:bg-brand-soft/40 dark:hover:bg-white/[0.06] ${active ? "sm:bg-sky-100 sm:hover:bg-sky-100 sm:dark:bg-sky-400/15 sm:dark:hover:bg-sky-400/15" : ""} ${selected ? "bg-black/[0.04] dark:bg-white/[0.08]" : ""}`}
+                  className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left transition hover:bg-sky-200 active:bg-brand-soft/40 dark:hover:bg-sky-900 ${active ? "sm:bg-sky-100 sm:hover:bg-sky-100 sm:dark:bg-sky-400/15 sm:dark:hover:bg-sky-400/15" : ""} ${selected ? "bg-sky-100 dark:bg-sky-900/50" : ""}`}
                 >
-                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${selected ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition ${selected ? "border-brand bg-brand text-white" : "border-sky-400 bg-transparent dark:border-sky-600"}`}>
                     {selected ? (
                       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                         <path d="m2 6 3 3 5-5" />
@@ -1610,7 +1610,7 @@ function PickerRow({
       onClick={() => onToggle(option.id)}
       className={`flex w-full items-center gap-3 border-b border-line/40 px-4 py-3.5 text-left last:border-b-0 active:bg-brand-soft/40 ${active ? "sm:bg-sky-100 sm:dark:bg-sky-400/15" : ""}`}
     >
-      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked ? "border-brand bg-brand text-white" : "border-zinc-400 bg-transparent dark:border-zinc-600"}`}>
+      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${checked ? "border-brand bg-brand text-white" : "border-sky-400 bg-transparent dark:border-sky-600"}`}>
         {checked && (
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M2 6l3 3 5-5" />
@@ -1777,7 +1777,7 @@ function BudgetItemPicker({
                 onClose();
               }
             }}
-            className="w-full rounded-xl bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-xl bg-sky-50 dark:bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
       </div>
@@ -1926,7 +1926,7 @@ function PayeeField({
         }}
         onKeyDown={handleKeyDown}
         className={
-          "w-full rounded-xl bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+          "w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
           (invalid ? "ring-2 ring-negative" : "ring-1 ring-line")
         }
       />

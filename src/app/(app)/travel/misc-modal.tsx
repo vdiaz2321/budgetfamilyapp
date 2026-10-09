@@ -439,7 +439,7 @@ export function MiscModal({
               type="button"
               onClick={onClose}
               disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/5"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>

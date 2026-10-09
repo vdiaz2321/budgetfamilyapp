@@ -75,7 +75,7 @@ export function PropertyRollupPanel({ properties, monthLabels, currentMonthLabel
         type="button"
         onClick={() => setCollapse({ open: !open })}
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-black/5 dark:hover:bg-white/10"
+        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
       >
         <Chevron open={open} />
         <span className="font-semibold">Properties</span>
@@ -130,7 +130,7 @@ function PropertyCard({
         type="button"
         onClick={() => setCollapse({ open: !open })}
         aria-expanded={open}
-        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 bg-black/[0.03] px-3 py-2 text-left transition hover:bg-black/[0.06] dark:bg-white/[0.05] dark:hover:bg-white/[0.08]"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 bg-sky-100 px-3 py-2 text-left transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
       >
         <Chevron open={open} small />
         <span
@@ -139,7 +139,7 @@ function PropertyCard({
         />
         <span className="text-[15px] font-bold">{property.name}</span>
         {property.subtype ? (
-          <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-white/10">
+          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-sky-900/50">
             {property.subtype}
           </span>
         ) : null}

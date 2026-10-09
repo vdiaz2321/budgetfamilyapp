@@ -51,7 +51,7 @@ function BulkAddModal({ groups, onClose }: { groups: GroupData[]; onClose: () =>
             name="categoryId"
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
-            className="rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           >
             {groups.map((g) => (
               <option key={g.categoryId} value={g.categoryId}>{g.name}</option>
@@ -68,7 +68,7 @@ function BulkAddModal({ groups, onClose }: { groups: GroupData[]; onClose: () =>
             value={names}
             onChange={(e) => setNames(e.target.value)}
             placeholder={"Tithes\nInternet\nMobile\nSales Taxes"}
-            className="rounded-xl bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
 

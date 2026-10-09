@@ -27,7 +27,7 @@ export function SearchBox({
         }}
         placeholder={placeholder}
         aria-label={label}
-        className="w-full rounded-md bg-background py-1 pl-2 pr-6 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+        className="w-full rounded-md bg-sky-50 dark:bg-background py-1 pl-2 pr-6 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
       />
       {value ? (
         <button

@@ -51,7 +51,7 @@ export function AirlinePicker({
 
   return (
     <div ref={box} className="relative">
-      <div className="flex items-center gap-1 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
+      <div className="flex items-center gap-1 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
         <input
           ref={input}
           value={open ? query : value}
@@ -113,7 +113,7 @@ export function AirlinePicker({
                 <button
                   type="button"
                   onClick={() => pick("")}
-                  className="w-full px-2 py-1.5 text-left text-sm text-muted transition hover:bg-black/5 dark:hover:bg-white/10"
+                  className="w-full px-2 py-1.5 text-left text-sm text-muted transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                 >
                   Clear
                 </button>
@@ -124,7 +124,7 @@ export function AirlinePicker({
                 <button
                   type="button"
                   onClick={() => pick(a)}
-                  className={`w-full px-2 py-1.5 text-left text-sm transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                  className={`w-full px-2 py-1.5 text-left text-sm transition hover:bg-sky-50 dark:hover:bg-sky-950/40 ${
                     a === value ? "font-semibold" : ""
                   }`}
                 >
@@ -140,7 +140,7 @@ export function AirlinePicker({
             <button
               type="button"
               onClick={() => pick(typed)}
-              className="w-full border-t border-line px-2 py-2 text-left text-sm font-semibold transition hover:bg-black/5 dark:hover:bg-white/10"
+              className="w-full border-t border-line px-2 py-2 text-left text-sm font-semibold transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Use “{typed}”
             </button>

@@ -403,7 +403,7 @@ function ChartSection({
             className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
               showPlan
                 ? "bg-positive text-white"
-                : "bg-black/5 text-muted hover:text-foreground dark:bg-white/10"
+                : "bg-sky-100 text-muted hover:text-foreground dark:bg-sky-900/50"
             }`}
           >
             Plan
@@ -416,7 +416,7 @@ function ChartSection({
           className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
             compare
               ? "bg-brand text-white"
-              : "bg-black/5 text-muted hover:text-foreground dark:bg-white/10"
+              : "bg-sky-100 text-muted hover:text-foreground dark:bg-sky-900/50"
           }`}
         >
           Compare accounts
@@ -455,7 +455,7 @@ function ChartSection({
       {/* Said once the toggle is on, since the button alone can't say where
           the accounts are picked. */}
       {compare && selectedRows.length === 0 ? (
-        <p className="px-4 pb-2 text-xs text-foreground/80">
+        <p className="px-4 pb-2 text-xs text-foreground">
           <span className="font-semibold text-foreground">Compare:</span> tap account names in Monthly Actual Balances.
         </p>
       ) : null}
@@ -994,7 +994,7 @@ function EditableBalanceCell({
           e.currentTarget.blur();
         }}
         onBlur={(e) => submitIfChanged(e.currentTarget.value)}
-        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center tabular-nums transition placeholder:text-muted hover:bg-black/5 focus:bg-surface focus:outline-none focus:ring-2 dark:hover:bg-white/10 ${
+        className={`w-full min-w-0 rounded-md bg-transparent px-1 py-0.5 text-center tabular-nums transition placeholder:text-muted hover:bg-sky-50 focus:bg-surface focus:outline-none focus:ring-2 dark:hover:bg-sky-950/40 ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1841,7 +1841,7 @@ function YearPicker({
         aria-label="Year"
         value={year}
         onChange={(e) => onYearChange(e.target.value)}
-        className="cursor-pointer rounded-lg bg-background px-2 py-1 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="cursor-pointer rounded-lg bg-sky-50 dark:bg-background px-2 py-1 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       >
         <option value="all">All</option>
         {years.map((y) => (
@@ -2333,7 +2333,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
                         <button
                           type="button"
                           onClick={() => setEditingMonth(r.p)}
-                          className="rounded px-1 py-0.5 underline decoration-dotted underline-offset-2 transition hover:bg-black/5 dark:hover:bg-white/10"
+                          className="rounded px-1 py-0.5 underline decoration-dotted underline-offset-2 transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                         >
                           {r.label}
                         </button>
@@ -2472,7 +2472,7 @@ function HistoryMonthEditor({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Close
           </button>
@@ -2536,7 +2536,7 @@ function AddPastYear({ currency }: { currency: string }) {
         min={1990}
         max={new Date().getFullYear() - 1}
         required
-        className="w-20 rounded-md bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-20 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       <span className="text-xs text-muted">Net worth</span>
       <div className="flex items-center gap-0.5">
@@ -2548,7 +2548,7 @@ function AddPastYear({ currency }: { currency: string }) {
           inputMode="decimal"
           placeholder="0.00"
           required
-          className="w-28 rounded-md bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-28 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </div>
       <button

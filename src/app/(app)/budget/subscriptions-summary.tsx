@@ -452,7 +452,7 @@ function DueCell({
               setEditing(false);
             }
           }}
-          className="w-[6.5rem] rounded-lg bg-background px-1.5 py-1 text-center text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-[6.5rem] rounded-lg bg-sky-50 dark:bg-background px-1.5 py-1 text-center text-xs ring-1 ring-brand focus:outline-none focus:ring-2 focus:ring-brand"
         />
       </div>
     );

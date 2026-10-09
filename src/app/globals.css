@@ -17,9 +17,9 @@
   --background: #faf8f4; /* subtle warm off-white app canvas */
   --surface: #ffffff; /* cards */
   --foreground: #111827; /* gray-900 */
-  /* gray-600, not gray-500: secondary text was too faint to read on a phone
-     (Victor, 2026-09-27). ~7:1 on the canvas. */
-  --muted: #4b5563;
+  /* Same ink as --foreground: Victor rejects grey text app-wide (2026-10-08),
+     so "muted" text is told apart by size and weight, never by a lighter grey. */
+  --muted: #111827;
   --border: #e5e7eb; /* gray-200 */
 
   /* Capitall brand — muted blue primary (purple retired 2026-09-25: Victor
@@ -82,7 +82,7 @@
   --background: #202124;
   --surface: #292a2d;
   --foreground: #e8eaed;
-  --muted: #bdc1c6; /* lighter than #9aa0a6 for the same reason */
+  --muted: #e8eaed; /* same ink as --foreground — no grey text */
   --border: #3c4043;
 
   --brand: #8aa9d8; /* soft steel blue — calm on charcoal, dark label on it */
@@ -164,11 +164,6 @@
   --color-emerald-900: #224e34;
   --color-emerald-950: #132c1e;
 }
-
-/* Travel page: its small labels and secondary figures read too faint at the
-   default --muted, so the page darkens it (light) and lifts it (dark). */
-.ink-strong { --muted: #374151; }
-:root[data-theme="dark"] .ink-strong { --muted: #e3e5e8; }
 
 @theme inline {
   --color-background: var(--background);

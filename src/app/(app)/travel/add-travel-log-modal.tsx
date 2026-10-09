@@ -202,7 +202,7 @@ export function AddTravelLogModal({
                   }}
                   autoComplete="off"
                   aria-label="Trip name"
-                  className="h-8 w-full rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  className="h-8 w-full rounded-md bg-sky-50 dark:bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
                 {/* Hangs under the box on wider screens so the dates stay level
                     with it. A name matching a saved trip says so on the same line —
@@ -229,7 +229,7 @@ export function AddTravelLogModal({
               value={startOn}
               onChange={(e) => typeDate("start", e.target.value)}
               aria-label="Trip starts"
-              className="h-8 min-w-0 rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="h-8 min-w-0 rounded-md bg-sky-50 dark:bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </label>
           <label className="flex min-w-0 items-center gap-1.5">
@@ -239,7 +239,7 @@ export function AddTravelLogModal({
               value={endOn}
               onChange={(e) => typeDate("end", e.target.value)}
               aria-label="Trip ends"
-              className="h-8 min-w-0 rounded-md bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+              className="h-8 min-w-0 rounded-md bg-sky-50 dark:bg-background px-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
             />
           </label>
         </div>
@@ -265,7 +265,7 @@ export function AddTravelLogModal({
               onClick={() => !isSaved && setOpen((o) => ({ ...o, [kind]: !o[kind] }))}
               aria-expanded={isOpen}
               disabled={isSaved}
-              className="flex w-full cursor-pointer items-center gap-2 bg-black/[0.04] px-5 py-3 text-left transition hover:bg-black/[0.08] disabled:cursor-default disabled:hover:bg-black/[0.04] dark:bg-white/[0.06] dark:hover:bg-white/[0.1] dark:disabled:hover:bg-white/[0.06]"
+              className="flex w-full cursor-pointer items-center gap-2 bg-sky-100 px-5 py-3 text-left transition hover:bg-sky-200 disabled:cursor-default disabled:hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900 dark:disabled:hover:bg-sky-900"
             >
               <span
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-sm font-bold ring-1 ${
@@ -376,13 +376,13 @@ export function AddTravelLogModal({
           </div>
         ) : null}
         {confirmDiscard ? (
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-black/5 px-3 py-2 text-sm dark:bg-white/10">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-sky-100 px-3 py-2 text-sm dark:bg-sky-900/50">
             <span className="font-medium">Throw away what you typed?</span>
             <span className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setConfirmDiscard(false)}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-black/5 dark:hover:bg-white/10"
+                className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
               >
                 Keep editing
               </button>
@@ -401,7 +401,7 @@ export function AddTravelLogModal({
             type="button"
             onClick={requestClose}
             disabled={pending}
-            className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/5"
+            className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
           >
             Cancel
           </button>
