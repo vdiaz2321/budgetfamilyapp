@@ -426,9 +426,15 @@ export default async function InvestPage({
   // January, so it already contains them: growth measured from it must leave
   // them out, or January's deposits are subtracted twice.
   const janContribBy = new Map<string, number>();
+  // The same, summed over the whole account. A split account that opens on its
+  // own snapshot (rather than through its buckets) opens on a balance holding
+  // every bucket's January deposits, not just the account slot's.
+  const janContribByAccount = new Map<string, number>();
   for (const c of janContribRows ?? []) {
     const key = investSlotKey(c.account_id, c.bucket_id ?? null, c.year);
     janContribBy.set(key, (janContribBy.get(key) ?? 0) + (c.net_contribution_cents ?? 0));
+    const accountKey = `${c.account_id}:${c.year}`;
+    janContribByAccount.set(accountKey, (janContribByAccount.get(accountKey) ?? 0) + (c.net_contribution_cents ?? 0));
   }
 
   // Stored/reviewed rows.
@@ -472,6 +478,8 @@ export default async function InvestPage({
     fallbackEnd: number | null,
     /** Snapshot slot this cell reads balances from — null when it has none. */
     snapshotId: string | null,
+    /** The slot opens on the whole account's snapshot, buckets included. */
+    opensWholeAccount = false,
   ): YearCell {
     const key = investSlotKey(accountId, bucketKey === "_" ? null : bucketKey, year);
     const stored = storedBy.get(key);
@@ -505,10 +513,11 @@ export default async function InvestPage({
     // deposits are already in `start`, so only February onward counts here.
     const janAlreadyIn =
       stored?.start == null && snapshotId != null && openedOnJanuary(snapshotId, year)
-        ? janContribBy.get(key) ?? 0
+        ? (opensWholeAccount ? janContribByAccount.get(`${accountId}:${year}`) : janContribBy.get(key)) ?? 0
         : 0;
     const autoAccrued =
-      start != null && end != null ? end - start - (contributed - janAlreadyIn) : 0;    const accrued = stored?.accruedManual ? stored.accrued : autoAccrued;
+      start != null && end != null ? end - start - (contributed - janAlreadyIn) : 0;
+    const accrued = stored?.accruedManual ? stored.accrued : autoAccrued;
 
     return {
       year,
@@ -524,6 +533,7 @@ export default async function InvestPage({
       // that resolveContributedCents then ignores for the year in progress, so
       // the table renders these read-only instead of pretending they take.
       contribFromLedger: year === nowYear && contribBy.has(key),
+      openingContribCents: janAlreadyIn,
     };
   }
 
@@ -591,6 +601,7 @@ export default async function InvestPage({
         year,
         fallbackEnd,
         acctBuckets.length > 0 && bucketsOpenYear.has(year) ? null : a.id,
+        acctBuckets.length > 0,
       );
     }
 
@@ -618,13 +629,18 @@ export default async function InvestPage({
     })
     .reduce((sum, row) => sum + (row.net_contribution_cents ?? 0), 0);
 
+  // Where a withdrawal can land: banking accounts (Kids Funding ones named as
+  // such), with their buckets — a bucketed account must name the bucket.
+  // Cards aren't offered: paying a card is its own flow on Accounts.
   const destAccounts = allAccounts
-    .filter(
-      (a) =>
-        a.active &&
-        (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "credit_card"),
-    )
-    .map((a) => ({ id: a.id, name: a.name }));
+    .filter((a) => a.active && (a.kind === "checking" || a.kind === "savings_bucket" || a.kind === "cash"))
+    .map((a) => ({
+      id: a.id,
+      name: a.is_kids_account ? `${a.name} (Kids Funding)` : a.name,
+      buckets: (bucketRows ?? [])
+        .filter((b) => b.account_id === a.id)
+        .map((b) => ({ id: b.id, name: b.name })),
+    }));
 
   // ---- Imported holdings & performance -------------------------------------
 
@@ -1074,6 +1090,7 @@ export default async function InvestPage({
       monthNetCents,
       transactions: txsBySub.get(s.id) ?? [],
       isKids,
+      isInvestment: slot ? investIds.has(slot.accountId) : false,
     };
   });
 

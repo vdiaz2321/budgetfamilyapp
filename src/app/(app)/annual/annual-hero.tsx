@@ -24,17 +24,20 @@ type Props = {
   year: number;
   outflowKinds: CategoryKind[];
   totals: Record<CategoryKind, number>;
+  /** The kids' 529s — out of Savings, in a card of their own. */
+  kidsTotal: number;
   currency: string;
   filter?: HeroFilter | null;
   onClear?: () => void;
 };
 
-const CARD_ORDER: CardId[] = ["income", "spending", "savings", "debt", "net"];
+const CARD_ORDER: CardId[] = ["income", "spending", "savings", "kids", "debt", "net"];
 
 export function AnnualHero({
   year,
   outflowKinds,
   totals,
+  kidsTotal,
   currency,
   filter,
   onClear,
@@ -45,7 +48,7 @@ export function AnnualHero({
   const savingsTotal = totals.savings;
   const debtTotal = totals.debt;
   const outflowTotal = outflowKinds.reduce((sum, k) => sum + totals[k], 0);
-  const netTotal = totals.income - outflowTotal;
+  const netTotal = totals.income - outflowTotal - kidsTotal;
   const pct = (v: number) =>
     totals.income === 0 ? null : (v / totals.income) * 100;
   const share = (v: number) => {
@@ -96,6 +99,15 @@ export function AnnualHero({
             subtitle={cap("savings", share(savingsTotal))}
           />
         );
+      case "kids":
+        return (
+          <Stat
+            label={`${year} Kids Funding`}
+            value={val("kids", kidsTotal)}
+            currency={currency}
+            subtitle={cap("kids", share(kidsTotal))}
+          />
+        );
       case "debt":
         return (
           <Stat
@@ -136,7 +148,7 @@ export function AnnualHero({
   const diffSlot = active?.difference ? freeSlots[1] : undefined;
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {CARD_ORDER.map((id) => {
         if (shows(id)) return <div key={id}>{card(id)}</div>;
         if (id === clearSlot) {

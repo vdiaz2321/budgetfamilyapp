@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryKind } from "@/lib/categories";
 import { AnnualHero, type HeroFilter } from "./annual-hero";
-import { MonthsTable, type MonthRow } from "./months-table";
 import { CategoryMonthsTable, type CatMonthGroup } from "./category-months-table";
 import { AnnualBreakdownHistory, type BreakdownKind } from "./annual-breakdown-history";
 import { PropertyRollupPanel, type PropertyRollup } from "./property-rollup";
@@ -17,10 +16,13 @@ import {
 type Props = {
   year: number;
   outflowKinds: CategoryKind[];
-  columns: { kind: CategoryKind; label: string }[];
-  monthRows: MonthRow[];
   totals: Record<CategoryKind, number>;
+  kidsTotal: number;
   totalNet: number;
+  /** Remaining per month (Jan–Dec); null where it isn't known yet. */
+  remainingMonths: (number | null)[];
+  /** The month in progress when viewing this year, else null. */
+  currentMonthIdx: number | null;
   groups: CatMonthGroup[];
   monthLabels: string[];
   properties: PropertyRollup[];
@@ -30,7 +32,7 @@ type Props = {
   currency: string;
 };
 
-const CARD_ORDER: CardId[] = ["income", "spending", "savings", "debt", "net"];
+const CARD_ORDER: CardId[] = ["income", "spending", "savings", "kids", "debt", "net"];
 const MONTH_ABBR = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -44,16 +46,15 @@ const MONTH_ABBR = [
  * the page with them and releases exactly when Annual Breakdown (a different
  * question: nine years, not this one) reaches the top.
  *
- * Clicking money cells in Months filters the hero: only the cards those cells
+ * Clicking money cells in Category by Months filters the hero: only the cards those cells
  * feed stay, each showing the selected cells' sum. Bills and Expenses both
  * feed Spending, which is how the unfiltered card is built too.
  */
 export function AnnualPanels({
-  year, outflowKinds, columns, monthRows, totals, totalNet,
+  year, outflowKinds, totals, kidsTotal, totalNet, remainingMonths, currentMonthIdx,
   groups, monthLabels, properties, kinds, years, netByYear, currency,
 }: Props) {
-  const currentMonthIdx = monthRows.find((r) => r.status === "current")?.idx;
-  const currentMonthLabel = currentMonthIdx === undefined ? null : monthLabels[currentMonthIdx];
+  const currentMonthLabel = currentMonthIdx === null ? null : monthLabels[currentMonthIdx];
   const [selected, setSelected] = useState<Selection>(() => new Map());
 
   const toggleCell = (key: string, cell: SelectedCell) => {
@@ -91,11 +92,11 @@ export function AnnualPanels({
   const filter = useMemo<HeroFilter | null>(() => {
     if (selected.size === 0) return null;
 
-    const sums = { income: 0, spending: 0, savings: 0, debt: 0, net: 0 } as Record<CardId, number>;
+    const sums = { income: 0, spending: 0, savings: 0, kids: 0, debt: 0, net: 0 } as Record<CardId, number>;
     // Distinct months per card, for the "N months selected" caption.
     const months: Record<CardId, Set<number>> = {
       income: new Set(), spending: new Set(), savings: new Set(),
-      debt: new Set(), net: new Set(),
+      kids: new Set(), debt: new Set(), net: new Set(),
     };
     // Whole-year Total cells belong to no single month; they caption as
     // "full year" instead of counting as a month.
@@ -115,7 +116,7 @@ export function AnnualPanels({
     // less the outflows, exactly as the year's own Net card is built. A Net
     // cell picked directly is already that month's income less its outflows,
     // so it folds into the same sum rather than competing with it.
-    sums.net += sums.income - sums.spending - sums.savings - sums.debt;
+    sums.net += sums.income - sums.spending - sums.savings - sums.kids - sums.debt;
 
     // A count, not a list: "Apr, May, Jun, Jul, Aug, Sep" wrapped the card to
     // three lines, and the outlined cells already show which months they are.
@@ -156,7 +157,7 @@ export function AnnualPanels({
         difference = {
           cents: byMonth.get(last)! - byMonth.get(first)!,
           caption: `${MONTH_ABBR[last]} vs ${MONTH_ABBR[first]}`,
-          upIsGood: card === "income" || card === "savings" || card === "net",
+          upIsGood: card === "income" || card === "savings" || card === "kids" || card === "net",
         };
       }
     }
@@ -179,27 +180,16 @@ export function AnnualPanels({
             year={year}
             outflowKinds={outflowKinds}
             totals={totals}
+            kidsTotal={kidsTotal}
             currency={currency}
             filter={filter}
             onClear={clear}
           />
         </div>
 
-        {/* One panel per row. Side by side, Months' old fixed columns left
-            it a small island in half an empty
-            panel, and neither table got the width its figures wanted. Stacked,
-            each one gets the whole page. */}
-        <div className="min-w-0">
-          <MonthsTable
-            columns={columns}
-            rows={monthRows}
-            totals={totals}
-            totalNet={totalNet}
-            currency={currency}
-            selected={selected}
-            onToggleCell={toggleCell}
-          />
-        </div>
+        {/* Months and Category by Months used to be two tables with the
+            same five totals; Category by Months now carries Remaining and
+            each group's share of income, so it is the one table. */}
         <div className="min-w-0">
           <CategoryMonthsTable
             groups={groups}
@@ -208,6 +198,9 @@ export function AnnualPanels({
             currency={currency}
             selected={selected}
             onToggleCell={toggleCell}
+            remainingMonths={remainingMonths}
+            totalNet={totalNet}
+            incomeTotal={totals.income}
           />
         </div>
 

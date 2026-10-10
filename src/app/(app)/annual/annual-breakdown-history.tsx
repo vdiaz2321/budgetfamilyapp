@@ -85,7 +85,7 @@ function TotalBand({ pad, plain, children }: { pad: string; plain?: boolean; chi
   return (
     <span
       className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line px-1 ${
-        plain ? "" : "bg-sky-100 dark:bg-sky-900/50"
+        plain ? "" : "bg-sky-100 dark:bg-sky-950/30"
       }`}
     >
       {children}
@@ -240,7 +240,7 @@ export function AnnualBreakdownHistory({ kinds, years: allYears, netByYear, curr
               className="scroll-handle overflow-x-auto"
             >
               <div style={{ minWidth: minW }}>
-                <div className="grid items-center gap-2 border-b border-line bg-sky-100 pr-4 py-2 dark:bg-sky-900/50" style={gridStyle}>
+                <div className="grid items-center gap-2 border-b border-line bg-sky-100 pr-4 py-2 dark:bg-sky-950/30" style={gridStyle}>
                   <span className="pl-4 text-[15px] font-semibold uppercase tracking-wide text-muted">
                     Category
                   </span>
@@ -708,7 +708,7 @@ function SelectionRow({
   const tint = (v: number) => (signed ? (v < 0 ? "text-negative" : "text-positive") : "");
   return (
     <div
-      className={`grid items-center gap-2 bg-sky-100 pr-4 py-2 dark:bg-sky-900/50 ${
+      className={`grid items-center gap-2 bg-sky-100 pr-4 py-2 dark:bg-sky-950/30 ${
         dividerAbove
           ? "border-t-[3px] border-foreground/80"
           : "border-t border-line"

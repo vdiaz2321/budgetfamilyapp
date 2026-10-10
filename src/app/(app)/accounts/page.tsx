@@ -494,11 +494,18 @@ export default async function AccountsPage() {
   const editedAtOf = (t: { created_at: string; updated_at: string }) =>
     new Date(t.updated_at).getTime() - new Date(t.created_at).getTime() > 60_000 ? t.updated_at : null;
 
+  // Each payment lives in ONE table. A card being paid off as a debt (its
+  // debt tracked on Debt/Loan) is reported under Debt Payments only — listing
+  // it here too counted the same money in both totals. So a Pay Card row that
+  // Debt Payments already holds is skipped, and debt payments made on Budget
+  // are no longer copied in.
+  const debtPaymentIds = new Set((debtPaymentRows ?? []).map((t) => t.id));
   const cardPayments: CardPayment[] = (cardPaymentRows ?? [])
     .filter(
       (t) =>
         t.paid_to_account_id &&
         cardIds.has(t.paid_to_account_id) &&
+        !debtPaymentIds.has(t.id) &&
         (t.movement_type === "card_payment" || t.movement_type == null),
     )
     .map((t) => ({
@@ -514,31 +521,6 @@ export default async function AccountsPage() {
       memo: t.memo ?? null,
       undo: undoOf(t.account_id, t.bucket_id, debtByCard.get(t.paid_to_account_id as string)),
     }));
-
-  // A debt tracked against a credit card is paid on Budget as a debt payment,
-  // not through Pay Card — count those toward the card too, so the card's row
-  // isn't $0 while its debt row shows the money. Pay Card rows on a debt card
-  // already have paid_to_account_id and are in the list above, so skipped here.
-  const cardIdByDebtSub = new Map(
-    (debtRows ?? [])
-      .filter((d) => d.account_id && cardIds.has(d.account_id))
-      .map((d) => [d.subcategory_id as string, d.account_id as string]),
-  );
-  for (const t of debtPaymentRows ?? []) {
-    const cardId = cardIdByDebtSub.get(t.subcategory_id);
-    if (!cardId || t.paid_to_account_id) continue;
-    cardPayments.push({
-      id: t.id,
-      date: t.occurred_on,
-      amountCents: t.amount_cents,
-      cardId,
-      reimbursedCents: t.reimbursed_cents ?? 0,
-      editedAt: editedAtOf(t),
-      fromAccountId: t.account_id ?? null,
-      memo: t.memo ?? null,
-      undo: undoOf(t.account_id, null, debtBySub.get(t.subcategory_id)),
-    });
-  }
 
   const debtPayments: CardPayment[] = (debtPaymentRows ?? []).map((t) => ({
     id: t.id,

@@ -38,6 +38,8 @@ export type SavingsCardData = {
   requiredMonthlyCents: number | null;
   transactions: SavingsTxData[];
   isKids: boolean;
+  /** The goal's money lands in an investment account (not a savings bucket). */
+  isInvestment: boolean;
 };
 
 export type SavingsPanelProps = {
@@ -170,7 +172,7 @@ function CapsEditor({
   return (
     <ModalShell title={`${taxYear} contribution caps`} onClose={onClose} mobileAlign="top">
       <div className="space-y-3 px-5 py-4">
-        <p className="text-xs leading-relaxed text-muted">
+        <p className="text-xs sm:text-sm leading-relaxed text-muted">
           Copy the two figures from the IRS page for tax year {taxYear}. They take effect
           immediately and carry over on 1 January.{" "}
           <a
@@ -184,7 +186,7 @@ function CapsEditor({
           </a>
         </p>
         <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold text-muted">
+          <span className="mb-1 block max-sm:text-[12px] sm:text-[15px] font-semibold text-muted">
             Elective deferral — TSP / 401(k) ({currency})
           </span>
           <input
@@ -196,7 +198,7 @@ function CapsEditor({
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold text-muted">
+          <span className="mb-1 block max-sm:text-[12px] sm:text-[15px] font-semibold text-muted">
             IRA, per person ({currency})
           </span>
           <input
@@ -207,12 +209,12 @@ function CapsEditor({
             className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
-        {error ? <p className="text-xs font-semibold text-negative">{error}</p> : null}
+        {error ? <p className="text-xs sm:text-sm font-semibold text-negative">{error}</p> : null}
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-2 text-xs font-semibold text-muted transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            className="rounded-lg px-3 py-2 text-xs sm:text-sm font-semibold text-muted transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
           >
             Cancel
           </button>
@@ -220,7 +222,7 @@ function CapsEditor({
             type="button"
             onClick={submit}
             disabled={pending}
-            className="rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+            className="rounded-lg px-3 py-2 text-xs sm:text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
             style={{ backgroundColor: "var(--viz-savings)" }}
           >
             {pending ? "Saving…" : `Save ${taxYear} caps`}
@@ -273,7 +275,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               that has to be visible while collapsed. */}
           {pendingYear ? (
             <span
-              className="shrink-0 whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide dark:bg-sky-900/50"
+              className="shrink-0 whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 max-sm:text-[11px] sm:text-[15px] font-semibold uppercase tracking-wide dark:bg-sky-900/50"
               style={{ color: "var(--viz-savings)" }}
             >
               {pendingYear} caps due
@@ -282,7 +284,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
         </span>
         {/* Deadlines differ per account type, so the header states the room
             only — each row carries its own cutoff date. */}
-        <span className="flex items-baseline gap-2 text-xs">
+        <span className="flex items-baseline gap-2 text-xs sm:text-sm">
           <span className="font-bold tabular-nums" style={{ color: totalRoom > 0 ? "var(--viz-savings)" : "var(--positive)" }}>
             {totalRoom > 0 ? formatSavingsMoney(totalRoom, currency) : "All maxed"}
           </span>
@@ -297,7 +299,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               figure — a wrong cap is worse than no cap. */}
           {!published ? (
             <div className="rounded-lg bg-background px-3 py-2.5 ring-1 ring-line">
-              <p className="text-xs leading-relaxed text-muted">
+              <p className="text-xs sm:text-sm leading-relaxed text-muted">
                 Contribution caps for <span className="font-semibold text-foreground">{year}</span>{" "}
                 haven&rsquo;t been added yet — the most recent on file are for {latestYear}. Rather
                 than measure against last year&rsquo;s figures, this card stays empty until they
@@ -315,7 +317,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               <button
                 type="button"
                 onClick={() => setEditingYear(year)}
-                className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+                className="mt-2 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-semibold text-white transition hover:brightness-110"
                 style={{ backgroundColor: "var(--viz-savings)" }}
               >
                 Enter {year} caps
@@ -327,7 +329,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               January; it disappears once the year is added. */}
           {pendingYear ? (
             <div className="rounded-lg bg-background px-3 py-2.5 ring-1 ring-line">
-              <p className="text-xs leading-relaxed text-muted">
+              <p className="text-xs sm:text-sm leading-relaxed text-muted">
                 The IRS usually publishes {pendingYear}{" "}limits around now. Once they&rsquo;re added,
                 this card carries over on 1 January — until then it will show {pendingYear} as
                 unpublished rather than measure against {year} figures.{" "}
@@ -344,7 +346,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               <button
                 type="button"
                 onClick={() => setEditingYear(pendingYear)}
-                className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+                className="mt-2 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-semibold text-white transition hover:brightness-110"
                 style={{ backgroundColor: "var(--viz-savings)" }}
               >
                 Enter {pendingYear} caps
@@ -368,7 +370,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
               <div key={r.subId}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                   <span className="text-sm font-semibold">{r.name}</span>
-                  <span className="text-xs tabular-nums text-muted">
+                  <span className="text-xs sm:text-sm tabular-nums text-muted">
                     <span className="font-semibold text-foreground">
                       {formatSavingsMoney(r.contributedCents, currency)}
                     </span>{" "}
@@ -378,7 +380,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                 {/* One limit can span several accounts — naming them is what
                     makes the combined figure above verifiable. */}
                 {r.sourceNames && r.sourceNames.length > 0 ? (
-                  <p className="text-[11px] text-muted">{r.sourceNames.join(" + ")}</p>
+                  <p className="max-sm:text-[12px] sm:text-[15px] text-muted">{r.sourceNames.join(" + ")}</p>
                 ) : null}
                 <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
                   <div
@@ -389,7 +391,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
                     }}
                   />
                 </div>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-muted">
+                <p className="mt-0.5 max-sm:text-[12px] sm:text-[15px] leading-relaxed text-muted">
                   {r.kind}
                   {" - "}
                   {maxed ? (
@@ -422,7 +424,7 @@ function ContributionLimits({ rows, currency, year, published, latestYear, pendi
             );
           })}
           {published ? (
-            <p className="border-t border-line/60 pt-2 text-[11px] leading-relaxed text-muted">
+            <p className="border-t border-line/60 pt-2 max-sm:text-[12px] sm:text-[15px] leading-relaxed text-muted">
               {anyIra ? (
                 <>
                   Targets run to Dec 31 — IRA money still counts toward {year} until about{" "}
@@ -552,10 +554,10 @@ export function SavingsPanel({
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/70 bg-brand-soft/35 px-4 py-3 dark:bg-brand-soft/15">
                 <div>
                   <h2 className="text-base font-semibold">{currentMonthLabel}</h2>
-                  <p className="text-xs text-muted">Savings activity from received income</p>
+                  <p className="text-xs sm:text-sm text-muted">Savings activity from received income</p>
                 </div>
                 {kidsCards.length > 0 && familyCards.length > 0 ? (
-                  <div className="flex items-center text-xs">
+                  <div className="flex items-center text-xs sm:text-sm">
                     <div className="inline-flex rounded-lg bg-surface p-1 ring-1 ring-black/5 dark:ring-white/10">
                       <ScopeButton active={scope === "family"} onClick={() => setScope("family")}>Family</ScopeButton>
                       <ScopeButton active={scope === "all"} onClick={() => setScope("all")}>With kids</ScopeButton>
@@ -570,18 +572,18 @@ export function SavingsPanel({
               <div className="grid grid-cols-1 divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
                 <Metric label="Of income" value={savingsRate == null ? "—" : `${savingsRate.toFixed(1)}%`} detail={`${formatSavingsMoney(incomeReceivedCents, currency)} received`} tone={savingsRate != null && savingsRate > 0 ? "text-positive" : undefined} />
                 <Metric label="This month’s savings" value={stats.planned > 0 ? `${Math.max(0, stats.planPct).toFixed(0)}% of plan` : "No plan"} detail={<><span className={stats.net >= 0 ? "text-positive" : "text-negative"}>{formatSavingsMoney(stats.net, currency)} saved</span> of {formatSavingsMoney(stats.planned, currency)} planned</>} />
-                <Metric label="Withdrawn" value={formatSavingsMoney(stats.withdrawals, currency)} detail={stats.withdrawals > 0 ? "moved out of goals" : "no withdrawals"} tone={stats.withdrawals > 0 ? "text-negative" : undefined} action={<button type="button" onClick={openWithdrawal} className="mt-2 rounded-md border border-brand/35 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand-soft focus:outline-none focus:ring-2 focus:ring-brand">Withdraw funds</button>} />
+                <Metric label="Withdrawn" value={formatSavingsMoney(stats.withdrawals, currency)} detail={stats.withdrawals > 0 ? "moved out of goals" : "no withdrawals"} tone={stats.withdrawals > 0 ? "text-negative" : undefined} action={<button type="button" onClick={openWithdrawal} className="mt-2 rounded-md border border-brand/35 px-2 py-1 text-xs sm:text-sm font-semibold text-brand transition hover:bg-brand-soft focus:outline-none focus:ring-2 focus:ring-brand">Withdraw funds</button>} />
               </div>
 
               <div className="space-y-2 border-t border-line/70 px-4 py-3">
-                <div className="flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center justify-between gap-3 text-xs sm:text-sm">
                   <span className="font-medium">Overall goal progress</span>
                   <span className="tabular-nums text-muted"><span className="text-positive">{formatSavingsMoney(stats.saved, currency)}</span> of {formatSavingsMoney(stats.goal, currency)}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-line/60">
                   <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, Math.max(0, stats.goalPct))}%`, backgroundColor: "var(--viz-savings)" }} />
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] text-muted">
+                <div className="flex items-center justify-between gap-3 max-sm:text-[12px] sm:text-[15px] text-muted">
                   <span>{Math.min(100, Math.max(0, stats.goalPct)).toFixed(1)}% complete</span>
                   <span className="text-negative">{formatSavingsMoney(stats.left, currency)} left</span>
                 </div>
@@ -596,9 +598,9 @@ export function SavingsPanel({
             <div className="flex items-center justify-between gap-3 border-b border-line/70 bg-brand-soft/35 px-4 py-3 dark:bg-brand-soft/15">
               <div>
                 <h2 className="text-base font-semibold">Savings and investment goals</h2>
-                <p className="text-xs text-muted">Select a goal to see its details and transactions.</p>
+                <p className="text-xs sm:text-sm text-muted">Select a goal to see its details and transactions.</p>
               </div>
-              <span className="shrink-0 text-xs text-muted">{cards.length} goal{cards.length === 1 ? "" : "s"}</span>
+              <span className="shrink-0 text-xs sm:text-sm text-muted">{cards.length} goal{cards.length === 1 ? "" : "s"}</span>
             </div>
             <div className="space-y-3 px-3 py-3">
               {familyCards.length > 0 ? <GoalGroup title="Family goals" cards={familyCards} currency={currency} incomeReceivedCents={incomeReceivedCents} /> : null}
@@ -650,15 +652,15 @@ type Activity = SavingsTxData & { goalName: string };
 function ActivityPanel({ activity, currency, monthLabel: label }: { activity: Activity[]; currency: string; monthLabel: string }) {
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="border-b border-line/70 px-4 py-3"><h2 className="text-sm font-semibold">Recent activity</h2><p className="text-xs text-muted">Deposits and withdrawals in {label}</p></div>
+      <div className="border-b border-line/70 px-4 py-3"><h2 className="text-sm font-semibold">Recent activity</h2><p className="text-xs sm:text-sm text-muted">Deposits and withdrawals in {label}</p></div>
       {activity.length === 0 ? (
-        <div className="flex min-h-28 items-center justify-center px-5 py-5 text-center"><div><div className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-brand-soft text-brand" aria-hidden>↗</div><p className="text-sm font-medium">No savings activity yet</p><p className="mt-1 text-xs text-muted">Savings transactions will appear here automatically.</p></div></div>
+        <div className="flex min-h-28 items-center justify-center px-5 py-5 text-center"><div><div className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-brand-soft text-brand" aria-hidden>↗</div><p className="text-sm font-medium">No savings activity yet</p><p className="mt-1 text-xs sm:text-sm text-muted">Savings transactions will appear here automatically.</p></div></div>
       ) : (
         <ul className="divide-y divide-line/60">
           {activity.map((transaction) => (
-            <li key={transaction.id} className="flex items-center gap-2.5 px-4 py-2.5 text-xs">
+            <li key={transaction.id} className="flex items-center gap-2.5 px-4 py-2.5 text-xs sm:text-sm">
               <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${transaction.isWithdrawal ? "bg-negative/10 text-negative" : "bg-positive/10 text-positive"}`} aria-hidden>{transaction.isWithdrawal ? "↓" : "↑"}</span>
-              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{transaction.goalName}</span><span className="block truncate text-[10px] text-muted">{shortDate(transaction.date)} · {transaction.payee ?? transaction.accountName ?? "Savings activity"}</span></span>
+              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{transaction.goalName}</span><span className="block truncate max-sm:text-[11px] sm:text-[15px] text-muted">{shortDate(transaction.date)} · {transaction.payee ?? transaction.accountName ?? "Savings activity"}</span></span>
               <span className={`shrink-0 font-semibold tabular-nums ${transaction.isWithdrawal ? "text-negative" : "text-positive"}`}>{transaction.isWithdrawal ? "−" : ""}{formatSavingsMoney(transaction.amountCents, currency)}</span>
             </li>
           ))}
@@ -671,7 +673,7 @@ function ActivityPanel({ activity, currency, monthLabel: label }: { activity: Ac
 function GoalGroup({ title, cards, currency, incomeReceivedCents }: { title: string; cards: SavingsCardData[]; currency: string; incomeReceivedCents: number }) {
   return (
     <div className="overflow-hidden rounded-xl border border-line/80">
-      <div className="border-b border-line/70 bg-brand-soft/25 px-4 py-2 text-xs font-semibold text-muted dark:bg-brand-soft/10">{title}</div>
+      <div className="border-b border-line/70 bg-brand-soft/25 px-4 py-2 text-xs sm:text-sm font-semibold text-muted dark:bg-brand-soft/10">{title}</div>
       <div className="divide-y divide-line/60">{cards.map((card) => <SavingsGoalRow key={card.id} card={card} currency={currency} incomeReceivedCents={incomeReceivedCents} />)}</div>
     </div>
   );
@@ -694,14 +696,14 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
           <StatusBadge pace={card.pace} hasGoal={hasGoal} />
         </span>
         <span className="flex items-baseline gap-1.5 whitespace-nowrap">
-          <span className="text-xs text-muted">This month</span>
+          <span className="text-xs sm:text-sm text-muted">This month</span>
           <span className={`text-sm font-semibold tabular-nums ${card.monthNetCents >= 0 ? "text-positive" : "text-negative"}`}>{card.monthNetCents < 0 ? "−" : ""}{formatSavingsMoney(Math.abs(card.monthNetCents), currency)}</span>
         </span>
         <span className="min-w-0">
-          <span className="flex items-center justify-between gap-2 text-xs text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
+          <span className="flex items-center justify-between gap-2 text-xs sm:text-sm text-muted"><span>{hasGoal ? `${progress.toFixed(0)}% complete` : "No goal set"}</span><span className="truncate tabular-nums">{hasGoal ? <><span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span> / {formatSavingsMoney(card.goalCents, currency)}</> : <span className="text-positive">{formatSavingsMoney(card.savedCents, currency)}</span>}</span></span>
           <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-line/60"><span className={`block h-full rounded-full ${card.pace === "reached" ? "bg-positive" : ""}`} style={{ width: `${progress}%`, ...(card.pace === "reached" ? {} : { backgroundColor: "var(--viz-savings)" }) }} /></span>
         </span>
-        <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-xs text-muted">Of income</span><span className="text-sm font-semibold tabular-nums">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
+        <span className="flex items-baseline gap-1.5 whitespace-nowrap"><span className="text-xs sm:text-sm text-muted">Of income</span><span className="text-sm font-semibold tabular-nums">{incomeRate == null ? "—" : `${incomeRate.toFixed(1)}%`}</span></span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`hidden text-muted transition-transform md:block ${expanded ? "rotate-90" : ""}`} aria-hidden><path d="M9 18l6-6-6-6" /></svg>
       </button>
 
@@ -716,13 +718,13 @@ function SavingsGoalRow({ card, currency, incomeReceivedCents }: { card: Savings
 
           <GoalEditor card={card} currency={currency} />
           <div className="mt-3 overflow-hidden rounded-xl bg-surface ring-1 ring-black/5 dark:ring-white/10">
-            <div className="flex items-center justify-between border-b border-line/60 px-3 py-2"><p className="text-[11px] font-semibold uppercase tracking-wide text-muted">Recent transactions</p><span className="text-[10px] text-muted">Up to 12</span></div>
-            {card.transactions.length === 0 ? <p className="px-3 py-4 text-center text-xs text-muted">No transactions yet</p> : (
+            <div className="flex items-center justify-between border-b border-line/60 px-3 py-2"><p className="max-sm:text-[12px] sm:text-[15px] font-semibold uppercase tracking-wide text-muted">Recent transactions</p><span className="max-sm:text-[11px] sm:text-[15px] text-muted">Up to 12</span></div>
+            {card.transactions.length === 0 ? <p className="px-3 py-4 text-center text-xs sm:text-sm text-muted">No transactions yet</p> : (
               <ul className="divide-y divide-line/50">
                 {card.transactions.map((transaction) => (
-                  <li key={transaction.id} className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-xs">
+                  <li key={transaction.id} className="grid grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-xs sm:text-sm">
                     <span className="tabular-nums text-muted">{shortDate(transaction.date)}</span>
-                    <span className="min-w-0"><span className="block truncate">{transaction.payee ?? "Savings activity"}</span>{transaction.accountName ? <span className="block truncate text-[10px] text-muted">{transaction.accountName}</span> : null}</span>
+                    <span className="min-w-0"><span className="block truncate">{transaction.payee ?? "Savings activity"}</span>{transaction.accountName ? <span className="block truncate max-sm:text-[11px] sm:text-[15px] text-muted">{transaction.accountName}</span> : null}</span>
                     <span className={`font-semibold tabular-nums ${transaction.isWithdrawal ? "text-negative" : "text-positive"}`}>{transaction.isWithdrawal ? "−" : ""}{formatSavingsMoney(transaction.amountCents, currency)}</span>
                   </li>
                 ))}
@@ -759,7 +761,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
           setError(null);
           setOpen(true);
         }}
-        className="mt-3 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+        className="mt-3 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-semibold text-white transition hover:brightness-110"
         style={{ backgroundColor: "var(--viz-savings)" }}
       >
         {card.goalCents > 0 ? "Edit goal" : "Set a goal"}
@@ -769,12 +771,12 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
 
   return (
     <div className="mt-3 rounded-xl bg-surface p-3 ring-1 ring-black/5 dark:ring-white/10">
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+      <p className="mb-2 max-sm:text-[12px] sm:text-[15px] font-semibold uppercase tracking-wide text-muted">
         {card.name} goal
       </p>
       <div className="grid gap-2 sm:grid-cols-3">
         <label className="block">
-          <span className="mb-1 block text-[10px] text-muted">Goal amount</span>
+          <span className="mb-1 block max-sm:text-[11px] sm:text-[15px] text-muted">Goal amount</span>
           <input
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
@@ -783,7 +785,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[10px] text-muted">Monthly contribution</span>
+          <span className="mb-1 block max-sm:text-[11px] sm:text-[15px] text-muted">Monthly contribution</span>
           <input
             value={monthly}
             onChange={(e) => setMonthly(e.target.value)}
@@ -792,7 +794,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[10px] text-muted">Target date</span>
+          <span className="mb-1 block max-sm:text-[11px] sm:text-[15px] text-muted">Target date</span>
           <input
             type="date"
             value={targetDate}
@@ -804,20 +806,20 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
 
       <div className="mt-2.5 flex flex-wrap items-center justify-end gap-2">
         {error ? (
-          <p className="mr-auto text-xs text-negative">{error}</p>
+          <p className="mr-auto text-xs sm:text-sm text-negative">{error}</p>
         ) : saved ? (
-          <p className="mr-auto text-xs font-semibold" style={{ color: "var(--positive)" }}>
+          <p className="mr-auto text-xs sm:text-sm font-semibold" style={{ color: "var(--positive)" }}>
             Saved.
           </p>
         ) : (
-          <p className="mr-auto text-[11px] text-muted">
+          <p className="mr-auto max-sm:text-[12px] sm:text-[15px] text-muted">
             Opening balance of {formatSavingsMoney(card.startCents, currency)} is left unchanged.
           </p>
         )}
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-muted hover:text-foreground"
+          className="rounded-lg px-2.5 py-1.5 text-xs sm:text-sm font-semibold text-muted hover:text-foreground"
         >
           Cancel
         </button>
@@ -840,7 +842,7 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
               }
             });
           }}
-          className="rounded-lg px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+          className="rounded-lg px-3 py-1.5 text-xs sm:text-sm font-bold text-white disabled:opacity-50"
           style={{ backgroundColor: "var(--viz-savings)" }}
         >
           {pending ? "Saving…" : "Save goal"}
@@ -851,11 +853,11 @@ function GoalEditor({ card, currency }: { card: SavingsCardData; currency: strin
 }
 
 function Detail({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return <div className="flex flex-col items-center justify-center rounded-lg bg-surface px-2 py-2 text-center ring-1 ring-black/5 dark:ring-white/10"><p className="text-[11px] leading-tight text-muted">{label}</p><p className="mt-0.5 w-full truncate text-base font-semibold leading-tight tabular-nums">{value}</p>{sub ? <p className="mt-0.5 w-full truncate text-[11px] leading-tight text-muted">{sub}</p> : null}</div>;
+  return <div className="flex flex-col items-center justify-center rounded-lg bg-surface px-2 py-2 text-center ring-1 ring-black/5 dark:ring-white/10"><p className="max-sm:text-[12px] sm:text-[15px] leading-tight text-muted">{label}</p><p className="mt-0.5 w-full truncate text-base font-semibold leading-tight tabular-nums">{value}</p>{sub ? <p className="mt-0.5 w-full truncate max-sm:text-[12px] sm:text-[15px] leading-tight text-muted">{sub}</p> : null}</div>;
 }
 
 function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal: boolean }) {
-  if (!hasGoal) return <span className="text-xs font-medium text-muted">No goal</span>;
+  if (!hasGoal) return <span className="text-xs sm:text-sm font-medium text-muted">No goal</span>;
   const badges: Record<SavingsCardData["pace"], { label: string; className: string } | null> = {
     none: null,
     reached: { label: "✓ Reached", className: "text-positive" },
@@ -864,5 +866,5 @@ function StatusBadge({ pace, hasGoal }: { pace: SavingsCardData["pace"]; hasGoal
     overdue: { label: "Overdue", className: "text-negative" },
   };
   const badge = badges[pace];
-  return badge ? <span className={`whitespace-nowrap text-xs font-medium ${badge.className}`}>{badge.label}</span> : <span />;
+  return badge ? <span className={`whitespace-nowrap text-xs sm:text-sm font-medium ${badge.className}`}>{badge.label}</span> : <span />;
 }

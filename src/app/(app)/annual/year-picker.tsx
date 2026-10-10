@@ -13,15 +13,15 @@ const START_YEAR = 2026;
 
 // The bold year in the navigator, but a real <select> so any year is one tap
 // away instead of clicking the arrow N times to reach a distant year. Floor is
-// fixed at START_YEAR and the top grows to a few years ahead of today — so as
-// time passes the list *adds* future years rather than shifting off the past.
+// fixed at START_YEAR and the top is this year — later years have nothing in
+// them yet, so listing them only offered empty pages.
 // Picking the current year drops the ?year param so the URL stays clean.
 export function YearPicker({ year, currentYear }: Props) {
   const router = useRouter();
   const years: number[] = [];
   // Guard the bounds so a year reached via URL still appears in the list.
   const min = Math.min(START_YEAR, year);
-  const max = Math.max(currentYear + 5, year);
+  const max = Math.max(currentYear, year);
   for (let y = max; y >= min; y--) years.push(y);
 
   return (

@@ -44,13 +44,14 @@ export type CardPayment = {
 };
 
 // Wording for each copy of the table: credit cards (default) or debts.
-export type PaymentsLedgerLabels = { title: string; item: string; all: string; empty: string; closed: string };
+export type PaymentsLedgerLabels = { title: string; item: string; all: string; empty: string; closed: string; total: string };
 const CARD_LABELS: PaymentsLedgerLabels = {
   title: "Credit Card Payments",
   item: "Card",
   all: "All cards",
   empty: "No card payments recorded",
   closed: "Closed card",
+  total: "Total Payments",
 };
 
 /**
@@ -235,7 +236,7 @@ export function CardPaymentsLedger({
             <span className="min-w-0 text-sm font-bold">{labels.title}</span>
           </button>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-0.5 rounded-lg bg-sky-100 p-0.5 dark:bg-sky-900/50">
+            <div className="flex items-center gap-0.5 rounded-lg bg-surface p-0.5 ring-1 ring-line">
               {(["month", "year"] as const).map((v) => (
                 <button
                   key={v}
@@ -243,7 +244,7 @@ export function CardPaymentsLedger({
                   onClick={() => setView(v)}
                   aria-pressed={view === v}
                   className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                    view === v ? "bg-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"
+                    view === v ? "font-bold text-foreground shadow-sm ring-1 ring-foreground/25" : "text-foreground hover:ring-1 hover:ring-line"
                   }`}
                 >
                   {v === "month" ? "By month" : "By year"}
@@ -260,7 +261,7 @@ export function CardPaymentsLedger({
                 onChange={(e) => setYear(e.target.value)}
                 aria-hidden={view !== "month"}
                 tabIndex={view === "month" ? undefined : -1}
-                className={`cursor-pointer rounded-lg bg-sky-50 dark:bg-background px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
+                className={`cursor-pointer rounded-lg bg-surface px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
                   view === "month" ? "" : "invisible"
                 }`}
               >
@@ -275,15 +276,15 @@ export function CardPaymentsLedger({
             caption: its own tile, label above value. */}
         <div className="flex items-center justify-center divide-x divide-line">
           <div className="px-3 py-1.5 text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total paid</div>
-            <div className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{labels.total}</div>
+            <div className="text-sm font-bold tabular-nums text-negative">
               {money(grandTotal)}
             </div>
           </div>
           {/* Shown in both views — in By year it's the average month across
               the whole history — so the header keeps its width. */}
           <div className="px-3 py-1.5 text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">Avg / month</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-foreground">Avg / month</div>
             <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
           </div>
         </div>
@@ -338,16 +339,17 @@ export function CardPaymentsLedger({
                   >
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)]"
+                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
                     >
                       <span className="flex items-center gap-1">
-                        <span className="truncate">{r.name}</span>
+                        <span className="truncate sm:overflow-visible sm:whitespace-nowrap">{r.name}</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 -rotate-90 text-muted" aria-hidden>
                           <path d="M6 9l6 6 6-6" />
                         </svg>
                       </span>
                     </th>
-                    <td className={`${cell} border-r border-line font-bold ${r.total ? "text-negative" : "text-muted"}`}>{money(r.total)}</td>
+                    {/* Blank, not $0.00, for a card with nothing paid — same as an empty month. */}
+                    <td className={`${cell} border-r border-line font-bold text-negative`}>{r.total ? money(r.total) : null}</td>
                     {showPeriodColumns
                       ? columns.map((c) => {
                           const v = r.cells.get(c.key) ?? 0;
@@ -359,7 +361,7 @@ export function CardPaymentsLedger({
                         })
                       : null}
                     {view === "month" ? (
-                      <td className={`${cell} border-l border-line text-muted`}>{money(perMonth(r.total))}</td>
+                      <td className={`${cell} border-l border-line text-muted`}>{r.total ? money(perMonth(r.total)) : null}</td>
                     ) : null}
                   </tr>
                 ))}
@@ -567,7 +569,7 @@ function PaymentRow({
             value={date}
             onChange={(e) => setDate(e.target.value)}
             aria-label="Payment date"
-            className="w-full rounded-md bg-sky-50 dark:bg-background px-1.5 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-2"
+            className="w-full rounded-md bg-surface px-1.5 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-2"
           />
         </label>
         <MoneyBox label="Paid" value={paid} onChange={setPaid} bold />
@@ -783,7 +785,7 @@ function MoneyBox({
 }) {
   return (
     <label className="block">
-      <span className="flex w-full items-center gap-1 rounded-md bg-sky-50 dark:bg-background px-1 py-1 text-[14px] ring-1 sm:px-2 sm:text-sm ring-line focus-within:ring-2 focus-within:ring-brand">
+      <span className="flex w-full items-center gap-1 rounded-md bg-surface px-1 py-1 text-[14px] ring-1 sm:px-2 sm:text-sm ring-line focus-within:ring-2 focus-within:ring-brand">
         <span className="hidden text-muted sm:inline">$</span>
         <input
           type="text"

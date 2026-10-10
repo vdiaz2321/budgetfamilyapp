@@ -204,8 +204,8 @@ export function MonthEndUpdateModal({
   const chip = (active: boolean) =>
     `shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold shadow-sm ring-1 ring-inset transition ${
       active
-        ? "bg-sky-200 text-foreground ring-black/20 dark:bg-sky-900/50 dark:ring-white/25"
-        : "bg-surface text-muted ring-line hover:bg-sky-200 dark:hover:bg-sky-900"
+        ? "bg-surface font-bold text-foreground ring-foreground/25"
+        : "bg-surface text-foreground ring-line hover:ring-foreground/25"
     }`;
 
   return (
@@ -237,7 +237,7 @@ export function MonthEndUpdateModal({
               {monthName(compareMonth)} → {monthName(month)}
             </span>
           </div>
-          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface ring-1 ring-inset ring-line">
             <div
               className="h-full rounded-full transition-all"
               style={{
@@ -284,10 +284,10 @@ export function MonthEndUpdateModal({
                         // The account's grand total — shaded and tagged so it reads as the sum
                         // of the buckets under it, not one more row to fill in. -mx/px keep its
                         // figures lined up with the bucket rows.
-                        <div className={`${GRID} -mx-2 gap-y-1 rounded-lg bg-sky-100 px-2 py-2 dark:bg-sky-900/50`}>
+                        <div className={`${GRID} -mx-2 gap-y-1 rounded-lg bg-surface px-2 py-2 ring-1 ring-line`}>
                           <span className="col-span-4 flex min-w-0 items-center gap-2 sm:col-span-1">
                             <span className="truncate text-sm font-semibold">{g.account.name}</span>
-                            <span className="shrink-0 rounded bg-sky-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted dark:bg-sky-900/50">
+                            <span className="shrink-0 rounded bg-surface px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-foreground ring-1 ring-line">
                               Total
                             </span>
                           </span>
@@ -326,7 +326,7 @@ export function MonthEndUpdateModal({
                                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                                 if (e.key === "Tab") tabDown(e);
                               }}
-                              className={`w-full min-w-0 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-center text-sm tabular-nums ring-1 ring-inset transition focus:outline-none focus:ring-2 focus:ring-brand ${
+                              className={`w-full min-w-0 rounded-md bg-surface px-2 py-1 text-center text-sm tabular-nums ring-1 ring-inset transition focus:outline-none focus:ring-2 focus:ring-brand ${
                                 done ? "ring-[color:var(--positive)]/50" : "ring-line"
                               }`}
                             />

@@ -35,7 +35,9 @@ export type CatMonthRow = {
 
 export type CatMonthGroup = {
   categoryId: string;
-  kind: CategoryKind;
+  /** The Budget group's kind, or Kids Funding for the 529 lines split out of
+   *  Savings. */
+  kind: CategoryKind | "kidsFunding";
   label: string;
   rows: CatMonthRow[];
   monthTotals: number[]; // 12 entries, cents
@@ -51,6 +53,11 @@ type Props = {
   /** Cells currently driving the hero cards, across both tables. */
   selected: Selection;
   onToggleCell: (key: string, cell: SelectedCell) => void;
+  /** Income less every outflow, per month (Jan–Dec); null = not known yet. */
+  remainingMonths: (number | null)[];
+  totalNet: number;
+  /** The year's income, for each group's "% of income". */
+  incomeTotal: number;
 };
 
 // Months run newest-first, left to right: the panel is half a screen wide, so
@@ -87,6 +94,9 @@ export function CategoryMonthsTable({
   currency,
   selected,
   onToggleCell,
+  remainingMonths,
+  totalNet,
+  incomeTotal,
 }: Props) {
   // Open by default, and persistent: this panel is the year read line by
   // line, so it should be found as it was left rather than collapsed on
@@ -166,8 +176,48 @@ export function CategoryMonthsTable({
                 syncScrollX={syncScrollX}
                 selected={selected}
                 onToggleCell={onToggleCell}
+                incomeTotal={incomeTotal}
               />
             ))}
+            {/* What the month leaves once every group above is paid —
+                the row the old Months table ended on. */}
+            <div className="overflow-clip rounded-lg bg-surface ring-1 ring-black/5 dark:ring-white/10">
+              <div
+                ref={(el) => {
+                  if (el) scrollersRef.current.add(el);
+                }}
+                className="bg-brand-soft/40"
+                style={{ overflowX: "hidden" }}
+              >
+                <div className="grid w-full items-center gap-2 py-2 pr-4" style={{ ...gridStyle(monthCount), ...trackMinWidth(monthCount) }}>
+                  <span className="sticky left-0 z-10 -my-2 flex self-stretch bg-surface">
+                    <span className="flex min-w-0 flex-1 items-center bg-brand-soft/40 pl-[calc(1rem+21px)]">
+                      <span className="truncate text-[13px] font-bold uppercase tracking-wide">Remaining</span>
+                    </span>
+                  </span>
+                  <YearBand pad="-my-2">
+                    <span className="flex w-full flex-col items-center tabular-nums">
+                      <span className={`text-[15px] font-bold ${totalNet >= 0 ? "text-positive" : "text-negative"}`}>
+                        {formatMoney(totalNet, currency)}
+                      </span>
+                      {incomeTotal > 0 ? (
+                        <span className={`text-[11px] font-semibold ${totalNet >= 0 ? "text-positive" : "text-negative"}`}>
+                          {((totalNet / incomeTotal) * 100).toFixed(1)}% of income
+                        </span>
+                      ) : null}
+                    </span>
+                  </YearBand>
+                  {visibleMonths(remainingMonths, monthCount).map((v, i) => (
+                    <span
+                      key={i}
+                      className={`text-center text-[15px] font-bold tabular-nums ${v == null ? "" : v >= 0 ? "text-positive" : "text-negative"}`}
+                    >
+                      {v == null ? <span className="text-muted">—</span> : formatMoney(v, currency)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         ) : (
           <p className="border-t border-line px-4 py-3 text-sm text-muted">
@@ -188,6 +238,7 @@ function Group({
   syncScrollX,
   selected,
   onToggleCell,
+  incomeTotal,
 }: {
   group: CatMonthGroup;
   monthCount: number;
@@ -196,6 +247,7 @@ function Group({
   syncScrollX: (x: number) => void;
   selected: Selection;
   onToggleCell: (key: string, cell: SelectedCell) => void;
+  incomeTotal: number;
 }) {
   const [collapse, setCollapse] = usePersistentCollapse(`annual-category-${group.categoryId}`, () => ({ open: false }));
   const open = collapse.open;
@@ -286,6 +338,11 @@ function Group({
               {picked ? (
                 <span className="text-[11px] font-semibold text-muted">
                   of {formatMoney(group.total, currency)}
+                </span>
+              ) : group.kind !== "income" && incomeTotal > 0 ? (
+                // Each outflow's share of income, as the Months table showed.
+                <span className="text-[11px] font-semibold" style={{ color: KIND_COLOR[group.kind] }}>
+                  {((group.total / incomeTotal) * 100).toFixed(1)}% of income
                 </span>
               ) : null}
             </span>
@@ -458,7 +515,7 @@ function Group({
 export function YearBand({ pad, children }: { pad: "-my-2" | "-my-2.5" | "-my-1.5"; children: React.ReactNode }) {
   return (
     <span
-      className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-sky-100 px-1 dark:bg-sky-900/50`}
+      className={`${pad} flex items-center justify-center self-stretch border-r-2 border-line bg-sky-100 px-1 dark:bg-sky-950/30`}
     >
       {children}
     </span>

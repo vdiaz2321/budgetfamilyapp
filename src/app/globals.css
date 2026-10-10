@@ -59,7 +59,7 @@
   --viz-spending: #fca5b5; /* soft cool red (rose-300) */
   --viz-soft: #93c5fd;     /* blue-300 — light blue (FI + travel bars) */
   --viz-positive-soft: #9fd0ac; /* soft sage — big green fills (FI "free" bars), as light as --viz-soft */
-  --viz-savings: #1d4ed8;  /* blue-700 (dark) */
+  --viz-savings: #2563a8;  /* steel blue — was blue-700 (#1d4ed8), whose violet cast clashed with the teal beside it */
   --viz-bills: #0f766e;    /* teal-700 — darkened from teal-600: too faint as text on white */
   --viz-expenses: #0284c7; /* sky-600 — darkened from sky-400: too faint as text on white */
   --viz-debt: #e11d48;     /* rose-600 */
@@ -115,7 +115,7 @@
   --viz-spending: #b85f74;
   --viz-soft: #4f6ec4;
   --viz-positive-soft: #4f8a62;
-  --viz-savings: #7f9de6; /* lifted from #6d8fe0: its % text read ~4:1 on dark cards */
+  --viz-savings: #5b9bd5; /* true blue — the old #7f9de6 read as periwinkle/purple on dark cards; still 4.9:1 as text */
   --viz-bills: #4fb8ab;
   --viz-expenses: #8ed3f5;
   --viz-debt: #e07c92; /* lifted from #d76b83 for the same reason */

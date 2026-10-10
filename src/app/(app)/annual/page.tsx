@@ -164,6 +164,25 @@ export default async function AnnualOverviewPage({
       .map((b) => b.id),
   );
 
+  // The kids' 529 lines: Budget subs whose money lands in a kids account
+  // (directly or through one of its buckets). They are Kids Funding, not
+  // Savings — 529s leave net worth, so counting them as saved overstated it.
+  // The Annual Breakdown below already keeps them apart; the hero and
+  // Category by Months now do too.
+  const kidsAccountIds = new Set(
+    (investmentAccounts ?? []).filter((a) => a.is_kids_account).map((a) => a.id),
+  );
+  const accountByBucket = new Map((investmentBuckets ?? []).map((b) => [b.id, b.account_id]));
+  const kidsSubIds = new Set(
+    (subs ?? [])
+      .filter((s) => {
+        const accountId = s.linked_bucket_id ? accountByBucket.get(s.linked_bucket_id) : s.linked_account_id;
+        return !!accountId && kidsAccountIds.has(accountId);
+      })
+      .map((s) => s.id),
+  );
+  const kidsActual = Array(12).fill(0) as number[];
+
   // Per-subcategory actuals by month (cents), for the Category by Months table.
   const actualBySub = new Map<string, number[]>();
 
@@ -177,7 +196,8 @@ export default async function AnnualOverviewPage({
     const kind = kindBySub.get(a.subcategory_id);
     if (!kind) continue;
     const monthIdx = parseInt(a.month.slice(5, 7), 10) - 1;
-    actual[monthIdx][kind] += a.actual_cents;
+    if (kidsSubIds.has(a.subcategory_id)) kidsActual[monthIdx] += a.actual_cents;
+    else actual[monthIdx][kind] += a.actual_cents;
 
     let months = actualBySub.get(a.subcategory_id);
     if (!months) {
@@ -197,7 +217,7 @@ export default async function AnnualOverviewPage({
     // All months show actuals only — no planned/projected values.
     const source = actual[idx];
     const net =
-      source.income - OUTFLOW_KINDS.reduce((sum, k) => sum + source[k], 0);
+      source.income - OUTFLOW_KINDS.reduce((sum, k) => sum + source[k], 0) - kidsActual[idx];
     const hasData = COLUMNS.some(({ kind }) => actual[idx][kind] !== 0);
     return { idx, name, values: source, net, status, hasData };
   });
@@ -206,6 +226,20 @@ export default async function AnnualOverviewPage({
   for (const r of rows) {
     for (const { kind } of COLUMNS) totals[kind] += r.values[kind];
   }
+  const kidsTotal = kidsActual.reduce((sum, v) => sum + v, 0);
+
+  // Remaining per month for Category by Months. The month in progress shows
+  // "—" until its paycheck lands (income under half of last month's): pay
+  // arrives at month end, so before then the month reads as a big red loss
+  // that is only bills landing ahead of income.
+  const remainingMonths = rows.map((r) => {
+    if (r.status === "future") return null;
+    if (r.status === "current" && r.idx > 0) {
+      const lastIncome = rows[r.idx - 1].values.income;
+      if (lastIncome > 0 && r.values.income < lastIncome / 2) return null;
+    }
+    return r.net;
+  });
   // Category by Months: preserve each Budget group while its accounting kind
   // continues to feed the five summary totals above.
   const subIdsByCategory = new Map<string, string[]>();
@@ -250,8 +284,13 @@ export default async function AnnualOverviewPage({
     months[parseInt(t.occurred_on.slice(5, 7), 10) - 1] += t.amount_cents;
   }
 
-  const categoryGroups: CatMonthGroup[] = categories.flatMap((category) => {
-    const allRows: CatMonthRow[] = (subIdsByCategory.get(category.id) ?? [])
+  const buildGroup = (
+    categoryId: string,
+    kind: CatMonthGroup["kind"],
+    label: string,
+    subIds: string[],
+  ): CatMonthGroup[] => {
+    const allRows: CatMonthRow[] = subIds
       .map((subId) => {
         const months = actualBySub.get(subId) ?? Array(12).fill(0);
         const total = months.reduce((sum, v) => sum + v, 0);
@@ -292,14 +331,26 @@ export default async function AnnualOverviewPage({
     const total = monthTotals.reduce((sum, v) => sum + v, 0);
 
     return [{
-      categoryId: category.id,
-      kind: category.kind,
-      label: category.name,
+      categoryId,
+      kind,
+      label,
       rows,
       monthTotals,
       total,
     }];
-  });
+  };
+  const categoryGroups: CatMonthGroup[] = categories.flatMap((category) =>
+    buildGroup(
+      category.id,
+      category.kind as CategoryKind,
+      category.name,
+      (subIdsByCategory.get(category.id) ?? []).filter((id) => !kidsSubIds.has(id)),
+    ),
+  );
+  // Kids Funding sits right after the savings group it used to be part of.
+  const kidsGroup = buildGroup("kids-funding", "kidsFunding", "Kids Funding", [...kidsSubIds]);
+  const savingsAt = categoryGroups.findIndex((g) => g.kind === "savings");
+  categoryGroups.splice(savingsAt >= 0 ? savingsAt + 1 : categoryGroups.length, 0, ...kidsGroup);
 
   const monthLabels = MONTH_NAMES.map((m) => m.slice(0, 3));
 
@@ -489,7 +540,7 @@ export default async function AnnualOverviewPage({
     );
   }
 
-  const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0);
+  const totalNet = totals.income - OUTFLOW_KINDS.reduce((sum, k) => sum + totals[k], 0) - kidsTotal;
   const currency = household.currency;
 
   return (
@@ -508,16 +559,14 @@ export default async function AnnualOverviewPage({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-3">
           <h1 className="text-xl font-bold">Annual Overview</h1>
-          <p className="text-sm text-muted">
-            The whole year at a glance — actual transactions only.
-          </p>
         </div>
 
         {/* Year navigator */}
         <div className="flex items-center gap-1 rounded-xl bg-surface p-1 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
           <YearArrow year={year - 1} dir="prev" />
           <YearPicker year={year} currentYear={currentYear} />
-          <YearArrow year={year + 1} dir="next" />
+          {/* No later years: nothing has happened in them yet. */}
+          {year < currentYear ? <YearArrow year={year + 1} dir="next" /> : <span className="h-7 w-7" aria-hidden />}
         </div>
       </div>
 
@@ -527,10 +576,11 @@ export default async function AnnualOverviewPage({
       <AnnualPanels
         year={year}
         outflowKinds={OUTFLOW_KINDS}
-        columns={COLUMNS}
-        monthRows={rows}
         totals={totals}
+        kidsTotal={kidsTotal}
         totalNet={totalNet}
+        remainingMonths={remainingMonths}
+        currentMonthIdx={year === currentYear ? currentMonthIdx : null}
         groups={categoryGroups}
         monthLabels={monthLabels}
         properties={propertyRollups}

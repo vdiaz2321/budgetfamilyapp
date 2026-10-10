@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { displayToCents } from "@/lib/money";
 import { adjustBucketBalance } from "@/lib/buckets";
+import { adjustAccountLedger } from "@/lib/account-ledger";
 import { captureSnapshots } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
 
@@ -122,107 +123,97 @@ export async function setInvestmentYear(formData: FormData) {
   revalidatePath("/invest");
 }
 
-// Transfer money from an investment account (optionally a specific bucket)
-// into a banking account. Creates a withdrawal transaction for the audit
-// trail, adjusts both account balances, and captures snapshots.
-export async function transferFromInvestment(formData: FormData) {
+// Transfer money out of an investment account into a banking account — the
+// one withdrawal flow, used by both Invest / Savings and the Accounts Transfer
+// popup. Creates the audit transaction, moves both balances and captures
+// snapshots so Net Worth follows.
+//
+// Either side that has buckets must name one: a bucketed account's balance is
+// the sum of its buckets, so writing the account total directly would leave
+// the two disagreeing (the same rule the bank-to-bank transfer enforces).
+export async function transferFromInvestment(formData: FormData): Promise<{ error: string | null }> {
   const { supabase, householdId } = await requireHousehold();
 
   const sourceAccountId = String(formData.get("sourceAccountId") ?? "");
   const sourceBucketId = String(formData.get("sourceBucketId") ?? "").trim() || null;
   const destAccountId = String(formData.get("destAccountId") ?? "");
+  const destBucketId = String(formData.get("destBucketId") ?? "").trim() || null;
   const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
-  const occurredOn = String(formData.get("date") ?? "");
+  const occurredOn = String(formData.get("date") ?? "").trim() || new Date().toISOString().slice(0, 10);
   const memo = String(formData.get("memo") ?? "").trim() || null;
-  if (!sourceAccountId || !destAccountId || !occurredOn || amountCents <= 0) return;
+  if (!sourceAccountId || !destAccountId) return { error: "Pick both accounts." };
+  if (amountCents <= 0) return { error: "Enter an amount." };
 
-  // Validate source is an investment account in this household.
-  const srcAcct = unwrap(
-    await supabase
+  const [srcAcct, destAcct, buckets] = await Promise.all([
+    supabase
       .from("accounts")
-      .select("id, kind")
+      .select("id, kind, name")
       .eq("id", sourceAccountId)
       .eq("household_id", householdId)
-      .maybeSingle(),
-    "accounts",
-  );
-  if (!srcAcct || srcAcct.kind !== "investment") return;
-
-  // Validate destination is a non-investment account in this household.
-  const destAcct = unwrap(
-    await supabase
+      .maybeSingle()
+      .then((r) => unwrap(r, "accounts")),
+    supabase
       .from("accounts")
-      .select("id, kind, current_balance_cents")
+      .select("id, kind, name")
       .eq("id", destAccountId)
       .eq("household_id", householdId)
-      .maybeSingle(),
-    "accounts",
-  );
-  if (!destAcct || destAcct.kind === "investment") return;
-
-  // Validate bucket belongs to the source account (when provided).
-  let validBucketId: string | null = null;
-  if (sourceBucketId) {
-    const { data: bucket, error: bucketError } = await supabase
+      .maybeSingle()
+      .then((r) => unwrap(r, "accounts")),
+    supabase
       .from("buckets")
-      .select("id")
-      .eq("id", sourceBucketId)
-      .eq("account_id", sourceAccountId)
+      .select("id, account_id")
       .eq("household_id", householdId)
-      .maybeSingle();
-    // null here doesn't just drop the attribution — it routes the withdrawal
-    // down the direct account-balance path instead of the bucket path.
-    if (bucketError) throw new Error(`Could not verify the bucket: ${bucketError.message}`);
-    validBucketId = bucket?.id ?? null;
+      .in("account_id", [sourceAccountId, destAccountId])
+      .then((r) => unwrap(r, "buckets") ?? []),
+  ]);
+  if (!srcAcct || srcAcct.kind !== "investment") return { error: "Pick an investment account to take the money from." };
+  if (!destAcct || destAcct.kind === "investment" || destAcct.kind === "credit_card") {
+    return { error: "Pick a banking account to send the money to." };
   }
 
-  // 1. Create an audit transaction: withdrawal from the investment account,
-  //    paid_to the destination banking account (mirrors the card-payment pattern).
-  await supabase.from("transactions").insert({
+  const srcBuckets = buckets.filter((b) => b.account_id === sourceAccountId);
+  const destBuckets = buckets.filter((b) => b.account_id === destAccountId);
+  if (srcBuckets.length > 0 && !sourceBucketId) return { error: `Pick which ${srcAcct.name} bucket the money comes from.` };
+  if (sourceBucketId && !srcBuckets.some((b) => b.id === sourceBucketId)) {
+    return { error: "That bucket isn't part of the source account." };
+  }
+  if (destBuckets.length > 0 && !destBucketId) return { error: `Pick which ${destAcct.name} bucket the money goes into.` };
+  if (destBucketId && !destBuckets.some((b) => b.id === destBucketId)) {
+    return { error: "That bucket isn't part of the destination account." };
+  }
+
+  // 1. The audit transaction: a withdrawal from the investment, paid to the
+  //    banking account (and bucket) — what Transactions lists and what a
+  //    delete reverses.
+  const { error: insertError } = await supabase.from("transactions").insert({
     household_id: householdId,
     occurred_on: occurredOn,
     amount_cents: amountCents,
     account_id: sourceAccountId,
-    bucket_id: validBucketId,
+    bucket_id: sourceBucketId,
     paid_to_account_id: destAccountId,
+    paid_to_bucket_id: destBucketId,
     movement_type: "investment_transfer",
     is_withdrawal: true,
-    memo: memo ?? `Transfer to ${destAcct.kind === "checking" || destAcct.kind === "savings_bucket" ? "banking" : "account"}`,
+    memo: memo ?? `Transfer to ${destAcct.name}`,
     source: "manual",
   });
+  if (insertError) return { error: `Couldn't save the transfer — ${insertError.message}` };
 
-  // 2. Decrement the investment side.
-  if (validBucketId) {
-    await adjustBucketBalance(supabase, householdId, validBucketId, -amountCents);
+  // 2. Take it off the investment side.
+  if (sourceBucketId) {
+    await adjustBucketBalance(supabase, householdId, sourceBucketId, -amountCents);
   } else {
-    // No bucket — adjust the account balance directly.
-    // Read-modify-write: a lost read would persist `0 - amountCents` over the
-    // investment account's real balance.
-    const { data: acctBal, error: acctBalError } = await supabase
-      .from("accounts")
-      .select("current_balance_cents")
-      .eq("id", sourceAccountId)
-      .single();
-    if (acctBalError) throw new Error(`Could not read the account balance: ${acctBalError.message}`);
-    await supabase
-      .from("accounts")
-      .update({
-        current_balance_cents: (acctBal?.current_balance_cents ?? 0) - amountCents,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", sourceAccountId)
-      .eq("household_id", householdId);
+    await adjustInvestmentAccount(supabase, householdId, sourceAccountId, -amountCents);
   }
 
-  // 3. Increment the destination banking account.
-  await supabase
-    .from("accounts")
-    .update({
-      current_balance_cents: (destAcct.current_balance_cents ?? 0) + amountCents,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", destAccountId)
-    .eq("household_id", householdId);
+  // 3. Put it on the banking side — the bucket when it has them, else the
+  //    account ledger.
+  if (destBucketId) {
+    await adjustBucketBalance(supabase, householdId, destBucketId, amountCents);
+  } else {
+    await adjustAccountLedger(supabase, householdId, destAccountId, amountCents);
+  }
 
   // 4. Snapshot & revalidate.
   await captureSnapshots(supabase, householdId, { force: true });
@@ -230,4 +221,30 @@ export async function transferFromInvestment(formData: FormData) {
   revalidatePath("/accounts");
   revalidatePath("/networth");
   revalidatePath("/transactions");
+  return { error: null };
+}
+
+// An investment account with no buckets: adjustAccountLedger refuses
+// investments by design (their balances are hand-reconciled), so the balance
+// is moved here. Read-modify-write: a lost read would persist `0 + delta` over
+// the real balance, so a failed read throws.
+async function adjustInvestmentAccount(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  accountId: string,
+  deltaCents: number,
+) {
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("current_balance_cents")
+    .eq("id", accountId)
+    .eq("household_id", householdId)
+    .single();
+  if (error) throw new Error(`Could not read the account balance: ${error.message}`);
+  const { error: updateError } = await supabase
+    .from("accounts")
+    .update({ current_balance_cents: (data?.current_balance_cents ?? 0) + deltaCents, updated_at: new Date().toISOString() })
+    .eq("id", accountId)
+    .eq("household_id", householdId);
+  if (updateError) throw new Error(`Could not update the account balance: ${updateError.message}`);
 }

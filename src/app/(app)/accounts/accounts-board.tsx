@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useRef, useState, useTransition } from "
 import { TAX_LABEL_SHORT, TAX_TREATMENTS } from "@/lib/tax-treatment";
 import { RETIREMENT_KINDS, RETIREMENT_LABEL } from "@/lib/retirement-kind";
 import { centsToGroupedDisplay, currencySymbol, formatMoney } from "@/lib/money";
-import { describeUpdate } from "@/lib/updated-ago";
 import { CardPaymentsLedger, type CardPayment } from "@/components/card-payments-ledger";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
@@ -26,6 +25,7 @@ import {
   updateBucket,
   updateBucketBalance,
 } from "./actions";
+import { transferFromInvestment } from "@/app/(app)/invest/actions";
 import { setAccountSnapshot, setBucketSnapshot } from "../networth/actions";
 import { DEBT_KINDS } from "../budget/types";
 import { isDebtExcludedFromNetWorth } from "@/lib/net-worth";
@@ -407,7 +407,7 @@ export function AccountsBoard({
   const [estateOpen, setEstateOpen] = useState(false);
   const estateToFill = estateToFillCount(accounts, estate);
   const [monthEndOpen, setMonthEndOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState<false | "banking" | "investment">(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
@@ -691,7 +691,7 @@ export function AccountsBoard({
     { label: "Month-end update", onSelect: () => setMonthEndOpen(true) },
     { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
-    { label: "Transfer Funds", onSelect: () => setTransferOpen(true) },
+    { label: "Transfer Funds", onSelect: () => setTransferOpen("banking") },
   ]);
 
   return (
@@ -709,15 +709,15 @@ export function AccountsBoard({
       }}
     >
     <div className="mx-auto w-full max-w-[110rem] space-y-4">
-      {/* Title + period picker in one row, right-aligned like Insights.
-          Subtitle removed at Victor's request. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Title, actions and period picker in one row, left-aligned so the
+          controls sit beside the title. Subtitle removed at Victor's request. */}
+      <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold">Accounts</h1>
         {/* Actions sit immediately left of the period picker so the header
             carries every page-level control in one row. Below md they move
             into the ⋯ menu instead (registered above), so on a phone the
             header doesn't spend a whole row on two buttons. */}
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setMonthEndOpen(true)}
@@ -739,11 +739,14 @@ export function AccountsBoard({
           </button>
           <button
             type="button"
-            onClick={() => setTransferOpen(true)}
-            // Secondary: outlined, so Add account is the one filled button.
-            // Two filled buttons side by side read as equal weight.
-            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            onClick={() => setTransferOpen("banking")}
+            // Outlined in the brand color: stands apart from the plain
+            // buttons, while Add account stays the one filled button.
+            className="hidden shrink-0 items-center gap-1.5 md:inline-flex whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
+            </svg>
             Transfer Funds
           </button>
           <button
@@ -882,7 +885,7 @@ export function AccountsBoard({
         const renderCard = ({ section, extras }: (typeof items)[number]) => (
           <div
             key={section.key}
-            className="@container relative overflow-hidden rounded-lg bg-sky-100 ring-1 ring-black/[0.06] dark:bg-sky-900/50 dark:ring-white/[0.08]"
+            className="@container relative overflow-hidden rounded-lg bg-surface ring-1 ring-line"
           >
           {/* Edge tint in the group's dot color, so each tile reads as its own. */}
           <span aria-hidden className={`pointer-events-none absolute inset-y-0 left-0 w-1 ${section.dot}`} />
@@ -902,7 +905,7 @@ export function AccountsBoard({
             onToggleBuckets={toggleBuckets}
             headerBadge={section.kidsGroup ? "Not in Net Worth" : undefined}
             onAddAccount={() => setAddOpen(true)}
-            onTransfer={() => setTransferOpen(true)}
+            onTransfer={() => setTransferOpen(section.key === "investments" ? "investment" : "banking")}
           />
           </div>
         );
@@ -950,7 +953,11 @@ export function AccountsBoard({
             <CardPaymentsLedger
               payments={cardPayments}
               cardNames={Object.fromEntries(creditCards.map((c) => [c.id, c.name]))}
-              openCardIds={creditCards.filter((c) => c.active).map((c) => c.id)}
+              // A card still being paid off as a debt has its row under Debt
+              // Payments instead, so it isn't listed here as well.
+              openCardIds={creditCards
+                .filter((c) => c.active && !budgetDebts.some((d) => d.accountId === c.id && d.balanceCents > 0))
+                .map((c) => c.id)}
               accountNames={Object.fromEntries(accounts.map((a) => [a.id, a.name]))}
               currency={currency}
               storageKey="accounts-card-payments-open"
@@ -968,7 +975,7 @@ export function AccountsBoard({
               accountNames={Object.fromEntries(accounts.map((a) => [a.id, a.name]))}
               currency={currency}
               storageKey="accounts-debt-payments-open"
-              labels={{ title: "Debt Payments", item: "Debt", all: "All debts", empty: "No debt payments recorded", closed: "Removed debt" }}
+              labels={{ title: "Debt Payments", item: "Debt", all: "All debts", empty: "No debt payments recorded", closed: "Removed debt", total: "Debt Payments" }}
             />
           </div>
         ) : null}
@@ -995,6 +1002,7 @@ export function AccountsBoard({
         <TransferModal
           accounts={accounts}
           allBuckets={accounts.flatMap((a) => a.buckets)}
+          startFrom={transferOpen}
           onClose={() => setTransferOpen(false)}
         />
       ) : null}
@@ -1115,16 +1123,16 @@ function CreditCardListSection({
         <Link
           href="/travel"
           onClick={(e) => e.stopPropagation()}
-          className="shrink-0 whitespace-nowrap rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          className="shrink-0 whitespace-nowrap rounded-full bg-surface px-3 py-1 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
         >
           Points & rewards →
         </Link>
         <span className="flex shrink-0 items-baseline gap-1.5 whitespace-nowrap">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Total CC owed</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total CC owed</span>
           <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
             {formatMoney(totalOwed, currency)}
           </span>
-          <span className="text-[11px] text-muted">· Not in Net Worth</span>
+          <span className="text-xs text-foreground">· Not in Net Worth</span>
         </span>
         </div>
         <button
@@ -1170,7 +1178,7 @@ function CreditCardListSection({
                     // A soft fill instead of a ring: the tile shape still
                     // handles the ragged last row, without a border inside
                     // the card's own border.
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-sky-100 px-2.5 py-2 text-left transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-surface px-2.5 py-2 text-left ring-1 ring-line transition hover:ring-foreground/30"
                   >
                     {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
@@ -1196,7 +1204,7 @@ function CreditCardListSection({
                     </svg>
                   </button>
                 ) : (
-                  <div className="flex w-full items-center gap-2 rounded-lg bg-sky-100 px-2.5 py-2 dark:bg-sky-900/50">
+                  <div className="flex w-full items-center gap-2 rounded-lg bg-surface px-2.5 py-2 ring-1 ring-line">
                     {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{a.name}</span>
                     {(a.owedCents ?? 0) > 0 ? (
@@ -1233,27 +1241,54 @@ function CreditCardListSection({
 function TransferModal({
   accounts,
   allBuckets,
+  startFrom = "banking",
   onClose,
 }: {
   accounts: AccountData[];
   allBuckets: BucketData[];
+  // Opened from the Investments popup it starts on an investment account.
+  startFrom?: "banking" | "investment";
   onClose: () => void;
 }) {
   useScrollLock();
   const [pending, start] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Cards and investments each have a dedicated flow that does more than move
-  // a balance, so they're not offered here at all rather than being offered
-  // and then refused on submit.
-  const movable = accounts.filter((a) => a.kind !== "credit_card" && a.kind !== "investment");
-  const [fromId, setFromId] = useState<string>(movable[0]?.id ?? "");
-  const [toId, setToId] = useState<string>(movable[1]?.id ?? "");
+  // Grouped so it's plain which money is which: moving to or from a Kids
+  // Funding account moves money in or out of Net Worth. Cards have their own
+  // payment flow. Money INTO an investment is a contribution, logged on Budget
+  // so Contributed / Left to max count it, so investments are only a source.
+  const live = accounts.filter((a) => a.active && a.kind !== "credit_card");
+  const banking = live.filter((a) => !a.isKidsAccount && a.kind !== "investment" && a.kind !== "property" && a.kind !== "debt_loan");
+  const investments = live.filter((a) => !a.isKidsAccount && a.kind === "investment");
+  const kids = live.filter((a) => a.isKidsAccount && a.kind !== "property" && a.kind !== "debt_loan");
+  const destinations = [...banking, ...kids.filter((a) => a.kind !== "investment")];
+
+  const firstFrom = (startFrom === "investment" ? investments[0] : undefined) ?? banking[0] ?? investments[0];
+  const [fromId, setFromId] = useState<string>(firstFrom?.id ?? "");
+  const [toId, setToId] = useState<string>(destinations.find((a) => a.id !== firstFrom?.id)?.id ?? "");
   const [fromBucketId, setFromBucketId] = useState("");
   const [toBucketId, setToBucketId] = useState("");
 
+  const fromAccount = live.find((a) => a.id === fromId);
+  const fromIsInvestment = fromAccount?.kind === "investment";
   const fromBuckets = allBuckets.filter((b) => b.accountId === fromId);
   const toBuckets = allBuckets.filter((b) => b.accountId === toId);
+  const toOptions = destinations.filter((a) => a.id !== fromId);
+
+  const selectClass =
+    "w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  const labelClass = "mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground";
+  const optionGroups = (groups: [string, AccountData[]][]) =>
+    groups
+      .filter(([, list]) => list.length > 0)
+      .map(([label, list]) => (
+        <optgroup key={label} label={label}>
+          {list.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </optgroup>
+      ));
 
   return (
     <div
@@ -1269,22 +1304,40 @@ function TransferModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"
+            className="rounded-md p-1 text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
             aria-label="Close"
           >
             ✕
           </button>
         </div>
 
+        {/* onSubmit, not <form action>: a rejected save must keep what was typed. */}
         <form
-          action={(fd) =>
+          onSubmit={(e) => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
             start(async () => {
               setErrorMsg(null);
-              const r = await transferBetweenAccounts(fd);
+              let r: { error: string | null } | undefined;
+              if (fromIsInvestment) {
+                // Same withdrawal Invest / Savings records — one transaction
+                // type, one set of balance moves, one Net Worth effect.
+                const w = new FormData();
+                w.set("sourceAccountId", fromId);
+                w.set("sourceBucketId", fromBucketId);
+                w.set("destAccountId", toId);
+                w.set("destBucketId", toBucketId);
+                w.set("amount", String(fd.get("amount") ?? ""));
+                w.set("date", String(fd.get("date") ?? ""));
+                w.set("memo", String(fd.get("memo") ?? ""));
+                r = await transferFromInvestment(w);
+              } else {
+                r = await transferBetweenAccounts(fd);
+              }
               if (r?.error) setErrorMsg(r.error);
               else onClose();
-            })
-          }
+            });
+          }}
           className="space-y-2"
         >
           <LabeledInput label="Amount" name="amount" type="number" step="0.01" min="0" required autoFocus />
@@ -1297,32 +1350,33 @@ function TransferModal({
           />
 
           <label className="block">
-            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-              From
-            </span>
+            <span className={labelClass}>From</span>
             <select
               name="fromAccountId"
               value={fromId}
-              onChange={(e) => { setFromId(e.target.value); setFromBucketId(""); }}
+              onChange={(e) => {
+                setFromId(e.target.value);
+                setFromBucketId("");
+                if (e.target.value === toId) {
+                  setToId(destinations.find((a) => a.id !== e.target.value)?.id ?? "");
+                  setToBucketId("");
+                }
+              }}
               required
-              className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className={selectClass}
             >
-              {movable.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
+              {optionGroups([["Banking", banking], ["Investments", investments], ["Kids Funding", kids]])}
             </select>
           </label>
           {fromBuckets.length > 0 ? (
             <label className="block">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                From bucket
-              </span>
+              <span className={labelClass}>From bucket</span>
               <select
                 name="fromBucketId"
                 value={fromBucketId}
                 onChange={(e) => setFromBucketId(e.target.value)}
                 required
-                className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className={selectClass}
               >
                 <option value="">Choose a bucket…</option>
                 {fromBuckets.map((b) => (
@@ -1333,32 +1387,29 @@ function TransferModal({
           ) : null}
 
           <label className="block">
-            <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-              To
-            </span>
+            <span className={labelClass}>To</span>
             <select
               name="toAccountId"
               value={toId}
               onChange={(e) => { setToId(e.target.value); setToBucketId(""); }}
               required
-              className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className={selectClass}
             >
-              {movable.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
+              {optionGroups([
+                ["Banking", toOptions.filter((a) => !a.isKidsAccount)],
+                ["Kids Funding", toOptions.filter((a) => a.isKidsAccount)],
+              ])}
             </select>
           </label>
           {toBuckets.length > 0 ? (
             <label className="block">
-              <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">
-                To bucket
-              </span>
+              <span className={labelClass}>To bucket</span>
               <select
                 name="toBucketId"
                 value={toBucketId}
                 onChange={(e) => setToBucketId(e.target.value)}
                 required
-                className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className={selectClass}
               >
                 <option value="">Choose a bucket…</option>
                 {toBuckets.map((b) => (
@@ -1374,7 +1425,7 @@ function TransferModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-sky-50 dark:hover:bg-sky-950/40"
             >
               Cancel
             </button>
@@ -1506,7 +1557,7 @@ function SumCell({ pickKey, cents, children }: { pickKey: string; cents: number 
         sum.toggle(pickKey, cents);
       }}
       className={`relative -mx-0.5 flex w-full items-center justify-center rounded-md px-0.5 ${
-        picked ? "bg-sky-500/15 ring-1 ring-inset ring-sky-500/60" : ""
+        picked ? "ring-2 ring-inset ring-brand" : ""
       }`}
     >
       {children}
@@ -1623,20 +1674,6 @@ function AccountSection({
   // other groups show no share line — Victor removed the "% of Assets" text.
   const kidsNote = section.kidsGroup ? { long: "Not in Net Worth", short: "Not in NW" } : null;
 
-  // When this group's balances were last typed in. A bucketed account is as
-  // fresh as its least-recently checked bucket (each is entered on its own),
-  // and the group as its stalest account — that one is what needs updating.
-  // Cards and debts skip it: transactions and Budget keep those current.
-  // Banking skips it too — Victor removed it there.
-  const tracksFreshness = section.key === "investments" || section.key === "kids";
-  const stalestUpdate = tracksFreshness
-    ? localAccounts
-        .filter((a) => a.active)
-        .flatMap((a) => (a.buckets.length > 0 ? a.buckets.map((b) => b.balanceUpdatedAt) : [a.balanceUpdatedAt]))
-        .sort()[0] ?? null
-    : null;
-  const freshness = stalestUpdate ? describeUpdate(stalestUpdate) : null;
-
   // Move the dragged account to sit where another account in this section was
   // dropped, then persist the new order.
   const reorder = (fromId: string, toId: string) => {
@@ -1688,13 +1725,6 @@ function AccountSection({
         <div className="flex min-w-0 flex-1 items-center gap-1 @[17rem]:gap-2">
           <span className="flex min-w-0 flex-col @[24rem]:shrink-0">
             <span className="truncate text-sm font-semibold leading-tight @[17rem]:text-base">{section.label}</span>
-            {freshness ? (
-              // Wraps rather than truncates: on a phone Banking's wide total
-              // leaves too little room, and "3 days a…" hides the part that matters.
-              <span className={`text-[11px] leading-tight ${freshness.stale ? "font-semibold text-negative" : "text-muted"}`}>
-                updated {freshness.label}
-              </span>
-            ) : null}
           </span>
           <svg
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1775,8 +1805,12 @@ function AccountSection({
             <button
               type="button"
               onClick={onTransfer}
-              className="shrink-0 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              // Same look as the page header's Transfer Funds.
+              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
+              </svg>
               Transfer Funds
             </button>
           ) : null}
@@ -1966,7 +2000,7 @@ function AccountRow({
   const balanceFor = (a: AccountData, columnIndex: number): number | null =>
     a.balancesByMonth?.[historyMonths[columnIndex]] ?? null;
 
-  const rowBg = editing ? "bg-sky-100 dark:bg-sky-900/50" : "hover:bg-sky-50 dark:hover:bg-sky-950/40";
+  const rowBg = editing ? "bg-surface ring-2 ring-inset ring-brand/40" : "hover:bg-sky-50 dark:hover:bg-sky-950/40";
 
   return (
     <li
@@ -2004,20 +2038,20 @@ function AccountRow({
             {account.name}
           </span>
           {account.ownership === "joint" ? (
-            <EditPill onClick={onToggleEdit} className="hidden bg-sky-100 text-muted hover:ring-muted @[560px]:inline-flex dark:bg-sky-900/50">
+            <EditPill onClick={onToggleEdit} className="hidden bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40 @[560px]:inline-flex">
               Joint
             </EditPill>
           ) : null}
           {section.key === "banking" && account.bankGroup ? (
             <EditPill
               onClick={onToggleEdit}
-              className={`${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-sky-100 text-muted hover:ring-muted dark:bg-sky-900/50"}`}
+              className={`${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40"}`}
             >
               {account.bankGroup === "savings" ? "Savings" : "Checking"}
             </EditPill>
           ) : null}
           {account.subtype ? (
-            <EditPill onClick={onToggleEdit} className="bg-sky-500/10 text-sky-600 hover:ring-sky-500 dark:text-sky-400">
+            <EditPill onClick={onToggleEdit} className="bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40">
               {account.subtype}
             </EditPill>
           ) : null}
@@ -2026,7 +2060,7 @@ function AccountRow({
             // split into buckets. It used to be @[560px]-only text, which the
             // half-width section cards never reached, so no account ever
             // showed it.
-            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-muted dark:bg-sky-900/50">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded bg-surface text-foreground ring-1 ring-line px-1.5 py-0.5 text-[10px] font-semibold">
               {bucketCount} {bucketCount === 1 ? "bucket" : "buckets"}
             </span>
           ) : null}
@@ -2872,7 +2906,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 <LabeledInput label="Card URL" name="cardUrl" type="url" placeholder="https://issuer.com/card" />
                 <label className="block">
                   <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Benefits reset</span>
-                  <select name="benefitCadence" defaultValue="annual" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+                  <select name="benefitCadence" defaultValue="annual" className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
                     <option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option><option value="anniversary">Card anniversary</option>
                   </select>
                 </label>
@@ -2888,12 +2922,12 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
               <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
               <label className="block">
                 <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Ownership</span>
-                <select name="ownership" defaultValue="sole" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="sole">Sole</option><option value="joint">Joint</option></select>
+                <select name="ownership" defaultValue="sole" className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="sole">Sole</option><option value="joint">Joint</option></select>
               </label>
               <div className="space-y-2"><LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" /><label className="flex items-center gap-1.5 px-0.5 text-xs text-muted"><input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Fee waived (e.g. military benefit)</label></div>
               <LabeledInput label="Date opened" name="dateOpened" type="date" />
               <LabeledInput label="Date closed" name="dateClosed" type="date" />
-              <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
+              <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
               <LabeledInput label="Rewards program" name="rewardsProgram" placeholder="Hilton, Hyatt, Chase UR" />
               <LabeledInput label="Value per pt (¢)" name="pointsValueCents" type="number" step="any" min="0" hint={
                 <a
@@ -2911,7 +2945,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
               <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" placeholder="3000" />
               <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" />
               <label className="flex items-end gap-1.5 pb-1.5 text-xs text-muted"><input type="checkbox" name="bonusEarned" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Bonus earned</label>
-              <div className="sm:col-span-2"><label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label><input name="remarks" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></div>
+              <div className="sm:col-span-2"><label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Remarks</label><input name="remarks" className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand" /></div>
             </div>
           </div>
 
@@ -2974,7 +3008,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
             Account type
             <select
               name="kind"
-              className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="mt-1 w-full rounded-md bg-surface px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               {kindKeys.map((k) => (
                 <option key={k} value={k}>{section.kindLabels[k]}</option>
@@ -2988,7 +3022,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
         {section.offerSubtype ? section.key === "loans" ? (
           <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
             Debt type
-            <select name="subtype" defaultValue="" required onChange={(e) => setDebtSubtype(e.target.value)} className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+            <select name="subtype" defaultValue="" required onChange={(e) => setDebtSubtype(e.target.value)} className="mt-1 w-full rounded-md bg-surface px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
               <option value="">Choose a debt type</option>
               {DEBT_KINDS.map((debtKind) => <option key={debtKind.value} value={debtKind.value}>{debtKind.label}</option>)}
             </select>
@@ -3025,7 +3059,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
               <select
                 name="taxTreatment"
                 defaultValue="taxable"
-                className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="mt-1 w-full rounded-md bg-surface px-2 py-2 text-sm font-normal normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 {TAX_TREATMENTS.map((t) => (
                   <option key={t} value={t}>
@@ -3066,7 +3100,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
         <LabeledInput label="Account reference" name="accountNumber" placeholder="Full number or last four" />
         <label className="block text-[11px] font-semibold uppercase tracking-wide text-muted">
           Ownership
-          <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-sky-50 dark:bg-background px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
+          <select name="ownership" defaultValue="sole" className="mt-1 w-full rounded-md bg-surface px-2 py-2 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand">
             <option value="sole">Sole</option>
             <option value="joint">Joint</option>
           </select>

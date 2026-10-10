@@ -314,11 +314,11 @@ export function ProjectionSection({
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {y.year}
                       </td>
-                      <td className="px-2.5 py-2 text-center tabular-nums text-muted">
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {y.age ?? "—"}
                       </td>
                       {/* Plan on top, what actually happened underneath. */}
-                      <td className="px-2.5 py-2 text-center tabular-nums">
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {formatMoneyWhole(y.incomeCents, currency)}
                         {/* Where the year's income comes from once the income
                             lines are paying, and the tax taken off them. */}
@@ -333,7 +333,7 @@ export function ProjectionSection({
                         ) : null}
                         <Actual cents={y.actualIncomeCents} currency={currency} row={y} thisYear={thisYear} />
                       </td>
-                      <td className="px-2.5 py-2 text-center tabular-nums text-negative">
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums text-negative">
                         {formatMoneyWhole(y.spendingCents, currency)}
                         {y.spendingCents - y.baseSpendingCents + y.debtFreedCents > 0 ? (
                           <span className="block whitespace-nowrap text-[11px] font-normal text-foreground">
@@ -345,7 +345,7 @@ export function ProjectionSection({
                       {/* The plan's saving for the year — income less
                           spending — with what actually reached savings and
                           investments underneath it. */}
-                      <td className="px-2.5 py-2 text-center tabular-nums">
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {/* Negative in retirement: the year's spending is coming
                             out of savings, so it reads as a draw, in red. */}
                         <span
@@ -403,7 +403,7 @@ export function ProjectionSection({
                           </>
                         )}
                       </td>
-                      <td className="px-2.5 py-2 text-center tabular-nums">
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {y.actualCents == null ? (
                           <span className="text-muted">—</span>
                         ) : (
@@ -446,7 +446,7 @@ export function ProjectionSection({
                           );
                         })()}
                       </td>
-                      <td className="px-2.5 py-2 text-center tabular-nums">
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {diff == null ? (
                           <span className="text-muted">—</span>
                         ) : (

@@ -17,7 +17,7 @@ Victor has repeatedly rejected purple/indigo and amber-orange in the app's visua
 
 **Use the `--viz-*` palette instead** (declared in `src/app/globals.css`, both light and dark blocks):
 - `--viz-income` (deep navy) + `--viz-spending` (soft cool red) — the income/spending bar pair; `--viz-soft` (light blue) for neutral secondary bars
-- `--viz-savings` (blue-700), `--viz-bills` (teal-600), `--viz-expenses` (sky-400), `--viz-debt` (rose-600) — flow colors
+- `--viz-savings` (steel blue), `--viz-bills` (teal-600), `--viz-expenses` (sky-400), `--viz-debt` (rose-600) — flow colors
 - `--viz-grid` (chart gridlines), `--viz-sel` (selected-period wash)
 
 For non-flow accents (subtitle text, filter chips, hover backgrounds, ranked bars), use a light-blue tint — `bg-sky-100 dark:bg-sky-900/50` for chips/pills, `bg-sky-50 dark:bg-sky-950/40` for hover or expanded rows — with full `text-foreground`, or a `--viz-*` color that matches the metric. Never grey: no `text-muted`, `bg-black/N`, `bg-white/N`, or `gray-*`/`slate-*`/`zinc-*`/`neutral-*` — Victor reads grey as disabled and has rejected it repeatedly.
@@ -42,6 +42,22 @@ bar and notch. Give the container
 outer, non-scrolling box so it can't scroll away with the content. The same
 applies at the bottom, where `env(safe-area-inset-bottom)` clears the home
 indicator (see `transaction-modal.tsx` for the existing usages).
+
+# "Make the font bigger" means desktop — leave the phone alone
+
+When Victor asks to increase font size, he means the **desktop** view. Apply
+the bump at `sm:` and up (e.g. `text-xs sm:text-sm`) and keep the phone at the
+size it already had. On the phone, only check that nothing broke — don't
+enlarge text there, and don't "fix" a phone layout by changing its font sizes.
+If the phone already looks wrong for another reason, say so; don't expand it.
+
+Gotchas when adding the `sm:` step:
+- `globals.css` overrides `.text-[10px]` (→11px) and `.text-[11px]` (→12px)
+  in a layer that beats responsive variants, so `text-[11px] sm:text-xs` stays
+  12px on desktop. Use `max-sm:text-[12px] sm:text-xs` (or `max-sm:text-[11px]`
+  for an old `text-[10px]`) — same pixels on the phone, real bump on desktop.
+- Check for existing `lg:text-xs` / `lg:text-[13px]` on the same element: they
+  win on a big monitor and silently cancel the bump. Raise them too.
 
 # Never add tooltips (title="…") unless Victor asks
 

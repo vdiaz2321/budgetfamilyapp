@@ -62,13 +62,13 @@ export function PeriodPicker({
   const seg = (active: boolean) =>
     `whitespace-nowrap rounded-full px-2 py-1.5 text-[15px] font-medium transition sm:px-3.5 sm:text-sm ${
       active
-        ? "bg-surface text-foreground shadow-sm"
-        : "text-muted hover:text-foreground"
+        ? "font-bold text-foreground shadow-sm ring-1 ring-foreground/25"
+        : "text-foreground hover:ring-1 hover:ring-line"
     }`;
 
   return (
     <div className="relative">
-      <div className="inline-flex items-center rounded-full bg-sky-100 p-1 sm:gap-0.5 dark:bg-sky-900/50">
+      <div className="inline-flex items-center rounded-full bg-surface p-1 ring-1 ring-line sm:gap-0.5">
         <button type="button" className={seg(isLastMonth)} onClick={() => go("monthly", lastMonth)}>
           Last month
         </button>

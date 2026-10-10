@@ -71,8 +71,8 @@ function RunwayTrack({
         <span className="text-lg font-bold tabular-nums" style={{ color: tone }}>
           {monthsCovered.toFixed(1)}
         </span>
-        <span className="text-xs text-muted">months of essentials covered</span>
-        <span className="ml-auto text-xs font-semibold" style={{ color: tone }}>
+        <span className="text-xs sm:text-sm text-muted">months of essentials covered</span>
+        <span className="ml-auto text-xs sm:text-sm font-semibold" style={{ color: tone }}>
           {verdict}
         </span>
       </div>
@@ -83,13 +83,13 @@ function RunwayTrack({
         />
         <span className="absolute inset-y-0 w-px bg-foreground/40" style={{ left: "50%" }} aria-hidden />
       </div>
-      <div className="mt-1 flex justify-between text-[10px] text-muted">
+      <div className="mt-1 flex justify-between max-sm:text-[11px] sm:text-[15px] text-muted">
         <span>3 mo floor</span>
         <span>
           {gapToSix > 0 ? `${formatCash(gapToSix, currency)} to 6 mo` : "6 mo target met"}
         </span>
       </div>
-      <p className="mt-1 text-[10px] text-muted">
+      <p className="mt-1 max-sm:text-[11px] sm:text-[15px] text-muted">
         Based on {formatCash(monthlyEssentialCents, currency)}/mo of bills.
       </p>
     </div>
@@ -125,7 +125,7 @@ function ReserveRow({
           const remaining = Math.max(0, row.goalCents - row.balanceCents);
           return (
             <div className="mt-1.5">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-[11px] text-muted">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 max-sm:text-[12px] sm:text-[15px] text-muted">
                 <span>
                   Target {formatCash(row.goalCents, currency)}
                   {row.plannedMonthlyCents ? ` · ${formatCash(row.plannedMonthlyCents, currency)}/mo planned` : ""}
@@ -140,7 +140,7 @@ function ReserveRow({
                   style={{ width: `${pct}%`, backgroundColor: tone }}
                 />
               </div>
-              <p className="mt-1 text-[10px] text-muted">
+              <p className="mt-1 max-sm:text-[11px] sm:text-[15px] text-muted">
                 {remaining > 0 ? `${formatCash(remaining, currency)} to go` : "Target reached"}
               </p>
             </div>
@@ -188,14 +188,14 @@ export function CashReserves({ data, currency }: { data: CashReservesData; curre
           <span className="text-sm font-bold tabular-nums" style={{ color: "var(--viz-savings)" }}>
             {formatCash(data.totalCents, currency)}
           </span>
-          <span className="text-xs text-muted">
+          <span className="text-xs sm:text-sm text-muted">
             {data.rows.length} fund{data.rows.length === 1 ? "" : "s"}
           </span>
         </span>
       </button>
       {open ? (
         <>
-          <p className="border-b border-line/70 px-4 py-2 text-xs text-muted">
+          <p className="border-b border-line/70 px-4 py-2 text-xs sm:text-sm text-muted">
             The balances come from Accounts.
           </p>
           <ul className="divide-y divide-line/60">

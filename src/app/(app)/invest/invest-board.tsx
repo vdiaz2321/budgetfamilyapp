@@ -14,7 +14,6 @@ import { ImportInvestmentModal } from "./import-modal";
 import { AddMonthForm, AddHoldingsForm } from "./manual-entry";
 import { AllHoldingsTable } from "./holdings-rollup";
 import { describeUpdate } from "@/lib/updated-ago";
-import { reorderAccounts } from "../accounts/actions";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { SavingsPanel, type SavingsPanelProps } from "./savings-panel";
 import { useScrollLock } from "@/lib/use-scroll-lock";
@@ -32,6 +31,9 @@ export type YearCell = {
   stored: boolean;
   /** Contributed came from the transaction ledger, so it can't be typed over. */
   contribFromLedger?: boolean;
+  /** January's deposits already inside `startBalanceCents` (the year opened on
+   *  January's close), so growth must not subtract them again. */
+  openingContribCents?: number;
 };
 
 export type BucketRow = {
@@ -121,10 +123,12 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   let end = parent?.endBalanceCents ?? null;
   let close = parent?.closeBalanceCents ?? null;
   let manual = !!parent?.accruedManual;
+  let openingContrib = parent?.openingContribCents ?? 0;
   for (const b of a.buckets) {
     const c = b.cells[year];
     if (!c) continue;
     contributed += c.contributedCents;
+    openingContrib += c.openingContribCents ?? 0;
     accrued += c.accruedCents;
     if (c.accruedManual) manual = true;
     if (c.startBalanceCents != null) start = (start ?? 0) + c.startBalanceCents;
@@ -134,8 +138,9 @@ function effectiveCell(a: InvestAccount, year: number): YearCell {
   // Gains for the whole account is worked out from the account's own opening,
   // close and contributions — not by adding up its parts. A split account can
   // open on the account slot and close on its buckets (TSP, split mid-2026),
-  // and summing the parts there would report zero growth.
-  if (!manual && start != null && end != null) accrued = end - start - contributed;
+  // and summing the parts there would report zero growth. Deposits already
+  // inside a January opening are left out, the same as each part's own cell.
+  if (!manual && start != null && end != null) accrued = end - start - (contributed - openingContrib);
 
   return {
     year,
@@ -158,7 +163,7 @@ function liveBalanceCents(a: InvestAccount): number {
   return a.balanceCents;
 }
 
-export type DestAccount = { id: string; name: string };
+export type DestAccount = { id: string; name: string; buckets: { id: string; name: string }[] };
 
 export type BoardTab = "portfolio" | "savings";
 
@@ -196,26 +201,37 @@ function taxFor(
   return resolveTaxTreatment({ bucketOverride, bucketName, accountOverride, accountSubtype }).treatment;
 }
 
+/**
+ * Rounds a list of cent amounts to whole dollars that still add up to the
+ * rounded total (largest remainder), so a breakdown never sits a dollar off
+ * the figure above it.
+ */
+function wholeDollarsSummingToTotal(cents: number[]): number[] {
+  const floors = cents.map((c) => Math.floor(c / 100));
+  let short = Math.round(cents.reduce((sum, c) => sum + c, 0) / 100) - floors.reduce((a, b) => a + b, 0);
+  const byRemainder = cents.map((c, i) => ({ i, rem: c / 100 - floors[i] })).sort((x, y) => y.rem - x.rem);
+  for (const { i } of byRemainder) {
+    if (short <= 0) break;
+    floors[i] += 1;
+    short -= 1;
+  }
+  return floors.map((d) => d * 100);
+}
+
 const gainTone = (cents: number) =>
   cents > 0 ? "text-positive" : cents < 0 ? "text-negative" : "text-foreground";
 
-// Gain measured against the year's deposits, in DOLLARS (cents): gains −
-// contributions. Positive when investments made more than was paid in that
-// year. Null when neither contributed nor gained (nothing to compare).
-//
-// Deliberately NOT a rate of return: a true return needs the beginning
-// balance, and `investment_years.start_cents` is empty for every historical
-// year. Account snapshots only begin Jan 2026, so a real return is computable
-// for 2026 onward at the earliest — until then this stays a dollar figure and
-// is labelled as one.
-function gainVsContributed(cell: {
-  startBalanceCents: number | null;
-  contributedCents: number;
-  accruedCents: number;
-}): number | null {
-  if (cell.contributedCents === 0 && cell.accruedCents === 0) return null;
-  return cell.accruedCents - cell.contributedCents;
+// The year's return: gains ÷ the balance the year opened on, as a percent.
+// Simple (ignores when in the year deposits landed), and null without an
+// opening balance — years before 2026 have none recorded, so they stay blank
+// rather than showing a made-up figure. Replaced "gain vs contrib" (gains −
+// deposits), which put Fidelity in red at −$3,928 in a year it gained $8,174.
+function returnPct(startCents: number | null, accruedCents: number): number | null {
+  if (startCents == null || startCents <= 0) return null;
+  return (accruedCents / startCents) * 100;
 }
+
+const formatPct = (pct: number) => `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`;
 
 export function InvestBoard({
   accounts,
@@ -236,14 +252,40 @@ export function InvestBoard({
   const year = years[0] ?? new Date().getFullYear();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  // One switch for all three hero breakdowns: opening any opens them all, so
+  // the cards stay side by side.
+  const [showBreakdowns, setShowBreakdowns] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importNote, setImportNote] = useState<string | null>(null);
-  const [openTax, setOpenTax] = useState<TaxTreatment | null>(null);
+  // Tax bands picked in "How it's taxed". Empty = no filter. They narrow the
+  // chart and the holdings list beside it.
+  const [taxPick, setTaxPick] = useState<TaxTreatment[]>([]);
 
   const mine = accounts.filter((a) => !a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
-  const chartAccounts = selectedAccount ? [selectedAccount] : mine;
+
+  // The chart's accounts for the picked bands. An account whose holdings are
+  // all in the picked bands goes in whole. A split account with only some
+  // buckets in them keeps just those buckets — its pre-split years sit on the
+  // account itself, mixed across bands, so they can't be shared out and are
+  // left off.
+  const taxChart = useMemo(() => {
+    if (taxPick.length === 0) return mine;
+    const picked = new Set(taxPick);
+    const out: InvestAccount[] = [];
+    for (const a of mine) {
+      if (a.buckets.length === 0) {
+        if (picked.has(taxFor(a.subtype, null, a.taxTreatment, null))) out.push(a);
+        continue;
+      }
+      const inBand = a.buckets.filter((b) => picked.has(taxFor(a.subtype, b.name, a.taxTreatment, b.taxTreatment)));
+      if (inBand.length === a.buckets.length) out.push(a);
+      else if (inBand.length > 0) out.push({ ...a, cells: {}, buckets: inBand });
+    }
+    return out;
+  }, [mine, taxPick]);
+  const chartAccounts = selectedAccount ? [selectedAccount] : taxChart;
 
   // The tab lives in the URL so /savings can deep-link straight to it and a
   // reload keeps the view. `history.replaceState` rather than a router
@@ -274,6 +316,58 @@ export function InvestBoard({
     }
     const accountCount = mine.reduce((sum, a) => sum + (a.buckets.length > 0 ? a.buckets.length : 1), 0);
     return { contributed, gains, current, accountCount };
+  }, [mine, year]);
+
+  // This year's contributions, holding by holding, sorted into retirement
+  // accounts (tax-free or tax-deferred) and taxable ones. Read per slot — a
+  // bucket's own treatment, else the account's — so Fidelity's taxable bucket
+  // and its Roths land on opposite sides. Whole dollars by largest remainder,
+  // so the lines add up to the card's rounded total instead of a dollar off.
+  const investedSplit = useMemo(() => {
+    // A bucket that names its account ("Fidelity Roth Vic", "TSP Roth") keeps
+    // its own line; one that doesn't ("Kraken", "River") is shown as its
+    // account ("Crypto"), and lines that end up with the same name and side
+    // are added together.
+    const exact: { label: string; cents: number; retirement: boolean }[] = [];
+    const add = (label: string, t: TaxTreatment, cents: number) => {
+      if (cents === 0) return;
+      const retirement = t !== "taxable";
+      const same = exact.find((r) => r.label === label && r.retirement === retirement);
+      if (same) same.cents += cents;
+      else exact.push({ label, cents, retirement });
+    };
+    for (const a of mine) {
+      add(a.name, taxFor(a.subtype, null, a.taxTreatment, null), a.cells[year]?.contributedCents ?? 0);
+      for (const b of a.buckets) {
+        const label = b.name.toLowerCase().includes(a.name.toLowerCase()) ? ledgerLabel(a.name, b.name) : a.name;
+        add(label, taxFor(a.subtype, b.name, a.taxTreatment, b.taxTreatment), b.cells[year]?.contributedCents ?? 0);
+      }
+    }
+    exact.splice(0, exact.length, ...exact.filter((r) => r.cents !== 0));
+    const whole = wholeDollarsSummingToTotal(exact.map((r) => r.cents));
+    const rows = exact
+      .map((r, i) => ({ label: r.label, retirement: r.retirement, cents: whole[i] }))
+      .sort((x, y) => y.cents - x.cents);
+    const retirement = rows.filter((r) => r.retirement);
+    const taxable = rows.filter((r) => !r.retirement);
+    const sum = (list: typeof rows) => list.reduce((t, r) => t + r.cents, 0);
+    return {
+      groups: [
+        { name: "Retirement", cents: sum(retirement), rows: retirement },
+        { name: "Taxable", cents: sum(taxable), rows: taxable },
+      ].filter((g) => g.rows.length > 0),
+    };
+  }, [mine, year]);
+
+  // This year's gain account by account — whole accounts, since a split
+  // account's gain is measured on the account (TSP's buckets carry none of
+  // their own) — biggest first, rounded to add up to the card's total.
+  const gainsByAccount = useMemo(() => {
+    const exact = mine
+      .map((a) => ({ name: a.name, cents: effectiveCell(a, year).accruedCents }))
+      .filter((r) => r.cents !== 0);
+    const whole = wholeDollarsSummingToTotal(exact.map((r) => r.cents));
+    return exact.map((r, i) => ({ name: r.name, cents: whole[i] })).sort((x, y) => y.cents - x.cents);
   }, [mine, year]);
 
   // Current balances grouped by tax treatment. Uses live balances (not the
@@ -321,16 +415,16 @@ export function InvestBoard({
   // partial imports would misrepresent the whole as whichever slice happens to
   // have been imported.
   const allocation = useMemo(() => {
-    const rows: { label: string; cents: number; accountId: string }[] = [];
+    const rows: { label: string; cents: number; accountId: string; treatment: TaxTreatment }[] = [];
     for (const a of mine) {
       if (a.buckets.length > 0) {
         for (const b of a.buckets) {
           // A bucket name already carries its brokerage ("Fidelity (Taxable)
           // Vic"), so prefixing the account repeats it. Same rule as ledgerLabel.
-          if (b.balanceCents > 0) rows.push({ label: ledgerLabel(a.name, b.name), cents: b.balanceCents, accountId: a.id });
+          if (b.balanceCents > 0) rows.push({ label: ledgerLabel(a.name, b.name), cents: b.balanceCents, accountId: a.id, treatment: taxFor(a.subtype, b.name, a.taxTreatment, b.taxTreatment) });
         }
       } else if (a.balanceCents > 0) {
-        rows.push({ label: a.name, cents: a.balanceCents, accountId: a.id });
+        rows.push({ label: a.name, cents: a.balanceCents, accountId: a.id, treatment: taxFor(a.subtype, null, a.taxTreatment, null) });
       }
     }
     const total = rows.reduce((s, r) => s + r.cents, 0);
@@ -338,6 +432,29 @@ export function InvestBoard({
     return { rows, total, top: rows[0] ?? null };
   }, [mine]);
   const showAllocation = allocation.rows.length > 1 && allocation.total > 0;
+  // The holdings list follows the picked tax bands; its total is theirs.
+  const shownAllocation = useMemo(() => {
+    if (taxPick.length === 0) return allocation;
+    const rows = allocation.rows.filter((r) => taxPick.includes(r.treatment));
+    return { ...allocation, rows, total: rows.reduce((s, r) => s + r.cents, 0) };
+  }, [allocation, taxPick]);
+  const toggleTax = (t: TaxTreatment) => {
+    // A holding picked in the list would hide the band filter on the chart,
+    // so picking a band clears it.
+    setSelectedId(null);
+    setTaxPick((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  };
+
+  // What's still owed to this year's investment goals (Savings tab), fund by
+  // fund: a fund past its goal doesn't make up for one behind. Kids' funds
+  // are out, as they are from the contributed figure above it; cash goals
+  // like Real Estate live in savings buckets and are out too.
+  const investGoals = (savings.cards ?? []).filter((c) => c.isInvestment && !c.isKids && c.goalCents > 0);
+  const leftToGoalCents = investGoals.reduce((sum, c) => sum + Math.max(0, c.leftToSaveCents), 0);
+  // Pace, from the same per-goal check the Savings tab runs: behind if any
+  // fund is behind or past its date, with what those funds need each month.
+  const behindGoals = investGoals.filter((c) => c.pace === "behind" || c.pace === "overdue");
+  const behindMonthlyCents = behindGoals.reduce((sum, c) => sum + (c.requiredMonthlyCents ?? 0), 0);
 
   // Retirement contribution room, read straight off the rows the Savings tab
   // renders so the two figures can never disagree.
@@ -350,7 +467,10 @@ export function InvestBoard({
     0,
   );
 
-  useRegisterMobilePageActions([{ label: "Transfer/Withdraw", onSelect: () => setShowTransfer(true) }]);
+  useRegisterMobilePageActions([
+    { label: "Transfer/Withdraw", onSelect: () => setShowTransfer(true) },
+    { label: "How investment tracking works", onSelect: () => setShowGuide((open) => !open) },
+  ]);
 
   return (
     <div className="mx-auto flex w-full max-w-[110rem] flex-col gap-6 px-4 py-7">
@@ -365,14 +485,48 @@ export function InvestBoard({
           <button
             type="button"
             onClick={() => setShowTransfer(true)}
-            className="hidden items-center md:flex gap-1.5 rounded-lg bg-brand-soft px-3 py-2 text-sm font-medium text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80"
+            className="hidden items-center md:flex gap-1.5 rounded-lg bg-brand-soft px-3 py-2 text-sm font-bold text-brand ring-1 ring-brand/20 transition hover:bg-brand-soft/80"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M7 17l10-10M17 7v10M17 7H7" />
             </svg>
             Transfer/Withdraw
           </button>
+          {/* The guide sits beside the page's action rather than taking a
+              full-width bar of its own above the tax card. */}
+          <button
+            type="button"
+            onClick={() => setShowGuide((open) => !open)}
+            aria-expanded={showGuide}
+            className={`hidden items-center md:flex gap-1.5 rounded-lg px-3 py-2 text-sm font-bold text-brand ring-1 transition ${
+              showGuide ? "bg-brand-soft ring-brand/50" : "bg-brand-soft ring-brand/20 hover:bg-brand-soft/80"
+            }`}
+          >
+            How investment tracking works
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showGuide ? "rotate-90" : ""}`} aria-hidden>
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
         </div>
+        {showGuide ? (
+          <div className="max-w-3xl rounded-xl bg-brand-soft/50 px-4 pb-4 pt-3 text-sm text-foreground ring-1 ring-brand/20">
+            <p className="mb-3 text-xs sm:text-sm text-muted">Review each investment account against its year-end statement.</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                <p className="mb-1 max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-brand">Contributions</p>
+                <p className="text-xs sm:text-sm leading-relaxed">Log a deposit transaction to any investment account — it auto-adds to <span className="font-semibold text-foreground">Contrib</span> here.</p>
+              </div>
+              <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                <p className="mb-1 max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-brand">Gains / Losses</p>
+                <p className="text-xs sm:text-sm leading-relaxed">At year-end, type the market gain or loss from your brokerage statement into <span className="font-semibold text-foreground">Gains</span>.</p>
+              </div>
+              <div className="rounded-lg bg-surface/60 px-3 py-2.5">
+                <p className="mb-1 max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-brand">Current balance</p>
+                <p className="text-xs sm:text-sm leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage&apos;s ending balance.</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {/* Hero, same layout as Net Worth on Accounts: the portfolio total
             leads at hero size, and the two contribution figures sit beside it
             (beneath on a phone). This month's contribution is a line under the
@@ -384,38 +538,127 @@ export function InvestBoard({
             phone the portfolio total takes the full top row. */}
         <div className="grid grid-cols-2 rounded-2xl bg-surface text-center shadow-sm ring-1 ring-black/5 sm:grid-cols-3 dark:ring-white/10">
           <div className="col-span-2 min-w-0 border-b border-line px-4 py-4 sm:col-span-1 sm:border-b-0">
-            {/* Named for the pool it sums, not the moment: this is investment
-                accounts only, and excludes the cash in savings buckets that the
-                Savings tab counts. "Current value" read like it might be both. */}
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted">Investment accounts</p>
+            {/* What the investment accounts are worth today (savings-bucket cash
+                is on the Savings tab, not here). Each label says what its
+                figure answers: worth now / put in this year / still allowed. */}
+            <p className="max-sm:text-[12px] sm:text-sm font-medium uppercase tracking-wide text-muted">Current Investments</p>
             <p className="mt-0.5 truncate text-3xl font-bold tabular-nums sm:text-4xl">
               {formatMoneyWhole(summary.current, currency)}
             </p>
             {summary.gains !== 0 ? (
-              <p className="mt-0.5 text-xs">
+              <p className="mt-0.5 text-xs sm:text-[15px]">
+                <span className="text-muted">Total Gains in {year}:</span>{" "}
                 <span
                   className="font-semibold tabular-nums"
                   style={{ color: summary.gains > 0 ? "var(--viz-bills)" : "var(--color-negative)" }}
                 >
                   {summary.gains > 0 ? "+" : "-"}
                   {formatMoneyWhole(Math.abs(summary.gains), currency)}
-                </span>{" "}
-                <span className="text-muted">gains in {year}</span>
+                </span>
               </p>
             ) : null}
             {contributedThisMonthCents > 0 ? (
-              <p className="mt-0.5 text-xs">
+              <p className="mt-0.5 text-xs sm:text-[15px]">
+                <span className="text-muted">Contributed in {currentMonthLabel.split(" ")[0]}:</span>{" "}
                 <span className="font-semibold tabular-nums text-positive">
                   +{formatMoneyWhole(contributedThisMonthCents, currency)}
-                </span>{" "}
-                <span className="text-muted">contributed in {currentMonthLabel.split(" ")[0]}</span>
+                </span>
               </p>
+            ) : null}
+            {gainsByAccount.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowBreakdowns((open) => !open)}
+                  aria-expanded={showBreakdowns}
+                  className="mx-auto mt-1.5 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs sm:text-sm font-semibold text-brand hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                >
+                  {showBreakdowns ? "Hide breakdown" : "Show breakdown"}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showBreakdowns ? "rotate-180" : ""}`} aria-hidden>
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {showBreakdowns ? (
+                  // Where the year's gains came from, account by account.
+                  <ul className="mx-auto mt-1.5 max-w-xs space-y-0.5 border-t border-line/60 pt-2 text-left text-xs sm:max-w-none sm:text-sm">
+                    {gainsByAccount.map((r) => (
+                      // Name left, amount right, so the figures line up in
+                      // one column.
+                      <li key={r.name} className="flex items-baseline justify-between gap-3">
+                        <span className="text-muted">{r.name}:</span>
+                        <span
+                          className="font-semibold tabular-nums"
+                          style={{ color: r.cents > 0 ? "var(--viz-bills)" : r.cents < 0 ? "var(--color-negative)" : undefined }}
+                        >
+                          {r.cents > 0 ? "+" : r.cents < 0 ? "-" : ""}
+                          {formatMoneyWhole(Math.abs(r.cents), currency)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
             ) : null}
           </div>
           <SummaryStat
-            label={`Contributed · ${year}`}
+            label={<><span className="hidden sm:inline">Total </span>invested in {year}</>}
             value={formatMoneyWhole(summary.contributed, currency)}
-            note="into all investments"
+            extra={
+              <>
+                {investGoals.length > 0 && leftToGoalCents > 0 ? (
+                  <p
+                    className="mt-0.5 truncate text-xs sm:text-[15px] font-semibold"
+                    style={{ color: behindGoals.length > 0 ? "var(--color-negative)" : "var(--color-positive)" }}
+                  >
+                    {behindGoals.length > 0
+                      ? `Behind: ${formatMoneyWhole(behindMonthlyCents, currency)}/mo needed`
+                      : "On track"}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setShowBreakdowns((open) => !open)}
+                  aria-expanded={showBreakdowns}
+                  className="mx-auto mt-1.5 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs sm:text-sm font-semibold text-brand hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                >
+                  <span className="sm:hidden">Breakdown</span>
+                  <span className="hidden sm:inline">{showBreakdowns ? "Hide breakdown" : "Show breakdown"}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showBreakdowns ? "rotate-180" : ""}`} aria-hidden>
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {showBreakdowns ? (
+                  <div className="mt-1.5 space-y-1.5 border-t border-line/60 pt-2 text-left text-xs sm:text-sm">
+                    {investedSplit.groups.map((g) => (
+                      <div key={g.name}>
+                        <p className="sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+                          <span className="font-semibold">{g.name}:</span>{" "}
+                          <span className="font-bold tabular-nums">{formatMoneyWhole(g.cents, currency)}</span>
+                        </p>
+                        {/* Which holdings it went into. Two lines each on a
+                            phone — a name like "Fidelity (Taxable) Vic" plus
+                            its amount doesn't fit the half-width card. */}
+                        <ul className="mt-0.5 space-y-0.5 pl-3">
+                          {g.rows.map((r) => (
+                            <li key={r.label} className="max-sm:pb-0.5 sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+                              <span className="block text-muted sm:inline">{r.label}:</span>{" "}
+                              <span className="tabular-nums">{formatMoneyWhole(r.cents, currency)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            }
+            note={
+              investGoals.length === 0
+                ? "so far"
+                : leftToGoalCents > 0
+                  ? `Left to Goal: ${formatMoneyWhole(leftToGoalCents, currency)}`
+                  : "goals reached"
+            }
             className="border-r border-line sm:border-l"
           />
           {/* Mirrors the Savings tab's limits card: each person's TSP/401(k)
@@ -423,7 +666,7 @@ export function InvestBoard({
               year, not the selected portfolio year. Was "Room left", which
               didn't say room for what. */}
           <SummaryStat
-            label={`Left to max · ${capYear}`}
+            label={`Left to invest in ${capYear}`}
             value={
               contributionRoomRows === 0
                 ? "—"
@@ -437,7 +680,7 @@ export function InvestBoard({
                 : (
                     <>
                       of {formatMoneyWhole(contributionLimitCents, currency)}
-                      <span className="hidden sm:inline"> TSP + IRA</span> limits
+                      <span className="hidden sm:inline"> yearly retirement</span> max
                     </>
                   )
             }
@@ -447,6 +690,62 @@ export function InvestBoard({
                 : contributionRoomCents > 0
                   ? "text-[color:var(--viz-savings)]"
                   : "text-positive"
+            }
+            extra={
+              limitRows.length > 0 ? (
+                // Folded by default so the three cards keep one height; opens
+                // to one line per person per account type — what's gone in,
+                // then the max it's measured against.
+                <>
+                <button
+                  type="button"
+                  onClick={() => setShowBreakdowns((open) => !open)}
+                  aria-expanded={showBreakdowns}
+                  className="mx-auto mt-1.5 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs sm:text-sm font-semibold text-brand hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                >
+                  <span className="sm:hidden">Breakdown</span>
+                  <span className="hidden sm:inline">{showBreakdowns ? "Hide breakdown" : "Show breakdown"}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showBreakdowns ? "rotate-180" : ""}`} aria-hidden>
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {showBreakdowns ? (
+                <ul className="mt-1.5 space-y-0.5 border-t border-line/60 pt-2 text-left text-xs sm:text-sm">
+                  {limitRows.map((r) => {
+                    const type =
+                      r.capKind === "ira"
+                        ? "IRA"
+                        : (r.sourceNames ?? []).some((n) => /tsp/i.test(n))
+                          ? "TSP"
+                          : "401(k)";
+                    return (
+                      // Two lines on a phone (name, then amounts): one line
+                      // doesn't fit the half-width card there.
+                      <li key={r.subId} className="max-sm:pb-1 sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+                        <span className="block text-muted sm:inline">{r.name}&rsquo;s {type}:</span>{" "}
+                        <span className="tabular-nums">
+                          <span className="font-semibold">{formatMoneyWhole(r.contributedCents, currency)}</span>
+                          <span className="text-muted"> of {formatMoneyWhole(r.limitCents, currency)}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                  {/* The three added up. Two lines everywhere: the label is
+                      too long to share a line in a third-width card. */}
+                  <li className="mt-1.5 border-t border-line/60 pt-1.5">
+                    <span className="block font-semibold">Total Invested in Retirement:</span>
+                    {/* Right-aligned from sm up, under the column above. */}
+                    <span className="block tabular-nums sm:text-right">
+                      <span className="font-bold">
+                        {formatMoneyWhole(limitRows.reduce((sum, r) => sum + r.contributedCents, 0), currency)}
+                      </span>
+                      <span className="text-muted"> of {formatMoneyWhole(contributionLimitCents, currency)}</span>
+                    </span>
+                  </li>
+                </ul>
+                ) : null}
+                </>
+              ) : undefined
             }
           />
         </div>
@@ -472,49 +771,10 @@ export function InvestBoard({
         </div>
       ) : (
         <>
-          <div className="max-w-3xl rounded-xl bg-brand-soft/50 ring-1 ring-brand/20">
-            <button
-              type="button"
-              onClick={() => setShowGuide((open) => !open)}
-              aria-expanded={showGuide}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-foreground"
-            >
-              <span>How investment tracking works</span>
-              <span className="flex items-center gap-1.5 text-xs font-medium text-brand">
-                <span>{showGuide ? "Hide details" : "Show details"}</span>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showGuide ? "rotate-90" : ""}`} aria-hidden>
-                  <path d="M9 6l6 6-6 6" />
-                </svg>
-              </span>
-            </button>
-            {showGuide ? (
-              <div className="border-t border-brand/15 px-4 pb-4 pt-3 text-sm text-foreground">
-                <p className="mb-3 text-xs text-muted">Review each investment account against its year-end statement.</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Contributions</p>
-                    <p className="text-xs leading-relaxed">Log a deposit transaction to any investment account — it auto-adds to <span className="font-semibold text-foreground">Contrib</span> here.</p>
-                  </div>
-                  <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Gains / Losses</p>
-                    <p className="text-xs leading-relaxed">At year-end, type the market gain or loss from your brokerage statement into <span className="font-semibold text-foreground">Gains</span>.</p>
-                  </div>
-                  <div className="rounded-lg bg-surface/60 px-3 py-2.5">
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-brand">Current balance</p>
-                    <p className="text-xs leading-relaxed">Update the account balance on <span className="font-semibold text-foreground">Accounts</span> to match your brokerage&apos;s ending balance.</p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
           {taxSplit.rows.length > 1 ? (
             <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
               <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
                 <h2 className="text-sm font-bold">How it&rsquo;s taxed</h2>
-                <p className="w-full text-xs text-muted">
-                  Select a band to see what&rsquo;s in it and what it means.
-                </p>
               </div>
               <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-line/60">
                 {taxSplit.rows.map((r) => (
@@ -523,40 +783,21 @@ export function InvestBoard({
                     style={{
                       width: `${(r.cents / taxSplit.total) * 100}%`,
                       backgroundColor: TAX_COLOR[r.treatment],
+                      opacity: taxPick.length > 0 && !taxPick.includes(r.treatment) ? 0.3 : 1,
                     }}
                   />
                 ))}
               </div>
               <ul className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                {/* Total leads the chip row in its own pill; "=" says the chips
-                    after it are what it's made of. */}
-                <li
-                  className="flex items-center gap-1.5 rounded-full px-3 py-0.5 text-sm"
-                  style={{
-                    color: "var(--viz-savings)",
-                    backgroundColor: "color-mix(in srgb, var(--viz-savings) 14%, transparent)",
-                    boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--viz-savings) 40%, transparent)",
-                  }}
-                >
-                  <span className="font-medium">Total</span>
-                  <span className="font-bold tabular-nums">{formatMoney(taxSplit.total, currency)}</span>
-                </li>
-                <li
-                  aria-hidden
-                  className="hidden px-1 text-xl font-bold leading-none sm:block"
-                  style={{ color: "var(--viz-savings)" }}
-                >
-                  =
-                </li>
                 {taxSplit.rows.map((r) => {
-                  const open = openTax === r.treatment;
+                  const open = taxPick.includes(r.treatment);
                   return (
                     <li key={r.treatment}>
                       <button
                         type="button"
-                        aria-expanded={open}
-                        onClick={() => setOpenTax(open ? null : r.treatment)}
-                        className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition hover:brightness-95 dark:hover:brightness-125"
+                        aria-pressed={open}
+                        onClick={() => toggleTax(r.treatment)}
+                        className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs sm:text-sm transition hover:brightness-95 dark:hover:brightness-125"
                         style={{
                           // Tinted in the band's own colour so each chip ties
                           // back to its stretch of the bar; open = stronger.
@@ -571,7 +812,7 @@ export function InvestBoard({
                           style={{ backgroundColor: TAX_COLOR[r.treatment] }}
                           aria-hidden
                         />
-                        <span className="text-muted">{TAX_LABEL[r.treatment]}</span>
+                        <span className="font-bold text-muted">{TAX_LABEL[r.treatment]}:</span>
                         <span className="font-semibold tabular-nums">
                           {formatMoney(r.cents, currency)}
                         </span>
@@ -598,10 +839,10 @@ export function InvestBoard({
                 })}
               </ul>
               {taxSplit.rows
-                .filter((r) => r.treatment === openTax)
+                .filter((r) => taxPick.includes(r.treatment))
                 .map((r) => (
                   <div key={r.treatment} className="mt-2.5 rounded-xl bg-canvas/60 px-3 py-2.5">
-                    <p className="text-xs text-muted">{TAX_MEANING[r.treatment]}</p>
+                    <p className="text-xs sm:text-sm text-muted">{TAX_MEANING[r.treatment]}</p>
                     {/* Columns, not one tall list: a band can hold eight
                         holdings, and a single column strands every amount at
                         the far right edge of a wide card, miles from its own
@@ -610,7 +851,7 @@ export function InvestBoard({
                       {r.holdings.map((h) => (
                         <li
                           key={h.name}
-                          className="flex items-baseline justify-between gap-2 border-b border-line/40 py-0.5 text-xs last:border-0"
+                          className="flex items-baseline justify-between gap-2 border-b border-line/40 py-0.5 text-xs sm:text-sm last:border-0"
                         >
                           <span className="min-w-0 truncate">{h.name}</span>
                           <span className="shrink-0 font-semibold tabular-nums">
@@ -619,7 +860,7 @@ export function InvestBoard({
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-2 text-[11px] text-muted">
+                    <p className="mt-2 max-sm:text-[12px] sm:text-sm text-muted">
                       Set each holding&rsquo;s tax treatment on Accounts. Anything left on Auto
                       is read from its name.
                     </p>
@@ -635,14 +876,20 @@ export function InvestBoard({
             accounts={chartAccounts}
             years={years}
             currency={currency}
-            selectedName={selectedAccount?.name ?? null}
-            onClear={() => setSelectedId(null)}
+            selectedName={
+              selectedAccount?.name ??
+              (taxPick.length > 0 ? taxSplit.rows.filter((r) => taxPick.includes(r.treatment)).map((r) => TAX_LABEL[r.treatment]).join(" + ") : null)
+            }
+            onClear={() => { setSelectedId(null); setTaxPick([]); }}
             aside={
               showAllocation ? (
                 <div>
-                  <div className="mb-1 flex items-baseline justify-between gap-2 px-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wide text-muted">Total Investment Holdings</h3>
-                    <span className="text-xs font-semibold tabular-nums">{formatMoneyWhole(allocation.total, currency)}</span>
+                  {/* A header strip like the card's own ("Performance by
+                      year"), edge to edge across the column: the negative
+                      margins cancel the column's padding. */}
+                  <div className="-mx-2 -mt-3 mb-2 flex items-baseline justify-between gap-2 bg-brand-soft/35 px-4 py-2.5 lg:-mt-1">
+                    <h3 className="text-xs sm:text-sm font-bold">Total Investment Holdings</h3>
+                    <span className="text-xs sm:text-sm font-bold tabular-nums">{formatMoneyWhole(shownAllocation.total, currency)}</span>
                   </div>
                   {/* Picking a holding filters the chart, the same as picking a
                       row in Investments. It filters to the holding's whole
@@ -651,8 +898,8 @@ export function InvestBoard({
                       would show those years empty. Its sibling buckets light
                       up with it to say so. */}
                   <ul className="space-y-0.5">
-                    {allocation.rows.slice(0, 8).map((r) => {
-                      const pct = (r.cents / allocation.total) * 100;
+                    {shownAllocation.rows.slice(0, 8).map((r) => {
+                      const pct = (r.cents / shownAllocation.total) * 100;
                       const active = selectedId === r.accountId;
                       return (
                         <li key={r.label} className="min-w-0">
@@ -667,8 +914,8 @@ export function InvestBoard({
                             }`}
                           >
                             <div className="flex items-baseline justify-between gap-2">
-                              <span className="truncate text-xs">{r.label}</span>
-                              <span className="shrink-0 text-xs font-semibold tabular-nums">
+                              <span className="truncate text-xs sm:text-sm">{r.label}</span>
+                              <span className="shrink-0 text-xs sm:text-sm font-semibold tabular-nums">
                                 {formatMoneyWhole(r.cents, currency)}{" "}
                                 <span className="font-normal text-muted">({pct.toFixed(0)}%)</span>
                               </span>
@@ -731,6 +978,11 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
   const [view, setView] = useState<View>("holdings");
   const [addingHoldings, setAddingHoldings] = useState(false);
   const [addingMonth, setAddingMonth] = useState(false);
+  // Starts folded: it holds only the positions imported or typed in (a slice
+  // of the portfolio), so open by default it read like the whole picture.
+  // An import or Add holdings opens it so the result is in view.
+  const [expanded, setExpanded] = useState(false);
+  const open = expanded || addingHoldings || !!importNote;
 
   // Only accounts/buckets with something on file (holdings or months, imported
   // or typed) are listed. A brand-new one is started from Add month, whose own
@@ -755,22 +1007,32 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
 
   return (
     <section className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-col items-start gap-3 border-b border-line bg-brand-soft/35 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
+      <div className="flex flex-col items-start gap-3 border-b border-line bg-brand-soft/35 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 text-muted transition-transform duration-200 ${open ? "rotate-90" : ""}`} aria-hidden>
+            <path d="M9 6l6 6-6 6" />
+          </svg>
           <h2 className="text-sm lg:text-base font-semibold">Holdings &amp; history</h2>
-        </div>
+          <span className="max-sm:text-xs sm:text-sm text-muted">Imported positions only</span>
+        </button>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => { setAddingHoldings((current) => !current); setAddingMonth(false); }}
-            className="rounded-lg bg-brand px-3 py-2 text-xs lg:text-sm font-semibold text-white transition hover:bg-brand/90"
+            className="rounded-lg bg-brand px-3 py-2 text-xs sm:text-sm lg:text-sm font-semibold text-white transition hover:bg-brand/90"
           >
             {addingHoldings ? "Close" : "Add holdings"}
           </button>
-          <button type="button" onClick={onImport} className="rounded-lg bg-sky-100 px-3 py-2 text-xs lg:text-sm font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900">Import CSV</button>
+          <button type="button" onClick={onImport} className="rounded-lg bg-sky-100 px-3 py-2 text-xs sm:text-sm lg:text-sm font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900">Import CSV</button>
         </div>
       </div>
 
+      {open ? <>
       {importNote ? (
         <div className="flex items-center justify-between gap-3 border-b border-line bg-positive/10 px-4 py-2">
           <p className="text-sm lg:text-base font-medium text-positive">{importNote}</p>
@@ -791,7 +1053,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
               key={option}
               type="button"
               onClick={() => setView(option)}
-              className={`rounded-md px-3 py-1.5 text-xs lg:text-sm font-semibold transition ${
+              className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs sm:text-sm font-semibold transition ${
                 view === option
                   ? "bg-sky-100 text-sky-900 ring-1 ring-sky-300 dark:bg-sky-900/50 dark:text-sky-100 dark:ring-sky-700"
                   : "text-muted hover:bg-sky-50 hover:text-sky-900 dark:hover:bg-sky-900/30 dark:hover:text-sky-100"
@@ -808,7 +1070,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
               <select
                 value={destination?.key ?? ""}
                 onChange={(event) => { setDestKey(event.target.value); setAddingMonth(false); }}
-                className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs sm:text-sm lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               >
                 {destinationGroups.map((group) => (
                   <optgroup key={group} label={group}>
@@ -822,7 +1084,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
             <button
               type="button"
               onClick={() => setAddingMonth((current) => !current)}
-              className="rounded-md bg-brand px-3 py-1.5 text-xs lg:text-sm font-semibold text-white transition hover:bg-brand/90"
+              className="rounded-md bg-brand px-3 py-1.5 text-xs sm:text-sm lg:text-sm font-semibold text-white transition hover:bg-brand/90"
             >
               {addingMonth ? "Close" : "Add month"}
             </button>
@@ -850,7 +1112,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
           {ledger ? (
             <>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-4 py-2.5">
-                <span className="text-xs lg:text-sm text-muted">
+                <span className="text-xs sm:text-sm lg:text-sm text-muted">
                   {ledgerLabel(ledger.accountName, ledger.bucketName)} · {ledger.performance.length} month{ledger.performance.length === 1 ? "" : "s"}
                 </span>
                 <PerformanceFreshness rows={ledger.performance} />
@@ -864,6 +1126,7 @@ function ImportedSnapshots({ imports, accounts, currency, onImport, importNote, 
           )}
         </>
       )}
+      </> : null}
     </section>
   );
 }
@@ -874,7 +1137,7 @@ function PerformanceFreshness({ rows }: { rows: InvestmentPerformanceImportRow[]
   if (!latest) return null;
   const { label, stale } = describeUpdate(latest);
   return (
-    <span className={`text-xs ${stale ? "font-semibold text-negative" : "text-muted"}`}>
+    <span className={`text-xs sm:text-[15px] ${stale ? "font-semibold text-negative" : "text-muted"}`}>
       updated {label}
     </span>
   );
@@ -883,13 +1146,13 @@ function PerformanceFreshness({ rows }: { rows: InvestmentPerformanceImportRow[]
 function ImportedPerformanceTable({ rows, currency }: { rows: InvestmentPerformanceImportRow[]; currency: string }) {
   return (
     <div className="max-h-80 overflow-auto rounded-lg ring-1 ring-line">
-      <table className="min-w-full text-xs lg:text-sm">
-        <thead className="sticky top-0 bg-surface text-left text-[10px] lg:text-xs uppercase tracking-wide text-muted">
+      <table className="min-w-full text-xs sm:text-sm lg:text-sm">
+        <thead className="sticky top-0 bg-surface text-left max-sm:text-[11px] sm:text-sm lg:text-sm uppercase tracking-wide text-muted">
           <tr><th className="px-3 py-2 text-center">Month</th><th className="px-3 py-2 text-center">Beginning balance</th><th className="px-3 py-2 text-center">Market change</th><th className="px-3 py-2 text-center">Dividends</th><th className="px-3 py-2 text-center">Withdrawal</th><th className="px-3 py-2 text-center">Ending balance</th><th className="px-3 py-2 text-center">% Growth</th></tr>
         </thead>
         <tbody className="divide-y divide-line">
           {rows.map((row) => <tr key={row.asOfDate}>
-            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] lg:text-xs font-medium text-muted dark:bg-sky-900/50">Manual</span> : null}</td>
+            <td className="whitespace-nowrap px-3 py-2 text-center">{row.asOfDate}{row.entrySource === "manual" ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 max-sm:text-[11px] sm:text-sm lg:text-sm font-medium text-muted dark:bg-sky-900/50">Manual</span> : null}</td>
             <td className="px-3 py-2 text-center tabular-nums">{row.beginningBalanceCents == null ? "—" : formatMoney(row.beginningBalanceCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.marketChangeCents ?? 0)}`}>{row.marketChangeCents == null ? "—" : formatMoney(row.marketChangeCents, currency)}</td>
             <td className={`px-3 py-2 text-center tabular-nums ${gainTone(row.dividendsCents ?? 0)}`}>{row.dividendsCents == null ? "—" : formatMoney(row.dividendsCents, currency)}</td>
@@ -949,25 +1212,31 @@ function SummaryStat({
   note,
   tone,
   className,
+  extra,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: string;
   note?: React.ReactNode;
   tone?: string;
   className?: string;
+  /** Detail under the note, e.g. a breakdown of the figure. */
+  extra?: React.ReactNode;
 }) {
   return (
     <div className={`min-w-0 px-3 py-4 sm:px-4 ${className ?? ""}`}>
-      <p className="truncate text-[10px] font-medium uppercase text-muted sm:text-[11px] sm:tracking-wide">{label}</p>
+      <p className="truncate max-sm:text-[11px] font-medium uppercase text-muted sm:text-sm sm:tracking-wide">{label}</p>
       <p className={`mt-0.5 truncate text-2xl font-bold tabular-nums sm:text-4xl ${tone ?? ""}`}>{value}</p>
-      {note ? <p className="mt-0.5 truncate text-xs text-muted">{note}</p> : null}
+      {note ? <p className="mt-0.5 truncate text-xs sm:text-[15px] text-muted">{note}</p> : null}
+      {extra}
     </div>
   );
 }
 
 // ─── Performance chart ───────────────────────────────────────────────────────
 
-type ChartMode = "stacked" | "grouped" | "return";
+// The "Gain" view (gain as a % of the year's deposits) was dropped: it
+// competed with the Investments table's Return column and read as a return.
+type ChartMode = "stacked" | "grouped";
 
 function PerformanceChart({
   accounts,
@@ -1006,11 +1275,7 @@ function PerformanceChart({
           gain += c.accruedCents;
           if (c.endBalanceCents != null) { endBal += c.endBalanceCents; endAny = true; }
         }
-        // Simple return: gains ÷ contributions × 100.
-        // Gain as a percentage of the year's contributions. NOT a rate of return
-        // (that needs a beginning balance, which is not recorded before 2026).
-        const returnPctVal = contrib > 0 ? (gain / contrib) * 100 : 0;
-        return { year: y, contrib, gain, endBal: endAny ? endBal : null, returnPct: returnPctVal };
+        return { year: y, contrib, gain, endBal: endAny ? endBal : null };
       }),
     [desc, accounts],
   );
@@ -1044,19 +1309,15 @@ function PerformanceChart({
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
-  // Max depends on mode: stacked sums, grouped is max of either, return is %.
+  // Max depends on mode: stacked sums, grouped is max of either.
   const maxBar = useMemo(() => {
-    if (mode === "return") {
-      const m = Math.max(...bars.map((b) => Math.abs(b.returnPct)), 1);
-      return Math.ceil(m / 5) * 5;
-    }
     if (mode === "grouped") {
       return Math.max(...bars.map((b) => Math.max(b.contrib, Math.max(b.gain, 0))), 1);
     }
     return Math.max(...bars.map((b) => b.contrib + Math.max(b.gain, 0)), 1);
   }, [bars, mode]);
 
-  const niceCeil = mode === "return" ? maxBar : Math.ceil(maxBar / 10000) * 10000;
+  const niceCeil = Math.ceil(maxBar / 10000) * 10000;
   const scale = (v: number) => (v / niceCeil) * chartH;
 
   const slotW = chartW / bars.length;
@@ -1064,7 +1325,7 @@ function PerformanceChart({
     ? Math.min(20, (chartW / bars.length) * 0.28)
     : Math.min(40, (chartW / bars.length) * 0.55);
 
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => (mode === "return" ? +(niceCeil * f).toFixed(1) : Math.round(niceCeil * f)));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(niceCeil * f));
 
   // Compact money formatter: input is CENTS, output uses $k for anything >= $1,000.
   const compactMoney = (cents: number) => {
@@ -1074,12 +1335,11 @@ function PerformanceChart({
     return `${sign}$${dollars.toFixed(0)}`;
   };
 
-  const fmtTick = (t: number) => (mode === "return" ? `${t}%` : compactMoney(t));
+  const fmtTick = (t: number) => compactMoney(t);
 
   const fmtBarTotal = (b: typeof bars[number]) => {
-    if (mode === "return") return `${b.returnPct >= 0 ? "+" : ""}${b.returnPct.toFixed(1)}%`;
     const total = mode === "stacked" ? b.contrib + Math.max(b.gain, 0) : Math.max(b.contrib, b.gain);
-    return `Total: ${compactMoney(total)}`;
+    return compactMoney(total);
   };
 
   return (
@@ -1106,22 +1366,19 @@ function PerformanceChart({
               Performance by year
               {selectedName ? <span className="ml-1.5 font-medium text-brand">· {selectedName}</span> : null}
             </h2>
-            <p className="text-xs text-muted">
-              {mode === "stacked" ? "Stacked: contributions + gains" : mode === "grouped" ? "Grouped: side-by-side comparison" : "Gain vs contributions each year — not a rate of return"}
-            </p>
           </div>
         </button>
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
-          <div className="flex overflow-hidden rounded-lg ring-1 ring-line text-[11px]">
-            {(["stacked", "grouped", "return"] as ChartMode[]).map((m) => (
+          <div className="flex overflow-hidden rounded-lg ring-1 ring-line max-sm:text-[12px] sm:text-sm">
+            {(["stacked", "grouped"] as ChartMode[]).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
                 className={`px-2.5 py-1 font-medium capitalize transition ${mode === m ? "bg-brand-soft text-brand" : "text-muted hover:bg-brand-soft/40 hover:text-foreground"}`}
               >
-                {m === "return" ? "Gain" : m}
+                {m}
               </button>
             ))}
           </div>
@@ -1129,7 +1386,7 @@ function PerformanceChart({
             <button
               type="button"
               onClick={onClear}
-              className="rounded-md px-2 py-1 text-[11px] font-medium text-muted ring-1 ring-line hover:bg-brand-soft hover:text-foreground"
+              className="rounded-md px-2 py-1 max-sm:text-[12px] sm:text-sm font-medium text-muted ring-1 ring-line hover:bg-brand-soft hover:text-foreground"
             >
               ✕ Clear filter
             </button>
@@ -1140,22 +1397,15 @@ function PerformanceChart({
       {chartOpen ? <div className={aside ? "lg:grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : ""}>
       <div className="flex min-w-0 flex-col">
       {/* Legend */}
-      <div className="flex items-center gap-4 px-4 pb-2 text-xs text-muted">
+      <div className="flex items-center gap-4 px-4 pb-2 text-xs sm:text-sm text-muted">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-savings)" }} />
           Contributed
         </span>
-        {mode !== "return" ? (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-bills)" }} />
-            Unrealized gains
-          </span>
-        ) : (
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-bills)" }} />
-            Annual return %
-          </span>
-        )}
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-bills)" }} />
+          Unrealized gains
+        </span>
       </div>
 
       {/* SVG chart */}
@@ -1179,7 +1429,7 @@ function PerformanceChart({
                 />
                 <text
                   x={PAD.left - 6} y={y + 4}
-                  textAnchor="end" fontSize="14" fill="currentColor" opacity="0.55"
+                  textAnchor="end" fontSize="14" className="sm:text-[16px]" fill="currentColor"
                 >
                   {fmtTick(t)}
                 </text>
@@ -1210,7 +1460,7 @@ function PerformanceChart({
                 rects.push({ x: bx, y: PAD.top + chartH - contribH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--negative)" });
               }
               totalTopY = PAD.top + chartH - contribH - gainH;
-            } else if (mode === "grouped") {
+            } else {
               const contribH = scale(b.contrib);
               const gainH = scale(Math.max(b.gain, 0));
               const gap = 2;
@@ -1226,13 +1476,6 @@ function PerformanceChart({
                 rects.push({ x: bxR, y: PAD.top + chartH, w: barW, h: scale(Math.abs(b.gain)), fill: "var(--negative)" });
               }
               totalTopY = PAD.top + chartH - Math.max(contribH, gainH);
-            } else {
-              // return: single bar for return pct
-              const h = scale(Math.abs(b.returnPct));
-              const bx = cx - barW / 2;
-              const fill = b.returnPct >= 0 ? "var(--viz-bills)" : "var(--negative)";
-              rects.push({ x: bx, y: PAD.top + chartH - h, w: barW, h, fill });
-              totalTopY = PAD.top + chartH - h;
             }
 
             return (
@@ -1273,7 +1516,7 @@ function PerformanceChart({
                 {rects.length > 0 ? (
                   <text
                     x={cx} y={totalTopY - 4}
-                    textAnchor="middle" fontSize="14" fontWeight="600"
+                    textAnchor="middle" fontSize="14" className="sm:text-[16px]" fontWeight="600"
                     fill="currentColor" opacity="0.7" pointerEvents="none"
                   >
                     {fmtBarTotal(b)}
@@ -1282,7 +1525,7 @@ function PerformanceChart({
                 {/* X-axis label */}
                 <text
                   x={cx} y={PAD.top + chartH + 20}
-                  textAnchor="middle" fontSize="15" fill="currentColor" opacity="0.6"
+                  textAnchor="middle" fontSize="15" className="sm:text-[17px]" fill="currentColor"
                 >
                   {b.year}
                 </text>
@@ -1292,7 +1535,7 @@ function PerformanceChart({
         </svg>
 
         {hovered !== null && bars[hovered] ? (
-          <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} mode={mode} />
+          <ChartTooltip b={bars[hovered]} hovered={hovered} total={bars.length} currency={currency} />
         ) : null}
       </div>
       </div>
@@ -1309,42 +1552,37 @@ function ChartTooltip({
   hovered,
   total,
   currency,
-  mode,
 }: {
-  b: { year: number; contrib: number; gain: number; endBal: number | null; returnPct: number };
+  b: { year: number; contrib: number; gain: number; endBal: number | null };
   hovered: number;
   total: number;
   currency: string;
-  mode: ChartMode;
 }) {
   const slotPct = ((hovered + 0.5) / total) * 100;
   return (
     <div
-      className="pointer-events-none absolute top-2 rounded-xl bg-surface px-3 py-2 text-xs shadow-lg ring-1 ring-black/10 dark:ring-white/15"
+      className="pointer-events-none absolute top-2 rounded-xl bg-surface px-3 py-2 text-xs sm:text-sm shadow-lg ring-1 ring-black/10 dark:ring-white/15"
       style={{
         left: `${slotPct}%`,
         transform: slotPct > 60 ? "translateX(-100%)" : "translateX(0)",
         zIndex: 10,
       }}
     >
-      <div className="mb-1.5 font-semibold">{b.year}</div>
+      <div className="mb-1.5 text-center font-semibold">{b.year}</div>
       <div className="space-y-0.5 text-muted">
-        <div>Contributed <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
+        <div>Contributed: <span className="font-medium text-foreground">{formatMoney(b.contrib, currency)}</span></div>
         <div>
-          Unrealized gains{" "}
+          Unrealized gains:{" "}
           <span className="font-medium" style={{ color: b.gain >= 0 ? "var(--viz-bills)" : "var(--color-negative)" }}>
             {formatMoney(b.gain, currency)}
           </span>
         </div>
-        {mode === "return" ? (
-          <div>Gain vs contrib <span className={`font-medium ${b.returnPct >= 0 ? "text-positive" : "text-negative"}`}>{b.returnPct >= 0 ? "+" : ""}{b.returnPct.toFixed(1)}%</span></div>
-        ) : null}
         {b.endBal != null && b.year < new Date().getFullYear() && (
-          <div>End balance <span className="font-medium text-foreground">{formatMoney(b.endBal, currency)}</span></div>
+          <div>End balance: <span className="font-medium text-foreground">{formatMoney(b.endBal, currency)}</span></div>
         )}
       </div>
       <div className="mt-1.5 border-t border-line/60 pt-1.5 font-semibold text-foreground">
-        Total {formatMoney(b.contrib + b.gain, currency)}
+        Total: {formatMoney(b.contrib + b.gain, currency)}
       </div>
     </div>
   );
@@ -1380,32 +1618,17 @@ function PerfTable({
   const [bucketsOpen, setBucketsOpen] = useSessionCollapse("invest-buckets-open", () => ({}));
   const toggleBuckets = (id: string) => setBucketsOpen((s) => ({ ...s, [id]: !s[id] }));
 
-  // Local optimistic ordering — mirrors the accounts page pattern so drag-drop
-  // updates the UI immediately, then persists via reorderAccounts. Server props
-  // reset this on refresh.
-  const [localAccounts, setLocalAccounts] = useState(accounts);
-  // This is an intentional synchronization of server-provided ordering into
-  // the optimistic drag-and-drop copy after a revalidation.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setLocalAccounts(accounts), [accounts]);
-  const [, startReorder] = useTransition();
-  const [reorderError, setReorderError] = useState<string | null>(null);
-  const reorder = (fromId: string, toId: string) => {
-    const fromIdx = localAccounts.findIndex((a) => a.id === fromId);
-    const toIdx = localAccounts.findIndex((a) => a.id === toId);
-    if (fromIdx === -1 || toIdx === -1) return;
-    const next = [...localAccounts];
-    const [moved] = next.splice(fromIdx, 1);
-    next.splice(toIdx, 0, moved);
-    setLocalAccounts(next);
-    const fd = new FormData();
-    fd.set("orderedIds", JSON.stringify(next.map((a) => a.id)));
-    startReorder(async () => {
-      const res = await reorderAccounts(fd);
-      setReorderError(res?.error ?? null);
-    });
-  };
-  const { dragOverId, startDrag } = usePointerReorder("invest-account", reorder);
+  // Rows sort by the clicked column instead of being dragged into order:
+  // first click sorts high to low (A–Z for Account), the next flips it.
+  // Opens on Current, biggest first.
+  type SortKey = "name" | "start" | "contrib" | "current" | "gains" | "eoy" | "ret";
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "current", dir: "desc" });
+  const toggleSort = (key: SortKey) =>
+    setSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "name" ? "asc" : "desc" },
+    );
 
   // Group totals for the selected year, using per-account EFFECTIVE cells
   // (account slot + all bucket slots). Effective start uses prior-year end as fallback.
@@ -1429,19 +1652,37 @@ function PerfTable({
     contribSum += c.contributedCents;
     accruedSum += c.accruedCents;
   }
-  const totalReturn = gainVsContributed(
-    { startBalanceCents: effStartAny ? effStartSum : null, contributedCents: contribSum, accruedCents: accruedSum },
-  );
+  const totalReturn = returnPct(effStartAny ? effStartSum : null, accruedSum);
 
-  // Render in user-defined order (server sends accounts sorted by sort_order).
-  // Local state above overrides during optimistic reorder.
-  const sortedAccounts = localAccounts;
+  const sortValue = (a: InvestAccount): number | string | null => {
+    const eff = effectiveCell(a, year);
+    const priorEff = effectiveCell(a, year - 1);
+    switch (sort.key) {
+      case "name": return a.name.toLowerCase();
+      case "start": return eff.startBalanceCents ?? priorEff.endBalanceCents ?? null;
+      case "contrib": return eff.contributedCents;
+      case "current": return eff.endBalanceCents;
+      case "gains": return eff.accruedCents;
+      case "eoy": return eff.closeBalanceCents;
+      case "ret": return returnPct(eff.startBalanceCents ?? priorEff.endBalanceCents ?? null, eff.accruedCents);
+    }
+  };
+  // Blanks always sink to the bottom, whichever way the column is sorted.
+  const sortedAccounts = [...accounts].sort((x, y) => {
+    const a = sortValue(x);
+    const b = sortValue(y);
+    if (a == null && b == null) return 0;
+    if (a == null) return 1;
+    if (b == null) return -1;
+    const cmp = typeof a === "string" ? a.localeCompare(b as string) : a - (b as number);
+    return sort.dir === "asc" ? cmp : -cmp;
+  });
 
   // Hide "Start" column when every account has a null/zero start for the year — reduces noise.
   const showStart = startAny && startSum > 0;
   // EOY is the 31 Dec balance, so for the year in progress every row is empty.
   // Show the column only once some account actually has one — it was a column
-  // of dashes that pushed Gains and Gain vs contrib off the side of the card.
+  // of dashes that pushed Gains and Return off the side of the card.
   const showClose = closeAny;
   const zeroCls = "text-muted/50";
 
@@ -1464,32 +1705,63 @@ function PerfTable({
         </svg>
         <h2 className="flex flex-1 items-center gap-2 text-sm lg:text-base font-bold">
           {title}
-          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs lg:text-sm font-semibold text-muted dark:bg-sky-900/50">{year}</span>
-          <span className="text-xs lg:text-sm font-normal text-muted">{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0)} account{accounts.reduce((s, a) => s + (a.buckets.length > 0 ? a.buckets.length : 1), 0) === 1 ? "" : "s"}</span>
+          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs sm:text-sm lg:text-sm font-semibold text-muted dark:bg-sky-900/50">{year}</span>
+          {/* Rows are accounts; split accounts hold several holdings, so both
+              counts are given — "13 accounts" over 7 rows read as a mistake. */}
+          <span className="max-sm:text-xs font-bold text-muted">
+            {accounts.length} account{accounts.length === 1 ? "" : "s"}
+            {(() => {
+              const holdings = accounts.reduce((n, a) => n + (a.buckets.length > 0 ? a.buckets.length : 1), 0);
+              // Desktop only: on a phone it wrapped mid-phrase beside the title.
+              return holdings !== accounts.length ? <span className="hidden sm:inline"> · {holdings} holdings</span> : null;
+            })()}
+          </span>
         </h2>
         {collapsed && (
-          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs lg:text-sm tabular-nums text-muted">
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs sm:text-sm lg:text-sm tabular-nums text-muted">
             <span>Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
             <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
             {endAny && <span>Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
           </div>
         )}
       </button>
-      {reorderError && !collapsed ? (
-        <p className="border-b border-line/70 px-4 py-1.5 text-xs lg:text-sm font-medium text-negative">{reorderError}</p>
-      ) : null}
       {collapsed ? null : <>
       <div className="overflow-x-auto">
-        <table className="w-full text-[13px] lg:text-[15px]">
+        <table className="w-full font-semibold text-[13px] sm:text-sm">
           <thead>
-            <tr className="text-[11px] lg:text-[13px] font-medium text-muted">
-              <th className="sticky left-0 z-10 bg-surface py-2 pl-3 pr-2 text-left">Account</th>
-              {showStart ? <th className="px-2 py-2 text-center">Start</th> : null}
-              <th className="px-2 py-2 text-center">Contrib</th>
-              <th className="px-2 py-2 text-center">Current</th>
-              <th className="px-2 py-2 text-center">Gains</th>
-              {showClose ? <th className="px-2 py-2 text-center">EOY</th> : null}
-              <th className="px-2 py-2 text-center">Gain vs contrib</th>
+            <tr className="max-sm:text-[12px] sm:text-sm lg:text-sm font-semibold text-muted">
+              {(
+                [
+                  ["name", "Account", true],
+                  ["start", "Start", showStart],
+                  ["contrib", "Contrib", true],
+                  ["current", "Current", true],
+                  ["gains", "Gains", true],
+                  ["eoy", "EOY", showClose],
+                  ["ret", "Return", true],
+                ] as [SortKey, string, boolean][]
+              ).filter(([, , shown]) => shown).map(([key, label]) => {
+                const active = sort.key === key;
+                const isName = key === "name";
+                return (
+                  <th
+                    key={key}
+                    aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                    className={isName ? "sticky left-0 z-10 bg-surface py-1 pl-1 pr-2 text-left" : "px-1 py-1 text-center"}
+                  >
+                    {/* Same header button as the Holdings table: the arrow
+                        shows the active column and which way it runs. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(key)}
+                      className={`inline-flex items-center gap-1 rounded px-2 py-1 font-semibold transition hover:bg-sky-50 hover:text-sky-900 dark:hover:bg-sky-900/30 dark:hover:text-sky-100 ${active ? "text-foreground" : ""}`}
+                    >
+                      {label}
+                      <span aria-hidden className={active ? "" : "opacity-30"}>{active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -1500,32 +1772,49 @@ function PerfTable({
               // When no buckets, that equals the account cell exactly.
               const eff = effectiveCell(a, year);
               const priorEff = effectiveCell(a, year - 1);
-              const ret = gainVsContributed({
-                startBalanceCents: eff.startBalanceCents ?? priorEff.endBalanceCents ?? null,
-                contributedCents: eff.contributedCents,
-                accruedCents: eff.accruedCents,
-              });
+              const ret = returnPct(eff.startBalanceCents ?? priorEff.endBalanceCents ?? null, eff.accruedCents);
               const isSelected = selectedId === a.id;
               // Account-level slot (bucket_id NULL) — where CSV seed lives. When
               // buckets exist, this slot is still editable so the seed row can be
               // adjusted, but bucket rows render below.
               const parentCell = a.cells[year];
-              const isDragOver = dragOverId === a.id;
               return (
                 <Fragment key={a.id}>
+                  {/* An account with buckets opens and closes from anywhere on
+                      its row except the name, which filters the chart (as a
+                      holding picked in the list does). Same tint as the
+                      Yearly Breakdown rows. */}
                   <tr
-                    data-drop-key={`invest-account:${a.id}`}
-                    className={`border-t border-line/70 transition ${isSelected ? "bg-brand-soft/40" : "hover:bg-brand-soft/10"} ${isDragOver ? "outline outline-2 -outline-offset-2 outline-brand" : ""}`}
+                    onClick={hasBuckets ? () => toggleBuckets(a.id) : undefined}
+                    className={`group border-t border-line/70 transition ${
+                      isSelected
+                        ? "bg-brand-soft/40"
+                        : hasBuckets
+                          ? "cursor-pointer hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                          : "hover:bg-brand-soft/10"
+                    }`}
                   >
                     {/* Pinned: on a phone the money columns scroll sideways and the
-                        account name has to stay put to say whose row it is. */}
-                    <td className="sticky left-0 z-10 bg-surface py-2 pl-3 pr-2">
+                        account name has to stay put to say whose row it is. Its
+                        background stays solid so scrolled figures can't show
+                        through; the hover tint is painted over it as an inset
+                        shadow so it matches the rest of the row. */}
+                    <td
+                      className={`sticky left-0 z-10 bg-surface py-2 pl-3 pr-2 ${
+                        hasBuckets && !isSelected
+                          ? "group-hover:shadow-[inset_0_0_0_999px_var(--color-sky-50)] dark:group-hover:shadow-[inset_0_0_0_999px_color-mix(in_oklab,var(--color-sky-950)_40%,transparent)]"
+                          : ""
+                      }`}
+                    >
                       <div className="flex min-w-0 items-center gap-1.5">
-                        <GripHandle onMouseDown={() => startDrag(a.id)} />
                         {hasBuckets ? (
                           <button
                             type="button"
-                            onClick={() => toggleBuckets(a.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleBuckets(a.id);
+                            }}
+                            aria-expanded={open}
                             aria-label={open ? "Collapse buckets" : "Expand buckets"}
                             className="rounded p-0.5 text-muted transition hover:bg-brand-soft hover:text-foreground"
                           >
@@ -1536,40 +1825,49 @@ function PerfTable({
                         ) : (
                           <span className="inline-block w-[18px]" aria-hidden />
                         )}
-                        <button
-                          type="button"
-                          onClick={() => onSelect(a.id)}
-                          // Wraps: type, holder and bucket chips drop under the
-                          // name when the column is narrow instead of holding
-                          // the Account column at the width of all of them.
-                          className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-left"
+                        {/* Name and the buckets tag wrap together, so on a phone
+                            the tag drops under the name instead of squeezing it. */}
+                        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelect(a.id);
+                            }}
+                            // Wraps: type, holder and bucket chips drop under the
+                            // name when the column is narrow instead of holding
+                            // the Account column at the width of all of them.
+                            className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-left"
 
-                        >
-                          <span className={`font-medium ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
-                          {a.subtype ? (
-                            <span className="text-[11px] lg:text-[13px] text-muted">{a.subtype}</span>
-                          ) : null}
-                          {a.holder ? (
-                            <span className="rounded bg-background px-1 text-[10px] lg:text-xs font-medium text-muted ring-1 ring-line">
-                              {a.holder}
-                            </span>
-                          ) : null}
+                          >
+                            <span className={`font-semibold ${isSelected ? "text-brand" : "hover:underline"}`}>{a.name}</span>
+                            {a.subtype ? (
+                              <span className="max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">{a.subtype}</span>
+                            ) : null}
+                            {a.holder ? (
+                              <span className="rounded bg-background px-1 max-sm:text-[11px] sm:text-sm lg:text-sm font-semibold text-muted ring-1 ring-line">
+                                {a.holder}
+                              </span>
+                            ) : null}
+                          </button>
+                          {/* Outside the name button: clicking it opens the
+                              buckets (the row's click), not the chart filter. */}
                           {hasBuckets ? (
-                            <span className="rounded bg-brand-soft/70 px-1 text-[10px] lg:text-xs font-medium text-brand ring-1 ring-brand/20">
+                            <span className="shrink-0 rounded bg-brand-soft/70 px-1 max-sm:text-[11px] sm:text-sm lg:text-sm font-semibold text-brand ring-1 ring-brand/20">
                               {a.buckets.length} bucket{a.buckets.length === 1 ? "" : "s"}
                             </span>
                           ) : null}
-                        </button>
+                        </div>
                       </div>
                     </td>
                     {showStart ? (
                       <td className="px-1 py-1">
                         {hasBuckets ? (
-                          <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                          <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                             {eff.startBalanceCents ? formatMoney(eff.startBalanceCents, currency) : null}
                           </span>
                         ) : (
-                          <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                          <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                             {parentCell?.startBalanceCents ? formatMoney(parentCell.startBalanceCents, currency) : null}
                           </span>
                         )}
@@ -1577,7 +1875,7 @@ function PerfTable({
                     ) : null}
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className="block text-center text-[13px] lg:text-[15px] tabular-nums font-medium">
+                        <span className="block text-center text-[13px] sm:text-sm tabular-nums font-semibold">
                           {eff.contributedCents ? formatMoney(eff.contributedCents, currency) : null}
                         </span>
                       ) : (
@@ -1586,11 +1884,11 @@ function PerfTable({
                     </td>
                     <td className="px-1 py-1">
                       {hasBuckets ? (
-                        <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums font-medium ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${(eff.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {eff.endBalanceCents ? formatMoney(eff.endBalanceCents, currency) : null}
                         </span>
                       ) : (
-                        <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums font-medium ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                        <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                           {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                         </span>
                       )}
@@ -1598,7 +1896,7 @@ function PerfTable({
                     <td className="relative px-1 py-1">
                       {eff.accruedManual ? <PinnedMark /> : null}
                       {hasBuckets ? (
-                        <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums font-medium ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
+                        <span className={`block text-center text-[13px] sm:text-sm tabular-nums font-semibold ${eff.accruedCents === 0 ? zeroCls : ""}`} style={eff.accruedCents > 0 ? { color: "var(--viz-bills)" } : eff.accruedCents < 0 ? { color: "var(--color-negative)" } : undefined}>
                           {formatMoney(eff.accruedCents, currency)}
                         </span>
                       ) : (
@@ -1607,13 +1905,13 @@ function PerfTable({
                     </td>
                     {showClose ? (
                       <td className="px-1 py-1">
-                        <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                        <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                           {eff.closeBalanceCents == null ? null : formatMoney(eff.closeBalanceCents, currency)}
                         </span>
                       </td>
                     ) : null}
                     <td className={`px-2 py-2 text-center tabular-nums ${ret == null ? "" : ret > 0 ? "text-positive" : ret < 0 ? "text-negative" : ""}`}>
-                      {ret == null || ret === 0 ? null : `${ret > 0 ? "+" : ""}${formatMoney(ret, currency)}`}
+                      {ret == null || ret === 0 ? null : formatPct(ret)}
                     </td>
                   </tr>
                   {hasBuckets && open ? (
@@ -1622,11 +1920,11 @@ function PerfTable({
                           account level has any non-zero value — otherwise buckets
                           alone are enough and the row would be pure noise). */}
                       {(parentCell?.contributedCents || parentCell?.accruedCents || parentCell?.startBalanceCents || parentCell?.endBalanceCents) ? (
-                        <tr className="border-t border-line/40 bg-background/30 text-xs lg:text-sm">
+                        <tr className="border-t border-line/40 bg-background/30 text-xs sm:text-sm lg:text-sm">
                           <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-muted italic">Account (unallocated / seed)</td>
                           {showStart ? (
                             <td className="px-1 py-1">
-                              <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                              <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                                 {parentCell?.startBalanceCents ? formatMoney(parentCell.startBalanceCents, currency) : null}
                               </span>
                             </td>
@@ -1635,7 +1933,7 @@ function PerfTable({
                             <LedgerCell compact cents={parentCell?.contributedCents ?? 0} currency={currency} tone={(parentCell?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                           </td>
                           <td className="px-1 py-1">
-                            <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                            <span className={`block text-center text-[13px] sm:text-sm tabular-nums ${(parentCell?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                               {parentCell?.endBalanceCents ? formatMoney(parentCell.endBalanceCents, currency) : null}
                             </span>
                           </td>
@@ -1644,7 +1942,7 @@ function PerfTable({
                           </td>
                           {showClose ? (
                             <td className="px-1 py-1">
-                              <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                              <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                                 {parentCell?.closeBalanceCents == null ? null : formatMoney(parentCell.closeBalanceCents, currency)}
                               </span>
                             </td>
@@ -1655,13 +1953,13 @@ function PerfTable({
                       {a.buckets.map((b) => {
                         const bc = b.cells[year];
                         return (
-                          <tr key={b.id} className="border-t border-line/40 bg-background/20 text-[13px] lg:text-[15px]">
+                          <tr key={b.id} className="border-t border-line/40 bg-background/20 text-[13px] sm:text-sm">
                             <td className="sticky left-0 z-10 bg-surface py-1 pl-10 pr-2 text-foreground">
                               <span className="text-brand-strong">↳</span> <span className="ml-1">{b.name}</span>
                             </td>
                             {showStart ? (
                               <td className="px-1 py-1">
-                                <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                                <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                                   {bc?.startBalanceCents ? formatMoney(bc.startBalanceCents, currency) : null}
                                 </span>
                               </td>
@@ -1670,7 +1968,7 @@ function PerfTable({
                               <LedgerCell compact cents={bc?.contributedCents ?? 0} currency={currency} tone={(bc?.contributedCents ?? 0) === 0 ? zeroCls : ""} />
                             </td>
                             <td className="px-1 py-1">
-                              <span className={`block text-center text-[13px] lg:text-[15px] tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
+                              <span className={`block text-center text-[13px] sm:text-sm tabular-nums ${(bc?.endBalanceCents ?? 0) === 0 ? zeroCls : ""}`}>
                                 {bc?.endBalanceCents ? formatMoney(bc.endBalanceCents, currency) : null}
                               </span>
                             </td>
@@ -1680,7 +1978,7 @@ function PerfTable({
                             </td>
                             {showClose ? (
                               <td className="px-1 py-1">
-                                <span className="block text-center text-[13px] lg:text-[15px] tabular-nums text-muted">
+                                <span className="block text-center text-[13px] sm:text-sm tabular-nums text-muted">
                                   {bc?.closeBalanceCents == null ? null : formatMoney(bc.closeBalanceCents, currency)}
                                 </span>
                               </td>
@@ -1704,7 +2002,7 @@ function PerfTable({
                 </td>
               ) : null}
               <td className="px-2 py-2 text-center tabular-nums">{contribSum ? formatMoney(contribSum, currency) : null}</td>
-              <td className="px-2 py-2 text-center tabular-nums font-medium">
+              <td className="px-2 py-2 text-center tabular-nums font-semibold">
                 {endAny ? formatMoney(endSum, currency) : null}
               </td>
               <td
@@ -1719,17 +2017,12 @@ function PerfTable({
                 </td>
               ) : null}
               <td className={`px-2 py-2 text-center tabular-nums ${totalReturn == null ? "" : totalReturn > 0 ? "text-positive" : totalReturn < 0 ? "text-negative" : ""}`}>
-                {totalReturn == null || totalReturn === 0 ? null : `${totalReturn > 0 ? "+" : ""}${formatMoney(totalReturn, currency)}`}
+                {totalReturn == null || totalReturn === 0 ? null : formatPct(totalReturn)}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
-        {/* Outside the scroll box, so on a phone it doesn't slide off with the
-            money columns and leave a blank band under the table. */}
-        <p className="border-t border-line/60 px-4 py-2 text-[11px] lg:text-[13px] text-muted">
-          Comes from Accounts page: Contrib comes from your transactions. Gains = Current − Start − Contrib.
-        </p>
       </>}
     </section>
   );
@@ -1760,7 +2053,7 @@ function LedgerCell({
   // A zero contribution prints nothing: "$0.00" on most rows buried the few
   // accounts that actually received money this year.
   return (
-    <span className={`flex items-center justify-center gap-1 px-1 text-center tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} ${tone ?? ""}`}>
+    <span className={`flex items-center justify-center gap-1 px-1 text-center tabular-nums ${compact ? "text-[13px] sm:text-sm" : "text-sm lg:text-base"} ${tone ?? ""}`}>
       {cents ? formatMoney(cents, currency) : null}
     </span>
   );
@@ -1776,7 +2069,7 @@ function LedgerCell({
  */
 function PinnedMark() {
   return (
-    <span aria-label="typed by hand" className="pointer-events-none absolute right-1 top-0 text-[10px] lg:text-xs leading-none text-muted">
+    <span aria-label="typed by hand" className="pointer-events-none absolute right-1 top-0 max-sm:text-[11px] sm:text-sm lg:text-sm leading-none text-muted">
       ✎
     </span>
   );
@@ -1828,9 +2121,11 @@ function EditCell({
       className="flex w-full items-center justify-center gap-px"
     >
       {negative && !editing ? (
-        <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} ${tone}`}>{MINUS}</span>
+        <span className={`pointer-events-none select-none tabular-nums ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"} ${tone}`}>{MINUS}</span>
       ) : null}
-      <span className={`pointer-events-none select-none text-muted ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"}`}>{currencySymbol(currency)}</span>
+      {/* The "$" takes the figure's colour, so a red or green amount reads as
+          one piece instead of a black symbol stuck to a coloured number. */}
+      <span className={`pointer-events-none select-none ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"} ${tone || "text-foreground"}`}>{currencySymbol(currency)}</span>
       <input type="hidden" name="accountId" value={accountId} />
       {bucketId ? <input type="hidden" name="bucketId" value={bucketId} /> : null}
       <input type="hidden" name="year" value={year} />
@@ -1868,7 +2163,7 @@ function EditCell({
         // Left-aligned inside its own box so the digits sit against the "$".
         // The form centres the pair, so the cell still reads centred; centring
         // the text as well pushed the number away from the symbol.
-        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-left tabular-nums ${compact ? "text-[13px] lg:text-[15px]" : "text-sm lg:text-base"} transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
+        className={`min-w-0 rounded-md bg-transparent px-0 py-0.5 text-left tabular-nums ${compact ? "text-[13px] font-semibold sm:text-sm" : "max-sm:text-[12px] sm:text-sm lg:text-base"} transition hover:bg-brand-soft/40 focus:bg-background focus:outline-none focus:ring-2 ${tone} ${
           pending ? "ring-2 ring-brand" : "focus:ring-brand"
         }`}
       />
@@ -1882,6 +2177,16 @@ function EditCell({
  * The group's 31-December close for a year — null when not one account in the
  * group has closed that year yet, so the row reads "—" rather than $0.00.
  */
+/**
+ * Whether a year's gain was actually measured for an account: a gain on
+ * file, a hand-typed one, or both an opening and a closing balance. Without
+ * any of those the $0.00 isn't a result, it's a blank — shown as "—".
+ */
+function gainTracked(a: InvestAccount, year: number): boolean {
+  const c = effectiveCell(a, year);
+  return !!c.accruedManual || c.accruedCents !== 0 || (c.startBalanceCents != null && c.endBalanceCents != null);
+}
+
 function sumClose(accounts: InvestAccount[], year: number): number | null {
   let total = 0;
   let any = false;
@@ -1929,13 +2234,13 @@ function YearByYear({
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-        <h2 className="text-sm lg:text-base font-bold">Year by year</h2>
+        <h2 className="text-sm lg:text-base font-bold">Yearly Breakdown Overview</h2>
       </button>
       {open ? (
         <div className="overflow-x-auto border-t border-line">
-          <table className="w-full text-sm lg:text-base">
+          <table className="w-full max-sm:text-[12px] sm:text-sm lg:text-base">
             <thead>
-              <tr className="text-[11px] lg:text-[13px] uppercase tracking-wide text-muted">
+              <tr className="max-sm:text-[12px] sm:text-sm lg:text-sm uppercase tracking-wide text-muted">
                 <th className="px-4 py-2 text-left font-semibold">Account</th>
                 <th className="px-3 py-2 text-left font-semibold">Metric</th>
                 {desc.map((y) => (
@@ -1946,19 +2251,25 @@ function YearByYear({
             <tbody>
               <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setMineCollapsed((c) => !c)}>
                 <td className="bg-background/60 px-4 py-1.5">
-                  <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] lg:text-[13px] font-semibold uppercase tracking-wide text-muted">
+                  <span className="flex items-center gap-1.5 whitespace-nowrap max-sm:text-[12px] sm:text-sm lg:text-sm font-semibold uppercase tracking-wide text-muted">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${mineCollapsed ? "" : "rotate-90"}`} aria-hidden><path d="M9 6l6 6-6 6" /></svg>
                     Investments
                   </span>
                 </td>
-                <td className="bg-background/60 px-3 py-1.5 text-[11px] lg:text-xs text-muted">Contributed + Gain + EOY</td>
+                {/* One label per line, lined up with the figures beside it: contributed
+                    on top, gain under it, EOY only once a year has closed. */}
+                <td className="bg-background/60 px-3 py-1.5 max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">
+                  <span className="block">Contributed</span>
+                  <span className="block">Gain</span>
+                  {desc.some((y) => sumClose(mine, y) != null) ? <span className="block">EOY</span> : null}
+                </td>
                 {desc.map((y) => {
                   const contrib = mine.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                   const gain = mine.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                   const eoy = sumClose(mine, y);
                   return (
-                    <td key={y} className="bg-background/60 px-3 py-1.5 whitespace-nowrap text-center text-[11px] lg:text-xs tabular-nums text-muted">
-                      <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>{" / "}<span>{eoy == null ? "—" : formatMoney(eoy, currency)}</span>
+                    <td key={y} className="bg-background/60 px-3 py-1.5 whitespace-nowrap text-center max-sm:text-[12px] sm:text-sm lg:text-sm tabular-nums font-bold text-muted">
+                      <span className="block text-foreground">{formatMoney(contrib, currency)}</span><span className={`block ${gainTone(gain)}`}>{mine.some((a) => gainTracked(a, y)) ? formatMoney(gain, currency) : "—"}</span>{eoy == null ? null : <span className="block">{formatMoney(eoy, currency)}</span>}
                     </td>
                   );
                 })}
@@ -1976,19 +2287,25 @@ function YearByYear({
               {kids.length > 0 && (
                 <tr className="cursor-pointer hover:bg-brand-soft/20" onClick={() => setKidsCollapsed((c) => !c)}>
                   <td className="border-t-2 border-line bg-background/60 px-4 py-1.5">
-                    <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] lg:text-[13px] font-semibold uppercase tracking-wide text-muted">
+                    <span className="flex items-center gap-1.5 whitespace-nowrap max-sm:text-[12px] sm:text-sm lg:text-sm font-semibold uppercase tracking-wide text-muted">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`shrink-0 transition-transform duration-150 ${kidsCollapsed ? "" : "rotate-90"}`} aria-hidden><path d="M9 6l6 6-6 6" /></svg>
                       Kids Funding
                     </span>
                   </td>
-                  <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 text-[11px] lg:text-xs text-muted">Contributed + Gain + EOY</td>
+                  {/* One label per line, lined up with the figures beside it: contributed
+                    on top, gain under it, EOY only once a year has closed. */}
+                <td className="border-t-2 border-line bg-background/60 px-3 py-1.5 max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">
+                  <span className="block">Contributed</span>
+                  <span className="block">Gain</span>
+                  {desc.some((y) => sumClose(kids, y) != null) ? <span className="block">EOY</span> : null}
+                </td>
                   {desc.map((y) => {
                     const contrib = kids.reduce((s, a) => s + (effectiveCell(a, y).contributedCents), 0);
                     const gain = kids.reduce((s, a) => s + (effectiveCell(a, y).accruedCents), 0);
                     const eoy = sumClose(kids, y);
                     return (
-                      <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 whitespace-nowrap text-center text-[11px] lg:text-xs tabular-nums text-muted">
-                        <span className="text-foreground">{formatMoney(contrib, currency)}</span>{" / "}<span className={gainTone(gain)}>{formatMoney(gain, currency)}</span>{" / "}<span>{eoy == null ? "—" : formatMoney(eoy, currency)}</span>
+                      <td key={y} className="border-t-2 border-line bg-background/60 px-3 py-1.5 whitespace-nowrap text-center max-sm:text-[12px] sm:text-sm lg:text-sm tabular-nums font-bold text-muted">
+                        <span className="block text-foreground">{formatMoney(contrib, currency)}</span><span className={`block ${gainTone(gain)}`}>{kids.some((a) => gainTracked(a, y)) ? formatMoney(gain, currency) : "—"}</span>{eoy == null ? null : <span className="block">{formatMoney(eoy, currency)}</span>}
                       </td>
                     );
                   })}
@@ -2031,15 +2348,36 @@ function YByAccountRows({
   onToggle: () => void;
 }) {
   const hasBuckets = account.buckets.length > 0;
+  // EOY (the 31 December close) only once some year has one — until then it
+  // was a line of dashes under every account and bucket.
+  const showEoy = desc.some((y) => effectiveCell(account, y).closeBalanceCents != null);
+  // An account with buckets opens and closes from anywhere on its three rows
+  // (name, Contributed, Gain, EOY) — nothing in them is editable, since its
+  // gains are typed on the bucket rows.
+  // Hover tints all three rows as one block: tinting only the row under the
+  // pointer flickered strip by strip as it moved down the account.
+  const [hovered, setHovered] = useState(false);
+  const rowToggle = hasBuckets
+    ? {
+        onClick: onToggle,
+        onMouseEnter: () => setHovered(true),
+        onMouseLeave: () => setHovered(false),
+        className: `cursor-pointer ${hovered ? "bg-sky-50 dark:bg-sky-950/40" : ""}`,
+      }
+    : { onClick: undefined, onMouseEnter: undefined, onMouseLeave: undefined, className: "" };
   return (
     <>
-      <tr className="border-t border-line/70">
-        <td rowSpan={3} className="px-4 py-2 align-top font-medium">
+      <tr onClick={rowToggle.onClick} onMouseEnter={rowToggle.onMouseEnter} onMouseLeave={rowToggle.onMouseLeave} className={`border-t border-line/70 ${rowToggle.className}`}>
+        <td rowSpan={showEoy ? 3 : 2} className="px-4 py-2 align-top font-bold">
           <span className="flex items-center gap-1.5">
             {hasBuckets ? (
               <button
                 type="button"
-                onClick={onToggle}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle();
+                }}
+                aria-expanded={open}
                 aria-label={open ? "Collapse buckets" : "Expand buckets"}
                 className="rounded p-0.5 text-muted hover:bg-brand-soft/40 hover:text-foreground"
               >
@@ -2050,7 +2388,7 @@ function YByAccountRows({
             ) : null}
             {account.name}
             {hasBuckets ? (
-              <span className="rounded bg-brand-soft/40 px-1.5 py-0.5 text-[10px] lg:text-xs font-normal text-muted">
+              <span className="rounded bg-brand-soft/40 px-1.5 py-0.5 max-sm:text-[11px] sm:text-sm lg:text-sm font-normal text-muted">
                 {account.buckets.length} bucket{account.buckets.length === 1 ? "" : "s"}
               </span>
             ) : null}
@@ -2058,7 +2396,7 @@ function YByAccountRows({
         </td>
         <td className="px-3 py-1.5 text-muted">Contributed</td>
         {desc.map((y) => (
-          <td key={y} className="px-3 py-1.5 text-center tabular-nums">
+          <td key={y} className="px-3 py-1.5 text-center tabular-nums font-bold">
             {hasBuckets ? (
               formatMoney(effectiveCell(account, y).contributedCents, currency)
             ) : (
@@ -2067,15 +2405,15 @@ function YByAccountRows({
           </td>
         ))}
       </tr>
-      <tr>
+      <tr onClick={rowToggle.onClick} onMouseEnter={rowToggle.onMouseEnter} onMouseLeave={rowToggle.onMouseLeave} className={rowToggle.className}>
         <td className="px-3 py-1.5 text-muted">Gain</td>
         {desc.map((y) => {
           const g = effectiveCell(account, y).accruedCents;
           const rawG = account.cells[y]?.accruedCents ?? 0;
           return (
-            <td key={y} className={`px-3 py-1.5 text-center tabular-nums ${gainTone(g)}`}>
+            <td key={y} className={`px-3 py-1.5 text-center tabular-nums font-bold ${gainTone(g)}`}>
               {hasBuckets ? (
-                formatMoney(g, currency)
+                gainTracked(account, y) ? formatMoney(g, currency) : "—"
               ) : (
                 <EditCell accountId={account.id} year={y} field="accrued" cents={rawG} currency={currency} tone={gainTone(rawG)} />
               )}
@@ -2083,51 +2421,55 @@ function YByAccountRows({
           );
         })}
       </tr>
-      <tr>
-        <td className="px-3 py-1.5 text-muted">EOY</td>
-        {desc.map((y) => {
-          const close = effectiveCell(account, y).closeBalanceCents;
-          return (
-            <td key={y} className="px-3 py-1.5 text-center tabular-nums text-muted">
-              {close == null ? "—" : formatMoney(close, currency)}
-            </td>
-          );
-        })}
-      </tr>
+      {showEoy ? (
+        <tr onClick={rowToggle.onClick} onMouseEnter={rowToggle.onMouseEnter} onMouseLeave={rowToggle.onMouseLeave} className={rowToggle.className}>
+          <td className="px-3 py-1.5 text-muted">EOY</td>
+          {desc.map((y) => {
+            const close = effectiveCell(account, y).closeBalanceCents;
+            return (
+              <td key={y} className="px-3 py-1.5 text-center tabular-nums font-bold text-muted">
+                {close == null ? "—" : formatMoney(close, currency)}
+              </td>
+            );
+          })}
+        </tr>
+      ) : null}
       {hasBuckets && open
         ? account.buckets.map((b) => (
             <Fragment key={b.id}>
               <tr className="border-t border-line/40 bg-background/30">
-                <td rowSpan={3} className="px-4 py-1.5 pl-10 align-top text-sm lg:text-base text-muted">↳ {b.name}</td>
-                <td className="px-3 py-1 text-sm lg:text-base text-muted">Contributed</td>
+                <td rowSpan={desc.some((y) => b.cells[y]?.closeBalanceCents != null) ? 3 : 2} className="px-4 py-1.5 pl-10 align-top max-sm:text-[12px] sm:text-sm lg:text-base text-muted">↳ {b.name}</td>
+                <td className="px-3 py-1 max-sm:text-[12px] sm:text-sm lg:text-base text-muted">Contributed</td>
                 {desc.map((y) => (
-                  <td key={y} className="px-3 py-1 text-center text-sm lg:text-base tabular-nums text-muted">
+                  <td key={y} className="px-3 py-1 text-center max-sm:text-[12px] sm:text-sm lg:text-base tabular-nums text-muted">
                     {formatMoney(b.cells[y]?.contributedCents ?? 0, currency)}
                   </td>
                 ))}
               </tr>
               <tr className="bg-background/30">
-                <td className="px-3 py-1 text-sm lg:text-base text-muted">Gain</td>
+                <td className="px-3 py-1 max-sm:text-[12px] sm:text-sm lg:text-base text-muted">Gain</td>
                 {desc.map((y) => {
                   const g = b.cells[y]?.accruedCents ?? 0;
                   return (
-                    <td key={y} className={`px-3 py-1 text-center text-sm lg:text-base tabular-nums ${gainTone(g)}`}>
+                    <td key={y} className={`px-3 py-1 text-center max-sm:text-[12px] sm:text-sm lg:text-base tabular-nums ${gainTone(g)}`}>
                       <EditCell accountId={account.id} bucketId={b.id} year={y} field="accrued" cents={g} currency={currency} tone={gainTone(g)} />
                     </td>
                   );
                 })}
               </tr>
-              <tr className="bg-background/30">
-                <td className="px-3 py-1 text-sm lg:text-base text-muted">EOY</td>
-                {desc.map((y) => {
-                  const close = b.cells[y]?.closeBalanceCents ?? null;
-                  return (
-                    <td key={y} className="px-3 py-1 text-center text-sm lg:text-base tabular-nums text-muted">
-                      {close == null ? "—" : formatMoney(close, currency)}
-                    </td>
-                  );
-                })}
-              </tr>
+              {desc.some((y) => b.cells[y]?.closeBalanceCents != null) ? (
+                <tr className="bg-background/30">
+                  <td className="px-3 py-1 max-sm:text-[12px] sm:text-sm lg:text-base text-muted">EOY</td>
+                  {desc.map((y) => {
+                    const close = b.cells[y]?.closeBalanceCents ?? null;
+                    return (
+                      <td key={y} className="px-3 py-1 text-center max-sm:text-[12px] sm:text-sm lg:text-base tabular-nums text-muted">
+                        {close == null ? "—" : formatMoney(close, currency)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ) : null}
             </Fragment>
           ))
         : null}
@@ -2153,12 +2495,15 @@ function TransferModal({
   const [sourceAccountId, setSourceAccountId] = useState("");
   const [sourceBucketId, setSourceBucketId] = useState("");
   const [destAccountId, setDestAccountId] = useState("");
+  const [destBucketId, setDestBucketId] = useState("");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [memo, setMemo] = useState("");
 
   const srcAccount = accounts.find((a) => a.id === sourceAccountId);
   const hasBuckets = (srcAccount?.buckets.length ?? 0) > 0;
+  const destBuckets = destAccounts.find((a) => a.id === destAccountId)?.buckets ?? [];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2166,12 +2511,15 @@ function TransferModal({
     fd.set("sourceAccountId", sourceAccountId);
     if (sourceBucketId) fd.set("sourceBucketId", sourceBucketId);
     fd.set("destAccountId", destAccountId);
+    if (destBucketId) fd.set("destBucketId", destBucketId);
     fd.set("amount", amount);
     fd.set("date", date);
     if (memo) fd.set("memo", memo);
     start(async () => {
-      await transferFromInvestment(fd);
-      onClose();
+      setErrorMsg(null);
+      const r = await transferFromInvestment(fd);
+      if (r.error) setErrorMsg(r.error);
+      else onClose();
     });
   };
 
@@ -2193,12 +2541,12 @@ function TransferModal({
         <form onSubmit={handleSubmit} className="space-y-4 px-5 py-5">
           {/* Source account */}
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted">From (investment account)</span>
+            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">From (investment account)</span>
             <select
               required
               value={sourceAccountId}
               onChange={(e) => { setSourceAccountId(e.target.value); setSourceBucketId(""); }}
-              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Select investment account</option>
               {accounts.map((a) => (
@@ -2210,13 +2558,14 @@ function TransferModal({
           {/* Source bucket (when account has buckets) */}
           {hasBuckets && (
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-muted">Bucket</span>
+              <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Bucket</span>
               <select
+                required
                 value={sourceBucketId}
                 onChange={(e) => setSourceBucketId(e.target.value)}
-                className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
               >
-                <option value="">Entire account (no specific bucket)</option>
+                <option value="">Choose a bucket…</option>
                 {srcAccount!.buckets.map((b) => (
                   <option key={b.id} value={b.id}>{b.name} — {formatMoney(b.balanceCents, currency)}</option>
                 ))}
@@ -2226,12 +2575,12 @@ function TransferModal({
 
           {/* Destination account */}
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted">To (banking account)</span>
+            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">To (banking account)</span>
             <select
               required
               value={destAccountId}
-              onChange={(e) => setDestAccountId(e.target.value)}
-              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              onChange={(e) => { setDestAccountId(e.target.value); setDestBucketId(""); }}
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">Select destination account</option>
               {destAccounts.map((a) => (
@@ -2240,9 +2589,27 @@ function TransferModal({
             </select>
           </label>
 
+          {/* Destination bucket (when the banking account has buckets) */}
+          {destBuckets.length > 0 && (
+            <label className="block">
+              <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Into bucket</span>
+              <select
+                required
+                value={destBucketId}
+                onChange={(e) => setDestBucketId(e.target.value)}
+                className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                <option value="">Choose a bucket…</option>
+                {destBuckets.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
           {/* Amount */}
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted">Amount</span>
+            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Amount</span>
             <div className="relative">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted">{currencySymbol(currency)}</span>
               <input
@@ -2253,34 +2620,36 @@ function TransferModal({
                 placeholder="0.00"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background py-2 pl-7 pr-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full rounded-lg border border-line bg-surface py-2 pl-7 pr-3 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand"
               />
             </div>
           </label>
 
           {/* Date */}
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted">Date</span>
+            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Date</span>
             <input
               required
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>
 
           {/* Memo */}
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted">Note</span>
+            <span className="mb-1 block text-xs sm:text-sm font-medium text-foreground">Note</span>
             <input
               type="text"
               placeholder="Transfer note (optional)"
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
-              className="w-full rounded-lg border border-line bg-sky-50 dark:bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>
+
+          {errorMsg ? <p className="text-sm font-medium text-negative">{errorMsg}</p> : null}
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-2">
@@ -2301,56 +2670,3 @@ function TransferModal({
   );
 }
 
-// Grab handle for drag-to-reorder — mirrors the Accounts board's handle so
-// both pages reorder the same way.
-function GripHandle({ onMouseDown }: { onMouseDown: () => void }) {
-  return (
-    <span
-      onMouseDown={(e) => {
-        e.preventDefault();
-        onMouseDown();
-      }}
-
-      className="flex shrink-0 cursor-grab items-center rounded p-0.5 text-muted/60 transition hover:bg-brand-soft/50 hover:text-muted active:cursor-grabbing"
-    >
-      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-        <path d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
-    </span>
-  );
-}
-
-// Pointer-based row reordering — rows carry data-drop-key="<kind>:<id>",
-// grabbing a handle starts the drag, releasing over another row of the same
-// kind fires onReorder(fromId, toId). Same mechanism as the Accounts board.
-function usePointerReorder(kind: string, onReorder: (fromId: string, toId: string) => void) {
-  const dragId = useRef<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-
-  const keyUnder = (x: number, y: number) => {
-    const el = document.elementFromPoint(x, y) as HTMLElement | null;
-    const rowEl = el?.closest<HTMLElement>("[data-drop-key]");
-    const key = rowEl?.getAttribute("data-drop-key");
-    return key && key.startsWith(`${kind}:`) ? key.slice(kind.length + 1) : null;
-  };
-
-  const startDrag = (id: string) => {
-    dragId.current = id;
-    document.body.style.cursor = "grabbing";
-    const onMove = (e: MouseEvent) => setDragOverId(keyUnder(e.clientX, e.clientY));
-    const onUp = (e: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      document.body.style.cursor = "";
-      setDragOverId(null);
-      const from = dragId.current;
-      dragId.current = null;
-      const to = keyUnder(e.clientX, e.clientY);
-      if (from && to && from !== to) onReorder(from, to);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
-  return { dragOverId, startDrag };
-}

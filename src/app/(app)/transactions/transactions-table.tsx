@@ -363,7 +363,7 @@ export function TransactionsTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="mx-auto w-full max-w-[120rem] space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden">
+    <div className="mx-auto w-full max-w-[120rem] space-y-2 md:flex md:h-[calc(100dvh-4rem)] md:flex-col md:space-y-0 md:overflow-hidden md:px-1 md:pb-1">
       {/* Frozen on every width. This used to slide away on phones when you
           scrolled down; Victor reads the month, the filters, the range and
           the totals line while scrolling the register, so the header stays
@@ -406,7 +406,7 @@ export function TransactionsTable({
           aria-expanded={searchOpen}
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition ${searchOpen || query ? "bg-brand text-white shadow-sm" : "bg-surface text-brand ring-1 ring-inset ring-brand/15 hover:bg-brand-soft"}`}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
           </svg>
         </button>
@@ -441,7 +441,7 @@ export function TransactionsTable({
       {/* Date range — searches across months instead of just the one selected above */}
         <div className="order-4 grid w-full grid-cols-[1fr_1fr_auto] items-center gap-1 rounded-xl bg-surface px-1.5 py-1 shadow-sm ring-1 ring-line sm:order-3 sm:flex sm:w-auto sm:gap-1.5">
         <div className="relative min-w-0 sm:w-40 sm:flex-none">
-          {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-muted">From</span> : null}
+          {!fromDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">From</span> : null}
           <input
             type="date"
             aria-label="From date"
@@ -457,12 +457,12 @@ export function TransactionsTable({
               setFromDate(e.target.value);
               applyRange(e.target.value, toDate);
             }}
-            className={`w-full cursor-pointer appearance-none rounded-lg bg-sky-50 dark:bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`w-full cursor-pointer appearance-none rounded-lg bg-surface py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${fromDate ? "pl-2" : "pl-12 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
           <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
         </div>
         <div className="relative min-w-0 sm:w-40 sm:flex-none">
-          {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-muted">To</span> : null}
+          {!toDate ? <span className="pointer-events-none absolute inset-y-0 left-2 z-10 flex items-center text-xs font-semibold text-foreground">To</span> : null}
           <input
             type="date"
             aria-label="To date"
@@ -478,7 +478,7 @@ export function TransactionsTable({
               setToDate(e.target.value);
               applyRange(fromDate, e.target.value);
             }}
-            className={`w-full cursor-pointer appearance-none rounded-lg bg-sky-50 dark:bg-background py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
+            className={`w-full cursor-pointer appearance-none rounded-lg bg-surface py-1.5 pr-9 ring-1 ring-black/10 focus:outline-none focus:ring-2 focus:ring-brand [&::-webkit-calendar-picker-indicator]:opacity-0 dark:ring-white/15 ${toDate ? "pl-2" : "pl-7 [&::-webkit-datetime-edit]:text-transparent"}`}
           />
           <span className="pointer-events-none absolute inset-y-0 right-2 z-10 flex items-center text-foreground">{CalendarIcon}</span>
         </div>
@@ -508,7 +508,7 @@ export function TransactionsTable({
         <button
           type="button"
           onClick={() => openModal("new")}
-          className="order-3 flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white hover:shadow-sm sm:order-2 sm:px-3"
+          className="order-3 ml-auto flex items-center gap-1.5 rounded-xl bg-brand-soft px-2.5 py-1.5 font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white hover:shadow-sm sm:order-2 sm:ml-0 sm:px-3"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
             <path d="M12 5v14M5 12h14" />
@@ -518,13 +518,13 @@ export function TransactionsTable({
         {/* Filter chip: show only rows still un-reconciled (cleared=false).
             Uses viz-savings blue when active so it never reads as
             purple/brand. On mobile it sits between Select and +Transaction
-            (order-3) on the first row; on desktop it moves to the right of
+            (order-2), shrunk to fit one row; on desktop it moves to the right of
             the date pill (order-4). */}
         <button
           type="button"
           aria-pressed={uncleredOnly}
           onClick={() => setUnclearedOnly((v) => !v)}
-          className={`order-2 flex shrink-0 items-center gap-1 rounded-xl px-2 py-1 text-[11px] font-semibold transition sm:order-4 sm:px-3 sm:py-1.5 sm:text-sm ${
+          className={`order-2 flex shrink-0 items-center gap-1 self-stretch rounded-xl px-1.5 py-1.5 font-semibold transition max-sm:text-[11px] sm:order-4 sm:self-auto sm:px-3 sm:text-sm ${
             uncleredOnly
               ? "text-white shadow-sm ring-1"
               : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
@@ -535,7 +535,7 @@ export function TransactionsTable({
               : undefined
           }
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg width="14" height="14" className="h-3 w-3 sm:h-3.5 sm:w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <rect x="4" y="4" width="16" height="16" rx="2.5" />
           </svg>
           {/* Full "Uncleared" at every width: the short "Unclear" label read
@@ -550,7 +550,7 @@ export function TransactionsTable({
             value={propertyFilter}
             onChange={(e) => setPropertyFilter(e.target.value)}
             aria-label="Filter by property"
-            className={`order-2 shrink-0 rounded-xl px-2 py-1 text-[11px] font-semibold transition sm:order-4 sm:px-3 sm:py-1.5 sm:text-sm ${
+            className={`order-5 shrink-0 rounded-xl px-2 py-1.5 text-xs font-semibold transition sm:order-4 sm:px-3 sm:text-sm ${
               propertyFilter
                 ? "text-white ring-1"
                 : "bg-surface text-foreground ring-1 ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"

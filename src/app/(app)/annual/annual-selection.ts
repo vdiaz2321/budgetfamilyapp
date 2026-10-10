@@ -4,13 +4,13 @@ import type { CategoryKind } from "@/lib/categories";
  * The trailing Net column of the Months table is selectable too; it maps to
  * the Net card rather than to any one kind.
  */
-export type CellKind = CategoryKind | "net";
+export type CellKind = CategoryKind | "net" | "kidsFunding";
 
 /**
  * Which hero card a column feeds. Bills and Expenses both roll into the one
  * Spending card, exactly as the unfiltered hero already sums them.
  */
-export type CardId = "income" | "spending" | "savings" | "debt" | "net";
+export type CardId = "income" | "spending" | "savings" | "kids" | "debt" | "net";
 
 export const CARD_FOR_KIND: Record<CellKind, CardId> = {
   income: "income",
@@ -19,17 +19,21 @@ export const CARD_FOR_KIND: Record<CellKind, CardId> = {
   expenses: "spending",
   debt: "debt",
   net: "net",
+  kidsFunding: "kids",
 };
 
 // Color per category kind — matches the hero cards' value color so a reader
 // can scan a column and its total tint reads as one thing. Uses the --viz-*
 // tokens (never --brand, which is purple) per the app-wide chart color rule.
-export const KIND_COLOR: Record<CategoryKind, string> = {
+export const KIND_COLOR: Record<CategoryKind | "kidsFunding", string> = {
   income: "var(--positive)",
   savings: "var(--viz-savings)",
   bills: "var(--negative)",
   expenses: "var(--negative)",
   debt: "var(--negative)",
+  // Neutral, as in the Annual Breakdown: it is money set aside for the kids,
+  // neither the household's saving nor its spending.
+  kidsFunding: "var(--foreground)",
 };
 
 /**

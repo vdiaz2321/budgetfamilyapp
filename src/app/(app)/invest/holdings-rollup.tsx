@@ -43,7 +43,7 @@ const HOLDER_PILLS = [
 const gainTone = (value: number) => (value > 0 ? "text-positive" : value < 0 ? "text-negative" : "text-foreground");
 const fieldClass =
   "mt-1 w-full rounded-md bg-background px-2 py-1.5 text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
-const labelClass = "block text-[10px] font-semibold uppercase tracking-wide text-muted";
+const labelClass = "block max-sm:text-[11px] sm:text-sm font-semibold uppercase tracking-wide text-muted";
 
 /**
  * Edit one holding. Everything about it is typed here rather than in the table
@@ -170,11 +170,11 @@ function HoldingModal({
           </div>
         </div>
 
-        {error ? <p className="mt-3 text-xs text-negative">{error}</p> : null}
+        {error ? <p className="mt-3 text-xs sm:text-sm text-negative">{error}</p> : null}
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
           {confirmingDelete ? (
-            <span className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
               <span className="text-muted">Remove this holding?</span>
               <button
                 type="button"
@@ -193,11 +193,11 @@ function HoldingModal({
               <button type="button" onClick={() => setConfirmingDelete(false)} className="px-2 py-1.5 font-medium text-muted hover:text-foreground">Keep</button>
             </span>
           ) : (
-            <button type="button" onClick={() => setConfirmingDelete(true)} className="text-xs font-semibold text-negative hover:underline">Remove holding</button>
+            <button type="button" onClick={() => setConfirmingDelete(true)} className="text-xs sm:text-sm font-semibold text-negative hover:underline">Remove holding</button>
           )}
           <span className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xs font-medium text-muted hover:bg-background">Cancel</button>
-            <button type="submit" disabled={pending} className="rounded-md bg-brand px-4 py-2 text-xs font-semibold text-white hover:bg-brand/90 disabled:opacity-50">
+            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-xs sm:text-sm font-medium text-muted hover:bg-background">Cancel</button>
+            <button type="submit" disabled={pending} className="rounded-md bg-brand px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-brand/90 disabled:opacity-50">
               {pending ? "Saving…" : "Save holding"}
             </button>
           </span>
@@ -296,34 +296,35 @@ export function AllHoldingsTable({
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+      {/* Left-aligned in one row: the controls, then the total beside them. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs lg:text-sm text-muted">Select a row to edit it</span>
+          <span className="text-xs sm:text-sm lg:text-sm text-muted">Select a row to edit it</span>
           {accountLabels.length > 1 ? (
             <select
               value={accountFilter}
               onChange={(event) => setAccountFilter(event.target.value)}
-              className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              className="rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-xs sm:text-sm lg:text-sm text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <option value="">All accounts</option>
               {accountLabels.map((label) => <option key={label} value={label}>{label}</option>)}
             </select>
           ) : null}
         </div>
-        <div className="ml-auto flex flex-col items-end text-right">
+        <div className="flex flex-col items-start text-left">
           <span className="text-base lg:text-lg font-bold tabular-nums">
             {visible.length} holding{visible.length === 1 ? "" : "s"} · {formatMoney(totalCents, currency)}
           </span>
           {freshness && stalest ? (
-            <span className={`text-xs ${freshness.stale ? "font-semibold text-negative" : "text-muted"}`}>
+            <span className={`text-xs sm:text-sm ${freshness.stale ? "font-semibold text-negative" : "text-muted"}`}>
               {lastUpdateByAccount.size > 1 ? `${stalest[0]} ` : ""}updated {freshness.label}
             </span>
           ) : null}
         </div>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-xs lg:text-sm">
-          <thead className="bg-background/50 text-[10px] lg:text-xs uppercase tracking-wide text-muted">
+        <table className="min-w-full text-xs sm:text-sm lg:text-sm">
+          <thead className="bg-background/50 max-sm:text-[11px] sm:text-sm lg:text-sm uppercase tracking-wide text-muted">
             <tr>
               {COLUMNS.map((column) => {
                 const active = sort.key === column.key;
@@ -369,15 +370,15 @@ export function AllHoldingsTable({
                       </a>
                     ) : null}
                   </span>
-                  <span className="block max-w-56 truncate text-[11px] lg:text-[13px] text-muted">{row.securityName}</span>
+                  <span className="block max-w-56 truncate max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">{row.securityName}</span>
                 </td>
-                <td className="whitespace-nowrap px-3 py-2 text-center text-[11px] lg:text-[13px] text-muted">
+                <td className="whitespace-nowrap px-3 py-2 text-center max-sm:text-[12px] sm:text-sm lg:text-sm text-muted">
                   <span className="inline-flex items-center gap-1.5">
                     {row.accountLabel}
                     {(() => {
                       const holder = holderOf(row.accountId, row.bucketId);
                       return holder ? (
-                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] lg:text-xs font-semibold ring-1 ${holderPill.get(holder)}`}>{holder}</span>
+                        <span className={`rounded-full px-1.5 py-0.5 max-sm:text-[11px] sm:text-sm lg:text-sm font-semibold ring-1 ${holderPill.get(holder)}`}>{holder}</span>
                       ) : null;
                     })()}
                   </span>

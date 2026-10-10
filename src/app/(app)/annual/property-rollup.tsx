@@ -130,7 +130,7 @@ function PropertyCard({
         type="button"
         onClick={() => setCollapse({ open: !open })}
         aria-expanded={open}
-        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 bg-sky-100 px-3 py-2 text-left transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 bg-sky-100 px-3 py-2 text-left transition hover:bg-sky-200 dark:bg-sky-950/30 dark:hover:bg-sky-950/60"
       >
         <Chevron open={open} small />
         <span

@@ -2454,6 +2454,7 @@ async function reverseMovementTransaction(
     account_id: string | null;
     bucket_id: string | null;
     paid_to_account_id: string | null;
+    paid_to_bucket_id?: string | null;
     movement_type: string | null;
   },
 ) {
@@ -2510,23 +2511,13 @@ async function reverseMovementTransaction(
         .eq("id", tx.account_id)
         .eq("household_id", householdId);
     }
-    // Destination banking account was incremented on create — take it back.
-    if (tx.paid_to_account_id) {
-      const { data: dest, error: destError } = await supabase
-        .from("accounts")
-        .select("current_balance_cents")
-        .eq("id", tx.paid_to_account_id)
-        .eq("household_id", householdId)
-        .maybeSingle();
-      if (destError) throw new Error(`Could not read the destination account: ${destError.message}`);
-      await supabase
-        .from("accounts")
-        .update({
-          current_balance_cents: (dest?.current_balance_cents ?? 0) - amount,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", tx.paid_to_account_id)
-        .eq("household_id", householdId);
+    // Destination banking account was incremented on create — take it back
+    // from the bucket it went into, else from the account ledger (which
+    // refuses a bucketed account rather than writing its total directly).
+    if (tx.paid_to_bucket_id) {
+      await adjustBucketBalance(supabase, householdId, tx.paid_to_bucket_id, -amount);
+    } else if (tx.paid_to_account_id) {
+      await adjustAccountLedger(supabase, householdId, tx.paid_to_account_id, -amount);
     }
   }
 
@@ -2585,12 +2576,12 @@ async function deleteSingleTransaction(
   const tx = unwrap(
     await supabase
       .from("transactions")
-      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, reward_activity_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
+      .select("subcategory_id, category_id, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, amount_cents, is_withdrawal, movement_type, travel_stay_id, travel_flight_id, travel_car_id, reward_activity_id, subcategories(linked_bucket_id, linked_account_id), categories(kind)")
       .eq("id", id)
       .eq("household_id", householdId)
       .maybeSingle<{
         subcategory_id: string | null; category_id: string | null; account_id: string | null; bucket_id: string | null;
-        paid_to_account_id: string | null; amount_cents: number; is_withdrawal: boolean | null; movement_type: string | null;
+        paid_to_account_id: string | null; paid_to_bucket_id: string | null; amount_cents: number; is_withdrawal: boolean | null; movement_type: string | null;
         travel_stay_id: string | null; travel_flight_id: string | null; travel_car_id: string | null; reward_activity_id: string | null;
         subcategories: { linked_bucket_id: string | null; linked_account_id: string | null } | null;
         categories: { kind: string } | null;

@@ -358,7 +358,7 @@ export function EstateGuideModal({
                     type="button"
                     onClick={() => toggleSection(section.label)}
                     aria-expanded={isOpen}
-                    className="flex w-full items-center gap-2 bg-sky-100 px-3 py-2 text-left transition hover:bg-sky-100 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+                    className="flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2 text-left transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
                   >
                     <svg aria-hidden viewBox="0 0 20 20" className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${isOpen ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 7.5 10 12.5 15 7.5" />
@@ -750,7 +750,7 @@ function EstatePrint({
   const g = estate.guide;
   const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const cell = "border border-black/30 px-1.5 py-1 align-top";
-  const head = `${cell} bg-sky-100 text-left font-semibold`;
+  const head = `${cell} bg-surface text-left font-semibold`;
   return (
     <div id="estate-print" className="text-[11px] leading-snug">
       <h1 className="text-lg font-bold">Estate guide</h1>

@@ -54,6 +54,9 @@ export function periodStartFor(targetDate: string | null, now: Date): string {
  * Amounts are stored unsigned with the direction in `is_withdrawal`, so a
  * withdrawal subtracts. This mirrors `net_contribution_cents` in
  * `v_investment_contributions` exactly; if one changes, change both.
+ * Only Budget savings lines are contributions: the view skips transfer rows
+ * (movement_type set), and callers here only pass savings-line rows, so an
+ * investment withdrawal never gives contribution room back.
  */
 export function signedContributionCents(tx: {
   amount_cents: number;
