@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter, loadFxRates, type ConvertedFrom } from "@/components/currency-converter";
@@ -299,8 +299,32 @@ export function MiscModal({
     </label>
   );
 
+  // Pinned in the popup header (in place of the X) so they are reachable
+  // without scrolling to the bottom of a long form.
+  const formId = useId();
+  const headerButtons = (
+    <>
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={pending}
+        className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
+      >
+        Cancel
+      </button>
+      <button
+        type="submit"
+        form={formId}
+        disabled={pending}
+        className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : "Save spending"}
+      </button>
+    </>
+  );
   const body = (
       <form
+        id={formId}
         onSubmit={(e) => {
           e.preventDefault();
           if (embed) return;
@@ -432,27 +456,6 @@ export function MiscModal({
 
         {error && !embed ? <p className="rounded-md bg-negative/10 px-3 py-2 text-sm font-medium text-negative">{error}</p> : null}
 
-        {embed ? null : (
-        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-line pt-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Save spending"}
-            </button>
-          </div>
-        </div>
-        )}
       </form>
   );
   return embed ? body : (
@@ -466,6 +469,7 @@ export function MiscModal({
         </>
       }
       onClose={onClose}
+      headerEnd={headerButtons}
       className="sm:max-w-4xl"
     >
       {body}

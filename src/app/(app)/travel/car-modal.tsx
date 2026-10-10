@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { CurrencyConverter } from "@/components/currency-converter";
@@ -144,8 +144,59 @@ export function CarModal({
     }
   }
 
+  // Pinned in the popup header (in place of the X) so they are reachable
+  // without scrolling to the bottom of a long form.
+  const formId = useId();
+  const headerButtons = (
+    <>
+      {car ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(async () => finish(await setTravelCarCancelled(car.id, !car.cancelledAt)))}
+          // Red while it would cancel, so it is not clicked by mistake;
+          // restoring a cancelled booking is harmless and stays neutral.
+          className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+            car.cancelledAt
+              ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              : "text-negative ring-negative/60 hover:bg-negative/10"
+          }`}
+        >
+          {car.cancelledAt ? "Restore booking" : "Cancel booking"}
+        </button>
+      ) : null}
+      {car ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(async () => finish(await deleteTravelCar(car.id)))}
+          className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
+        >
+          Delete
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={pending}
+        className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
+      >
+        Cancel
+      </button>
+      <button
+        type="submit"
+        form={formId}
+        disabled={pending}
+        className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : car ? "Save rental" : "Add rental"}
+      </button>
+    
+    </>
+  );
   const body = (
       <form
+        id={formId}
         onSubmit={(e) => {
           e.preventDefault();
           if (embed) return;
@@ -333,49 +384,6 @@ export function CarModal({
             {isEstimate ? "Planned rental cost" : "Rental cost"}{" "}
             <span className="font-bold tabular-nums text-foreground">{formatMoneyWhole(costCents, currency)}</span>
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            {car ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => start(async () => finish(await setTravelCarCancelled(car.id, !car.cancelledAt)))}
-                // Red while it would cancel, so it is not clicked by mistake;
-                // restoring a cancelled booking is harmless and stays neutral.
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
-                  car.cancelledAt
-                    ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                    : "text-negative ring-negative/60 hover:bg-negative/10"
-                }`}
-              >
-                {car.cancelledAt ? "Restore booking" : "Cancel booking"}
-              </button>
-            ) : null}
-            {car ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => start(async () => finish(await deleteTravelCar(car.id)))}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
-              >
-                Delete
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
-            >
-              {pending ? "Saving…" : car ? "Save rental" : "Add rental"}
-            </button>
-          </div>
         </div>
         )}
         {draw !== 0 ? (
@@ -389,6 +397,7 @@ export function CarModal({
     <ModalShell
       title={car ? "Edit rental" : "Add rental"}
       onClose={onClose}
+      headerEnd={headerButtons}
       className="sm:max-w-3xl"
       headerActions={car ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >

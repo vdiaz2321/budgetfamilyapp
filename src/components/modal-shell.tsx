@@ -55,6 +55,7 @@ export function ModalShell({
   headerExtra,
   headerActions,
   headerActionsBelow = false,
+  headerEnd,
 }: {
   // Usually text; a control (a picker) can stand in for it.
   title: React.ReactNode;
@@ -69,6 +70,9 @@ export function ModalShell({
   // Put headerActions on their own line under the title at every width (the
   // trip popup's actions + dates row), instead of beside it from sm up.
   headerActionsBelow?: boolean;
+  // The popup's own buttons (Save, Delete, Close…) pinned at the header's right
+  // edge in place of the X, so they're reachable without scrolling to the end.
+  headerEnd?: React.ReactNode;
   // Where the panel sits on phones. "bottom" (default) is right for long,
   // scroll-heavy forms the thumb works through. "top" suits short forms, which
   // otherwise end up with their action buttons pinned in the very corner of the
@@ -114,6 +118,9 @@ export function ModalShell({
               {headerExtra}
             </div>
           ) : null}
+          {headerEnd ? (
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{headerEnd}</div>
+          ) : (
           <div className="ml-auto flex shrink-0 items-center">
             <button
               type="button"
@@ -126,6 +133,7 @@ export function ModalShell({
               </svg>
             </button>
           </div>
+          )}
         </div>
         {/* Scopes column-wise Tab (Accounts balance grids) to this popup, so it
             never jumps to an input on the page behind. */}

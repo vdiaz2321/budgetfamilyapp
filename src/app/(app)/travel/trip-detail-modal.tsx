@@ -9,6 +9,7 @@ import { Field, inputClass } from "./travel-form";
 import { bookingForeign, bookingPlanActual, bookingWhen, tripDate, type Booking, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES, actualCents, type TripTaggedPurchase } from "./types";
 import { MatchPurchasesModal } from "./match-purchases-modal";
+import { AddTransactionButton } from "./add-transaction-button";
 
 const DASH = "—";
 const KIND_LABEL = { flight: "Flight", stay: "Stay", car: "Rental" } as const;
@@ -349,6 +350,8 @@ export function TripDetailModal({
               Edit trip
             </button>
           ) : null}
+          {/* Log a purchase for this trip without leaving the popup. */}
+          <AddTransactionButton className={SECTION_BUTTON} label="+ Transaction" />
           {/* Each end of the trip: its weekday over the full date. The plan
               total isn't repeated here — the cards below already show it. */}
           {/* The dates on a light-blue pill (the Flight tag's tint — never
@@ -381,6 +384,43 @@ export function TripDetailModal({
           ) : null}
                 </div>
       }
+      // Close / Delete trip pinned at the header's right edge (in place of the
+      // X) so they're reachable without scrolling to the bottom.
+      headerEnd={
+        mode === "delete" ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+            <span className="font-semibold text-foreground">Delete this trip and everything in it?</span>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => run(() => deleteTrip(t.trip.id), onClose)}
+              className="rounded-md bg-negative px-3 py-1.5 font-semibold text-white disabled:opacity-60"
+            >
+              Delete trip
+            </button>
+            <button type="button" onClick={() => setMode("view")} className="px-2 py-1.5 font-semibold text-foreground hover:underline">
+              Keep
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setMode("delete")}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
+            >
+              Delete trip
+            </button>
+            {/* Hidden while Edit trip is open: Close doesn't save, so the
+                way out of that form is Save trip or Cancel. */}
+            {mode !== "edit" ? (
+              <button type="button" onClick={onClose} className="rounded-md border border-black/25 bg-background px-4 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40">
+                Close
+              </button>
+            ) : null}
+          </>
+        )
+      }
       onClose={onClose}
       className="sm:max-w-[min(94vw,68rem)]"
       mobileAlign="top"
@@ -389,6 +429,7 @@ export function TripDetailModal({
         className="space-y-4 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"
         style={{ "--trip-stats-h": `${statsHeight}px` } as React.CSSProperties}
       >
+        {error ? <p className="rounded-md bg-negative/10 px-3 py-2 text-xs font-medium text-negative">{error}</p> : null}
         {/* ---- Edit trip (name, dates, notes) opens right under the button
              that starts it; otherwise the notes read here. */}
         {mode === "edit" ? (
@@ -965,44 +1006,6 @@ export function TripDetailModal({
           ) : (
             <p className="rounded-lg px-3 py-2 text-xs text-foreground ring-1 ring-line">No restaurants, groceries or other spending yet.</p>
           )}
-        </section>
-
-        {/* ---- The trip itself */}
-        <section className="border-t border-line pt-3">
-          {mode === "delete" ? (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-foreground">Delete this trip and everything in it — its stays, flights, rentals and spending?</span>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => run(() => deleteTrip(t.trip.id), onClose)}
-                className="rounded-md bg-negative px-3 py-1.5 font-semibold text-white disabled:opacity-60"
-              >
-                Delete trip
-              </button>
-              <button type="button" onClick={() => setMode("view")} className="px-2 py-1.5 font-semibold text-foreground hover:underline">
-                Keep
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Hidden while Edit trip is open: Close doesn't save, so the
-                  way out of that form is Save trip or Cancel. */}
-              {mode !== "edit" ? (
-                <button type="button" onClick={onClose} className="rounded-md border border-black/25 bg-background px-4 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40">
-                  Close
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setMode("delete")}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
-              >
-                Delete trip
-              </button>
-            </div>
-          )}
-          {error ? <p className="mt-2 text-xs font-medium text-negative">{error}</p> : null}
         </section>
       </div>
     </ModalShell>

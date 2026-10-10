@@ -264,6 +264,85 @@ export function StayModal({
     Math.round((Number(hotelCost.replace(/[$,\s]/g, "")) || 0) * 100) -
     Math.round((Number(pocketCost.replace(/[$,\s]/g, "")) || 0) * 100);
 
+  // Pinned in the popup header (in place of the X) so they are reachable
+  // without scrolling to the bottom of a long form.
+  const headerButtons = (
+    <>
+      {/* A booking that falls through is cancelled, not deleted: it keeps
+          its place in the archive and drops out of every total. */}
+      {stay ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(async () => {
+            const result = await setTravelStayCancelled(stay.id, !stay.cancelledAt);
+            if (result?.error) setError(result.error);
+            else {
+              router.refresh();
+              onClose();
+            }
+          })}
+          // Red while it would cancel, so it is not clicked by mistake;
+          // restoring a cancelled booking is harmless and stays neutral.
+          className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+            stay.cancelledAt
+              ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              : "text-negative ring-negative/60 hover:bg-negative/10"
+          }`}
+        >
+          {stay.cancelledAt ? "Restore booking" : "Cancel booking"}
+        </button>
+      ) : null}
+      {stay ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(async () => {
+            const fd = new FormData();
+            fd.set("id", stay.id);
+            const result = await deleteTravelStay(fd);
+            if (result?.error) setError(result.error);
+            else {
+              router.refresh();
+              onClose();
+            }
+          })}
+          className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
+        >
+          Delete
+        </button>
+      ) : null}
+      {onBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={pending}
+          className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 disabled:opacity-60 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
+        >
+          ← Back
+        </button>
+      ) : null}
+      {/* Dismisses the form. Distinct from "Cancel booking" above, which
+          cancels the reservation itself. */}
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={pending}
+        className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
+      >
+        Cancel
+      </button>
+      <button
+        type="submit"
+        form={formId}
+        disabled={pending}
+        className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : stay ? "Save stay" : "Add stay"}
+      </button>
+    
+    </>
+  );
   const body = (
     <div className={embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}>
       <form
@@ -771,78 +850,6 @@ export function StayModal({
                 + Add another room
               </button>
             ) : null}
-            {/* A booking that falls through is cancelled, not deleted: it keeps
-                its place in the archive and drops out of every total. */}
-            {stay ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => start(async () => {
-                  const result = await setTravelStayCancelled(stay.id, !stay.cancelledAt);
-                  if (result?.error) setError(result.error);
-                  else {
-                    router.refresh();
-                    onClose();
-                  }
-                })}
-                // Red while it would cancel, so it is not clicked by mistake;
-                // restoring a cancelled booking is harmless and stays neutral.
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
-                  stay.cancelledAt
-                    ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                    : "text-negative ring-negative/60 hover:bg-negative/10"
-                }`}
-              >
-                {stay.cancelledAt ? "Restore booking" : "Cancel booking"}
-              </button>
-            ) : null}
-            {stay ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => start(async () => {
-                  const fd = new FormData();
-                  fd.set("id", stay.id);
-                  const result = await deleteTravelStay(fd);
-                  if (result?.error) setError(result.error);
-                  else {
-                    router.refresh();
-                    onClose();
-                  }
-                })}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
-              >
-                Delete
-              </button>
-            ) : null}
-            {onBack ? (
-              <button
-                type="button"
-                onClick={onBack}
-                disabled={pending}
-                className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 disabled:opacity-60 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
-              >
-                ← Back
-              </button>
-            ) : null}
-            {/* Dismisses the form. Distinct from "Cancel booking" above, which
-                cancels the reservation itself. */}
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              form={formId}
-              disabled={pending}
-              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
-            >
-              {pending ? "Saving…" : stay ? "Save stay" : "Add stay"}
-            </button>
           </div>
         </div>
         )}
@@ -852,6 +859,7 @@ export function StayModal({
     <ModalShell
       title={stay ? "Edit stay" : roomOf ? `Add another room · ${roomOf.propertyName}` : "Add stay"}
       onClose={onClose}
+      headerEnd={headerButtons}
       headerActions={stay && trips ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >
       {body}

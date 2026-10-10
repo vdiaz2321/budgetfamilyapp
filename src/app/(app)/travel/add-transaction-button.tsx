@@ -12,7 +12,15 @@ import { useScrollLock } from "@/lib/use-scroll-lock";
 // form's Trip field tags it to the trip, which is what feeds Spent here.
 // Its pickers load in the background once the page is up, so a tap opens
 // the form at once instead of waiting ~1.5s for them.
-export function AddTransactionButton() {
+export function AddTransactionButton({
+  className,
+  label,
+}: {
+  // Overrides the page-sized look, e.g. to match the trip popup's header
+  // buttons; a custom label drops the + icon (it's in the label).
+  className?: string;
+  label?: string;
+} = {}) {
   usePrefetchTripTagging();
   const [options, setOptions] = useState<Awaited<ReturnType<typeof loadTxFormOptions>> | null>(null);
   const [payees, setPayees] = useState<{ id: string; name: string }[]>([]);
@@ -68,12 +76,14 @@ export function AddTransactionButton() {
         disabled={loading}
         // Same colours as the Transactions page's "+ Transaction" button; sized
         // to sit beside Add Trip / Edit trip.
-        className="flex items-center gap-1.5 rounded-lg bg-brand-soft px-4 py-2 text-base font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white disabled:opacity-60 sm:text-lg"
+        className={className ?? "flex items-center gap-1.5 rounded-lg bg-brand-soft px-4 py-2 text-base font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white disabled:opacity-60 sm:text-lg"}
       >
-        <svg aria-hidden viewBox="0 0 20 20" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-          <path d="M10 4v12M4 10h12" />
-        </svg>
-        {loading ? "Opening…" : "Add transaction"}
+        {label ? null : (
+          <svg aria-hidden viewBox="0 0 20 20" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M10 4v12M4 10h12" />
+          </svg>
+        )}
+        {loading ? "Opening…" : label ?? "Add transaction"}
       </button>
       {error ? <p className="w-full text-xs text-negative">{error}</p> : null}
 

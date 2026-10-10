@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { loadFxRates } from "@/components/currency-converter";
-import { centsToDisplay, displayToCents, foreignSymbol, formatMoney } from "@/lib/money";
+import { centsToDisplay, displayToCents, foreignSymbol, formatMoney, moneyExpressionToCents } from "@/lib/money";
+import { evaluateExpression, hasOperator } from "@/lib/math-expression";
 import { CurrencySelect } from "../travel/travel-form";
 import type { AccountOption, TripBookingOption } from "./types";
 
@@ -78,8 +79,8 @@ export function BookingPaymentPanel({
   const isStay = booking.ref.startsWith("stay:");
   const nightOn = freeNight === "" ? booking.freeNightUsed : freeNight === "on";
   const isFlight = booking.ref.startsWith("flight:") && rows.length > 0;
-  const splitCents = rows.reduce((sum, r) => sum + Math.max(0, displayToCents(r.cents)), 0);
-  const splitForeign = rows.reduce((sum, r) => sum + Math.max(0, displayToCents(r.foreign)), 0);
+  const splitCents = rows.reduce((sum, r) => sum + Math.max(0, moneyExpressionToCents(r.cents)), 0);
+  const splitForeign = rows.reduce((sum, r) => sum + Math.max(0, moneyExpressionToCents(r.foreign)), 0);
   const left = totalCents - splitCents;
   const fx = foreignSymbol(foreignCurrency);
   const foreign = booking.usesForeign;
@@ -99,7 +100,7 @@ export function BookingPaymentPanel({
   }, [isFlight, date]);
   function typeForeign(name: string, value: string) {
     const rate = rates.current?.[foreignCurrency];
-    const n = Number(value.replace(/,/g, ""));
+    const n = hasOperator(value) ? NaN : Number(value.replace(/,/g, ""));
     onRow(name, rate && value.trim() && Number.isFinite(n) ? { foreign: value, cents: centsToDisplay(Math.round((n / rate) * 100)) } : { foreign: value });
   }
 
@@ -166,6 +167,7 @@ export function BookingPaymentPanel({
                   aria-label={`${r.name} spent USD`}
                   value={r.cents}
                   onChange={(e) => onRow(r.name, { cents: e.target.value })}
+                  {...calcProps(r.cents, (v) => onRow(r.name, { cents: v }))}
                   onFocus={(e) => e.target.select()}
                   inputMode="decimal"
                   className={box}
@@ -175,6 +177,7 @@ export function BookingPaymentPanel({
                     aria-label={`${r.name} spent ${foreignCurrency}`}
                     value={r.foreign}
                     onChange={(e) => typeForeign(r.name, e.target.value)}
+                    {...calcProps(r.foreign, (v) => typeForeign(r.name, v))}
                     onFocus={(e) => e.target.select()}
                     inputMode="decimal"
                     className={box}
@@ -184,6 +187,7 @@ export function BookingPaymentPanel({
                   aria-label={`${r.name} points`}
                   value={r.points}
                   onChange={(e) => onRow(r.name, { points: e.target.value })}
+                  {...calcProps(r.points, (v) => onRow(r.name, { points: v }), true)}
                   onFocus={(e) => e.target.select()}
                   placeholder="0"
                   inputMode="numeric"
@@ -223,10 +227,20 @@ export function BookingPaymentPanel({
             onChange={(e) => {
               if (!isFlight) return onBookingPoints(e.target.value);
               setPointsDraft(e.target.value);
-              onTotalPoints(toInt(e.target.value));
+              // Mid-calculation ("1000+500") the seats wait for the result.
+              if (!hasOperator(e.target.value)) onTotalPoints(toInt(e.target.value));
             }}
+            {...calcProps(
+              isFlight ? pointsDraft ?? "" : bookingPoints,
+              (v) => {
+                if (!isFlight) return onBookingPoints(v);
+                setPointsDraft(null);
+                onTotalPoints(toInt(v));
+              },
+              true,
+              () => setPointsDraft(null),
+            )}
             onFocus={(e) => e.target.select()}
-            onBlur={() => setPointsDraft(null)}
             placeholder={!isFlight && booking.pointsUsed && booking.pointsCost ? booking.pointsCost.toLocaleString() : "0"}
             className={`${box} mt-0.5`}
           />
@@ -237,6 +251,7 @@ export function BookingPaymentPanel({
             inputMode="decimal"
             value={pointsValue}
             onChange={(e) => onPointsValue(e.target.value)}
+            {...calcProps(pointsValue, onPointsValue)}
             onFocus={(e) => e.target.select()}
             placeholder={impliedCents ? String(Number(impliedCents.toFixed(2))) : ""}
             className={`${box} mt-0.5`}
@@ -271,6 +286,7 @@ export function BookingPaymentPanel({
                 inputMode="decimal"
                 value={credit}
                 onChange={(e) => onCredit(e.target.value)}
+                {...calcProps(credit, onCredit)}
                 onFocus={(e) => e.target.select()}
                 placeholder={booking.hotelCreditCents ? centsToDisplay(booking.hotelCreditCents) : "0"}
                 className={`${box} mt-0.5`}
@@ -292,4 +308,27 @@ function Stat({ label: text, value, color }: { label: string; value: string; col
       </span>
     </div>
   );
+}
+
+// The payment boxes double as a calculator: type "38+9" and press Enter (or
+// leave the box) to swap in 47.00. Enter only calculates when there is math to
+// do — on a plain number it still submits the form.
+function calcProps(raw: string, set: (value: string) => void, whole = false, afterBlur?: () => void) {
+  const resolve = () => {
+    if (!hasOperator(raw)) return;
+    const value = evaluateExpression(raw);
+    if (value !== null) set(whole ? String(Math.round(value)) : centsToDisplay(Math.round(value * 100)));
+  };
+  return {
+    onBlur: () => {
+      resolve();
+      afterBlur?.();
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter" && hasOperator(raw)) {
+        e.preventDefault();
+        resolve();
+      }
+    },
+  };
 }

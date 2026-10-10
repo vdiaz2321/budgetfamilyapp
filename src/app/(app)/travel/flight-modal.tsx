@@ -433,6 +433,55 @@ export function FlightModal({
     });
   }
 
+  // Pinned in the popup header (in place of the X) so they are reachable
+  // without scrolling to the bottom of a long form.
+  const headerButtons = (
+    <>
+      {flight ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => act(() => setTravelFlightCancelled(flight.id, !flight.cancelledAt))}
+          // Red while it would cancel, so it is not clicked by mistake;
+          // restoring a cancelled booking is harmless and stays neutral.
+          className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+            flight.cancelledAt
+              ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              : "text-negative ring-negative/60 hover:bg-negative/10"
+          }`}
+        >
+          {flight.cancelledAt ? "Restore booking" : "Cancel booking"}
+        </button>
+      ) : null}
+      {flight ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => act(() => deleteTravelFlight(flight.id))}
+          className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
+        >
+          Delete
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={pending}
+        className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
+      >
+        Cancel
+      </button>
+      <button
+        type="submit"
+        form={formId}
+        disabled={pending}
+        className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : flight ? "Save flight" : "Add flight"}
+      </button>
+    
+    </>
+  );
   const body = (
     <div className={embed ? "" : "px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]"}>
       <form
@@ -918,50 +967,6 @@ export function FlightModal({
             {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · {isEstimate ? "Planned flight cost" : "Flight cost"}{" "}
             <span className="font-bold tabular-nums text-foreground">{formatMoney(fareCents, currency)}</span>
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            {flight ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => act(() => setTravelFlightCancelled(flight.id, !flight.cancelledAt))}
-                // Red while it would cancel, so it is not clicked by mistake;
-                // restoring a cancelled booking is harmless and stays neutral.
-                className={`rounded-md px-3 py-1.5 text-xs font-semibold ring-1 transition ${
-                  flight.cancelledAt
-                    ? "ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
-                    : "text-negative ring-negative/60 hover:bg-negative/10"
-                }`}
-              >
-                {flight.cancelledAt ? "Restore booking" : "Cancel booking"}
-              </button>
-            ) : null}
-            {flight ? (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => act(() => deleteTravelFlight(flight.id))}
-                className="rounded-md px-3 py-1.5 text-xs font-semibold text-negative transition hover:bg-negative/10"
-              >
-                Delete
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-sky-50 disabled:opacity-60 dark:hover:bg-sky-950/40"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              form={formId}
-              disabled={pending}
-              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-800 disabled:opacity-60"
-            >
-              {pending ? "Saving…" : flight ? "Save flight" : "Add flight"}
-            </button>
-          </div>
         </div>
         )}
     </div>
@@ -970,6 +975,7 @@ export function FlightModal({
     <ModalShell
       title={flight ? "Edit flight" : "Add flight"}
       onClose={onClose}
+      headerEnd={headerButtons}
       className="sm:max-w-5xl"
       headerActions={flight ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >

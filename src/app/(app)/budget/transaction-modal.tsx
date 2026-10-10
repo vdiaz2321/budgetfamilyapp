@@ -341,9 +341,10 @@ function TransactionModalForm({
   const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
   // A flight payment split per passenger — each share is that passenger's
   // Spent on the Travel Log, in dollars and the flight's other currency, as on
-  // its popup. It starts as this payment's own saved split (on an edit) or the
-  // passengers' planned fares, scaled to the amount; a figure typed by hand is
-  // kept until the booking changes, and the amount follows the dollars typed.
+  // its popup. An edit starts from this payment's own saved split; a new one
+  // starts blank — a payment often covers only some seats, so pre-splitting
+  // the amount across everyone was wrong (Victor, 2026-10-10). The amount
+  // follows the dollars typed; "Split by planned fares" fills it on request.
   const flightPax = paidBooking?.ref.startsWith("flight:") ? paidBooking.passengers : [];
   const ownShares = editTx ? paidBooking?.payments.find((p) => p.txId === editTx.id)?.shares ?? null : null;
   const [paxCents, setPaxCents] = useState<Record<string, string> | null>(null);
@@ -353,17 +354,18 @@ function TransactionModalForm({
   const flightCurrency = paxCurrency ?? (paidBooking?.foreignCurrency || "EUR");
   const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
   const ownShare = (name: string) => ownShares?.find((s) => sameName(s.name, name));
-  const defaultShares = shareOut(
-    totalCents,
-    flightPax.map((p) => (ownShares ? ownShare(p.name)?.cents ?? 0 : p.plannedCents)),
-  );
+  const defaultShares = ownShares ? shareOut(totalCents, flightPax.map((p) => ownShare(p.name)?.cents ?? 0)) : [];
+  function splitByPlannedFares() {
+    const parts = shareOut(totalCents, flightPax.map((p) => p.plannedCents));
+    setPaxCents(Object.fromEntries(flightPax.map((p, i) => [p.name, parts[i] ? centsToDisplay(parts[i]) : ""])));
+  }
   const paxRows: PaxRow[] = flightPax.map((p, i) => ({
     name: p.name,
     cents: paxCents?.[p.name] ?? (defaultShares[i] ? centsToDisplay(defaultShares[i]) : ""),
     foreign: paxForeign?.[p.name] ?? (ownShare(p.name)?.foreignCents ? centsToDisplay(ownShare(p.name)!.foreignCents!) : ""),
     points: paxPoints?.[p.name] ?? (p.points ? String(p.points) : ""),
   }));
-  const paxSplitCents = paxRows.reduce((sum, r) => sum + Math.max(0, displayToCents(r.cents)), 0);
+  const paxSplitCents = paxRows.reduce((sum, r) => sum + Math.max(0, moneyExpressionToCents(r.cents)), 0);
   function pickBooking(ref: string) {
     setBookingRef(ref);
     setPaxCents(null);
@@ -385,7 +387,7 @@ function TransactionModalForm({
       const next = pick("cents");
       setPaxCents(next);
       // The amount is what the passengers' dollars add up to.
-      const sum = Object.values(next).reduce((s, v) => s + Math.max(0, displayToCents(v)), 0);
+      const sum = Object.values(next).reduce((s, v) => s + Math.max(0, moneyExpressionToCents(v)), 0);
       setTotalCents(sum);
       setConvertedCents(sum);
     }
@@ -667,7 +669,7 @@ function TransactionModalForm({
               an add. Only exception: a locked initial kind (debt/savings from
               the Budget row context) still shows its own tab. */}
           {initialKind === "debt" || initialKind === "savings" ? (
-            <div className="flex gap-1.5 rounded-xl bg-sky-50 p-1.5 ring-1 ring-line dark:bg-background">
+            <div className="flex gap-1.5 rounded-xl bg-surface p-1.5 ring-1 ring-line dark:bg-background">
               <div
                 className={
                   "flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-semibold shadow-sm ring-1 ring-line " +
@@ -678,7 +680,7 @@ function TransactionModalForm({
               </div>
             </div>
           ) : (
-            <div className="flex gap-1.5 rounded-xl bg-sky-50 p-1.5 ring-1 ring-line dark:bg-background">
+            <div className="flex gap-1.5 rounded-xl bg-surface p-1.5 ring-1 ring-line dark:bg-background">
               {(["income", "expenses"] as const).map((kind) => (
                 <button
                   key={kind}
@@ -795,7 +797,7 @@ function TransactionModalForm({
                 type="button"
                 onClick={() => setAccountPickerOpen(true)}
                 className={
-                  "flex w-full items-center justify-between gap-2 rounded-xl bg-sky-50 dark:bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand " +
+                  "flex w-full items-center justify-between gap-2 rounded-xl bg-surface dark:bg-background px-3 py-2.5 text-left text-sm focus:outline-none focus:ring-2 focus:ring-brand " +
                   (missingAccount ? "ring-2 ring-negative" : "ring-1 ring-line")
                 }
               >
@@ -823,7 +825,7 @@ function TransactionModalForm({
                   type="button"
                   onClick={() => setPickerOpen(true)}
                   className={
-                    "w-full truncate rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+                    "w-full truncate rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-left text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
                     (missingBudgetItem ? "ring-2 ring-negative" : "ring-1 ring-line")
                   }
                 >
@@ -854,7 +856,7 @@ function TransactionModalForm({
                   clearErrors();
                 }}
                 className={
-                  "w-[9.5rem] rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm " +
+                  "w-[9.5rem] rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:w-40 sm:px-3 sm:text-sm " +
                   (missingDate ? "ring-2 ring-negative" : "ring-1 ring-line")
                 }
               />
@@ -896,7 +898,7 @@ function TransactionModalForm({
                 name="bucketId"
                 value={selectedBucketId}
                 onChange={(e) => setSelectedBucketId(e.target.value)}
-                className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                className="w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
                 <option value="">Bucket (optional)</option>
                 {availableBuckets.map((b) => (
@@ -912,7 +914,7 @@ function TransactionModalForm({
               <select
                 name="propertyId"
                 defaultValue={editTx?.propertyId ?? ""}
-                className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                className="w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
               >
                 <option value="">Property (optional)</option>
                 {propertyOptions.map((p) => (
@@ -933,7 +935,7 @@ function TransactionModalForm({
                     // A booking belongs to one trip; changing trips unlinks it.
                     pickBooking("");
                   }}
-                  className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                  className="w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                 >
                   <option value="">Not part of a trip</option>
                   {tripChoices.map((t) => (
@@ -945,12 +947,12 @@ function TransactionModalForm({
                     name="bookingRef"
                     value={bookingOk ? bookingRef : ""}
                     onChange={(e) => pickBooking(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className="mt-2 w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     <option value="">Pays for: day-to-day spending</option>
                     {bookings.map((b) => (
                       <option key={b.ref} value={b.ref}>
-                        Pays for: {b.label}{b.isEstimate ? " (planned)" : ""}
+                        Pays for: {b.label}
                       </option>
                     ))}
                   </select>
@@ -966,8 +968,8 @@ function TransactionModalForm({
                       value={JSON.stringify(
                         paxRows.map((r) => ({
                           name: r.name,
-                          cents: Math.max(0, displayToCents(r.cents)),
-                          foreignCents: r.foreign.trim() ? Math.max(0, displayToCents(r.foreign)) : null,
+                          cents: Math.max(0, moneyExpressionToCents(r.cents)),
+                          foreignCents: r.foreign.trim() ? Math.max(0, moneyExpressionToCents(r.foreign)) : null,
                           points: Math.max(0, Math.trunc(Number(r.points.replace(/,/g, ""))) || 0),
                         })),
                       )}
@@ -982,7 +984,7 @@ function TransactionModalForm({
                       rows={paxRows}
                       onRow={editPaxRow}
                       onTotalPoints={setTotalPaxPoints}
-                      onResetSplit={() => setPaxCents(null)}
+                      onResetSplit={splitByPlannedFares}
                       foreignCurrency={flightCurrency}
                       date={dateValue}
                       onForeignCurrency={setPaxCurrency}
@@ -1007,7 +1009,7 @@ function TransactionModalForm({
                     name="travelCategory"
                     value={travelCategory}
                     onChange={(e) => setTravelCategory(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className="mt-2 w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     {columnChoices.map((key) => (
                       <option key={key} value={key}>
@@ -1025,7 +1027,7 @@ function TransactionModalForm({
                     name="foodColumn"
                     value={foodColumn}
                     onChange={(e) => setFoodColumn(e.target.value)}
-                    className="mt-2 w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+                    className="mt-2 w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
                     {(["restaurants", "groceries"] as const).map((key) => (
                       <option key={key} value={key}>
@@ -1053,7 +1055,7 @@ function TransactionModalForm({
               type="text"
               placeholder="Add a note (optional)"
               defaultValue={editTx?.memo ?? initialMemo ?? ""}
-              className="w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
+              className="w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
             />
             {/* Delete moved into the footer next to Refund so all row-level
                 controls sit on one line — see the bottom action bar below. */}
@@ -1356,7 +1358,7 @@ function AmountInput({
             const v = parseFloat(e.target.value);
             onChangeCents(isNaN(v) ? 0 : Math.round(v * 100));
           }}
-          className={`w-full rounded-xl bg-sky-50 dark:bg-background py-2.5 pr-2 text-base font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-brand ${invalid ? "ring-2 ring-negative" : "ring-1 ring-line"} ${focused ? "pl-3" : "pl-7"}`}
+          className={`w-full rounded-xl bg-surface dark:bg-background py-2.5 pr-2 text-base font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-brand ${invalid ? "ring-2 ring-negative" : "ring-1 ring-line"} ${focused ? "pl-3" : "pl-7"}`}
         />
       </div>
     </div>
@@ -1412,7 +1414,7 @@ function SplitAmountInput({ amountCents, onChange }: { amountCents: number; onCh
             commit(raw);
           }
         }}
-        className="w-24 rounded-lg bg-sky-50 dark:bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-24 rounded-lg bg-surface dark:bg-background px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
       {focused ? (
         /* Wider than the input it belongs to — the negative margin keeps its
@@ -1536,7 +1538,7 @@ function AccountPicker({
                 onClose();
               }
             }}
-            className="w-full rounded-xl bg-sky-50 dark:bg-background py-2 pl-9 pr-3 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm"
+            className="w-full rounded-xl bg-surface dark:bg-background py-2 pl-9 pr-3 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:text-sm"
           />
         </div>
       </div>
@@ -1777,7 +1779,7 @@ function BudgetItemPicker({
                 onClose();
               }
             }}
-            className="w-full rounded-xl bg-sky-50 dark:bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+            className="w-full rounded-xl bg-surface dark:bg-background py-2 pl-9 pr-3 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
       </div>
@@ -1926,7 +1928,7 @@ function PayeeField({
         }}
         onKeyDown={handleKeyDown}
         className={
-          "w-full rounded-xl bg-sky-50 dark:bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
+          "w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm " +
           (invalid ? "ring-2 ring-negative" : "ring-1 ring-line")
         }
       />

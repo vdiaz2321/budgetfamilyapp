@@ -1616,40 +1616,51 @@ function DueItemsList({
   const [skippingId, setSkippingId] = useState<string | null>(null);
   const [, startSkip] = useTransition();
   return (
-    <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+    // Desktop: one shared grid (rows are subgrids) so date, name, account,
+    // amount and buttons line up in columns sized to the longest entry, all
+    // packed to the left.
+    <ul className="divide-y divide-line rounded-xl border border-line bg-surface sm:grid sm:grid-cols-[auto_auto_auto_auto_1fr] sm:gap-x-6">
+      {/* Column headers (desktop only — phones stack each row instead), so
+          the cells below don't each need an "Account:" / "Amount Owed:" label. */}
+      <li className="hidden px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-foreground sm:col-span-5 sm:grid sm:grid-cols-subgrid">
+        <span>Due</span>
+        <span>Item</span>
+        <span>Account</span>
+        <span>Amount Owed</span>
+        <span />
+      </li>
       {dueItems.map((item) => {
         const dueTarget = new Date(`${item.dueDate}T00:00:00`);
         const todayMidnight = new Date();
         todayMidnight.setHours(0, 0, 0, 0);
         const isOverdue = dueTarget < todayMidnight;
         return (
-          <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5">
+          <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5 sm:col-span-5 sm:grid sm:grid-cols-subgrid">
             {/* The name side opens the item's editor (due date, amount); the
                 Pay button on the right still logs the payment. */}
             <button
               type="button"
               onClick={() => onOpen?.(item)}
               disabled={!onOpen}
-              className="-my-1.5 -ml-2 min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition hover:bg-sky-100 dark:hover:bg-sky-950/40"
+              className="-my-1.5 -ml-2 min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition hover:bg-sky-100 sm:col-span-3 sm:grid sm:grid-cols-subgrid sm:items-baseline dark:hover:bg-sky-950/40"
             >
-              <div className="flex min-w-0 items-baseline gap-x-2">
-                <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>{dueItemDateLabel(item.dueDate)}</span>
-                <span className="truncate text-sm font-semibold sm:shrink-0 sm:max-w-[60%]">{item.name}</span>
-                {/* Hidden on phones, where it squeezed the name to a few
-                    letters — the red date and red Pay already say overdue. */}
-                {isOverdue && (
-                  <span className="hidden shrink-0 text-[10px] font-bold uppercase tracking-wide text-negative sm:inline">
-                    Overdue
-                  </span>
-                )}
+              <div className="flex min-w-0 items-baseline gap-x-2 sm:contents">
+                <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>
+                  {dueItemDateLabel(item.dueDate)}
+                  {/* Hidden on phones, where it squeezed the name to a few
+                      letters — the red date and red Pay already say overdue. */}
+                  {isOverdue && (
+                    <span className="ml-1.5 hidden text-[10px] font-bold uppercase tracking-wide sm:inline">
+                      Overdue
+                    </span>
+                  )}
+                </span>
+                <span className="truncate text-sm font-semibold sm:max-w-[16rem]">{item.name}</span>
                 {/* Desktop keeps the whole row on one line; phones keep the
                     account on its own line below (there's no room). */}
                 <span className="hidden min-w-0 truncate text-sm font-semibold sm:inline">
                   {item.accountName ? (
-                    <>
-                      <span className="font-bold text-muted">Account: </span>
-                      {item.accountName}
-                    </>
+                    item.accountName
                   ) : (
                     <span className="text-muted">No account linked</span>
                   )}
@@ -1660,7 +1671,7 @@ function DueItemsList({
               </p>
             </button>
             {/* Amount, Prev Mo and Pay sit on one line beside the name. */}
-            <div className="flex shrink-0 items-center justify-end gap-2 sm:gap-4">
+            <div className="flex shrink-0 items-center justify-end gap-2 sm:col-span-2 sm:grid sm:grid-cols-subgrid">
               {/* A zero here is a subscription whose price isn't on file (it
                   varies, or was never entered) — those are kept in the list on
                   purpose. "$0.00" read as "nothing owed", which is the opposite
@@ -1668,7 +1679,6 @@ function DueItemsList({
                   dropped from the list once nothing is left to pay. */}
               {item.amountCents > 0 ? (
                 <p className="text-sm font-semibold tabular-nums">
-                  <span className="hidden font-bold text-muted sm:inline">Amount Owed: </span>
                   {formatMoney(item.amountCents, currency)}
                 </p>
               ) : (
@@ -1676,7 +1686,7 @@ function DueItemsList({
                 <p className="hidden text-[11px] font-semibold text-muted sm:block">Amount not set</p>
               )}
               {onPayDue && (
-                <>
+                <div className="flex items-center gap-2">
                   {/* Only when last month actually had a charge to copy, and
                       only when it differs from the planned amount — otherwise
                       the chip is a second button that does exactly what
@@ -1713,7 +1723,7 @@ function DueItemsList({
                   >
                     Pay
                   </button>
-                </>
+                </div>
               )}
             </div>
           </li>
