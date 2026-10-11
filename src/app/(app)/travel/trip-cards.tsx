@@ -95,7 +95,7 @@ export function TripCards({
   const upcomingFigures = [
     { label: "Total trips", value: String(ahead.length), tone: "" },
     { label: "Total spent", value: formatMoneyWhole(sumOf((t) => t.spent), currency), tone: "text-negative" },
-    { label: "Total planned", value: formatMoneyWhole(sumOf((t) => t.plannedTotal), currency), tone: "text-muted" },
+    { label: "Total planned", value: formatMoneyWhole(sumOf((t) => t.plannedTotal), currency), tone: "text-sky-700 dark:text-sky-300" },
     // Points actually redeemed and the cash they replaced — shown even at 0.
     { label: "Total pts used", value: upcomingPts.toLocaleString(), tone: "" },
     { label: "Total cash saved", value: formatMoneyWhole(upcomingSaved, currency), tone: upcomingSaved > 0 ? "text-positive" : "" },
@@ -123,7 +123,7 @@ export function TripCards({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <h2 className="text-sm font-bold sm:text-base">Upcoming trips</h2>
+          <h2 className="text-sm font-extrabold sm:text-lg">Upcoming trips</h2>
         </span>
         {/* The money for every trip still ahead, open or folded, in the
             same label + figure style as the other section headers. */}
@@ -131,15 +131,15 @@ export function TripCards({
           <>
             {upcomingFigures.map((f, i) => (
               <span key={f.label} className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[i] ?? ""}`}>
-                <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">{f.label}:</span>
-                <span className={`text-sm font-semibold tabular-nums ${f.tone}`}>{f.value}</span>
+                <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">{f.label}:</span>
+                <span className={`text-sm font-bold tabular-nums ${f.tone}`}>{f.value}</span>
               </span>
             ))}
             {/* Folded, the header still says what's next — on wide screens
                 only, where it fits on the same line as the totals. */}
             {!open && next ? (
               <span className="hidden min-w-0 items-baseline gap-1.5 2xl:flex">
-                <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Next:</span>
+                <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">Next:</span>
                 <span className="text-sm font-semibold">
                   {next.trip.name.split(" · ")[0]}{" "}
                   <span className="font-medium text-muted">{nextDays > 0 ? `in ${plural(nextDays, "day")}` : "now"}</span>

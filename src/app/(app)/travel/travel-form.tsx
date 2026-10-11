@@ -51,7 +51,7 @@ export function CurrencySelect({ value, onChange }: { value: string; onChange: (
     // A stronger outline and a readable label — the faint ring-line and muted
     // grey label read as disabled (Victor, 2026-09-30). Same look as the
     // form's "Paid with points" picker beside it.
-    <label className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold ${PILL_CONTROL}`}>
+    <label className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-background px-2 text-xs font-semibold sm:text-sm ${PILL_CONTROL}`}>
       <span className="text-foreground">Select if using other currency:</span>
       <select
         value={value}
@@ -85,6 +85,7 @@ export function PlanSpentFields({
   what = "cost",
   onFocusSlot,
   spentLocked = false,
+  onOpenSpent,
   spentOnPoints = false,
   showForeign = true,
 }: {
@@ -98,6 +99,8 @@ export function PlanSpentFields({
   onFocusSlot?: (slot: PlanSpentSlot) => void;
   /** Spent comes from linked transactions: shown locked, not typed. */
   spentLocked?: boolean;
+  /** Opens those linked transactions — clicking the locked box does it. */
+  onOpenSpent?: () => void;
   /** Paid with points: Spent is only the cash paid on top of the points, and
    *  Planned is what it would have cost. The labels say so. */
   spentOnPoints?: boolean;
@@ -117,17 +120,18 @@ export function PlanSpentFields({
   const box = (b: (typeof boxes)[number]) => {
     const locked = spentLocked && b.slot === "spent";
     return (
-      <Field key={b.slot} label={b.label}>
+      <Field key={b.slot} label={b.label} action={locked && onOpenSpent ? <OpenLinkedButton onOpen={onOpenSpent} /> : undefined}>
         <input
           value={value[b.slot]}
           onChange={(e) => onChange({ ...value, [b.slot]: e.target.value })}
           onFocus={() => onFocusSlot?.(b.slot)}
+          onClick={locked ? onOpenSpent : undefined}
           readOnly={locked}
           tabIndex={locked ? -1 : undefined}
           inputMode="decimal"
-          className={`${inputClass} ${locked ? "opacity-70" : ""}`}
+          className={`${inputClass} ${locked ? "opacity-70" : ""} ${locked && onOpenSpent ? openableClass : ""}`}
         />
-        {locked ? <PaidNote linked /> : null}
+        {locked ? <PaidNote linked onOpen={onOpenSpent} /> : null}
       </Field>
     );
   };
@@ -147,13 +151,39 @@ export function PlanSpentFields({
 // Under a locked Pocket cost: where its figure comes from. It shows only the
 // linked payments and stays blank until one is linked (Victor, 2026-09-30) —
 // the trip still counts the Spent figures typed here until then.
-export function PaidNote({ linked }: { linked: boolean }) {
+export function PaidNote({ linked, onOpen }: { linked: boolean; onOpen?: () => void }) {
+  // With a payment to open, the Open button beside the box says it instead.
+  if (linked && onOpen) return null;
   return (
     <span className="mt-0.5 block text-[11px] font-medium text-muted">
       {linked ? "From linked transactions" : "Fills in from linked transactions"}
     </span>
   );
 }
+
+/** Opens a booking's linked payment; sits on its Spent box's label line. */
+export function OpenLinkedButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      // preventDefault: inside a <label>, a click would also reach the box,
+      // which opens the payment too — a second load of the same thing.
+      onClick={(e) => {
+        e.preventDefault();
+        onOpen();
+      }}
+      className="-my-1 shrink-0 whitespace-nowrap rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-800/60"
+    >
+      {/* Just "Open" on a phone, where the full name would crowd out the
+          label it sits beside. */}
+      <span className="sm:hidden">Open</span>
+      <span className="hidden sm:inline">Open linked transaction</span>
+    </button>
+  );
+}
+
+/** A locked Spent box that opens its linked payment when clicked. */
+export const openableClass = "cursor-pointer hover:ring-2 hover:ring-sky-400";
 
 export const inputClass =
   "w-full rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500";
@@ -171,10 +201,19 @@ export function Section({ title, action, children }: { title: string; action?: R
   );
 }
 
-export function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+export function Field({ label, action, className, children }: { label: string; action?: React.ReactNode; className?: string; children: React.ReactNode }) {
   return (
     <label className={`block min-w-0 ${className ?? ""}`}>
-      <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      {action ? (
+        // A button on the label's own line, right after it. It keeps the
+        // line's height, so the box stays level with the boxes beside it.
+        <span className="mb-0.5 flex h-[18px] items-center gap-2">
+          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+          {action}
+        </span>
+      ) : (
+        <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      )}
       {children}
     </label>
   );

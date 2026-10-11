@@ -36,6 +36,7 @@ import {
   markCardDetailsUpdated,
 } from "../accounts/actions";
 import { ModalShell } from "@/components/modal-shell";
+import type { TravelStay } from "./types";
 import { ExpandIcon } from "./travel-board";
 import {
   UNLINKED,
@@ -98,7 +99,6 @@ function shortDate(iso: string): string {
   const [, m, d] = iso.split("-");
   return `${Number(d)}-${SHORT_MONTHS[Number(m) - 1]}`;
 }
-
 /** "12 days left" / "in 3 months" — the number the date alone doesn't give. */
 function expiryLabel(days: number): string {
   if (days <= 0) return "expired";
@@ -130,6 +130,8 @@ const RewardsDataContext = React.createContext<{
   redemptions: Map<string, CardRedemption>;
   collapsed: Record<string, boolean>;
   toggleSection: (key: string) => void;
+  freeNightStays: TravelStay[];
+  onOpenStay?: (stay: TravelStay) => void;
 } | null>(null);
 
 function useRewardsData() {
@@ -150,6 +152,8 @@ export function CreditCardRewardsProvider({
   nonCardAccounts,
   allBuckets,
   redemptions,
+  freeNightStays = [],
+  onOpenStay,
 }: {
   children: React.ReactNode;
   // Every credit card in the household, closed ones included — the closed
@@ -160,6 +164,11 @@ export function CreditCardRewardsProvider({
   allBuckets: BucketData[];
   /** Award bookings per card id, from the logs below. */
   redemptions: Map<string, CardRedemption>;
+  /** Live stays that use a card's free night — they set its Booked on and
+   *  Check-in, which the card form then shows locked. */
+  freeNightStays?: TravelStay[];
+  /** Opens a stay's form (from a card's locked dates). */
+  onOpenStay?: (stay: TravelStay) => void;
 }) {
   const [focusCardId, setFocusCardId] = useState<string | null>(null);
   // Each card section remembers its own open/closed state for the session.
@@ -201,6 +210,8 @@ export function CreditCardRewardsProvider({
           redemptions,
           collapsed,
           toggleSection,
+          freeNightStays,
+          onOpenStay,
         }}
       >
         {children}
@@ -522,21 +533,23 @@ function CreditCardSection({
   // Figure chips for a group's banner. Light chips on the light fill; in dark
   // mode the values use lifted versions of the data palette. Each slot has a
   // fixed min width so the Travel and Hotel rows line up in columns.
-  const bannerChip = (label: string, text: string, valueClass: string, extra = "", slot = "") => (
-    <span key={label} className={`flex shrink-0 flex-col gap-0.5 rounded-xl px-2.5 py-1.5 ring-1 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-3 ${slot} ${extra || "bg-surface ring-line dark:ring-white/10"}`}>
-      <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted dark:text-foreground">{label}:</span>
-      <span className={`whitespace-nowrap text-sm font-semibold tabular-nums ${valueClass}`}>{text}</span>
+  // Plain "Label: figure" on the banner's tint, in the section headers'
+  // style — boxed in white chips they shouted over the heading itself.
+  const bannerChip = (label: string, text: string, valueClass: string, slot = "") => (
+    <span key={label} className={`flex shrink-0 flex-col gap-0.5 sm:inline-flex sm:flex-row sm:items-baseline sm:gap-1.5 ${slot}`}>
+      <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">{label}:</span>
+      <span className={`whitespace-nowrap text-sm font-bold tabular-nums ${valueClass}`}>{text}</span>
     </span>
   );
   const groupFigures = (cards: AccountData[], cat: "travel" | "hotel", owed: number) => {
     const { points, value, redeemable, unvalued } = groupRewards(cards);
     return (
       <>
-        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative dark:text-rose-300" : "text-muted dark:text-foreground", "", "sm:min-w-[9.5rem]")}
-        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-positive dark:text-emerald-300", "", "sm:min-w-[11.25rem]") : null}
-        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-positive dark:text-emerald-300", "", "sm:min-w-[11.25rem]") : null}
+        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative dark:text-rose-300" : "text-foreground", "sm:min-w-[9.5rem]")}
+        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-positive dark:text-emerald-300", "sm:min-w-[11.25rem]") : null}
+        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-positive dark:text-emerald-300", "sm:min-w-[11.25rem]") : null}
         {redeemable > 0
-          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-700 dark:text-sky-200", "bg-surface ring-sky-700/20 dark:ring-sky-300/30", "sm:min-w-[11.25rem]")
+          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-700 dark:text-sky-200", "sm:min-w-[11.25rem]")
           : null}
         {/* Only as complete as the cents-per-point typed on the cards. */}
         {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-negative dark:text-rose-300") : null}
@@ -566,7 +579,8 @@ function CreditCardSection({
         }}
         // A teal wash at rest marks it as a filter control on the dark
         // banner; switched on it fills solid.
-        className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition lg:ml-auto ${
+        // Straight after the group's figures, not pushed to the far edge.
+        className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition ${
           active
             ? "bg-teal-600 text-white ring-teal-600 dark:bg-teal-400 dark:text-foreground dark:ring-teal-300"
             : "bg-teal-50 text-teal-800 ring-teal-600/30 hover:bg-teal-100 dark:bg-teal-400/15 dark:text-teal-200 dark:ring-teal-300/30 dark:hover:bg-teal-400/25"
@@ -586,12 +600,22 @@ function CreditCardSection({
   // A row inside the shared Travel / Hotel box, not a card of its own.
   const groupBanner = (cat: "travel" | "hotel", isOpen: boolean, owed: number, cards: AccountData[]) => (
     <div>
+      {/* Reads as the group's heading, not one more row: a pale fill of
+          its own — sage for Travel (Victor's pick, 2026-10-11: blue tints
+          blended into the light-blue column header under it, and solid
+          colour was too loud), a pale teal for Hotel so the two never look
+          alike — a bar of the group's colour down the left edge (sky for
+          Travel, teal for Hotel), and a larger name. */}
       <div
         onClick={() => toggleGroup(cat)}
-        className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 px-4 py-3.5 text-foreground transition hover:bg-sky-50 sm:px-5 dark:text-white dark:hover:bg-sky-950/40"
+        className={`flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 border-l-[6px] px-4 py-3.5 text-foreground transition sm:px-5 dark:text-white ${
+          cat === "travel"
+            ? "border-l-sky-600 bg-[#e8efe6] hover:bg-[#dce7d9] dark:border-l-sky-400 dark:bg-[#243029] dark:hover:bg-[#2c3a32]"
+            : "border-l-teal-600 bg-[#d8efea] hover:bg-[#c8e7e0] dark:border-l-teal-400 dark:bg-[#1f3532] dark:hover:bg-[#25403c]"
+        }`}
       >
-        <button type="button" aria-expanded={isOpen} className="flex min-w-0 shrink-0 items-center gap-3 text-left sm:w-[12rem]">
-          <span className="text-muted dark:text-foreground"><GroupChevron open={isOpen} /></span>
+        <button type="button" aria-expanded={isOpen} className="flex min-w-0 shrink-0 items-center gap-3 text-left sm:w-[14.5rem]">
+          <span><GroupChevron open={isOpen} /></span>
           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ${cat === "travel" ? "bg-sky-100 text-sky-700 ring-sky-700/20 dark:bg-sky-400/15 dark:text-sky-300 dark:ring-sky-300/30" : "bg-teal-100 text-teal-700 ring-teal-700/20 dark:bg-teal-400/15 dark:text-teal-300 dark:ring-teal-300/30"}`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               {cat === "travel" ? (
@@ -605,7 +629,7 @@ function CreditCardSection({
             </svg>
           </span>
           <span className="min-w-0">
-            <span className="block whitespace-nowrap text-sm font-bold sm:text-base">{cat === "travel" ? "Travel Rewards" : "Hotel Rewards"}</span>
+            <span className="block whitespace-nowrap text-sm font-extrabold sm:text-lg">{cat === "travel" ? "Travel Rewards" : "Hotel Rewards"}</span>
           </span>
         </button>
         {/* Two per row on a phone, one line from sm up. */}
@@ -832,47 +856,40 @@ function CreditCardSection({
           </span>
         );
       })()}
-      {/* The card counts double as the column filter: travel shows the
-          travel column alone, hotel the hotel one, total puts both
-          back with Other underneath. */}
+      {/* Which cards to list — All, Travel or Hotel, each with its count —
+          as the same switch the page uses for "By brand / By card". As three
+          small bordered counts they read as labels, not a choice. Travel
+          shows the travel column alone, Hotel the hotel one, All both with
+          Other underneath. Sized to sit level with Filters beside it. */}
       {(() => {
         const scoped = holderScoped(accounts);
         const count = (cat: "travel" | "hotel" | null) =>
           cat === null
             ? scoped.length
             : scoped.filter((a) => a.cardDetails?.rewardsCategory === cat).length;
-        // Outlined so all three read as pressable, filled only when
-        // one is actually narrowing the list. "Total" is the resting
-        // state, so a filled pill there said a filter was on when
-        // none was.
-        const countChip = (cat: "travel" | "hotel" | null, label: string) => {
-          const active = cat !== null && categoryFilter === cat;
-          return (
-            <button
-              type="button"
-              // Clicking the chip that's already on clears the filter,
-              // so getting back to everything doesn't mean hunting for
-              // "total".
-              onClick={() => setCategoryFilter((prev) => (prev === cat ? null : cat))}
-              className={`rounded-md border px-1.5 py-0.5 transition ${
-                active
-                  ? "border-transparent text-white"
-                  : "border-line bg-surface hover:bg-sky-100 dark:border-white/10 dark:hover:bg-sky-900/40"
-              }`}
-              style={active ? { backgroundColor: "var(--viz-savings)" } : undefined}
-            >
-              <span className={`font-semibold tabular-nums ${active ? "" : "text-foreground"}`}>
-                {count(cat)}
-              </span>{" "}
-              {label}
-            </button>
-          );
-        };
+        const options = [
+          { cat: null, label: "All" },
+          { cat: "travel", label: "Travel" },
+          { cat: "hotel", label: "Hotel" },
+        ] as const;
         return (
-          <span className="flex items-center gap-1">
-            {countChip("travel", "travel")}
-            {countChip("hotel", "hotel")}
-            {countChip(null, "total")}
+          <span className="inline-flex rounded-lg bg-sky-100 p-0.5 dark:bg-sky-900/50" role="group" aria-label="Show cards">
+            {options.map((o) => {
+              const active = categoryFilter === o.cat;
+              return (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => setCategoryFilter(o.cat)}
+                  aria-pressed={active}
+                  className={`rounded-md px-2.5 py-[3px] font-semibold text-foreground transition ${
+                    active ? "bg-surface shadow-sm" : "hover:bg-sky-200 dark:hover:bg-sky-800/60"
+                  }`}
+                >
+                  {o.label} <span className="tabular-nums">{count(o.cat)}</span>
+                </button>
+              );
+            })}
           </span>
         );
       })()}
@@ -1637,23 +1654,23 @@ function PointsByCard({
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-        <span className="shrink-0 whitespace-nowrap text-sm font-bold sm:text-base">Points/Value Historical Data</span>
+        <span className="shrink-0 whitespace-nowrap text-sm font-extrabold sm:text-lg">Points/Value Historical Data</span>
         </span>
         {total.redeemed.points > 0 ? (
           <>
             <span className="flex shrink-0 items-baseline gap-1.5 sm:min-w-[16.75rem]">
-              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground">
+              <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">
                 Total pts used:
               </span>
-              <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
+              <span className="whitespace-nowrap text-sm font-bold tabular-nums">
                 {total.redeemed.points.toLocaleString()}
               </span>
             </span>
             <span className="flex shrink-0 items-baseline gap-1.5">
-              <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-foreground">
+              <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">
                 Total cash saved:
               </span>
-              <span className="whitespace-nowrap text-sm font-semibold tabular-nums">
+              <span className="whitespace-nowrap text-sm font-bold tabular-nums">
                 {formatMoneyWhole(total.redeemed.valueCents, currency)}
               </span>
             </span>
@@ -1841,7 +1858,7 @@ function RewardsActivityLedger({
           className="flex min-w-0 items-center gap-2 text-left"
         >
           <ExpandIcon />
-          <span className="text-sm font-bold sm:text-base">Rewards Points Transactions Log</span>
+          <span className="text-sm font-extrabold sm:text-lg">Rewards Points Transactions Log</span>
         </button>
         <span className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {entryCount}
@@ -2553,7 +2570,9 @@ function CreditCardPanel({
         <span className="text-center">
           {d?.charging ? (
             // A break is allowed after a slash only ("iCloud/ Talkatone"), never mid-word.
-            <span className="inline-block max-w-full rounded-md bg-sky-100 px-2 py-1 text-xs font-semibold dark:bg-sky-900/50">{d.charging.replace(/\//g, "/\u200b")}</span>
+            // text-sm like the figures across the row; only Benefit expires
+            // keeps its small tags.
+            <span className="inline-block max-w-full rounded-md bg-sky-100 px-2 py-1 text-sm font-semibold dark:bg-sky-900/50">{d.charging.replace(/\//g, "/\u200b")}</span>
           ) : DASH_CELL}
         </span>
         <span className="text-center text-sm font-semibold tabular-nums">
@@ -2564,16 +2583,17 @@ function CreditCardPanel({
             d.pointsValueMicros ? (
               <span className="text-positive">${Math.round((d.currentPoints * d.pointsValueMicros) / 10_000 / 100).toLocaleString()}</span>
             ) : (
-              <span className="text-xs text-negative">No value set</span>
+              <span className="text-negative">No value set</span>
             )
           ) : DASH_CELL}
         </span>
-        <span className="text-center text-xs font-semibold tabular-nums text-foreground">
+        {/* Same size as the points and value beside it. */}
+        <span className="text-center text-sm font-semibold tabular-nums text-foreground">
           {valuePerPt != null ? `${formatCentsPerPoint(valuePerPt)}/pt` : DASH_CELL}
         </span>
         <span className="text-center">
           {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax) ? (
-            <span className="inline-block rounded-full bg-sky-50 px-2 py-0.5 text-xs font-bold tabular-nums text-sky-700 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800">
+            <span className="inline-block rounded-full bg-sky-50 px-2 py-0.5 text-sm font-bold tabular-nums text-sky-700 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800">
               {d?.freeNightCreditCents
                 ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
                 : d?.freeNightPointsLimit
@@ -2585,11 +2605,12 @@ function CreditCardPanel({
         <span className="text-center">
           {d?.benefitUsedOn ? (
             <span className={`inline-block whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ${d.benefitUsedOn < today ? "bg-negative/10 text-negative ring-negative/30" : "bg-positive/10 text-positive ring-positive/30"}`}>
-              Check-in {shortDate(d.benefitUsedOn)}
+              {/* Past tense once the stay has started. */}
+              {d.benefitUsedOn < today ? "Checked-in" : "Check-in"}
             </span>
           ) : d?.benefitBookedOn ? (
             <span className="inline-block whitespace-nowrap rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold text-foreground ring-1 ring-line dark:bg-sky-900/50">
-              Booked {shortDate(d.benefitBookedOn)}
+              Booked
             </span>
           ) : d?.freeNightExpiresOn ? (
             <span
@@ -2599,16 +2620,18 @@ function CreditCardPanel({
                   : "bg-teal-50 text-teal-800 ring-teal-200 dark:bg-teal-950/40 dark:text-teal-300 dark:ring-teal-800"
               }`}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="9" />
-                <path d="M12 7v5l3 2" />
-              </svg>
-              {fnExpired ? "Expired" : fnDaysLeft != null ? `Exp: ${expiryLabel(fnDaysLeft).replace(" left", "").replace(" months", " mos")}` : "Expires"}
+              {/* Spelled out, no clock icon (Victor, 2026-10-11). */}
+              {fnExpired ? "Expired" : fnDaysLeft != null ? `Expires: ${expiryLabel(fnDaysLeft).replace(" left", "").replace(" months", " mos")}` : "Expires"}
             </span>
           ) : DASH_CELL}
-          {/* The date itself, under the countdown tag. */}
-          {!certSpent && d?.freeNightExpiresOn ? (
-            <span className="mt-1 block text-xs tabular-nums text-muted">{d.freeNightExpiresOn.replace(/-/g, "\u2011")}</span>
+          {/* The date itself, with its year, under the tag: the expiry's
+              under its countdown, a used night's check-in or booked date
+              under those. In the tag, "18-Sep" left the year unclear beside
+              next year's expiries, and with the year it outgrew the column. */}
+          {d?.benefitUsedOn || d?.benefitBookedOn || d?.freeNightExpiresOn ? (
+            <span className="mt-1 block text-xs tabular-nums text-muted">
+              {(d.benefitUsedOn ?? d.benefitBookedOn ?? d.freeNightExpiresOn ?? "").replace(/-/g, "\u2011")}
+            </span>
           ) : null}
         </span>
         <span className={`text-center text-sm font-semibold tabular-nums ${owed > 0 ? "text-negative" : owed < 0 ? "text-positive" : ""}`}>
@@ -2620,7 +2643,7 @@ function CreditCardPanel({
               href={externalCardUrl(d.cardUrl)}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-0.5 rounded-lg bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/40"
+              className="inline-flex items-center gap-0.5 rounded-lg bg-sky-50 px-2.5 py-1 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/40"
             >
               Visit <span aria-hidden>↗</span>
             </a>
@@ -3005,6 +3028,23 @@ function RewardActivityForm({
   );
 }
 
+// A card date a stay sets: shown, posted with the form, not typed.
+function LockedDate({ label, name, value }: { label: string; name: string; value: string }) {
+  return (
+    <div className="block">
+      <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">{label}</span>
+      <input
+        type="date"
+        name={name}
+        value={value}
+        readOnly
+        tabIndex={-1}
+        className="w-full rounded-md bg-surface px-2 py-1.5 text-sm opacity-70 ring-1 ring-line focus:outline-none"
+      />
+    </div>
+  );
+}
+
 function EditCreditCardForm({
   card,
   onDone,
@@ -3023,7 +3063,24 @@ function EditCreditCardForm({
   // the Bank field. A list, not a <select>: a new issuer still gets typed in,
   // and picking an existing one keeps the spelling identical so the chips and
   // the by-bank grouping don't split "Cap 1" from "Capital One".
-  const { accounts: allCards } = useRewardsData();
+  const { accounts: allCards, freeNightStays, onOpenStay } = useRewardsData();
+  // A stay using this card's free night owns its Booked on / Check-in dates
+  // (saving the stay stamps them here). Typed over on the card, the two
+  // disagreed — the night showed unused while the stay said used — so they
+  // show locked, from the stay. Only the stay the card is stamped with, and
+  // only while it falls in the current certificate's year (the 12 months up
+  // to the expiration): when a new certificate arrives, its new expiration
+  // frees the dates to be cleared.
+  const nightStay = (() => {
+    const used = d?.benefitUsedOn;
+    if (!used) return null;
+    const exp = d?.freeNightExpiresOn;
+    if (exp) {
+      const yearBefore = `${Number(exp.slice(0, 4)) - 1}${exp.slice(4)}`;
+      if (used > exp || used <= yearBefore) return null;
+    }
+    return freeNightStays.find((s) => s.accountId === card.id && s.checkIn === used) ?? null;
+  })();
   const bankOptions = [...new Set(allCards.map(cardBank).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
 
@@ -3044,7 +3101,8 @@ function EditCreditCardForm({
   );
 
   return (
-    <ModalShell title={`Edit ${card.name}`} onClose={onDone}>
+    // Wider than the default, for three fields to a row.
+    <ModalShell title={`Edit ${card.name}`} onClose={onDone} className="sm:max-w-4xl">
       <div className="bg-background p-3">
       {/* One form: saves both account-level basics AND rewards details together.
           All tabs stay mounted (hidden via CSS) so a single Save submits every field. */}
@@ -3080,17 +3138,18 @@ function EditCreditCardForm({
         {/* Tab 1: Key fields (default) */}
         <div className={activeTab === "key" ? "" : "hidden"}>
           <div className="rounded-lg border border-line bg-background/60 p-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_input]:bg-white [&_input]:ring-sky-300 [&_select]:bg-white [&_select]:ring-sky-300 dark:[&_input]:bg-neutral-900 dark:[&_input]:ring-sky-300 dark:[&_select]:bg-neutral-900 dark:[&_select]:ring-sky-300">
+            {/* Three to a row from md up, grouped by row: the card (points,
+                limit, site), its benefit (credit, free-night cap, reset), then
+                the benefit's dates. Two columns stretched a short form into
+                wide, mostly empty boxes on a desktop. */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 [&_input]:bg-white [&_input]:ring-sky-300 [&_select]:bg-white [&_select]:ring-sky-300 dark:[&_input]:bg-neutral-900 dark:[&_input]:ring-sky-300 dark:[&_select]:bg-neutral-900 dark:[&_select]:ring-sky-300">
               <LabeledInput label="Current points" name="currentPoints" type="text" defaultValue={d?.currentPoints ? d.currentPoints.toLocaleString() : ""} placeholder="0" />
-              <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
-              <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
-              <FreeNightCapField pointsLimit={d?.freeNightPointsLimit ?? null} categoryMax={d?.freeNightCategoryMax ?? null} />
-              <LabeledInput label="Booked on" name="benefitBookedOn" type="date" defaultValue={d?.benefitBookedOn ?? ""} />
-              <LabeledInput label="Check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
               <LabeledInput label="Spending limit" name="spendingLimit" type="number" step="1" prefix="$" defaultValue={d?.spendingLimitCents ? centsToDisplay(d.spendingLimitCents) : ""} />
               <LabeledInput label="Card website" name="cardUrl" type="url" defaultValue={d?.cardUrl ?? ""} placeholder="https://issuer.com/card" />
+              <LabeledInput label="Annual hotel credit" name="freeNightCredit" type="number" step="0.01" prefix="$" defaultValue={d?.freeNightCreditCents ? centsToDisplay(d.freeNightCreditCents) : ""} />
+              <FreeNightCapField pointsLimit={d?.freeNightPointsLimit ?? null} categoryMax={d?.freeNightCategoryMax ?? null} />
               <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-foreground">Benefits reset</span>
+                <span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-foreground">Benefits reset</span>
                 <select name="benefitCadence" defaultValue={d?.benefitCadence ?? "annual"} className="w-full rounded-md px-2 py-1.5 text-sm ring-1 focus:outline-none focus:ring-2 focus:ring-sky-500">
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
@@ -3098,22 +3157,52 @@ function EditCreditCardForm({
                   <option value="anniversary">Card anniversary</option>
                 </select>
               </label>
+              <LabeledInput label="Benefit expiration" name="freeNightExpires" type="date" defaultValue={d?.freeNightExpiresOn ?? ""} />
+              {/* A stay with no reservation date leaves Booked on to the card. */}
+              {nightStay?.reservedOn ? (
+                <LockedDate label="Booked on" name="benefitBookedOn" value={nightStay.reservedOn} />
+              ) : (
+                <LabeledInput label="Booked on" name="benefitBookedOn" type="date" defaultValue={d?.benefitBookedOn ?? ""} />
+              )}
+              {nightStay ? (
+                <LockedDate label="Check-in" name="benefitUsedOn" value={nightStay.checkIn} />
+              ) : (
+                <LabeledInput label="Check-in" name="benefitUsedOn" type="date" defaultValue={d?.benefitUsedOn ?? ""} />
+              )}
+              {nightStay ? (
+                <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-foreground col-span-full">
+                  Set by stay: {nightStay.propertyName}
+                  {onOpenStay ? (
+                    <button
+                      type="button"
+                      // Closes this form first: left open behind the stay, its
+                      // dates would be stale when the stay changes them.
+                      onClick={() => {
+                        onDone();
+                        onOpenStay(nightStay);
+                      }}
+                      className="rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-800/60"
+                    >
+                      Open stay
+                    </button>
+                  ) : null}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
 
         {/* Tab 2: Basics & Rewards */}
         <div className={activeTab === "basics" ? "" : "hidden"}>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {/* Three to a row from md up: who (name, holder, auth user), the
+              account (bank, opened, closed), its fee and rewards, the sign-up
+              bonus, then Remarks across the width. The two checkboxes and the
+              TPG link share a line of their own at the bottom: squeezed into
+              the grid they sat oddly beside the boxes. */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
             <LabeledInput label="Card name" name="name" defaultValue={card.name} required />
             <LabeledInput label="Holder" name="holder" defaultValue={card.holder ?? ""} placeholder="Vic / Johana" />
-            <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
-            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-foreground">
-              <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-sky-700" />
-              Fee waived (e.g. military benefit)
-            </label>
-            <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
-            <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
+            <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
             <div>
               <LabeledInput
                 label="Bank"
@@ -3126,6 +3215,9 @@ function EditCreditCardForm({
                 {bankOptions.map((b) => <option key={b} value={b} />)}
               </datalist>
             </div>
+            <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
+            <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
+            <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
             <label className="block">
               <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Rewards category</span>
               <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
@@ -3133,28 +3225,32 @@ function EditCreditCardForm({
               </select>
             </label>
             <LabeledInput label="Rewards program" name="rewardsProgram" defaultValue={d?.rewardsProgram ?? ""} placeholder="Hilton, Hyatt, Chase UR…" />
-            <LabeledInput label="Value per pt (¢)" name="pointsValueCents" type="number" step="any" min="0" hint={
-                <a
-                  href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-sky-900/50 dark:text-sky-400 dark:hover:bg-sky-900/40"
-                >
-                  TPG point values <span aria-hidden>↗</span>
-                </a>
-              } defaultValue={d?.pointsValueMicros ? String(Number((d.pointsValueMicros / 10_000).toFixed(4))) : ""} placeholder="0.75" />
-            <LabeledInput label="Auth user" name="authUser" defaultValue={d?.authUser ?? ""} placeholder="" />
+            <LabeledInput label="Value per pt (¢)" name="pointsValueCents" type="number" step="any" min="0" defaultValue={d?.pointsValueMicros ? String(Number((d.pointsValueMicros / 10_000).toFixed(4))) : ""} placeholder="0.75" />
             <LabeledInput label="Charging" name="charging" defaultValue={d?.charging ?? ""} placeholder="Netflix, Google Drive" />
             <LabeledInput label="Bonus info" name="bonusInfo" defaultValue={d?.bonusInfo ?? ""} placeholder="60,000 pts" />
             <LabeledInput label="Bonus spend req." name="bonusSpend" type="number" step="0.01" prefix="$" defaultValue={d?.bonusSpendCents ? centsToDisplay(d.bonusSpendCents) : ""} placeholder="3000" />
             <LabeledInput label="Bonus deadline" name="bonusDeadline" type="date" defaultValue={d?.bonusSpendDeadline ?? ""} />
-            <label className="flex items-end gap-1.5 pb-1.5 text-xs text-foreground">
-              <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-sky-700" />
-              Bonus earned
-            </label>
-            <div className="sm:col-span-2">
+            <div className="col-span-full">
               <label className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Remarks</label>
               <input name="remarks" defaultValue={d?.remarks ?? ""} placeholder="" className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500" />
+            </div>
+            <div className="col-span-full flex flex-wrap items-center gap-x-5 gap-y-2 pt-1">
+              <label className="flex items-center gap-1.5 text-xs text-foreground">
+                <input type="checkbox" name="feeWaived" defaultChecked={card.feeWaived} className="h-3.5 w-3.5 rounded accent-sky-700" />
+                Fee waived (e.g. military benefit)
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-foreground">
+                <input type="checkbox" name="bonusEarned" defaultChecked={d?.bonusEarned ?? false} className="h-3.5 w-3.5 rounded accent-sky-700" />
+                Bonus earned
+              </label>
+              <a
+                href="https://thepointsguy.com/loyalty-programs/monthly-valuations/"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-sky-700/30 bg-background px-2 py-1 text-xs font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-100 dark:bg-sky-900/50 dark:text-sky-400 dark:hover:bg-sky-900/40"
+              >
+                TPG point values <span aria-hidden>↗</span>
+              </a>
             </div>
           </div>
         </div>
@@ -3176,7 +3272,9 @@ function EditCreditCardForm({
                 </span>
               </span>
             </label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.55fr)_minmax(0,1.55fr)]">
+            {/* All six on one line from md up — the date widest, APR and due
+                day narrow; three to a row in between. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
               <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
               <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
               <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" defaultValue={d?.promoAprEndsOn ?? ""} />

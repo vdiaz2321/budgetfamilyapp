@@ -36,7 +36,7 @@ function KindDay({ booking, className = "" }: { booking: Booking; className?: st
   const day = new Date(`${booking.start}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
   return (
     <span className={`flex shrink-0 flex-col items-center gap-0.5 ${className}`}>
-      <KindChip kind={booking.kind} />
+      <KindChip kind={booking.kind} label={bookingWho(booking)} />
       <span className="text-[11px] font-semibold text-foreground">{day}</span>
     </span>
   );
@@ -51,13 +51,23 @@ function BookingRemarks({ booking }: { booking: Booking }) {
   return remarks ? <span className="whitespace-pre-line text-xs text-foreground">{remarks}</span> : null;
 }
 
-function KindChip({ kind, className = "" }: { kind: keyof typeof KIND_LABEL; className?: string }) {
+// Who the booking is with — the airline, the hotel brand or site it was
+// booked through, the rental company — named on its chip in place of the
+// bare kind. The icon and tint still say which kind it is.
+function bookingWho(b: Booking): string | null {
+  const who = b.kind === "flight" ? b.flight.airline : b.kind === "stay" ? b.stay.brand ?? b.stay.bookingChannel : b.car.company;
+  return who?.trim() || null;
+}
+
+// Wide enough for a name like "Eurowings" or "Booking.com"; a longer one is
+// cut short rather than wrapping.
+function KindChip({ kind, label, className = "" }: { kind: keyof typeof KIND_LABEL; label?: string | null; className?: string }) {
   return (
-    <span className={`inline-flex w-16 shrink-0 items-center justify-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold ${KIND_STYLE[kind]} ${className}`}>
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <span className={`inline-flex w-24 shrink-0 items-center justify-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold ${KIND_STYLE[kind]} ${className}`}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
         {KIND_ICON[kind]}
       </svg>
-      {KIND_LABEL[kind]}
+      <span className="min-w-0 truncate">{label ?? KIND_LABEL[kind]}</span>
     </span>
   );
 }
@@ -316,9 +326,9 @@ export function TripDetailModal({
   return (
     <ModalShell
       // Plain trip name — the old trip-switching dropdown went (Victor,
-      // 2026-10-08): another trip is opened from its card. The trip's actions,
-      // dates and nights/pax sit on their own line under it in the header,
-      // pinned while the body scrolls.
+      // 2026-10-08): another trip is opened from its card. The trip's actions
+      // sit on their own line under it in the header, pinned while the body
+      // scrolls.
       title={t.trip.name}
       headerActionsBelow
       headerActions={
@@ -351,13 +361,24 @@ export function TripDetailModal({
             </button>
           ) : null}
           {/* Log a purchase for this trip without leaving the popup. */}
-          <AddTransactionButton className={SECTION_BUTTON} label="+ Transaction" />
-          {/* Each end of the trip: its weekday over the full date. The plan
-              total isn't repeated here — the cards below already show it. */}
-          {/* The dates on a light-blue pill (the Flight tag's tint — never
-              grey), weekday centred over each; nights and pax plain beside
-              it, on their own line on a phone. All bold. */}
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 font-semibold tabular-nums text-foreground">
+          {/* The Transactions page's "+ Transaction" colours, at this row's size. */}
+          <AddTransactionButton
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent bg-brand-soft px-3 py-1.5 text-sm font-bold text-brand shadow-sm ring-1 ring-brand/15 transition hover:bg-brand hover:text-white"
+            label="+ Transaction"
+          />
+          {/* The trip's dates, level with the buttons: its weekday over each
+              date on a light-blue pill (the Flight tag's tint — never grey).
+              Nights and pax sit centred above it — lifted out of the row from
+              sm up, so the pill stays level with the buttons; stacked on a
+              phone, where the pill has a line of its own. All bold. */}
+          <span className="flex flex-col items-center gap-0.5 font-semibold tabular-nums text-foreground sm:relative">
+            {t.nights != null || t.pax ? (
+              <span className="whitespace-nowrap sm:absolute sm:bottom-full sm:left-1/2 sm:mb-3 sm:-translate-x-1/2">
+                {t.nights != null ? `${t.nights} night${t.nights === 1 ? "" : "s"}` : null}
+                {t.nights != null && t.pax ? <>&nbsp;&nbsp;/&nbsp;&nbsp;</> : null}
+                {t.pax ? `${t.pax} pax` : null}
+              </span>
+            ) : null}
             {t.start ? (
               <span className="flex items-end gap-2 rounded-full bg-sky-100 px-4 py-1.5 dark:bg-sky-900/50">
                 <TripDay iso={t.start} />
@@ -371,18 +392,11 @@ export function TripDetailModal({
             ) : (
               <span>No dates yet</span>
             )}
-            {t.nights != null || t.pax ? (
-              <span className="basis-full whitespace-nowrap sm:basis-auto">
-                {t.nights != null ? `${t.nights} night${t.nights === 1 ? "" : "s"}` : null}
-                {t.nights != null && t.pax ? <>&nbsp;&nbsp;/&nbsp;&nbsp;</> : null}
-                {t.pax ? `${t.pax} pax` : null}
-              </span>
-            ) : null}
           </span>
           {budgetPlanCents > 0 && !budgetMonth ? (
             <span className="self-end font-semibold text-negative">Add dates to put its plan on the Budget</span>
           ) : null}
-                </div>
+        </div>
       }
       // Close / Delete trip pinned at the header's right edge (in place of the
       // X) so they're reachable without scrolling to the bottom.
@@ -503,7 +517,9 @@ export function TripDetailModal({
                 "nothing to compare yet"
               ) : (
                 <>
-                  <span className="block">Planned: <span className={PLAN_BLUE}>{formatMoneyWhole(comparedPlanned, currency)}</span></span>
+                  {/* Only what has spending against it, so not Total
+                      Planned — the bare "Planned" read as a mismatch. */}
+                  <span className="block">Planned Items Paid: <span className={PLAN_BLUE}>{formatMoneyWhole(comparedPlanned, currency)}</span></span>
                   <span className="block">Spent: <span className="text-negative">{formatMoneyWhole(comparedSpent, currency)}</span></span>
                 </>
               )
@@ -538,6 +554,7 @@ export function TripDetailModal({
                           <span className="text-[13px] font-semibold">
                             {b.title}
                             <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
+                            <BookingPax booking={b} />
                             {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-foreground">Cancelled</span> : null}
                           </span>
                           <span className="text-xs text-foreground">
@@ -667,10 +684,12 @@ export function TripDetailModal({
                   Planned / Actual / Difference columns line up. */}
               <table className="w-full min-w-[34rem] table-fixed text-sm">
                 <colgroup>
-                  <col className="w-[40%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[24%] border-x-2 border-sky-400 dark:border-sky-500" />
-                  <col className="w-[18%]" />
+                  {/* Name widest: a stay's name and its dates fit on one
+                      line. Same widths in both tables, so they line up. */}
+                  <col className="w-[46%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[22%] border-x-2 border-sky-400 dark:border-sky-500" />
+                  <col className="w-[16%]" />
                 </colgroup>
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
@@ -707,6 +726,7 @@ export function TripDetailModal({
                               <span className="text-sm font-semibold">
                                 {b.title}
                                 <BookingDate booking={b} tripYear={t.start?.slice(0, 4)} />
+                                <BookingPax booking={b} />
                                 {b.cancelled ? <span className="ml-1.5 text-[11px] font-semibold text-foreground">Cancelled</span> : null}
                               </span>
                               <span className="text-xs text-foreground">
@@ -715,7 +735,7 @@ export function TripDetailModal({
                             </span>
                           </button>
                           {allSeats.length ? (
-                            <span className="ml-[4.5rem] block" onClick={(e) => e.stopPropagation()}>
+                            <span className="ml-[6.5rem] block" onClick={(e) => e.stopPropagation()}>
                               <PaxToggle open={seats.length > 0} onClick={() => toggleSeats(b.id)} />
                             </span>
                           ) : null}
@@ -759,7 +779,7 @@ export function TripDetailModal({
                       {seats.map((p, i) => (
                         // Clicking a seat opens the flight's form, like the rest of the booking.
                         <tr key={p.key} className={`tabular-nums   hover:bg-sky-100/70 dark:hover:bg-sky-900/30 [&>td]:py-0.5 ${i === 0 ? "[&>td]:pt-1.5" : ""} ${i === seats.length - 1 && !remarks ? "[&>td]:pb-2" : ""}`}>
-                          <td className="truncate px-3 pl-[5.25rem] text-left">{p.name}</td>
+                          <td className="truncate px-3 pl-[7.25rem] text-left">{p.name}</td>
                           <td className="whitespace-nowrap px-3 text-center">
                             {p.planned != null ? formatMoneyWhole(p.planned, currency) : DASH}
                             {p.planned != null && p.plannedFx != null ? (
@@ -789,7 +809,7 @@ export function TripDetailModal({
                       {paymentsOpen ? <PurchaseRows list={payments} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
                       {remarks ? (
                         <tr>
-                          <td colSpan={4} className={`whitespace-pre-line px-3 pb-2 pl-[5.25rem] text-xs text-foreground ${seats.length || paymentsOpen ? "pt-1.5" : ""}`}>
+                          <td colSpan={4} className={`whitespace-pre-line px-3 pb-2 pl-[7.25rem] text-xs text-foreground ${seats.length || paymentsOpen ? "pt-1.5" : ""}`}>
                             {remarks}
                           </td>
                         </tr>
@@ -924,10 +944,12 @@ export function TripDetailModal({
             <div className="hidden overflow-clip rounded-lg ring-1 ring-line sm:block">
               <table className="w-full min-w-[34rem] table-fixed text-sm">
                 <colgroup>
-                  <col className="w-[40%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[24%] border-x-2 border-sky-400 dark:border-sky-500" />
-                  <col className="w-[18%]" />
+                  {/* Name widest: a stay's name and its dates fit on one
+                      line. Same widths in both tables, so they line up. */}
+                  <col className="w-[46%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[22%] border-x-2 border-sky-400 dark:border-sky-500" />
+                  <col className="w-[16%]" />
                 </colgroup>
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
@@ -1119,7 +1141,21 @@ function TripDay({ iso }: { iso: string }) {
 function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string | undefined }) {
   const { date, legs } = bookingWhen(booking, tripYear);
   if (legs.some((l) => l.day)) return null;
-  return <span className="ml-2 whitespace-nowrap text-xs font-medium tabular-nums text-foreground">{date}</span>;
+  // Spaced off the name and as bold as it from sm up — small and close in,
+  // it ran into the name.
+  return <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">{date}</span>;
+}
+
+// A flight's head count, right after its route (and date): the line under
+// the legs used to read "Vueling · 2 pax", repeating the airline its chip
+// already names.
+function BookingPax({ booking }: { booking: Booking }) {
+  if (booking.kind !== "flight" || !booking.flight.passengers.length) return null;
+  return (
+    <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+      {booking.flight.passengers.length} pax
+    </span>
+  );
 }
 
 // Under the title: a flight's legs in columns — day, Depart, Arrive — so a
@@ -1127,7 +1163,10 @@ function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string
 // line. A stay or rental has no legs: just its detail (city, nights).
 function BookingWhen({ booking, tripYear }: { booking: Booking; tripYear: string | undefined }) {
   const { legs } = bookingWhen(booking, tripYear);
-  if (!legs.length) return <>{booking.detail}</>;
+  // A flight's detail is its airline (on the chip) and pax (beside the
+  // route), so it adds nothing here.
+  const detail = booking.kind === "flight" ? null : booking.detail;
+  if (!legs.length) return <>{detail}</>;
   const withDay = legs.some((l) => l.day);
   return (
     <>
@@ -1147,7 +1186,7 @@ function BookingWhen({ booking, tripYear }: { booking: Booking; tripYear: string
           </Fragment>
         ))}
       </span>
-      <span className="block">{booking.detail}</span>
+      {detail ? <span className="block">{detail}</span> : null}
     </>
   );
 }

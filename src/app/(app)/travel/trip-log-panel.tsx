@@ -306,23 +306,23 @@ export function TripLogPanel({
           className={`flex min-w-0 items-center gap-2 text-left ${HEAD_TITLE_COL}`}
         >
           <ExpandIcon />
-          <span className="text-sm font-bold sm:whitespace-nowrap sm:text-base">All Trips Categories Breakdown</span>
+          <span className="text-sm font-extrabold sm:whitespace-nowrap sm:text-lg">All Trips Categories Breakdown</span>
         </button>
         {/* Collapsed, the card carries the same figures as the open log's
             header — trips, spent, planned — and the year they cover. Only the
             search stays inside, since it filters the table. */}
         <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[0]}`}>
-          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
-          <span className="text-sm font-semibold tabular-nums">{shown.length}</span>
+          <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">Total trips:</span>
+          <span className="text-sm font-bold tabular-nums">{shown.length}</span>
         </span>
         <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[1]}`}>
-          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
-          <span className="text-sm font-semibold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
+          <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">Total spent:</span>
+          <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
         </span>
         {totalPlanned > 0 ? (
           <span className={`flex shrink-0 items-baseline gap-1.5 ${HEAD_FIGURE_COLS[2]}`}>
-            <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
-            <span className="text-sm font-semibold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
+            <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">Total planned:</span>
+            <span className="text-sm font-bold tabular-nums text-sky-700 dark:text-sky-300">{formatMoneyWhole(totalPlanned, currency)}</span>
           </span>
         ) : null}
         <span className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>{yearSelect}</span>
@@ -341,8 +341,8 @@ export function TripLogPanel({
                 <>
                   {pickFigures.map((f) => (
                     <span key={f.label} className="flex items-baseline gap-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{f.label}</span>
-                      <span className={`text-sm font-semibold tabular-nums ${f.tone}`}>{formatMoneyWhole(f.cents, currency)}</span>
+                      <span className="font-medium text-foreground max-sm:text-[12px] sm:text-sm">{f.label}</span>
+                      <span className={`text-sm font-bold tabular-nums ${f.tone}`}>{formatMoneyWhole(f.cents, currency)}</span>
                     </span>
                   ))}
                   <span className="text-xs text-muted">{picks.length} cell{picks.length === 1 ? "" : "s"}</span>
@@ -357,17 +357,17 @@ export function TripLogPanel({
               ) : (
               <>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total trips:</span>
-                <span className="text-sm font-semibold tabular-nums">{shown.length}</span>
+                <span className="font-medium text-foreground max-sm:text-[12px] sm:text-sm">Total trips:</span>
+                <span className="text-sm font-bold tabular-nums">{shown.length}</span>
               </span>
               <span className="flex items-baseline gap-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total spent:</span>
-                <span className="text-sm font-semibold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
+                <span className="font-medium text-foreground max-sm:text-[12px] sm:text-sm">Total spent:</span>
+                <span className="text-sm font-bold tabular-nums text-negative">{formatMoneyWhole(totalSpent, currency)}</span>
               </span>
               {totalPlanned > 0 ? (
                 <span className="flex items-baseline gap-1.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total planned:</span>
-                  <span className="text-sm font-semibold tabular-nums text-muted">{formatMoneyWhole(totalPlanned, currency)}</span>
+                  <span className="font-medium text-foreground max-sm:text-[12px] sm:text-sm">Total planned:</span>
+                  <span className="text-sm font-bold tabular-nums text-sky-700 dark:text-sky-300">{formatMoneyWhole(totalPlanned, currency)}</span>
                 </span>
               ) : null}
               </>

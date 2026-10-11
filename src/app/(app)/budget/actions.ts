@@ -1329,7 +1329,7 @@ export async function listTripTagging(): Promise<TripTagging> {
   if (tripIds.length === 0) return { trips, bookingsByTrip: {}, spendingRowsByTrip: {} };
 
   const [stays, flights, cars, legs, pax, paid, plannedRows, taggedRows] = await Promise.all([
-    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, hotel_cost_cents, planned_cost_cents, points_value_micros, foreign_currency, free_night_used, hotel_credit_cents").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
+    supabase.from("travel_stays").select("id, trip_id, property_name, check_in, nights, pax, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, hotel_cost_cents, planned_cost_cents, points_value_micros, foreign_currency, free_night_used, hotel_credit_cents").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flights").select("id, trip_id, airline, first_flight_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, flight_cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_cars").select("id, trip_id, company, pickup_on, return_on, pocket_cost_cents, is_estimate, cancelled_at, points_cost, points_used, account_id, cost_cents, planned_cost_cents, points_value_micros, foreign_currency").eq("household_id", householdId).in("trip_id", tripIds).is("cancelled_at", null),
     supabase.from("travel_flight_legs").select("flight_id, flight_on, from_place, to_place, sort_order").eq("household_id", householdId).order("sort_order"),
@@ -1401,12 +1401,18 @@ export async function listTripTagging(): Promise<TripTagging> {
     passengers: [] as { name: string; plannedCents: number; points: number }[],
     freeNightUsed: false,
     hotelCreditCents: 0,
+    pax: null as number | null,
+    roomGroup: null as string | null,
   });
   const rows = [
     ...(stays.data ?? []).map((s) => ({
       on: s.check_in,
       label: `Stay · ${s.property_name} · ${day(s.check_in)}`,
       ...base(`stay:${s.id}`, s, s.hotel_cost_cents),
+      pax: s.pax == null ? null : Number(s.pax),
+      // Rooms of one stay: same hotel, same check-in. A single card charge
+      // for them all can be split across them on the transaction form.
+      roomGroup: `${(s.property_name ?? "").trim().toLowerCase()}|${s.check_in}`,
       freeNightUsed: Boolean(s.free_night_used),
       hotelCreditCents: Number(s.hotel_credit_cents ?? 0),
     })),
@@ -1422,10 +1428,21 @@ export async function listTripTagging(): Promise<TripTagging> {
     })),
     ...(cars.data ?? []).map((c) => ({ on: c.pickup_on, label: `Rental · ${c.company ?? "Car"} · ${day(c.pickup_on)}`, ...base(`car:${c.id}`, c, c.cost_cents) })),
   ].sort((a, b) => a.on.localeCompare(b.on));
-  // Two bookings with the same label (two Four Points rooms on one night)
-  // read apart by what each cost: its points, else its cash.
-  const labelCount = new Map<string, number>();
-  for (const r of rows) labelCount.set(r.label, (labelCount.get(r.label) ?? 0) + 1);
+  // Two bookings with the same label (two rooms at one hotel on one night)
+  // read apart by each room's head count first — "· 3 pax" / "· 2 pax", how
+  // the rooms are split when booked, and there before either is paid — then,
+  // if that still matches, by what each cost: its points, else its cash.
+  const countLabels = () => {
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(r.label, (counts.get(r.label) ?? 0) + 1);
+    return counts;
+  };
+  let labelCount = countLabels();
+  for (const r of rows) {
+    if ((labelCount.get(r.label) ?? 0) < 2) continue;
+    if (r.pax) r.label = `${r.label} · ${r.pax} pax`;
+  }
+  labelCount = countLabels();
   for (const r of rows) {
     if ((labelCount.get(r.label) ?? 0) < 2) continue;
     const cash = r.pocketCents || r.costCents;
@@ -1435,6 +1452,10 @@ export async function listTripTagging(): Promise<TripTagging> {
     if (detail) r.label = `${r.label} · ${detail}`;
   }
   const bookingsByTrip: TripTagging["bookingsByTrip"] = {};
+  // A stay that is the only room of its stay has no group to split across.
+  const groupSize = new Map<string, number>();
+  for (const r of rows) if (r.roomGroup) groupSize.set(r.roomGroup, (groupSize.get(r.roomGroup) ?? 0) + 1);
+  for (const r of rows) if (r.roomGroup && (groupSize.get(r.roomGroup) ?? 0) < 2) r.roomGroup = null;
   for (const { on: _on, tripId, ...r } of rows) (bookingsByTrip[tripId] ??= []).push(r);
 
   // A trip with no dates of its own (Barcelona · Oct 2026 has only bookings)
@@ -1990,19 +2011,31 @@ export async function addTransaction(formData: FormData) {
 }
 
 // The parts of a split, as the modal sends them: JSON in "splits",
-// [{ subcategoryId, amountCents }]. Everything else on the form is shared.
-function splitPartsOf(formData: FormData): { subcategoryId: string; amountCents: number }[] {
+// [{ subcategoryId, amountCents, bookingRef? }]. Everything else on the form
+// is shared. A part with its own bookingRef pays for that booking — one card
+// charge split across the rooms of a stay.
+type SplitPartInput = { subcategoryId: string; amountCents: number; bookingRef: string | null };
+function splitPartsOf(formData: FormData): SplitPartInput[] {
   try {
     const raw = JSON.parse(String(formData.get("splits") ?? "[]"));
     return Array.isArray(raw)
       ? raw
-          .map((p) => ({ subcategoryId: String(p?.subcategoryId ?? ""), amountCents: Math.trunc(Number(p?.amountCents)) }))
+          .map((p) => ({
+            subcategoryId: String(p?.subcategoryId ?? ""),
+            amountCents: Math.trunc(Number(p?.amountCents)),
+            bookingRef: typeof p?.bookingRef === "string" && p.bookingRef ? p.bookingRef : null,
+          }))
           .filter((p) => p.subcategoryId && Number.isFinite(p.amountCents) && p.amountCents > 0)
       : [];
   } catch {
     return [];
   }
 }
+
+// Typed on the form for the one booking it pays for — points, free night,
+// credit, a flight's passengers. A part paying for a room of its own leaves
+// them out, so each room keeps the figures saved on its stay.
+const BOOKING_EXTRA_FIELDS = ["bookingPoints", "bookingPointsValue", "bookingFreeNight", "bookingCredit", "bookingPassengers", "bookingCurrency"];
 
 // Write each part as its own transaction under one split_group_id, in ONE
 // server call — one sign-in check, one snapshot, one page refresh — where the
@@ -2012,7 +2045,7 @@ async function insertSplitParts(
   supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
   householdId: string,
   formData: FormData,
-  parts: { subcategoryId: string; amountCents: number }[],
+  parts: SplitPartInput[],
   splitGroupId: string | null,
 ): Promise<SaveOutcome[]> {
   const outcomes: SaveOutcome[] = [];
@@ -2023,6 +2056,10 @@ async function insertSplitParts(
     });
     fd.set("subcategoryId", part.subcategoryId);
     fd.set("amount", (part.amountCents / 100).toFixed(2));
+    if (part.bookingRef) {
+      fd.set("bookingRef", part.bookingRef);
+      for (const k of BOOKING_EXTRA_FIELDS) fd.delete(k);
+    }
     try {
       const outcome = await insertTransactionCore(supabase, householdId, fd, splitGroupId);
       if (outcome) outcomes.push(outcome);

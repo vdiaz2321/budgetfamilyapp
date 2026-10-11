@@ -51,7 +51,7 @@ export function AirlinePicker({
 
   return (
     <div ref={box} className="relative">
-      <div className="flex items-center gap-1 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
+      <div className="flex items-center gap-1 rounded-md bg-background px-2 py-1.5 text-sm ring-1 ring-line focus-within:ring-2 focus-within:ring-sky-500">
         <input
           ref={input}
           value={open ? query : value}

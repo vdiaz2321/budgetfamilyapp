@@ -16,6 +16,7 @@ import type { Embed, SectionHandle } from "./embedded-section";
 import { addDays } from "./trip-summary";
 import type { TravelBrand, TravelCard, TravelStay, TravelTrip } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
+import { useLinkedPayments } from "./linked-payments";
 
 const NO_CARD = "";
 
@@ -64,6 +65,8 @@ export function StayModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Clicking the locked Spent box opens the payment behind it.
+  const linked = useLinkedPayments(stay?.payments, currency);
   const [ownTrip, setTrip] = useTripChoice(stay ? stay.tripId : roomOf ? roomOf.tripId : defaultTripId);
   const trip = embed ? embed.trip : ownTrip;
   const formRef = useRef<HTMLFormElement>(null);
@@ -393,6 +396,9 @@ export function StayModal({
           <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!stay && !roomOf && !defaultTripId} hiddenInputs className="sm:col-span-2" />
         ) : null}
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
+        {/* With a second room added, this form's fields are Room 1 — named
+            the same way, so the rooms read as a set. */}
+        {!embed && rooms.length > 0 ? <RoomBand label="Room 1" className="sm:col-span-2" /> : null}
         {stay?.cancelledAt ? (
           <p className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 text-xs font-semibold text-muted dark:bg-sky-900/50">
             Cancelled booking — kept in the archive, left out of every total.
@@ -412,7 +418,10 @@ export function StayModal({
 
         {/* The three dates and the two counts on one row — none of them
              needs more than a fifth of the form. Two per row at 375px. */}
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-5">
+        {/* The three dates get the width — at a fifth each, "03/28/2027"
+            was cut off (worse in Room 2's inset box); nights and pax are a
+            number or two. Two to a row on a phone, as before. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-[minmax(9.5rem,1.3fr)_minmax(9.5rem,1.3fr)_minmax(9.5rem,1.3fr)_minmax(0,0.6fr)_minmax(0,0.6fr)]">
           <Field label="Reservation made">
             <input
               type="date"
@@ -561,8 +570,11 @@ export function StayModal({
             foreignCurrency={foreignCurrency}
             onFocusSlot={(slot) => (lastSlot.current = slot)}
             spentLocked={stay?.paidCents != null}
+            onOpenSpent={linked.canOpen ? linked.open : undefined}
             showForeign={showMore && Boolean(foreignCurrency)}
           />
+          {linked.error ? <p className="text-[11px] text-negative">{linked.error}</p> : null}
+          {linked.overlay}
           <input type="hidden" name="plannedCost" value={fig.planned} />
           <input type="hidden" name="plannedCostForeign" value={fig.plannedForeign} />
           <input type="hidden" name="pocketCost" value={fig.spent} />
@@ -798,9 +810,12 @@ export function StayModal({
         ) : null}
       </form>
       {rooms.map((r, i) => (
-        <div key={r.id} className="mt-4 border-t border-line pt-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-bold">Room {i + 2}</span>
+        // Each added room is its own boxed section with a heading band — as a
+        // bold "Room 2" over a thin line it was easy to miss in the form.
+        <div key={r.id} className="mt-5 overflow-hidden rounded-xl ring-1 ring-line">
+          <RoomBand
+            label={`Room ${i + 2}`}
+            action={
             <button
               type="button"
               onClick={() => {
@@ -811,7 +826,9 @@ export function StayModal({
             >
               Remove room
             </button>
-          </div>
+            }
+          />
+          <div className="px-4 py-3">
           <StayModal
             stay={null}
             roomOf={r.roomOf}
@@ -826,12 +843,16 @@ export function StayModal({
             }}
             onClose={onClose}
           />
+          </div>
         </div>
       ))}
         {embed ? null : (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
-            Saved on this stay{" "}
+            {/* Hotel cost less pocket cost: what points, credits and free
+                nights took off the bill — not Planned less Spent, which a bare
+                "Saved" was read as. */}
+            Saved with points & credits{" "}
             <span className="font-bold tabular-nums text-positive">{formatMoneyWhole(saved, currency)}</span>
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -859,6 +880,8 @@ export function StayModal({
     <ModalShell
       title={stay ? "Edit stay" : roomOf ? `Add another room · ${roomOf.propertyName}` : "Add stay"}
       onClose={onClose}
+      // Wider than the default, so the date boxes show their full dates.
+      className="sm:max-w-4xl"
       headerEnd={headerButtons}
       headerActions={stay && trips ? <TripPicker trips={trips} value={trip} onChange={setTrip} inHeader /> : undefined}
     >
@@ -884,5 +907,16 @@ function Field({
       <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
     </label>
+  );
+}
+
+// A room's heading inside the stay form: the sage band with a teal bar used
+// for headings on Travel, so Room 1, Room 2… stand out from the fields.
+function RoomBand({ label, action, className = "" }: { label: string; action?: React.ReactNode; className?: string }) {
+  return (
+    <div className={`flex items-center justify-between gap-2 border-l-[6px] border-l-teal-600 bg-[#e8efe6] px-4 py-2 dark:border-l-teal-400 dark:bg-[#243029] ${className}`}>
+      <span className="text-base font-extrabold text-foreground">{label}</span>
+      {action}
+    </div>
   );
 }

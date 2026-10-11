@@ -1358,6 +1358,10 @@ export function TravelBoard({
           // bookings in the logs below — the rewards board's stated
           // cents-per-point has nothing to check itself against otherwise.
           redemptions={redemptions}
+          // Stays using a card's free night lock that card's Booked on and
+          // Check-in dates; the card form links back to the stay.
+          freeNightStays={stays.filter((s) => s.freeNightUsed && !s.cancelledAt && !s.isEstimate && s.accountId)}
+          onOpenStay={(s) => setEditing(s)}
         >
           {/* ---- Rewards first, shut to its headline tiles: what points are
                left, and which cards are due an update after their anniversary.
@@ -1672,7 +1676,7 @@ function Panel({
           )}
           {/* One line, never cut off: the title column (HEAD_TITLE_COL) is sized to
               the longest title, "All Trips Categories Breakdown". */}
-          <span className="text-sm font-bold sm:whitespace-nowrap sm:text-base">{title}</span>
+          <span className="text-sm font-extrabold sm:whitespace-nowrap sm:text-lg">{title}</span>
         </span>
         {meta ? (
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{meta}</span>
@@ -1702,7 +1706,7 @@ function Panel({
 /** Column widths shared by the Upcoming trips, All Trips and Bookings Log
  *  headers, so their titles and first three figures line up down the page.
  *  Each is a minimum sized to its widest figure today, with a little room. */
-export const HEAD_TITLE_COL = "sm:w-[18rem]";
+export const HEAD_TITLE_COL = "sm:w-[21rem]";
 export const HEAD_FIGURE_COLS = ["sm:min-w-[7.75rem]", "sm:min-w-[10.25rem]", "sm:min-w-[11.75rem]"] as const;
 
 /** The two diagonal arrows: this header opens a full-width popup. */
@@ -1790,8 +1794,10 @@ export function Figure({
 }) {
   return (
     <span className={`flex shrink-0 items-baseline gap-1.5 ${className ?? ""}`}>
-      <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted">{label}:</span>
-      <span className={`text-sm font-semibold tabular-nums ${tone}`} style={style}>{value}</span>
+      {/* Label and figure the same size from sm up — a small capitalised
+          label beside a larger figure read as two different things. */}
+      <span className="whitespace-nowrap font-medium text-foreground max-sm:text-[12px] sm:text-sm">{label}:</span>
+      <span className={`text-sm font-bold tabular-nums ${tone}`} style={style}>{value}</span>
     </span>
   );
 }

@@ -175,12 +175,22 @@ function TransactionModalForm({
   // their sum as the total.
   const editParts = editTx?.splitParts && editTx.splitParts.length > 1 ? editTx.splitParts : null;
   const isSplitEdit = editParts != null;
+  // A charge split across the rooms of a stay is saved as a split too — one
+  // part per room, all on the same item — but opens as one item paying for
+  // the stay, with its rooms' amounts under "Pays for".
+  const roomEditParts =
+    editParts &&
+    editParts.every((p) => p.subId === editParts[0].subId && p.bookingRef) &&
+    new Set(editParts.map((p) => p.bookingRef)).size === editParts.length
+      ? editParts
+      : null;
   const [totalCents, setTotalCents] = useState(
     editParts
       ? editParts.reduce((sum, p) => sum + Math.abs(p.amountCents), 0)
       : editTx ? Math.abs(editTx.amountCents) : initialAmountCents ?? 0,
   );
   const [splits, setSplits] = useState<SplitEntry[]>(() => {
+    if (roomEditParts) return [{ subId: roomEditParts[0].subId, amountCents: roomEditParts.reduce((sum, p) => sum + Math.abs(p.amountCents), 0) }];
     if (editParts) return editParts.map((p) => ({ subId: p.subId, amountCents: Math.abs(p.amountCents) }));
     const seedSubId = editTx ? editTx.subId : initialSubId;
     return seedSubId
@@ -339,6 +349,20 @@ function TransactionModalForm({
     ? CATCH_ALL_COLUMNS.filter((key) => key === "other" || key === travelCategory || tripRows.includes(key))
     : CATCH_ALL_COLUMNS;
   const paidBooking = bookings.find((b) => b.ref === bookingRef) ?? null;
+  // One card charge for more than one room of a stay (one room for 3, a
+  // second for the other 2): each room's share, typed per room. Null = the
+  // whole charge pays for the room picked above.
+  const [roomCents, setRoomCents] = useState<Record<string, string> | null>(() =>
+    roomEditParts ? Object.fromEntries(roomEditParts.map((p) => [p.bookingRef!, centsToDisplay(Math.abs(p.amountCents))])) : null,
+  );
+  const stayRooms = paidBooking?.roomGroup ? bookings.filter((b) => b.roomGroup === paidBooking.roomGroup) : [];
+  const roomSplitOn = roomCents != null && bookingOk && stayRooms.length >= 2 && splits.length <= 1;
+  const roomShares = roomSplitOn
+    ? stayRooms
+        .map((r) => ({ ref: r.ref, cents: Math.max(0, moneyExpressionToCents(roomCents?.[r.ref] ?? "")) }))
+        .filter((r) => r.cents > 0)
+    : [];
+  const roomSplitCents = roomShares.reduce((sum, r) => sum + r.cents, 0);
   // A flight payment split per passenger — each share is that passenger's
   // Spent on the Travel Log, in dollars and the flight's other currency, as on
   // its popup. An edit starts from this payment's own saved split; a new one
@@ -368,6 +392,9 @@ function TransactionModalForm({
   const paxSplitCents = paxRows.reduce((sum, r) => sum + Math.max(0, moneyExpressionToCents(r.cents)), 0);
   function pickBooking(ref: string) {
     setBookingRef(ref);
+    // Another room of the same stay keeps the room split; anything else drops it.
+    const next = bookings.find((b) => b.ref === ref);
+    if (!next?.roomGroup || next.roomGroup !== paidBooking?.roomGroup) setRoomCents(null);
     setPaxCents(null);
     setPaxForeign(null);
     setPaxPoints(null);
@@ -526,6 +553,13 @@ function TransactionModalForm({
       );
     }
 
+    // A charge split across rooms has to add up to the charge.
+    if (roomSplitOn && totalCents > 0 && roomSplitCents !== totalCents) {
+      messages.push(
+        `Rooms — the split adds up to $${centsToDisplay(roomSplitCents)}, not the $${centsToDisplay(totalCents)} paid.`,
+      );
+    }
+
     if (splits.length > 1) {
       const blank = splits.filter((sp) => sp.amountCents <= 0);
       for (const sp of blank) {
@@ -566,14 +600,20 @@ function TransactionModalForm({
       // letting the rejection vanish behind a modal that did half the work.
       const warnings: string[] = [];
       const note = (r: { warning?: string } | void) => { if (r?.warning) warnings.push(r.warning); };
+      // Split across two or more rooms: one part per room, each paying for its
+      // room. Only one room with an amount is just a payment for that room.
+      const roomParts = roomShares.length >= 2
+        ? roomShares.map((r) => ({ subcategoryId: splits[0].subId, amountCents: r.cents, bookingRef: r.ref }))
+        : null;
+      if (roomSplitOn && roomShares.length === 1) fd.set("bookingRef", roomShares[0].ref);
       try {
       if (isEdit) {
         // A split (or a plain transaction being split): the server replaces
         // every existing part with the parts on the form, in one call, under
         // one split id. A plain one-item save stays an update so ids and
         // audit trails don't churn.
-        if (editTx && (splits.length > 1 || isSplitEdit)) {
-          fd.set("splits", JSON.stringify(splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
+        if (editTx && (splits.length > 1 || isSplitEdit || roomParts)) {
+          fd.set("splits", JSON.stringify(roomParts ?? splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
           note(await replaceWithSplit(fd));
         } else {
           fd.set("subcategoryId", splits[0].subId);
@@ -593,9 +633,9 @@ function TransactionModalForm({
         onClose();
       } else {
         if (splits.length === 0) return;
-        if (splits.length > 1) {
+        if (splits.length > 1 || roomParts) {
           // Every part in one server call, linked as one split.
-          fd.set("splits", JSON.stringify(splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
+          fd.set("splits", JSON.stringify(roomParts ?? splits.map((sp) => ({ subcategoryId: sp.subId, amountCents: sp.amountCents }))));
           note(await addSplitTransaction(fd));
         } else {
           fd.set("subcategoryId", splits[0].subId);
@@ -957,10 +997,60 @@ function TransactionModalForm({
                     ))}
                   </select>
                 ) : null}
+                {/* A stay booked as more than one room (3 people in one, 2 in
+                    the other): one card charge can be split across its rooms,
+                    each room's share typed under it. */}
+                {paidBooking && bookingOk && stayRooms.length >= 2 && splits.length <= 1 ? (
+                  <div className="mt-2 space-y-2 rounded-xl bg-sky-50 p-3 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:ring-sky-800">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={roomCents != null}
+                        onChange={(e) => {
+                          clearErrors();
+                          setRoomCents(e.target.checked ? { [paidBooking.ref]: totalCents ? centsToDisplay(totalCents) : "" } : null);
+                        }}
+                        className="h-4 w-4 rounded accent-sky-700"
+                      />
+                      Split this charge across the rooms
+                    </label>
+                    {roomCents != null ? (
+                      <>
+                        {stayRooms.map((r, i) => (
+                          <div key={r.ref} className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-semibold text-foreground">
+                              Room {i + 1}{r.pax ? ` · ${r.pax} pax` : ""}
+                            </span>
+                            <input
+                              inputMode="decimal"
+                              aria-label={`Room ${i + 1} share`}
+                              value={roomCents[r.ref] ?? ""}
+                              onChange={(e) => {
+                                clearErrors();
+                                setRoomCents({ ...roomCents, [r.ref]: e.target.value });
+                              }}
+                              placeholder="0.00"
+                              className="w-32 rounded-lg bg-surface px-2 py-1.5 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500 dark:bg-background"
+                            />
+                          </div>
+                        ))}
+                        <p className="text-xs font-semibold text-foreground">
+                          {roomSplitCents === totalCents
+                            ? "Split: matches the charge"
+                            : roomSplitCents < totalCents
+                              ? `Left to split: $${centsToDisplay(totalCents - roomSplitCents)}`
+                              : `Over the charge by $${centsToDisplay(roomSplitCents - totalCents)}`}
+                        </p>
+                        <p className="text-xs text-foreground">Points, free night, credit: set on each room&apos;s stay</p>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
                 {/* What the payment does to that booking: a flight's split
                     per passenger, its points, and the same Payment figures
-                    the Travel Log's popup shows. */}
-                {paidBooking && bookingOk ? (
+                    the Travel Log's popup shows. Hidden while the charge is
+                    split across rooms — each room keeps its own figures. */}
+                {paidBooking && bookingOk && !roomSplitOn ? (
                   <>
                     <input
                       type="hidden"

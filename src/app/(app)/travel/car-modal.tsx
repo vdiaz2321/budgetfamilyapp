@@ -7,13 +7,14 @@ import { CurrencyConverter } from "@/components/currency-converter";
 import { centsToDisplay, currencySymbol, displayToCents, formatMoneyWhole } from "@/lib/money";
 import { deleteTravelCar, saveTravelCar, setTravelCarCancelled } from "./car-actions";
 import {
-  CurrencySelect, Field, MoreDetailsToggle, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote,
+  CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PaidNote, PlanSpentFields, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote,
   type PlanSpent, type PlanSpentSlot,
 } from "./travel-form";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import type { Embed } from "./embedded-section";
 import type { TravelCard, TravelCar, TravelTrip } from "./types";
 import { formatCentsPerPoint, microsToCentsField } from "./points-value";
+import { useLinkedPayments } from "./linked-payments";
 
 const rateDisplay = (micros: number) => microsToCentsField(micros);
 
@@ -42,6 +43,8 @@ export function CarModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Clicking the locked Pocket cost opens the payment behind it.
+  const linked = useLinkedPayments(car?.payments, currency);
 
   const [ownTrip, setTrip] = useTripChoice(car ? car.tripId : defaultTripId);
   const trip = embed ? embed.trip : ownTrip;
@@ -322,7 +325,8 @@ export function CarModal({
           <MoreDetailsToggle open={showMore} onToggle={() => setShowMore((v) => !v)} className="mt-3" />
 
           <div className={showMore ? "contents" : "hidden"}>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {/* Pocket cost is wider: its label line also carries the Open linked transaction button. */}
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_1.4fr]">
             <Field label={pointsUsed ? "Points used" : "Pts if used"}>
               <input type="number" min="0" step="1" value={points} onChange={(e) => setPoints(e.target.value)} className={inputClass} />
             </Field>
@@ -341,16 +345,22 @@ export function CarModal({
                 </span>
               ) : null}
             </Field>
-            <Field label={`Pocket cost (${currencySymbol(currency)})`}>
+            <Field
+              label={`Pocket cost (${currencySymbol(currency)})`}
+              action={linked.canOpen ? <OpenLinkedButton onOpen={linked.open} /> : undefined}
+            >
               <input
                 // Only ever the linked payments — blank until one is linked.
                 value={car?.paidCents != null ? centsToDisplay(car.paidCents) : ""}
                 placeholder="—"
                 readOnly
                 tabIndex={-1}
-                className={`${inputClass} opacity-70`}
+                onClick={linked.canOpen ? linked.open : undefined}
+                className={`${inputClass} opacity-70 ${linked.canOpen ? openableClass : ""}`}
               />
-              <PaidNote linked={car?.paidCents != null} />
+              <PaidNote linked={car?.paidCents != null} onOpen={linked.canOpen ? linked.open : undefined} />
+              {linked.error ? <span className="mt-0.5 block text-[11px] text-negative">{linked.error}</span> : null}
+              {linked.overlay}
             </Field>
           </div>
 

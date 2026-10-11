@@ -42,9 +42,8 @@ export function TripPicker({
   // Opened from the page's Add button (not from a trip): start on "New trip"
   // so the name box is ready; an existing trip is still one pick away.
   startNew?: boolean;
-  // Editing a booking: the trip is a setting of the booking, not a field to
-  // fill in, so it sits beside the modal's title — no "Add to trip" label.
-  // The header is outside the form, so the form posts the choice itself.
+  // Editing a booking: the trip's name beside the modal's title, as text —
+  // a saved booking stays in its trip.
   inHeader?: boolean;
 }) {
   const [creating, setCreating] = useState(!!startNew);
@@ -109,21 +108,11 @@ export function TripPicker({
   }
 
   if (inHeader) {
-    return (
-      <div className={`flex min-w-0 flex-wrap items-center gap-2 ${className ?? ""}`}>
-        <select
-          aria-label="Trip"
-          value={creating ? NEW : value.tripId}
-          onChange={(e) => pick(e.target.value)}
-          className="min-w-0 max-w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm font-medium ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
-        >
-          {options}
-        </select>
-        {creating
-          ? nameInput("min-w-0 w-48 rounded-md bg-sky-50 dark:bg-background px-2 py-1 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500")
-          : null}
-      </div>
-    );
+    // Editing a booking: its trip is shown, not picked. A dropdown here made
+    // it one slip to move a booking to the wrong trip, and its small text
+    // cut long trip names short. Same size as the title it sits beside.
+    const name = trips.find((t) => t.id === value.tripId)?.name;
+    return name ? <span className={`min-w-0 text-lg font-bold ${className ?? ""}`}>{name}</span> : null;
   }
 
   return (

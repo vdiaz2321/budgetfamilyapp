@@ -3,10 +3,10 @@
  * split_group_id. Each row carries every part of its split (in the order they
  * were saved) so opening any one of them shows the whole purchase.
  */
-export type SplitPart = { subId: string; amountCents: number; travelCategory?: string | null };
+export type SplitPart = { subId: string; amountCents: number; travelCategory?: string | null; bookingRef?: string | null };
 
 export function attachSplitParts<
-  T extends { splitGroupId?: string | null; subId: string | null; amountCents: number; travelCategory?: string | null; splitParts?: SplitPart[] },
+  T extends { splitGroupId?: string | null; subId: string | null; amountCents: number; travelCategory?: string | null; bookingRef?: string | null; splitParts?: SplitPart[] },
 >(txs: T[]): T[] {
   const byGroup = new Map<string, T[]>();
   for (const t of txs) {
@@ -19,7 +19,8 @@ export function attachSplitParts<
       .filter((r): r is T & { subId: string } => Boolean(r.subId))
       // Each part's own Travel Log column, so the form reads the right one
       // whichever row of the split was opened.
-      .map((r) => ({ subId: r.subId, amountCents: r.amountCents, travelCategory: r.travelCategory ?? null }));
+      // and the booking it pays for — a charge split across a stay's rooms.
+      .map((r) => ({ subId: r.subId, amountCents: r.amountCents, travelCategory: r.travelCategory ?? null, bookingRef: r.bookingRef ?? null }));
     for (const r of rows) r.splitParts = parts;
   }
   return txs;

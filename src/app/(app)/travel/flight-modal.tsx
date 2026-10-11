@@ -13,7 +13,8 @@ import {
   saveTravelFlight,
   setTravelFlightCancelled,
 } from "./flight-actions";
-import { CurrencySelect, Field, MoreDetailsToggle, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, outsideTripNote } from "./travel-form";
+import { CurrencySelect, Field, MoreDetailsToggle, OpenLinkedButton, PILL_CONTROL, PaidNote, PlannedPointsNote, Section, inputClass, isPlannedOnly, openableClass, outsideTripNote } from "./travel-form";
+import { useLinkedPayments } from "./linked-payments";
 import { TripPicker, useTripChoice } from "./trip-picker";
 import { AirlinePicker } from "./airline-picker";
 import { CheckPicker } from "./year-picker";
@@ -216,6 +217,8 @@ export function FlightModal({
   // Payments linked from the Budget fill each passenger's Spent $ — their
   // share of the payments — so those boxes can't be typed over here.
   const spentLinked = flight?.paidCents != null;
+  // Clicking a locked Spent box opens the payment behind it.
+  const linked = useLinkedPayments(flight?.payments, currency);
   const PAX_GRID = showFx ? PAX_GRID_FX : PAX_GRID_USD;
   // The money boxes on each row: with a currency, dollars and that currency
   // under Planned and under Spent; without, dollars only.
@@ -524,7 +527,43 @@ export function FlightModal({
         </div>
 
         {/* ---- Flights. A round trip is one booking with two of these. */}
-        <Section title="Flights">
+        {/* The add-flight buttons and Features share the heading's line;
+            the heading is their size from sm up. */}
+        <section className="border-t border-line pt-3">
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h3 className="text-xs font-bold uppercase tracking-wide sm:text-sm">Flights</h3>
+            {/* A layover carries on from where the last flight landed, on
+                the same day and booking ref. */}
+            <button
+              type="button"
+              onClick={() => {
+                const last = legs[legs.length - 1];
+                setLegs((all) => [
+                  ...all,
+                  { ...emptyLeg(last?.toPlace ?? "", ""), flightOn: last?.flightOn ?? "", flightNumber: last?.flightNumber ?? "" },
+                ]);
+              }}
+              className={FLIGHT_ACTION}
+            >
+              Add layover flight
+            </button>
+            {/* The return flies from where the last flight landed back to
+                where the trip began. An added booking (Booking 2, …) is a
+                one-way ticket: no return. */}
+            {copyOf || returnStart >= 0 ? null : (
+              <button
+                type="button"
+                onClick={() => {
+                  const last = legs[legs.length - 1];
+                  setLegs((all) => [...all, emptyLeg(last?.toPlace ?? "", legs[0]?.fromPlace ?? "")]);
+                }}
+                className={FLIGHT_ACTION}
+              >
+                Add return flight
+              </button>
+            )}
+            <FeaturesButton value={baggage} onChange={setBaggage} />
+          </div>
           <div className="space-y-3">
             {legs.map((leg, i) => (
               <Fragment key={leg.key}>
@@ -601,41 +640,8 @@ export function FlightModal({
             ) : tripNote ? (
               <p className="text-xs font-medium text-negative">{tripNote}</p>
             ) : null}
-            <div className="flex flex-wrap items-start gap-2 pt-1">
-              {/* A layover carries on from where the last flight landed, on
-                  the same day and booking ref. */}
-              <button
-                type="button"
-                onClick={() => {
-                  const last = legs[legs.length - 1];
-                  setLegs((all) => [
-                    ...all,
-                    { ...emptyLeg(last?.toPlace ?? "", ""), flightOn: last?.flightOn ?? "", flightNumber: last?.flightNumber ?? "" },
-                  ]);
-                }}
-                className={FLIGHT_ACTION}
-              >
-                Add layover flight
-              </button>
-              {/* The return flies from where the last flight landed back to
-                  where the trip began. An added booking (Booking 2, …) is a
-                  one-way ticket: no return. */}
-              {copyOf || returnStart >= 0 ? null : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const last = legs[legs.length - 1];
-                    setLegs((all) => [...all, emptyLeg(last?.toPlace ?? "", legs[0]?.fromPlace ?? "")]);
-                  }}
-                  className={FLIGHT_ACTION}
-                >
-                  Add return flight
-                </button>
-              )}
-              <FeaturesButton value={baggage} onChange={setBaggage} />
-            </div>
           </div>
-        </Section>
+        </section>
 
         {/* ---- Who flew, each person's own fare, and whether their seat
              was paid with points. The fare stays on a points ticket: it is
@@ -644,9 +650,10 @@ export function FlightModal({
           {/* Heading, head count and the converter on one line. The converter
               takes the whole next line once it is opened. */}
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h3 className="text-xs font-bold uppercase tracking-wide">Passengers</h3>
-            <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
-              Total
+            {/* Heading and head count in one: "Total passengers: 5". Same
+                size as the Flights heading above. */}
+            <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide sm:text-sm">
+              Total passengers:
               <input
                 type="number"
                 min="1"
@@ -665,7 +672,8 @@ export function FlightModal({
             <button
               type="button"
               onClick={() => setEditingNames((v) => !v)}
-              className="rounded-md px-2 py-1 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              // Its own plain look, at the size of the controls beside it.
+              className="h-7 rounded-md px-2.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 sm:text-sm dark:hover:bg-sky-950/40"
             >
               {editingNames ? "Done editing names" : "Edit family names"}
             </button>
@@ -790,6 +798,7 @@ export function FlightModal({
                     aria-label={`Passenger ${i + 1} ${spent ? "spent" : "planned"} ${slot.endsWith("Foreign") || slot === "fareEur" ? foreignCurrency : currency}`}
                     value={p[slot]}
                     onChange={(e) => typeFare(p.key, slot, e.target.value)}
+                    onClick={spentLinked && spent ? linked.open : undefined}
                     onFocus={() => {
                       lastFare.current = { key: p.key, slot };
                       loadRatesFor(p.key, slot);
@@ -798,7 +807,7 @@ export function FlightModal({
                     // top of the points (taxes, fees, a points + cash fare).
                     placeholder={p.pointsUsed && spent ? "Cash paid" : undefined}
                     inputMode="decimal"
-                    className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""} ${spentLinked && spent ? "opacity-70" : ""}`}
+                    className={`${inputClass} text-center ${n === 0 ? "col-start-2 sm:col-start-auto" : ""} ${spentLinked && spent ? "opacity-70" : ""} ${spentLinked && spent && linked.canOpen ? openableClass : ""}`}
                   />
                   );
                 })}
@@ -859,7 +868,8 @@ export function FlightModal({
         <MoreDetailsToggle open={showMore} onToggle={() => setShowMore((v) => !v)} className="mt-3" />
 
         <div className={showMore ? "contents" : "hidden"}>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {/* Pocket cost is wider: its label line also carries the Open linked transaction button. */}
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-[1fr_1fr_1fr_1.4fr]">
           <Field label="Points used">
             {/* The points tickets above, added up. */}
             <input value={pointsTyped ? pointsTyped.toLocaleString() : ""} readOnly tabIndex={-1} className={`${inputClass} opacity-70`} />
@@ -883,7 +893,10 @@ export function FlightModal({
             {/* The fares added up — change a fare above to change it. */}
             <input value={fareCents ? centsToDisplay(fareCents) : ""} readOnly tabIndex={-1} className={`${inputClass} opacity-70`} />
           </Field>
-          <Field label={`Pocket cost (${currencySymbol(currency)})`}>
+          <Field
+              label={`Pocket cost (${currencySymbol(currency)})`}
+              action={linked.canOpen ? <OpenLinkedButton onOpen={linked.open} /> : undefined}
+            >
             <input
               // Only ever the linked payments — blank until one is linked,
               // so it never shows a plan or a guess as money paid.
@@ -891,9 +904,12 @@ export function FlightModal({
               placeholder="—"
               readOnly
               tabIndex={-1}
-              className={`${inputClass} opacity-70`}
+              onClick={linked.canOpen ? linked.open : undefined}
+              className={`${inputClass} opacity-70 ${linked.canOpen ? openableClass : ""}`}
             />
-            <PaidNote linked={flight?.paidCents != null} />
+            <PaidNote linked={flight?.paidCents != null} onOpen={linked.canOpen ? linked.open : undefined} />
+            {linked.error ? <span className="mt-0.5 block text-[11px] text-negative">{linked.error}</span> : null}
+            {linked.overlay}
           </Field>
         </div>
 
@@ -964,8 +980,16 @@ export function FlightModal({
         {embed ? null : (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <p className="text-xs text-muted">
-            {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · {isEstimate ? "Planned flight cost" : "Flight cost"}{" "}
-            <span className="font-bold tabular-nums text-foreground">{formatMoney(fareCents, currency)}</span>
+            {/* The passenger table's Total row, named: a bare "Flight cost"
+                read as a mismatch with the Planned total right above it. */}
+            {passengers.length} passenger{passengers.length === 1 ? "" : "s"} · Planned{" "}
+            <span className="font-bold tabular-nums text-foreground">{formatMoney(total("planned"), currency)}</span>
+            {isEstimate ? null : (
+              <>
+                {" "}· Spent{" "}
+                <span className="font-bold tabular-nums text-foreground">{formatMoney(total("fare"), currency)}</span>
+              </>
+            )}
           </p>
         </div>
         )}
@@ -1155,7 +1179,9 @@ function FeaturesButton({ value, onChange }: { value: FlightBaggage; onChange: (
 
 // The Flights section's own buttons: light blue so they read as clickable,
 // with the same sky-100 / sky-400 hover as the rest of the app's outlined buttons.
+// Add a flight / Features: blue-outlined, at the height of the currency
+// picker in the Passengers row (h-7) rather than a full-size button.
 const FLIGHT_ACTION =
-  "inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-sky-800 shadow-sm ring-1 ring-sky-300 transition hover:bg-sky-100 hover:ring-sky-400 dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-700 dark:hover:bg-sky-900/50";
+  "inline-flex h-7 items-center gap-1.5 rounded-lg bg-white px-2.5 text-xs font-semibold text-sky-800 shadow-sm ring-1 ring-sky-300 transition hover:bg-sky-100 hover:ring-sky-400 sm:text-sm dark:bg-sky-950/40 dark:text-sky-200 dark:ring-sky-700 dark:hover:bg-sky-900/50";
 const FLIGHT_ACTION_ON =
-  "inline-flex items-center gap-1.5 rounded-lg bg-sky-100 px-3 py-1.5 text-sm font-semibold text-sky-900 shadow-sm ring-1 ring-sky-400 transition hover:bg-sky-200 dark:bg-sky-900/50 dark:text-sky-100 dark:ring-sky-600 dark:hover:bg-sky-900/70";
+  "inline-flex h-7 items-center gap-1.5 rounded-lg bg-sky-100 px-2.5 text-xs font-semibold text-sky-900 shadow-sm ring-1 ring-sky-400 transition hover:bg-sky-200 sm:text-sm dark:bg-sky-900/50 dark:text-sky-100 dark:ring-sky-600 dark:hover:bg-sky-900/70";

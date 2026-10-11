@@ -238,7 +238,7 @@ export type TxData = {
   // Every part of a split purchase shares this id (null on a plain one), and
   // each part carries the whole split so the modal can open it as one.
   splitGroupId?: string | null;
-  splitParts?: { subId: string; amountCents: number; travelCategory?: string | null }[];
+  splitParts?: { subId: string; amountCents: number; travelCategory?: string | null; bookingRef?: string | null }[];
 };
 
 // What the item panel's "Prev Mo Spent" chip hands the transaction modal:
@@ -283,6 +283,11 @@ export type TripBookingOption = {
   /** Stays only: the free-night certificate and hotel credit on the stay. */
   freeNightUsed: boolean;
   hotelCreditCents: number;
+  /** Stays only: the room's head count (two rooms on one night read apart by it). */
+  pax: number | null;
+  /** Stays only, when the stay has more than one room: shared by its rooms, so
+   *  one card charge can be split across them. Null for a single room. */
+  roomGroup: string | null;
 };
 // One untagged purchase dated during a trip, offered by the trip popup's
 // "Match purchases" list (listTripPurchaseCandidates).

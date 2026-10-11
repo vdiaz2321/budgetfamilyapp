@@ -11,7 +11,7 @@ const openModals: symbol[] = [];
 // Escape closes the topmost modal. Until now nothing listened for it anywhere
 // in the app, so every overlay — year editor, assumptions, confirmations,
 // transaction modal — could only be dismissed by finding the X or the backdrop.
-function useCloseOnEscape(onClose: () => void) {
+export function useCloseOnEscape(onClose: () => void) {
   // Read through a ref so the listener is bound once per modal rather than
   // re-bound on every render an inline arrow prop causes.
   const latest = useRef(onClose);
