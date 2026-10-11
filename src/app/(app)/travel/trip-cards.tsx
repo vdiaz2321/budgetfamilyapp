@@ -164,9 +164,15 @@ export function TripCards({
             // so the bar is how much of that plan is spent. Green once nothing
             // is left to pay; red past the plan.
             const planned = t.plannedTotal;
-            const fullyPaid = t.spent > 0 && t.planOnly.total <= 0;
+            // A trip still under way keeps spending, so a Spending row with
+            // its first purchase tagged isn't "done": until the last day has
+            // passed it only counts as paid once spent reaches the plan.
+            const tripOver = t.end != null && t.end < today;
+            const fullyPaid = t.spent > 0 && t.planOnly.total <= 0 && (tripOver || t.spent >= planned);
             const overPlan = planned > 0 && t.spent > planned;
-            const paidPct = fullyPaid || overPlan ? 100 : planned > 0 ? Math.round((t.spent / planned) * 100) : 0;
+            // Capped at 99 short of fully paid, so rounding never shows a
+            // teal "100% paid".
+            const paidPct = fullyPaid || overPlan ? 100 : planned > 0 ? Math.min(99, Math.round((t.spent / planned) * 100)) : 0;
             const booked = t.counts.flight + t.counts.stay + t.counts.car > 0;
             // What's been paid for each kind of booking — the same split as
             // Spent below (plan-only bookings left out). Blank when nothing is

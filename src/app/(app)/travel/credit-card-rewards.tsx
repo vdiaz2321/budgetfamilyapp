@@ -545,14 +545,16 @@ function CreditCardSection({
     const { points, value, redeemable, unvalued } = groupRewards(cards);
     return (
       <>
-        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative dark:text-rose-300" : "text-foreground", "sm:min-w-[9.5rem]")}
-        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-positive dark:text-emerald-300", "sm:min-w-[11.25rem]") : null}
-        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-positive dark:text-emerald-300", "sm:min-w-[11.25rem]") : null}
+        {bannerChip("Total owed", formatMoneyWhole(owed, currency), owed > 0 ? "text-negative" : "text-foreground", "sm:min-w-[9.5rem]")}
+        {/* Plain ink by default; colour only where it means something —
+            red for money owed, green for what the points are worth. */}
+        {points > 0 ? bannerChip("Total pts", points.toLocaleString(), "text-foreground", "sm:min-w-[11.25rem]") : null}
+        {value > 0 ? bannerChip("Total value", formatMoneyWhole(value, currency), "text-positive", "sm:min-w-[11.25rem]") : null}
         {redeemable > 0
-          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-sky-700 dark:text-sky-200", "sm:min-w-[11.25rem]")
+          ? bannerChip("Redeemable", formatMoneyWhole(redeemable, currency), "text-foreground", "sm:min-w-[11.25rem]")
           : null}
         {/* Only as complete as the cents-per-point typed on the cards. */}
-        {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-negative dark:text-rose-300") : null}
+        {unvalued > 0 ? bannerChip("No value set", `${compactNum(unvalued)} pts`, "text-negative") : null}
       </>
     );
   };
@@ -577,13 +579,13 @@ function CreditCardSection({
           setUnusedGroup((prev) => (prev === cat ? null : cat));
           if (!active) setGroupOpen((state) => ({ ...state, [cat]: true }));
         }}
-        // A teal wash at rest marks it as a filter control on the dark
-        // banner; switched on it fills solid.
+        // A light-blue pill at rest marks it as a filter control; switched
+        // on it fills solid.
         // Straight after the group's figures, not pushed to the far edge.
-        className={`shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+        className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ring-1 transition ${
           active
-            ? "bg-teal-600 text-white ring-teal-600 dark:bg-teal-400 dark:text-foreground dark:ring-teal-300"
-            : "bg-teal-50 text-teal-800 ring-teal-600/30 hover:bg-teal-100 dark:bg-teal-400/15 dark:text-teal-200 dark:ring-teal-300/30 dark:hover:bg-teal-400/25"
+            ? "bg-sky-700 text-white ring-sky-700 dark:bg-sky-300 dark:text-[#0b1a2a] dark:ring-sky-300"
+            : "bg-sky-100 text-foreground ring-sky-600/25 hover:bg-sky-200 dark:bg-sky-900/50 dark:ring-sky-300/30 dark:hover:bg-sky-900/80"
         }`}
       >
         {/* A group usually holds one kind of benefit; "0 free nights" beside
@@ -600,18 +602,17 @@ function CreditCardSection({
   // A row inside the shared Travel / Hotel box, not a card of its own.
   const groupBanner = (cat: "travel" | "hotel", isOpen: boolean, owed: number, cards: AccountData[]) => (
     <div>
-      {/* Reads as the group's heading, not one more row: a pale fill of
-          its own — sage for Travel (Victor's pick, 2026-10-11: blue tints
-          blended into the light-blue column header under it, and solid
-          colour was too loud), a pale teal for Hotel so the two never look
-          alike — a bar of the group's colour down the left edge (sky for
-          Travel, teal for Hotel), and a larger name. */}
+      {/* Reads as the group's heading, not one more row: a clean white
+          card raised off the box's off-white canvas (Victor, 2026-10-11:
+          the sage / teal fills read muddy, worst in dark mode), a bar of
+          the group's colour down the left edge (sky for Travel, teal for
+          Hotel) so the two never look alike, and a larger name. */}
       <div
         onClick={() => toggleGroup(cat)}
         className={`flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-2.5 border-l-[6px] px-4 py-3.5 text-foreground transition sm:px-5 dark:text-white ${
           cat === "travel"
-            ? "border-l-sky-600 bg-[#e8efe6] hover:bg-[#dce7d9] dark:border-l-sky-400 dark:bg-[#243029] dark:hover:bg-[#2c3a32]"
-            : "border-l-teal-600 bg-[#d8efea] hover:bg-[#c8e7e0] dark:border-l-teal-400 dark:bg-[#1f3532] dark:hover:bg-[#25403c]"
+            ? "border-l-sky-600 bg-surface hover:bg-sky-50 dark:border-l-sky-400 dark:hover:bg-sky-950/40"
+            : "border-l-teal-600 bg-surface hover:bg-sky-50 dark:border-l-teal-400 dark:hover:bg-sky-950/40"
         }`}
       >
         <button type="button" aria-expanded={isOpen} className="flex min-w-0 shrink-0 items-center gap-3 text-left sm:w-[14.5rem]">

@@ -910,11 +910,11 @@ function Field({
   );
 }
 
-// A room's heading inside the stay form: the sage band with a teal bar used
-// for headings on Travel, so Room 1, Room 2… stand out from the fields.
+// A room's heading inside the stay form: the white band with a teal bar used
+// for group headings on Travel, so Room 1, Room 2… stand out from the fields.
 function RoomBand({ label, action, className = "" }: { label: string; action?: React.ReactNode; className?: string }) {
   return (
-    <div className={`flex items-center justify-between gap-2 border-l-[6px] border-l-teal-600 bg-[#e8efe6] px-4 py-2 dark:border-l-teal-400 dark:bg-[#243029] ${className}`}>
+    <div className={`flex items-center justify-between gap-2 border-l-[6px] border-l-teal-600 bg-surface px-4 py-2 ring-1 ring-line dark:border-l-teal-400 ${className}`}>
       <span className="text-base font-extrabold text-foreground">{label}</span>
       {action}
     </div>

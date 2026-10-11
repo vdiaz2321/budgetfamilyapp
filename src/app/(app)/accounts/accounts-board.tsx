@@ -1119,20 +1119,21 @@ function CreditCardListSection({
           </span>
         </button>
         <div className="order-last flex w-full flex-wrap items-center gap-x-4 gap-y-1 sm:order-none sm:w-auto">
-        {/* Where the points live now. Named for what it holds, not "see also". */}
+        {/* The points live on the Travel Log — named for the page it opens. */}
         <Link
           href="/travel"
           onClick={(e) => e.stopPropagation()}
           className="shrink-0 whitespace-nowrap rounded-full bg-surface px-3 py-1 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
         >
-          Points & rewards →
+          Travel Log Page →
         </Link>
-        <span className="flex shrink-0 items-baseline gap-1.5 whitespace-nowrap">
-          <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total CC owed</span>
+        {/* Wraps "Not in Net Worth" under the total on a phone. */}
+        <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 whitespace-nowrap">
+          <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total credit card owed:</span>
           <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
             {formatMoney(totalOwed, currency)}
           </span>
-          <span className="text-xs text-foreground">· Not in Net Worth</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-foreground"><span className="max-sm:hidden">· </span>Not in Net Worth</span>
         </span>
         </div>
         <button
@@ -1743,18 +1744,19 @@ function AccountSection({
               Debt/Loan Page →
             </Link>
           ) : null}
+          {/* Kids Funding's note sits by its name, where Debts has its page
+              link, and matches the Credit Cards header's "Not in Net Worth". */}
+          {kidsNote ? (
+            <>
+              <span className="hidden shrink-0 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-foreground @[24rem]:inline">{kidsNote.long}</span>
+              {/* "Not in NW" from a phone-wide tile (~320px) up. Four tiles
+                  across on a laptop leaves ~230px each — too little for name +
+                  note + amount on one line, so the note steps aside there (the
+                  Current Assets figure already leaves Kids Funding out). */}
+              <span className="hidden shrink-0 whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-foreground @[19rem]:inline @[24rem]:hidden">{kidsNote.short}</span>
+            </>
+          ) : null}
         </div>
-        {/* Name, share and amount all on one line — the share sits just left
-            of the amount it describes. */}
-        {kidsNote ? (
-          <>
-            <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-muted @[24rem]:inline">{kidsNote.long}</span>
-            {/* Four tiles across on a laptop leaves ~230px each — too little for
-                name + note + amount on one line, so the note steps aside there
-                (the Current Assets figure already leaves Kids Funding out). */}
-            <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-muted @[21rem]:inline @[24rem]:hidden">{kidsNote.short}</span>
-          </>
-        ) : null}
         <span
           className={`shrink-0 text-right text-sm font-bold tabular-nums ${
             section.liability && total > 0 ? "text-negative" : ""

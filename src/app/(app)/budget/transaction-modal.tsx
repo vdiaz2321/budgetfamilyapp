@@ -477,10 +477,23 @@ function TransactionModalForm({
     );
     setSwappedFrom({});
   }
-  const swapNote = Object.entries(swappedFrom)
-    .filter(([twin]) => splits.some((sp) => sp.subId === twin))
-    .map(([twin, original]) => `${subOptions.find((o) => o.id === original)?.name} → ${subOptions.find((o) => o.id === twin)?.name}`)
-    .join(", ");
+  // Each trip item's column picker also lists the other item's columns, so a
+  // trip grocery typed on Traveling/Trips isn't stuck: picking Groceries or
+  // Restaurants moves that part to the trip food item, and picking a
+  // catch-all column moves it back. Only offered when the other item isn't
+  // already a part of this split.
+  const tripFoodItem = subOptions.find((x) => x.receivesTripPlans && x.travelCategory === "restaurants") ?? null;
+  const canSwitchTo = (item: SubOption | null): item is SubOption =>
+    Boolean(item && !splits.some((sp) => sp.subId === item.id));
+  function switchTripItem(fromId: string, toId: string) {
+    setSplits(splits.map((sp) => (sp.subId === fromId ? { ...sp, subId: toId } : sp)));
+    // Remember the item first picked, so taking the trip off restores it.
+    const record = { ...swappedFrom };
+    const original = record[fromId] ?? fromId;
+    delete record[fromId];
+    if (original !== toId) record[toId] = original;
+    setSwappedFrom(record);
+  }
   // Both add and edit share the two-tab UI now, so "Income" narrows to income
   // subs and "Expense" opens to any spend kind (savings/bills/expenses/debt).
   // A locked initial kind (Budget's Debt/Savings row context) still filters
@@ -1098,10 +1111,16 @@ function TransactionModalForm({
                   <select
                     name="travelCategory"
                     value={travelCategory}
-                    onChange={(e) => setTravelCategory(e.target.value)}
+                    onChange={(e) => {
+                      const key = e.target.value;
+                      if ((key === "restaurants" || key === "groceries") && tripCatchAll && canSwitchTo(tripFoodItem)) {
+                        switchTripItem(tripCatchAll.id, tripFoodItem.id);
+                        setFoodColumn(key);
+                      } else setTravelCategory(key);
+                    }}
                     className="mt-2 w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
-                    {columnChoices.map((key) => (
+                    {[...columnChoices, ...(canSwitchTo(tripFoodItem) ? (["restaurants", "groceries"] as const) : [])].map((key) => (
                       <option key={key} value={key}>
                         {/* In a split only the catch-all item's part uses it — say which. */}
                         {splits.length > 1
@@ -1116,10 +1135,16 @@ function TransactionModalForm({
                   <select
                     name="foodColumn"
                     value={foodColumn}
-                    onChange={(e) => setFoodColumn(e.target.value)}
+                    onChange={(e) => {
+                      const key = e.target.value;
+                      if (key !== "restaurants" && key !== "groceries" && tripFoodItem && canSwitchTo(tripCatchAll)) {
+                        switchTripItem(tripFoodItem.id, tripCatchAll.id);
+                        setTravelCategory(key);
+                      } else setFoodColumn(key);
+                    }}
                     className="mt-2 w-full rounded-xl bg-surface dark:bg-background px-2 py-2.5 text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:px-3 sm:text-sm"
                   >
-                    {(["restaurants", "groceries"] as const).map((key) => (
+                    {[...(["restaurants", "groceries"] as const), ...(canSwitchTo(tripCatchAll) ? columnChoices : [])].map((key) => (
                       <option key={key} value={key}>
                         {splits.length > 1
                           ? `${subOptions.find((o) => o.receivesTripPlans && o.travelCategory === "restaurants")?.name ?? "Restaurant Travel"} column: `
@@ -1133,7 +1158,10 @@ function TransactionModalForm({
                   <span className="mt-1 block px-1 text-[11px] text-muted">
                     {bookingOk
                       ? null
-                      : `Counts on the Travel Log as this trip's spending.${swapNote ? ` Switched ${swapNote} for this trip.` : ""}${movedToCatchAll.length ? ` ${movedToCatchAll.map((o) => o.name).join(", ")} will save on ${tripCatchAll!.name} (${movedToCatchAll.map((o) => EXPENSE_CATEGORIES.find((c) => c.key === o.travelCategory)?.label ?? o.name).join(", ")} column), not your everyday budget.` : ""}`}
+                      : // The item box already shows a swap; only a server-side move needs naming.
+                        movedToCatchAll.length
+                        ? `Counts as trip spending, on ${tripCatchAll!.name}.`
+                        : "Counts as trip spending."}
                   </span>
                 ) : null}
               </div>

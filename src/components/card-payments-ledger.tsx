@@ -208,8 +208,9 @@ export function CardPaymentsLedger({
   // table) — a centered label over right-aligned money reads as misaligned.
   // tabular-nums keeps the digits the same width, so centered values still
   // line up well enough down a column.
-  const cell = "px-2.5 py-1.5 text-center tabular-nums whitespace-nowrap";
-  const headBase = "px-2.5 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted whitespace-nowrap";
+  // Desktop reads one step bigger (sm:); the phone keeps its sizes.
+  const cell = "px-2 py-1.5 text-center tabular-nums whitespace-nowrap";
+  const headBase = "px-2 py-2 max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-muted whitespace-nowrap";
   const head = `${headBase} text-center`;
 
   return (
@@ -302,15 +303,39 @@ export function CardPaymentsLedger({
               part of the row rather than a filled band. */}
           <div ref={scrollBoxRef} className="overflow-x-auto bg-surface">
             {/* The min width only exists to keep 12 month columns readable; a
-                By-year table with a couple of columns fits a phone as-is. */}
-            <table className={`w-full border-collapse text-xs ${columns.length > 3 ? "min-w-[42rem]" : ""}`}>
+                By-year table with a couple of columns fits a phone as-is.
+                From sm: up every column has a set width (table-fixed), so the
+                Credit Card and Debt tables stacked on Accounts line up column
+                for column; extra room is shared out evenly between them. */}
+            <table
+              className={`w-full border-collapse text-xs sm:table-fixed sm:text-[15px] sm:min-w-[var(--ledger-min)] ${columns.length > 3 ? "min-w-[42rem]" : ""}`}
+              style={{ "--ledger-min": `${COL_NAME + (view === "month" ? COL_AVG : 0) + COL_TOTAL + (showPeriodColumns ? columns.length * COL_PERIOD : 0)}rem` } as React.CSSProperties}
+            >
+              <colgroup>
+                <col className="sm:w-[var(--col-name)]" style={{ "--col-name": `${COL_NAME}rem` } as React.CSSProperties} />
+                {view === "month" ? <col className="sm:w-[var(--col-avg)]" style={{ "--col-avg": `${COL_AVG}rem` } as React.CSSProperties} /> : null}
+                <col className="sm:w-[var(--col-total)]" style={{ "--col-total": `${COL_TOTAL}rem` } as React.CSSProperties} />
+                {showPeriodColumns
+                  ? columns.map((c) => (
+                      <col key={c.key} className="sm:w-[var(--col-period)]" style={{ "--col-period": `${COL_PERIOD}rem` } as React.CSSProperties} />
+                    ))
+                  : null}
+              </colgroup>
               <thead>
                 <tr className="border-b border-line bg-surface">
                   <th className={`${headBase} sticky left-0 z-10 bg-surface text-center`}>
                     <SortButton label={labels.item} dir={sort?.key === "name" ? sort.dir : null} onClick={() => toggleSort("name")} />
                   </th>
+                  {/* Avg/mo sits left of the total (Victor's pick). It's the total
+                      spread evenly, so it sorts the same as Total. */}
+                  {view === "month" ? (
+                    <th className={head}>
+                      <SortButton label="Avg/mo" dir={sort?.key === "total" ? sort.dir : null} onClick={() => toggleSort("total")} />
+                    </th>
+                  ) : null}
                   {/* By year this column spans every year, so "Annual" only fits by month. */}
-                  <th className={head}>
+                  {/* "Annual Total" wraps to two lines rather than widening its column past its figures. */}
+                  <th className={`${head} !whitespace-normal`}>
                     <SortButton label={view === "month" ? "Annual Total" : "Total"} dir={sort?.key === "total" ? sort.dir : null} onClick={() => toggleSort("total")} />
                   </th>
                   {showPeriodColumns
@@ -320,12 +345,6 @@ export function CardPaymentsLedger({
                         </th>
                       ))
                     : null}
-                  {/* Avg/mo is the total spread evenly, so it sorts the same as Total. */}
-                  {view === "month" ? (
-                    <th className={head}>
-                      <SortButton label="Avg/mo" dir={sort?.key === "total" ? sort.dir : null} onClick={() => toggleSort("total")} />
-                    </th>
-                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -339,7 +358,7 @@ export function CardPaymentsLedger({
                   >
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
+                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold sm:text-[15px] group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
                     >
                       <span className="flex items-center gap-1">
                         <span className="truncate sm:overflow-visible sm:whitespace-nowrap">{r.name}</span>
@@ -348,6 +367,9 @@ export function CardPaymentsLedger({
                         </svg>
                       </span>
                     </th>
+                    {view === "month" ? (
+                      <td className={`${cell} text-muted`}>{r.total ? money(perMonth(r.total)) : null}</td>
+                    ) : null}
                     {/* Blank, not $0.00, for a card with nothing paid — same as an empty month. */}
                     <td className={`${cell} border-r border-line font-bold text-negative`}>{r.total ? money(r.total) : null}</td>
                     {showPeriodColumns
@@ -360,17 +382,19 @@ export function CardPaymentsLedger({
                           );
                         })
                       : null}
-                    {view === "month" ? (
-                      <td className={`${cell} border-l border-line text-muted`}>{r.total ? money(perMonth(r.total)) : null}</td>
-                    ) : null}
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-foreground/20 bg-surface font-bold">
-                  <th scope="row" className="sticky left-0 z-10 bg-surface px-2.5 py-2 text-left text-xs">
+                  <th scope="row" className="sticky left-0 z-10 bg-surface px-2.5 py-2 text-left text-xs sm:text-[15px]">
                     {labels.all}
                   </th>
+                  {view === "month" ? (
+                    <td className={`${cell}`} style={{ color: "var(--viz-savings)" }}>
+                      {money(perMonth(grandTotal))}
+                    </td>
+                  ) : null}
                   <td className={`${cell} border-r border-line text-negative`}>
                     {money(grandTotal)}
                   </td>
@@ -384,11 +408,6 @@ export function CardPaymentsLedger({
                         );
                       })
                     : null}
-                  {view === "month" ? (
-                    <td className={`${cell} border-l border-line`} style={{ color: "var(--viz-savings)" }}>
-                      {money(perMonth(grandTotal))}
-                    </td>
-                  ) : null}
                 </tr>
               </tfoot>
             </table>
@@ -801,23 +820,34 @@ function MoneyBox({
   );
 }
 
+// Desktop column widths (rem), shared by every ledger so the Credit Card and
+// Debt tables on Accounts line up. Sized for the widest figure each holds at
+// 15px; "Annual Total" wraps to two lines inside COL_TOTAL.
+const COL_NAME = 15;
+const COL_AVG = 6;
+const COL_TOTAL = 6.5;
+const COL_PERIOD = 5.75;
+
 /** A column header that sorts the table. The arrow only shows on the sorted
- *  column; the hover wash says the others are clickable too. A hidden arrow
- *  holds its space so the label stays centred over its figures either way. */
+ *  column; the hover wash says the others are clickable too. The arrow hangs
+ *  just right of the label in the cell's padding, taking no width, so the
+ *  label stays centred over its figures and the column is only as wide as
+ *  its label or its figures. */
 function SortButton({ label, dir, onClick }: { label: string; dir: "asc" | "desc" | null; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40 ${
+      className={`relative rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40 ${
         dir ? "text-foreground" : ""
       }`}
     >
-      <span className="invisible w-2 text-[8px]" aria-hidden>▲</span>
       {label}
-      <span className={`w-2 text-[8px] ${dir ? "" : "invisible"}`} aria-hidden>
-        {dir === "asc" ? "▲" : "▼"}
-      </span>
+      {dir ? (
+        <span className="absolute left-full top-1/2 -translate-y-1/2 text-[8px]" aria-hidden>
+          {dir === "asc" ? "▲" : "▼"}
+        </span>
+      ) : null}
     </button>
   );
 }

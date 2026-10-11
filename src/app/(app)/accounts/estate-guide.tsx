@@ -209,9 +209,12 @@ function NameSelect({
   );
 }
 
-function Labeled({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) {
+// Column labels sit centered over their boxes, and so do the values typed in
+// them (Victor centers headers and figures alike). The one full-width text
+// box (Steps for the family) keeps its label and text at the left.
+function Labeled({ label, children, className = "", center = true }: { label: string; children: React.ReactNode; className?: string; center?: boolean }) {
   return (
-    <label className={`block min-w-0 ${className}`}>
+    <label className={`block min-w-0 ${center ? "text-center [&_input]:text-center [&_select]:text-center [&_select]:[text-align-last:center]" : ""} ${className}`}>
       <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</span>
       {children}
     </label>
@@ -313,7 +316,11 @@ export function EstateGuideModal({
           {/* Who handles things */}
           <section className="space-y-3">
             <h3 className="text-sm font-bold">Who handles things</h3>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* All four on one line on a desktop, Power of attorney first; two by two on a tablet. */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Labeled label="Power of attorney">
+                <NameSelect label="Power of attorney" value={g.powerOfAttorney} names={names} onSave={(v) => save(() => saveEstateGuideField("power_of_attorney", v))} />
+              </Labeled>
               <Labeled label="Executor">
                 <NameSelect label="Executor" value={g.executor} names={names} onSave={(v) => save(() => saveEstateGuideField("executor", v))} />
               </Labeled>
@@ -323,11 +330,8 @@ export function EstateGuideModal({
               <Labeled label="Attorney / JAG office">
                 <SaveField label="Attorney" initial={g.attorney} placeholder="Name and phone" onSave={(v) => save(() => saveEstateGuideField("attorney", v))} />
               </Labeled>
-              <Labeled label="Power of attorney">
-                <NameSelect label="Power of attorney" value={g.powerOfAttorney} names={names} onSave={(v) => save(() => saveEstateGuideField("power_of_attorney", v))} />
-              </Labeled>
             </div>
-            <Labeled label="Steps for the family">
+            <Labeled label="Steps for the family" center={false}>
               <SaveField
                 label="Steps for the family"
                 multiline
@@ -760,10 +764,10 @@ function EstatePrint({
       <table className="w-full border-collapse">
         <tbody>
           {[
+            ["Power of attorney", g.powerOfAttorney],
             ["Executor", g.executor],
             ["Will kept at", g.willLocation],
             ["Attorney / JAG office", g.attorney],
-            ["Power of attorney", g.powerOfAttorney],
           ].map(([k, v]) => (
             <tr key={k}>
               <th className={`${head} w-44`}>{k}</th>
