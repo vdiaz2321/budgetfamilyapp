@@ -1,11 +1,13 @@
 /**
  * When the portfolio can pay for the life the household already lives.
  *
- * Everything here is in **today's money**: the return is a real (after
- * inflation) rate, so the FI number and the projected balances can be read
- * against today's spending without deflating anything. That's the one modelling
- * choice that makes the rest honest — a nominal 8% against today's $63k of
- * spending would flatter the date by years.
+ * Every figure is in the dollars of the year it lands in. Investments grow at
+ * the expected rate of return; savings (checking and savings buckets) at the
+ * savings APY, and each year's saving is split between the two. Retired pay,
+ * VA, Social Security and other income rise by the COLA each year; spending,
+ * healthcare and rentals by inflation — so a 2033 figure is what 2033
+ * actually pays. Spending is what the table says for that year, grown by
+ * inflation from the year it was typed.
  *
  * The arithmetic is deliberately the plain version, so it can be checked by
  * hand: growth on the balance you started the year with, then the year's
@@ -15,7 +17,7 @@
  */
 
 /**
- * One year taken from the household's own projection grid, in today's money.
+ * One year taken from the household's own projection grid.
  * Supplying these is what lets the projection say "the kids move out in 2036"
  * instead of assuming this year's spending repeats for forty years.
  */
@@ -27,24 +29,24 @@ export type FiScheduleYear = {
    *  replaces the flat guaranteed-income figure for that year. */
   guaranteedCents?: number;
   /** That year's gains when the table has worked them out (they include
-   *  rental equity). Omitted: the real return on the opening balance. */
+   *  rental equity). Omitted: the return on the opening balance. */
   growthCents?: number;
 };
 
 export type FiInputs = {
   /** Invested assets today. */
   portfolioCents: number;
-  /** Added each year from here on, in today's money. */
+  /** Added each year from here on. */
   annualContributionCents: number;
   /** What a year of the household's life costs, excluding what it saves. */
   annualSpendCents: number;
-  /** Real return, e.g. 5 for 5% after inflation. */
-  realReturnPct: number;
+  /** Expected yearly return on investments, e.g. 7.5. */
+  returnPct: number;
   /** Safe withdrawal rate, e.g. 4 for the 4% rule (a 25× target). */
   withdrawalRatePct: number;
   /**
    * Income that arrives whether or not the portfolio does — a pension, VA
-   * disability, Social Security — per year, in today's money. It is subtracted
+   * disability, Social Security — per year. It is subtracted
    * from spending before the target is sized, because the portfolio only has
    * to fund the part nothing else covers.
    */
@@ -57,7 +59,7 @@ export type FiInputs = {
    *  a few years after FI — needed to see savings drawn down in retirement. */
   untilYear?: number | null;
   /**
-   * Per-year spending and saving, in today's money. Any year present here
+   * Per-year spending and saving. Any year present here
    * overrides the two flat figures above; years past the end of it carry the
    * last entry forward, because a plan that stops is not a plan that says
    * spending drops to zero.
@@ -65,13 +67,17 @@ export type FiInputs = {
   schedule?: FiScheduleYear[];
   /**
    * A bad-market test: in `year` the portfolio loses `pct`% instead of
-   * growing. Years after it grow at the real return on what is actually
+   * growing. Years after it grow at the return on what is actually
    * left — the table's own gains were worked out on the un-dropped balance.
    */
   shock?: { year: number; pct: number } | null;
-  /** From this year on, grow at the real return on the actual balance rather
+  /** From this year on, grow at the return on the actual balance rather
    *  than the table's gains: for a what-if whose balance has left the plan's. */
   ownGrowthFrom?: number | null;
+  /** Savings held now, their APY, and the share of each year's saving that
+   *  goes to investments (the rest to savings). The savings part of the
+   *  balance earns the APY, the rest the return. Omitted: all invested. */
+  cash?: { nowCents: number; pct: number; toInvestPct: number } | null;
 };
 
 export type FiYear = {
@@ -83,9 +89,9 @@ export type FiYear = {
   growthCents: number;
   contributionCents: number;
   endCents: number;
-  /** What this particular year of life costs, in today's money. */
+  /** What this particular year of life costs. */
   spendCents: number;
-  /** Guaranteed income received that year, in today's money. */
+  /** Guaranteed income received that year. */
   guaranteedCents: number;
   /**
    * The portfolio that sustains THIS year at the withdrawal rate — sized on
@@ -117,7 +123,7 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     portfolioCents,
     annualContributionCents,
     annualSpendCents,
-    realReturnPct,
+    returnPct,
     withdrawalRatePct,
     maxYears = 60,
     schedule,
@@ -126,6 +132,7 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     untilYear = null,
     shock = null,
     ownGrowthFrom = null,
+    cash = null,
   } = inputs;
   const ownFrom = shock?.year ?? ownGrowthFrom;
 
@@ -143,8 +150,7 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     if (lastScheduled && year > lastScheduled.year) return lastScheduled;
     return { year, spendCents: annualSpendCents, contributionCents: annualContributionCents };
   };
-  // A pension (or VA, or Social Security) pays from its start year onward and
-  // is already in today's money, like everything else here.
+  // A pension (or VA, or Social Security) pays from its start year onward.
   const guaranteedFor = (year: number): number => {
     const scheduled = planFor(year).guaranteedCents;
     if (scheduled != null) return scheduled;
@@ -181,6 +187,9 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
 
   let lastTarget = todayTarget;
   let runsOutYear: number | null = null;
+  // Savings at the start of each year, followed even through years whose
+  // gains come from the table, so a what-if starting later has the right split.
+  let cashBal = cash?.nowCents ?? 0;
   const lastOffset = untilYear != null ? Math.max(1, untilYear - fromYear) : maxYears;
   for (let offset = 1; offset <= lastOffset; offset++) {
     const year = fromYear + offset;
@@ -197,9 +206,10 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
     const growth =
       shock && year === shock.year
         ? start > 0 ? -Math.round((start * shock.pct) / 100) : 0
-        : scheduled ?? (start > 0 ? Math.round((start * realReturnPct) / 100) : 0);
+        : scheduled ?? yearGrowth(start, cashBal, cash?.pct ?? 0, returnPct);
     const end = start + growth + contributionCents;
     balance = end;
+    if (cash) cashBal = nextCash(cashBal, cash.pct, contributionCents, cash.toInvestPct, end);
     if (end < 0 && runsOutYear == null) runsOutYear = year;
 
     const independent = canReachTarget && end >= target;
@@ -243,6 +253,71 @@ export function projectFi(inputs: FiInputs, fromYear: number): FiProjection {
   };
 }
 
+/**
+ * Typed spending, grown by inflation. An amount typed for a year is that
+ * year's spending exactly; each year after it holding the same typed amount
+ * grows by inflation from there, until a year with a new typed amount starts
+ * over. Returns year → spending before healthcare. Years before `thisYear`
+ * are left as typed.
+ */
+export function inflatedSpending(
+  rows: { year: number; baseSpendingCents: number }[],
+  thisYear: number,
+  inflationPct: number,
+): Map<number, number> {
+  const out = new Map<number, number>();
+  let anchorYear: number | null = null;
+  let prevBase: number | null = null;
+  for (const r of [...rows].sort((a, b) => a.year - b.year)) {
+    if (r.year < thisYear) {
+      out.set(r.year, r.baseSpendingCents);
+      continue;
+    }
+    if (anchorYear == null || r.baseSpendingCents !== prevBase) anchorYear = r.year;
+    prevBase = r.baseSpendingCents;
+    out.set(r.year, Math.round(r.baseSpendingCents * inflateTo(r.year, anchorYear, inflationPct)));
+  }
+  return out;
+}
+
+// ---- Savings vs investments.
+//
+// Savings (checking and savings buckets) earn the savings APY; investments the
+// expected return. Each year's saving is split between them the way the
+// accounts are split today; a year that spends more than it earns draws on investments first,
+// and savings only once investments are gone.
+
+/** Account kinds that count as savings in the plan. */
+export const CASH_KINDS = ["checking", "savings_bucket"] as const;
+
+/** Share of each year's saving that goes to investments: the same split as
+ *  the accounts today (all of it when there's nothing in either yet). */
+export function investShareOfNew(cashCents: number, investCents: number): number {
+  const total = Math.max(0, cashCents) + Math.max(0, investCents);
+  return total > 0 ? (Math.max(0, investCents) / total) * 100 : 100;
+}
+
+/** Savings at the start of next year: this year's grown at the APY, plus the
+ *  savings share of what the year saved, never more than the whole balance. */
+export function nextCash(
+  cashCents: number,
+  cashPct: number,
+  savedCents: number,
+  toInvestPct: number,
+  endBalanceCents: number,
+): number {
+  const grown = cashCents * (1 + cashPct / 100) + Math.max(0, savedCents) * (1 - toInvestPct / 100);
+  return Math.round(Math.max(0, Math.min(grown, endBalanceCents)));
+}
+
+/** A year's gains on `startCents`: the cash part at the cash rate, the rest at
+ *  the investment return. Nothing left earns nothing. */
+export function yearGrowth(startCents: number, cashCents: number, cashPct: number, returnPct: number): number {
+  if (startCents <= 0) return 0;
+  const inCash = Math.min(Math.max(0, cashCents), startCents);
+  return Math.round((inCash * cashPct) / 100 + ((startCents - inCash) * returnPct) / 100);
+}
+
 /** Age in a given calendar year, when a birth year is known. */
 export function ageInYear(birthYear: number | null, year: number): number | null {
   return birthYear ? year - birthYear : null;
@@ -250,10 +325,13 @@ export function ageInYear(birthYear: number | null, year: number): number | null
 
 // ---- Retirement income, year by year.
 //
-// Everything below is in today's dollars, like the rest of this file. Military
-// retired pay, VA disability and Social Security all get a yearly COLA tied to
-// inflation, so in today's dollars each is a flat line — the raise is already
-// "in" the number, and there is nothing yearly to guess.
+// Military retired pay, VA disability and Social Security all get a yearly
+// COLA, so each rises by the plan's COLA rate every year.
+
+/** What an amount now has grown to by `year` at `pct` a year. */
+export function inflateTo(year: number, thisYear: number, pct: number): number {
+  return Math.pow(1 + pct / 100, Math.max(0, year - thisYear));
+}
 
 export type IncomeLineKind = "va" | "social_security" | "job" | "spouse" | "other";
 
@@ -270,7 +348,7 @@ export type IncomeLine = {
   id: string;
   name: string;
   kind: IncomeLineKind;
-  /** Per month, today's dollars, before tax. */
+  /** Per month at current rates, before tax; rises with inflation. */
   monthlyCents: number;
   /** First year received; null = already arriving. */
   startYear: number | null;
@@ -294,8 +372,8 @@ export type MilitaryPension = {
   serviceStartMonth?: number | null;
   /** High-3 average monthly basic pay, in retirement-year dollars. */
   high3MonthlyCents: number | null;
-  /** General inflation used to bring High-3 back to today's dollars. */
-  inflationPct: number;
+  /** The yearly COLA once retired pay starts. */
+  colaPct: number;
   sbpEnabled: boolean;
   /** SBP premium, % of gross retired pay (6.5% today). */
   sbpPct: number;
@@ -310,14 +388,21 @@ export type PensionEstimate = {
   multiplierPct: number;
   /** Gross monthly retired pay in retirement-year dollars, as DFAS would quote it. */
   grossAtRetireCents: number;
-  /** The same, brought back to today's dollars. */
-  grossTodayCents: number;
-  /** SBP premium per month, today's dollars (0 when not elected). */
-  sbpTodayCents: number;
+  /** SBP premium per month in the retirement year (0 when not elected). */
+  sbpAtRetireCents: number;
+  retireYear: number;
+  /** Yearly COLA after the retirement year. */
+  colaPct: number;
 };
 
+/** Gross retired pay and SBP per month in `year`, with every COLA since retiring. */
+function pensionIn(p: PensionEstimate, year: number) {
+  const cola = inflateTo(year, p.retireYear, p.colaPct);
+  return { gross: Math.round(p.grossAtRetireCents * cola), sbp: Math.round(p.sbpAtRetireCents * cola) };
+}
+
 /** DFAS: High-3 × (2.5% × years of service), rounded down to the dollar. */
-export function estimatePension(p: MilitaryPension, thisYear: number): PensionEstimate | null {
+export function estimatePension(p: MilitaryPension): PensionEstimate | null {
   if (p.retireYear == null || p.serviceStartYear == null || !p.high3MonthlyCents) return null;
   // DFAS counts whole months: each one is 1/12 of the 2.5% a year.
   const months = Math.max(
@@ -328,10 +413,16 @@ export function estimatePension(p: MilitaryPension, thisYear: number): PensionEs
   const extraMonths = months % 12;
   const multiplierPct = Math.round(((2.5 * months) / 12) * 100) / 100;
   const grossAtRetireCents = Math.floor((p.high3MonthlyCents * multiplierPct) / 100 / 100) * 100;
-  const yearsAway = Math.max(0, p.retireYear - thisYear);
-  const grossTodayCents = Math.round(grossAtRetireCents / Math.pow(1 + p.inflationPct / 100, yearsAway));
-  const sbpTodayCents = p.sbpEnabled ? Math.round((grossTodayCents * p.sbpPct) / 100) : 0;
-  return { yearsOfService, extraMonths, multiplierPct, grossAtRetireCents, grossTodayCents, sbpTodayCents };
+  const sbpAtRetireCents = p.sbpEnabled ? Math.round((grossAtRetireCents * p.sbpPct) / 100) : 0;
+  return {
+    yearsOfService,
+    extraMonths,
+    multiplierPct,
+    grossAtRetireCents,
+    sbpAtRetireCents,
+    retireYear: p.retireYear,
+    colaPct: p.colaPct,
+  };
 }
 
 /**
@@ -348,7 +439,7 @@ export function retiredShareOfYear(year: number, retireYear: number | null, reti
 export type IncomePart = {
   name: string;
   kind: IncomeLineKind | "pension";
-  /** Per month, today's dollars, after SBP and tax. */
+  /** Per month, after SBP and tax. */
   monthlyAfterTaxCents: number;
   /** Same, before tax (still after SBP) — so the breakdown can show the tax. */
   monthlyBeforeTaxCents: number;
@@ -376,24 +467,29 @@ export function incomeForYear(
   pensionStartYear: number | null,
   lines: IncomeLine[],
   taxPct: number,
+  thisYear: number,
+  colaPct: number,
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
   if (pension && pensionStartYear != null && year >= pensionStartYear) {
+    const { gross, sbp } = pensionIn(pension, year);
     parts.push({
       name: "Military retired pay",
       kind: "pension",
-      monthlyAfterTaxCents: Math.round((pension.grossTodayCents - pension.sbpTodayCents) * keep),
-      monthlyBeforeTaxCents: pension.grossTodayCents - pension.sbpTodayCents,
+      monthlyAfterTaxCents: Math.round((gross - sbp) * keep),
+      monthlyBeforeTaxCents: gross - sbp,
     });
   }
+  const lineGrowth = inflateTo(year, thisYear, colaPct);
   for (const line of lines) {
     if (!active(year, line.startYear, line.endYear) || line.monthlyCents <= 0) continue;
+    const monthly = Math.round(line.monthlyCents * lineGrowth);
     parts.push({
       name: line.name,
       kind: line.kind,
-      monthlyAfterTaxCents: Math.round(line.monthlyCents * (line.taxable ? keep : 1)),
-      monthlyBeforeTaxCents: line.monthlyCents,
+      monthlyAfterTaxCents: Math.round(monthly * (line.taxable ? keep : 1)),
+      monthlyBeforeTaxCents: monthly,
     });
   }
   const afterTaxCents = parts.reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
@@ -419,11 +515,13 @@ export function survivorIncomeForYear(
   sbpEnabled: boolean,
   lines: IncomeLine[],
   taxPct: number,
+  thisYear: number,
+  colaPct: number,
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
   if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
-    const annuity = Math.round(pension.grossTodayCents * 0.55);
+    const annuity = Math.round(pensionIn(pension, year).gross * 0.55);
     parts.push({
       name: "SBP annuity (55%)",
       kind: "pension",
@@ -434,14 +532,16 @@ export function survivorIncomeForYear(
   const live = lines.filter((l) => active(year, l.startYear, l.endYear) && l.monthlyCents > 0);
   const ss = live.filter((l) => l.kind === "social_security");
   const largestSs = ss.reduce<IncomeLine | null>((best, l) => (best == null || l.monthlyCents > best.monthlyCents ? l : best), null);
+  const lineGrowth = inflateTo(year, thisYear, colaPct);
   for (const line of live) {
     if (line.kind === "va" || line.kind === "job") continue;
     if (line.kind === "social_security" && line !== largestSs) continue;
+    const monthly = Math.round(line.monthlyCents * lineGrowth);
     parts.push({
       name: line.kind === "social_security" ? "Social Security (survivor)" : line.name,
       kind: line.kind,
-      monthlyAfterTaxCents: Math.round(line.monthlyCents * (line.taxable ? keep : 1)),
-      monthlyBeforeTaxCents: line.monthlyCents,
+      monthlyAfterTaxCents: Math.round(monthly * (line.taxable ? keep : 1)),
+      monthlyBeforeTaxCents: monthly,
     });
   }
   const afterTaxCents = parts.reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
@@ -481,12 +581,12 @@ export type HealthcarePlan = {
   dentalVisionAnnualCents: number | null;
   /** How much faster than inflation medical costs rise, % a year. */
   growthPct: number;
+  inflationPct: number;
 };
 
 /**
- * Healthcare as its own yearly cost, in today's dollars, rising `growthPct` a
- * year faster than general inflation (medical costs run ahead of it), counted
- * from this year. Three lines: the health plan from military retirement until
+ * Healthcare as its own yearly cost, rising inflation + `growthPct` a year
+ * (medical costs run ahead of prices overall), counted from this year. Three lines: the health plan from military retirement until
  * TRICARE For Life starts, TFL (Medicare Part B) from its start age, and
  * dental & vision from retirement on. The retirement year only pays from the
  * retirement month.
@@ -498,15 +598,14 @@ export function healthcareForYear(year: number, plan: HealthcarePlan, thisYear: 
     (onTfl ? plan.tflAnnualCents ?? 0 : (plan.planAnnualCents ?? 0) * retiredShare) +
     (plan.dentalVisionAnnualCents ?? 0) * retiredShare;
   if (base <= 0) return 0;
-  return Math.round(base * Math.pow(1 + plan.growthPct / 100, Math.max(0, year - thisYear)));
+  return Math.round(base * inflateTo(year, thisYear, plan.inflationPct + plan.growthPct));
 }
 
 // ---- Rental properties.
 //
-// Everything is in today's dollars like the rest of the plan, except the
-// mortgage: its payment is fixed in nominal dollars, so it is worked out in
-// nominal terms and deflated each year. That is the honest version — inflation
-// quietly shrinks a fixed mortgage, and a rental's cash flow improves with it.
+// Price, rent and costs are typed at current rates and rise with inflation;
+// the value also grows by its appreciation on top. The mortgage payment stays
+// fixed, so a rental's cash flow improves as rent rises past it.
 
 export type RentalProperty = {
   id: string;
@@ -515,23 +614,23 @@ export type RentalProperty = {
   owned: boolean;
   /** Planned purchases: the year it is bought. */
   purchaseYear: number | null;
-  /** Planned: price in today's dollars. Owned: current value. */
+  /** Planned: price at current rates. Owned: current value. */
   valueCents: number;
   downPaymentPct: number;
   closingCostPct: number;
-  /** Owned: what is owed today (nominal = today's dollars now). */
+  /** Owned: what is owed now. */
   loanBalanceCents: number | null;
   loanRatePct: number;
   /** Planned: loan term. Owned: years left. */
   loanYears: number;
   monthlyRentCents: number;
   monthlyCostsCents: number;
-  /** Value growth above inflation. */
+  /** Value growth on top of inflation. */
   appreciationPct: number;
 };
 
 export type RentalYear = {
-  /** Rent − costs − mortgage payment for the year, today's dollars, before tax. */
+  /** Rent − costs − mortgage payment for the year, before tax. */
   cashFlowCents: number;
   equityStartCents: number;
   equityEndCents: number;
@@ -566,7 +665,7 @@ export function rentalForYear(
   thisYear: number,
   inflationPct: number,
 ): RentalYear | null {
-  const deflate = (y: number) => Math.pow(1 + inflationPct / 100, Math.max(0, y - thisYear));
+  const inflate = (y: number) => inflateTo(y, thisYear, inflationPct);
   const firstYear = p.owned ? thisYear + 1 : p.purchaseYear;
   if (firstYear == null || year < firstYear) return null;
 
@@ -574,13 +673,13 @@ export function rentalForYear(
   const valueBase = p.owned ? thisYear : p.purchaseYear!;
   const principal = p.owned
     ? p.loanBalanceCents ?? 0
-    : p.valueCents * deflate(p.purchaseYear!) * (1 - p.downPaymentPct / 100);
+    : p.valueCents * inflate(p.purchaseYear!) * (1 - p.downPaymentPct / 100);
   const payYearly = monthlyPayment(principal, p.loanRatePct, p.loanYears) * 12;
   const loanStart = p.owned ? thisYear + 1 : p.purchaseYear!;
 
   const equityEnd = (y: number) => {
-    const value = p.valueCents * Math.pow(1 + p.appreciationPct / 100, y - valueBase);
-    const owed = balanceAfter(principal, p.loanRatePct, p.loanYears, y - loanStart + 1) / deflate(y);
+    const value = p.valueCents * Math.pow(1 + p.appreciationPct / 100, y - valueBase) * inflate(y);
+    const owed = balanceAfter(principal, p.loanRatePct, p.loanYears, y - loanStart + 1);
     return value - owed;
   };
   const equityStart =
@@ -590,10 +689,10 @@ export function rentalForYear(
         : 0
       : equityEnd(year - 1);
   const paying = year - loanStart < p.loanYears;
-  const cashFlow = 12 * (p.monthlyRentCents - p.monthlyCostsCents) - (paying ? payYearly / deflate(year) : 0);
+  const cashFlow = 12 * (p.monthlyRentCents - p.monthlyCostsCents) * inflate(year) - (paying ? payYearly : 0);
   const purchaseCash =
     !p.owned && year === p.purchaseYear
-      ? p.valueCents * ((p.downPaymentPct + p.closingCostPct) / 100)
+      ? p.valueCents * inflate(p.purchaseYear!) * ((p.downPaymentPct + p.closingCostPct) / 100)
       : 0;
 
   return {

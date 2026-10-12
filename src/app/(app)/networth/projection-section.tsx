@@ -137,20 +137,24 @@ export function ProjectionSection({
   thisYear,
   seed,
   militaryRetireYear,
-  defaultTaxPct,
   currentNwCents,
   currentNwMonth,
+  assumptions,
+  details,
 }: {
   years: ProjectionYear[];
   currency: string;
   thisYear: number;
   seed: ProjectionSeed;
   militaryRetireYear: number | null;
-  defaultTaxPct: number;
-  /** Today's net worth — the same figure as the Retirement Financial Planner's card. */
+  /** Today's net worth at the last finished month's close. */
   currentNwCents: number;
   /** The finished month that figure closed (YYYY-MM-01); null = live. */
   currentNwMonth: string | null;
+  /** From the retirement plan: the Edit assumptions line that rebuilds this
+   *  table, and the retirement details under it. */
+  assumptions?: React.ReactNode;
+  details?: React.ReactNode;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: false }));
@@ -240,9 +244,8 @@ export function ProjectionSection({
           <span className="text-sm font-semibold sm:text-lg">Current and Projected Net Worth</span>
         </button>
 
-        {/* Same treatment as the Retirement Financial Planner cards: the pace and how far
-            ahead of the projection it is answer one question, so they share a card, and
-            each card says in a line what its number is. */}
+        {/* Now, this year's pace, and the end of the plan — each card says in
+            a line what its number is. */}
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {current ? (
             <Figure
@@ -256,7 +259,7 @@ export function ProjectionSection({
                       projection: ahead reads Up in green, behind Down in red. Its own
                       line on a phone, where the slash fell at a line end. */}
                   <span className="max-sm:hidden"> / </span>
-                  <span className={`font-semibold max-sm:block ${currentNwCents >= current.eoyCents ? "text-positive" : "text-negative"}`}>
+                  <span className={`whitespace-nowrap font-semibold max-sm:block ${currentNwCents >= current.eoyCents ? "text-positive" : "text-negative"}`}>
                     {currentNwCents >= current.eoyCents ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(currentNwCents - current.eoyCents), currency)}
                   </span>
                 </>
@@ -269,11 +272,19 @@ export function ProjectionSection({
               value={formatMoneyWhole(gapIsPace ? forecast! : lastYear!.actualCents!, currency)}
               tone={gap >= 0 ? "text-positive" : "text-negative"}
               sub={
-                gapIsPace
-                  ? `Projected NW ${gap >= 0 ? "ahead" : "behind"} by ${formatMoneyWhole(Math.abs(gap), currency)}`
-                  : `${gap >= 0 ? "ahead of" : "behind"} projection by ${formatMoneyWhole(Math.abs(gap), currency)}`
+                gapIsPace ? (
+                  <>
+                    {/* Only the Up/Down figure carries the colour, like the card beside it. */}
+                    <span className={`font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}>
+                      {gap >= 0 ? "Up" : "Down"}: {formatMoneyWhole(Math.abs(gap), currency)}
+                    </span>{" "}
+                    <span className="whitespace-nowrap">from Proj NW</span>
+                  </>
+                ) : (
+                  `${gap >= 0 ? "ahead of" : "behind"} projection by ${formatMoneyWhole(Math.abs(gap), currency)}`
+                )
               }
-              subClassName={`font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}
+              subClassName={gapIsPace ? undefined : `font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}
             />
           ) : null}
           {last ? (
@@ -282,7 +293,7 @@ export function ProjectionSection({
               value={formatMoneyWhole(last.eoyCents, currency)}
               tone=""
               style={{ color: "var(--viz-savings)" }}
-              sub={last.age != null ? `end of plan · age ${last.age}` : "end of plan"}
+              sub={last.age != null ? `Expected at age ${last.age}` : "Expected"}
               className="col-span-2 sm:col-span-1"
             />
           ) : null}
@@ -291,6 +302,7 @@ export function ProjectionSection({
 
       {open ? (
         <>
+          {assumptions ? <div className="px-4 pb-3">{assumptions}</div> : null}
           {/* The grid scrolls in its own box so thirty years of projection
               don't push the rest of the page down — and sticky only works
               against a bounded height, which is what gives the header row
@@ -331,13 +343,12 @@ export function ProjectionSection({
                       {/* Plan on top, what actually happened underneath. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {formatMoneyWhole(y.incomeCents, currency)}
-                        {/* Where the year's income comes from once the income
-                            lines are paying, and the tax taken off them. */}
-                        {militaryRetireYear != null && y.year >= militaryRetireYear ? (
-                          <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                            after {y.taxPct ?? defaultTaxPct}% tax
-                          </span>
-                        ) : y.incomeCents !== y.workIncomeCents && y.year >= thisYear ? (
+                        {/* Before military retirement: the other income on top
+                            of the typed pay. Income is gross — taxes are
+                            budgeted as spending. */}
+                        {(militaryRetireYear == null || y.year < militaryRetireYear) &&
+                        y.incomeCents !== y.workIncomeCents &&
+                        y.year >= thisYear ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
                             incl. {formatMoneyWhole(y.incomeCents - y.workIncomeCents, currency)} other
                           </span>
@@ -496,8 +507,9 @@ export function ProjectionSection({
             <p className="px-4 pb-3 text-sm font-medium text-negative">{error}</p>
           ) : null}
           {!error && notice ? (
-            <p className="px-4 pb-3 text-sm font-medium text-muted">{notice}</p>
+            <p className="px-4 pb-3 text-sm font-medium text-foreground">{notice}</p>
           ) : null}
+          {details}
         </>
       ) : null}
 
@@ -521,7 +533,6 @@ export function ProjectionSection({
           currency={currency}
           thisYear={thisYear}
           militaryRetireYear={militaryRetireYear}
-          defaultTaxPct={defaultTaxPct}
           onClose={() => setEditing(null)}
         />
       ) : null}
@@ -641,14 +652,12 @@ function YearModal({
   currency,
   thisYear,
   militaryRetireYear,
-  defaultTaxPct,
   onClose,
 }: {
   row: ProjectionYear;
   currency: string;
   thisYear: number;
   militaryRetireYear: number | null;
-  defaultTaxPct: number;
   onClose: () => void;
 }) {
   // From the military retirement year on, income is the income lines (after
@@ -657,7 +666,6 @@ function YearModal({
   const retired = militaryRetireYear != null && row.year >= militaryRetireYear;
   const futureYear = row.year > thisYear;
   const linesCents = row.incomeCents - (retired ? 0 : row.workIncomeCents);
-  const [taxPct, setTaxPct] = useState(row.taxPct == null ? "" : String(row.taxPct));
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -773,6 +781,9 @@ function YearModal({
         <input type="hidden" name="year" value={row.year} />
         <input type="hidden" name="boy" value={centsToDisplay(row.boyCents)} />
         <input type="hidden" name="carryForward" value={fromActuals ? "0" : "1"} />
+        {/* What the spending box opened with, so an untouched box keeps the
+            year's typed amount instead of re-typing the inflated one. */}
+        <input type="hidden" name="spendingWas" value={toWhole(row.baseSpendingCents)} />
 
         {/* Where the year stands, on top so it's read before any box is edited
             (Victor, 2026-09-28). */}
@@ -929,6 +940,8 @@ function YearModal({
             hint={
               [
                 healthCents > 0 ? `+${formatMoneyWhole(healthCents, currency)} healthcare` : "",
+                // A new amount here is this year's; later years add inflation.
+                futureYear ? "Later years add inflation" : "",
               ].filter(Boolean).join(" · ") || undefined
             }
           >
@@ -976,23 +989,6 @@ function YearModal({
           <Field label="Age">
             <input name="age" inputMode="numeric" defaultValue={row.age ?? ""} className={smallInputClass} />
           </Field>
-          {/* Retirement tax only matters once retired pay starts; before that
-              the box was a long note about a number the year doesn't use. It
-              still rides along hidden so saving never clears it. */}
-          {retired ? (
-            <Field label="Tax %" hint={`Default ${defaultTaxPct}%. VA isn't taxed.`}>
-              <input
-                name="taxPct"
-                inputMode="decimal"
-                value={taxPct}
-                onChange={(e) => setTaxPct(e.target.value)}
-                placeholder={String(defaultTaxPct)}
-                className={smallInputClass}
-              />
-            </Field>
-          ) : (
-            <input type="hidden" name="taxPct" value={taxPct} />
-          )}
           <Field label="Proj EOY NW">
             <input
               value={formatMoneyWhole(predictedEoyCents, currency)}

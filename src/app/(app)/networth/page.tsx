@@ -1,4 +1,4 @@
-import { parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
+import { CASH_KINDS, inflatedSpending, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -145,7 +145,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, real_return_pct, withdrawal_rate_pct, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, sbp_enabled, sbp_pct, retirement_tax_pct, longevity_age, healthcare_annual_cents, health_plans, dental_vision_annual_cents, healthcare_start_age, healthcare_growth_pct")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, cola_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_vision_annual_cents, healthcare_start_age, healthcare_growth_pct")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -586,7 +586,16 @@ export default async function NetworthPage() {
   // the figure entirely. Debts are netted off for the mirror of that: money
   // owed on a card is not money that can fund a retirement.
   let fiAssetsCents = 0;
+  // Cash the plan grows at the savings rate rather than the investment return.
+  let fiCashCents = 0;
+  let fiInvestCents = 0;
   for (const a of balanceRows ?? []) {
+    if (!a.is_kids_account && a.active !== false && (CASH_KINDS as readonly string[]).includes(a.kind)) {
+      fiCashCents += a.current_balance_cents ?? 0;
+    }
+    if (!a.is_kids_account && a.active !== false && a.kind === "investment") {
+      fiInvestCents += a.current_balance_cents ?? 0;
+    }
     if (a.is_kids_account || a.active === false) continue;
     if (a.kind === "credit_card" || a.kind === "debt_loan") continue;
     if (a.kind === PROPERTY_KIND) continue;
@@ -825,6 +834,13 @@ export default async function NetworthPage() {
   const upcomingTravelCents = await upcomingTravelPromise;
   await capturePromise;
 
+  // The typed spending each year, grown by inflation from the year it was typed —
+  // what the table shows and the year popup edits.
+  const grownSpend = inflatedSpending(
+    (projectionRows ?? []).map((r) => ({ year: r.year, baseSpendingCents: r.base_spending_cents ?? r.spending_cents ?? 0 })),
+    thisYearNum,
+    planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
+  );
   const projectionYears = (projectionRows ?? []).map((r) => ({
     year: r.year,
     age: r.age ?? null,
@@ -833,7 +849,7 @@ export default async function NetworthPage() {
     workIncomeCents: r.work_income_cents ?? r.income_cents ?? 0,
     taxPct: r.tax_pct == null ? null : Number(r.tax_pct),
     spendingCents: r.spending_cents ?? 0,
-    baseSpendingCents: r.base_spending_cents ?? r.spending_cents ?? 0,
+    baseSpendingCents: grownSpend.get(r.year) ?? r.base_spending_cents ?? r.spending_cents ?? 0,
     debtFreedCents: r.debt_freed_cents ?? 0,
     growthCents: r.growth_cents ?? 0,
     oneOffCents: r.one_off_cents ?? 0,
@@ -885,7 +901,8 @@ export default async function NetworthPage() {
         targetRetireMonth: planRow?.target_retire_month ?? null,
         annualSpendCents: planRow?.annual_spend_cents ?? null,
         annualContributionCents: planRow?.annual_contribution_cents ?? null,
-        realReturnPct: planRow?.real_return_pct == null ? 5 : Number(planRow.real_return_pct),
+        investmentReturnPct: planRow?.investment_return_pct == null ? 7.5 : Number(planRow.investment_return_pct),
+        withdrawStartYear: planRow?.withdraw_start_year ?? null,
         withdrawalRatePct:
           planRow?.withdrawal_rate_pct == null ? 4 : Number(planRow.withdrawal_rate_pct),
         // A pension, VA, Social Security — income the portfolio never has to
@@ -896,9 +913,10 @@ export default async function NetworthPage() {
         serviceStartMonth: planRow?.service_start_month ?? null,
         high3MonthlyCents: planRow?.high3_monthly_cents ?? null,
         inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
+        colaPct: planRow?.cola_pct == null ? 2.5 : Number(planRow.cola_pct),
+        cashReturnPct: planRow?.cash_return_pct == null ? 3 : Number(planRow.cash_return_pct),
         sbpEnabled: !!planRow?.sbp_enabled,
         sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
-        retirementTaxPct: planRow?.retirement_tax_pct == null ? 12 : Number(planRow.retirement_tax_pct),
         longevityAge: planRow?.longevity_age ?? 90,
         healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
         healthPlans: parseHealthPlans(planRow?.health_plans),
@@ -938,6 +956,8 @@ export default async function NetworthPage() {
       }}
       fiMeasured={{
         assetsCents: fiAssetsCents,
+        cashCents: fiCashCents,
+        investCents: fiInvestCents,
         asOfMonth: lastClosed?.month ?? null,
         spendCents: fiSpendCents,
         contributionCents: fiContributionCents,

@@ -255,29 +255,33 @@ export function NetworthBoard({
     <div className="mx-auto w-full max-w-[110rem] space-y-4">
       <h1 className="text-lg font-bold sm:text-2xl">Net Worth</h1>
 
-      {/* The household's own year-by-year plan, and how the record compares.
-          Rendered even with no years yet — that empty case is the only place
-          a projection can be started from. */}
-      <ProjectionSection
-        years={projectionYears}
-        currency={currency}
-        thisYear={thisYear}
-        seed={projectionSeed}
-        militaryRetireYear={fiPlan.targetRetireYear}
-        defaultTaxPct={fiPlan.retirementTaxPct}
-        currentNwCents={fiMeasured.assetsCents}
-        currentNwMonth={fiMeasured.asOfMonth}
-      />
-
-      {/* Retirement Financial Planner — sits under the year-by-year plan, and
-          above the history because the history is the evidence for both. */}
+      {/* The household's own year-by-year plan, how the record compares, and
+          the retirement it leads to — one section. The retirement plan works
+          out the Edit assumptions line and the details, and the
+          table section places them, so its rates sit right above the table
+          they rebuild. Rendered even with no years yet — that empty case is
+          the only place a projection can be started from. */}
       <FiSection
         plan={fiPlan}
         measured={fiMeasured}
         currency={currency}
         thisYear={thisYear}
         projection={projectionYears}
-      />
+      >
+        {({ assumptions, details }) => (
+          <ProjectionSection
+            years={projectionYears}
+            currency={currency}
+            thisYear={thisYear}
+            seed={projectionSeed}
+            militaryRetireYear={fiPlan.targetRetireYear}
+            currentNwCents={fiMeasured.assetsCents}
+            currentNwMonth={fiMeasured.asOfMonth}
+            assumptions={assumptions}
+            details={details}
+          />
+        )}
+      </FiSection>
 
       {/* The chart used to pin to the top of the viewport while you scrolled
           the tables below it. It scrolls away with everything else now: a card

@@ -11,6 +11,11 @@ import {
   estimatePension,
   healthcareForYear,
   incomeForYear,
+  inflatedSpending,
+  CASH_KINDS,
+  investShareOfNew,
+  nextCash,
+  yearGrowth,
   retiredShareOfYear,
   type HealthcarePlan,
   type HealthPlan,
@@ -356,11 +361,13 @@ export async function saveRetirementPlan(formData: FormData) {
   };
   const targetMonth = month("targetRetireMonth");
   const serviceStartMonth = month("serviceStartMonth");
-  const realReturn = num("realReturnPct");
+  const investReturn = num("investmentReturnPct");
+  const cola = num("colaPct");
+  const withdrawStart = num("withdrawStartYear");
   const withdrawal = num("withdrawalRatePct");
   const inflation = num("inflationPct");
+  const cashReturn = num("cashReturnPct");
   const sbpPct = num("sbpPct");
-  const taxPct = num("retirementTaxPct");
   const longevity = num("longevityAge");
   const healthStartAge = num("healthcareStartAge");
   // Each row: a plan kind and its yearly premium as typed.
@@ -385,20 +392,24 @@ export async function saveRetirementPlan(formData: FormData) {
   ) {
     return { error: "Service has to start before the military retirement year." };
   }
-  if (realReturn != null && (realReturn < -20 || realReturn > 20)) {
-    return { error: "A real return outside -20%…20% isn't a plan, it's a bet." };
+  if (investReturn != null && (investReturn < -20 || investReturn > 30)) {
+    return { error: "A rate of return outside -20%…30% isn't a plan, it's a bet." };
   }
+  if (cola != null && (cola < 0 || cola > 20)) {
+    return { error: "COLA has to be between 0% and 20%." };
+  }
+  if (!year(withdrawStart)) return { error: "Enter a four-digit year for when withdrawals start." };
   if (withdrawal != null && (withdrawal <= 0 || withdrawal > 20)) {
     return { error: "Withdrawal rate has to be between 0% and 20%." };
   }
   if (inflation != null && (inflation < 0 || inflation > 20)) {
     return { error: "Inflation has to be between 0% and 20%." };
   }
+  if (cashReturn != null && (cashReturn < 0 || cashReturn > 20)) {
+    return { error: "Cash rate has to be between 0% and 20%." };
+  }
   if (sbpPct != null && (sbpPct < 0 || sbpPct > 20)) {
     return { error: "SBP rate has to be between 0% and 20%." };
-  }
-  if (taxPct != null && (taxPct < 0 || taxPct > 60)) {
-    return { error: "Tax rate has to be between 0% and 60%." };
   }
   if (longevity != null && (longevity < 50 || longevity > 120)) {
     return { error: "Plan until age has to be between 50 and 120." };
@@ -556,12 +567,14 @@ export async function saveRetirementPlan(formData: FormData) {
       service_start_year: serviceStart,
       service_start_month: serviceStartMonth,
       high3_monthly_cents: money("high3"),
-      real_return_pct: realReturn ?? 5,
+      investment_return_pct: investReturn ?? 7.5,
+      cola_pct: cola ?? 2.5,
+      withdraw_start_year: withdrawStart,
       withdrawal_rate_pct: withdrawal ?? 4,
       inflation_pct: inflation ?? 2.5,
+      cash_return_pct: cashReturn ?? 3,
       sbp_enabled: formData.get("sbpEnabled") === "on",
       sbp_pct: sbpPct ?? 6.5,
-      retirement_tax_pct: taxPct ?? 12,
       longevity_age: longevity ?? 90,
       health_plans: healthPlans,
       healthcare_annual_cents: money("healthcareAnnual"),
@@ -682,9 +695,9 @@ const LINE_KINDS: IncomeLineKind[] = ["va", "social_security", "job", "spouse", 
 //
 // income_cents is each year's TOTAL take-home: the pay typed for the year
 // (work_income_cents, only before the military retirement year) plus every
-// income line paying that year, after SBP and tax. Future gains are the real
-// return on the year's opening balance, so a balance that is being spent down
-// earns less — and nothing once it is gone. The table is extended to the
+// income line paying that year, after SBP and tax. Future gains are the
+// investment return on the year's opening balance (cash at the cash rate), so
+// a balance that is being spent down earns less — and nothing once it is gone. The table is extended to the
 // plan-until age, carrying the last year's spending forward.
 //
 // Years before this one are history and are never touched; this year keeps
@@ -703,7 +716,7 @@ async function recomputeRetirementIncome(
       .eq("household_id", householdId)
       .order("year"),
     supabase.from("rental_properties").select("*").eq("household_id", householdId),
-    supabase.from("accounts").select("id, current_balance_cents").eq("household_id", householdId),
+    supabase.from("accounts").select("id, kind, is_kids_account, active, current_balance_cents").eq("household_id", householdId),
     supabase
       .from("debts")
       .select("property_account_id, current_balance_cents")
@@ -740,13 +753,12 @@ async function recomputeRetirementIncome(
       serviceStartYear: plan.service_start_year,
       serviceStartMonth: plan.service_start_month ?? null,
       high3MonthlyCents: plan.high3_monthly_cents,
-      inflationPct: Number(plan.inflation_pct ?? 2.5),
+      colaPct: Number(plan.cola_pct ?? 2.5),
       sbpEnabled: !!plan.sbp_enabled,
       sbpPct: Number(plan.sbp_pct ?? 6.5),
     },
-    thisYear,
   );
-  const defaultTax = Number(plan.retirement_tax_pct ?? 12);
+  const colaPct = Number(plan.cola_pct ?? 2.5);
   const inflationPct = Number(plan.inflation_pct ?? 2.5);
   const balances = new Map((acctRes.data ?? []).map((a) => [a.id as string, Number(a.current_balance_cents ?? 0)]));
   const loanByProperty = new Map<string, number>();
@@ -764,8 +776,21 @@ async function recomputeRetirementIncome(
     tflStartAge: Number(plan.healthcare_start_age ?? 65),
     dentalVisionAnnualCents: plan.dental_vision_annual_cents ?? null,
     growthPct: Number(plan.healthcare_growth_pct ?? 1.5),
+    inflationPct,
   };
-  const returnPct = Number(plan.real_return_pct ?? 5);
+  // Investments grow at the expected return; savings (checking + savings
+  // buckets) at the APY, and each year's saving is split between them.
+  const returnPct = Number(plan.investment_return_pct ?? 7.5);
+  const cashPct = Number(plan.cash_return_pct ?? 3);
+  const liveAccounts = (acctRes.data ?? []).filter((a) => a.active && !a.is_kids_account);
+  const cashNow = liveAccounts
+    .filter((a) => (CASH_KINDS as readonly string[]).includes(a.kind))
+    .reduce((t, a) => t + Number(a.current_balance_cents ?? 0), 0);
+  const investNow = liveAccounts
+    .filter((a) => a.kind === "investment")
+    .reduce((t, a) => t + Number(a.current_balance_cents ?? 0), 0);
+  // New savings split like the accounts are today.
+  const toInvestPct = investShareOfNew(cashNow, investNow);
 
   // Run to the plan-until age, carrying the last year forward.
   const lastYear = plan.birth_year ? plan.birth_year + Number(plan.longevity_age ?? 90) : null;
@@ -781,9 +806,19 @@ async function recomputeRetirementIncome(
     }
   }
 
+  // Typed spending rises with inflation from the year it was typed.
+  const grownSpend = inflatedSpending(
+    rows.map((r) => ({ year: r.year, baseSpendingCents: r.base_spending_cents ?? r.spending_cents })),
+    thisYear,
+    inflationPct,
+  );
+
   const stamp = new Date().toISOString();
   const out: Array<Record<string, unknown>> = [];
   let carry: number | null = null;
+  // Savings at the start of each future year; today's balance stands in for
+  // the close of this one.
+  let cash = cashNow;
   for (const row of rows) {
     if (row.year < thisYear) continue;
     const boy: number = carry ?? row.boy_cents;
@@ -791,28 +826,31 @@ async function recomputeRetirementIncome(
     // months of active-duty pay and gets two months of retired pay.
     const retiredShare = retiredShareOfYear(row.year, retireYear, retireMonth);
     const work = Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare));
-    const taxPct = row.tax_pct == null ? defaultTax : Number(row.tax_pct);
-    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, taxPct);
+    // Income is gross: taxes are budgeted as spending.
+    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0, thisYear, colaPct);
     const pensionYearly = (yearIncome.parts.find((p) => p.kind === "pension")?.monthlyAfterTaxCents ?? 0) * 12;
     const lineIncome = yearIncome.afterTaxCents - Math.round(pensionYearly * (1 - retiredShare));
     // Rentals: net rent is income; equity is part of net worth but earns no
     // investment return — it grows by principal paid and appreciation, and a
     // purchase moves the down payment out of savings (closing costs are gone).
-    const rent = rentalsForYear(rentals, row.year, thisYear, inflationPct, taxPct);
+    const rent = rentalsForYear(rentals, row.year, thisYear, inflationPct, 0);
     const income = work + lineIncome + rent.cashAfterTaxCents;
     const baseSpend = row.base_spending_cents ?? row.spending_cents;
     // Spending is what was typed plus healthcare — nothing else. It used to
     // drop by each debt's payment once the Debts page projected it paid off,
     // which on two small 0% cards meant a −$33…−$900 line on every row from
     // 2028; Victor had it removed (2026-09-28).
-    const spending = Math.max(0, baseSpend + healthcareForYear(row.year, health, thisYear));
+    const spending = Math.max(0, (grownSpend.get(row.year) ?? baseSpend) + healthcareForYear(row.year, health, thisYear));
     const investable = boy - rent.equityStartCents;
     const propertyEffect = rent.equityEndCents - rent.equityStartCents - rent.purchaseCashCents;
     const growth =
       row.year === thisYear
         ? row.growth_cents
-        : (investable > 0 ? Math.round((investable * returnPct) / 100) : 0) + propertyEffect;
+        : yearGrowth(investable, cash, cashPct, returnPct) + propertyEffect;
     const eoy = boy + income - spending + growth + row.one_off_cents;
+    if (row.year > thisYear) {
+      cash = nextCash(cash, cashPct, income - spending + row.one_off_cents, toInvestPct, eoy - rent.equityEndCents);
+    }
     out.push({
       household_id: householdId,
       year: row.year,
@@ -922,7 +960,7 @@ async function rebuildProjectionChain(
 // every one of them is editable afterwards.
 //
 // Income and spending are held flat across all twenty-five years on purpose.
-// The grid is in today's money and a change carries forward, so a flat start
+// A change carries forward, so a flat start
 // is the honest one — the user bends it where their life actually bends.
 const SEED_YEARS = 25;
 
@@ -1102,6 +1140,13 @@ export async function saveProjectionYear(formData: FormData) {
     "networth_projection",
   );
 
+  // The box shows the year's spending grown by inflation. Saved untouched, the
+  // typed amount behind it stays; a new amount becomes this year's figure.
+  const spendingWas = String(formData.get("spendingWas") ?? "");
+  const spendingTyped = spendingWas === "" || displayToCents(spendingWas) !== spending;
+  const prevBase = prev ? prev.base_spending_cents ?? prev.spending_cents : null;
+  const baseSpending = !spendingTyped && prevBase != null ? prevBase : spending;
+
   const { error } = await supabase.from("networth_projection").upsert(
     {
       household_id: householdId,
@@ -1113,7 +1158,7 @@ export async function saveProjectionYear(formData: FormData) {
       income_cents: income,
       work_income_cents: income,
       spending_cents: spending,
-      base_spending_cents: spending,
+      base_spending_cents: baseSpending,
       growth_cents: growth,
       one_off_cents: oneOff,
       tax_pct: taxPct,
@@ -1153,7 +1198,7 @@ export async function saveProjectionYear(formData: FormData) {
       carry.work_income_cents = income;
       carry.income_cents = income;
     }
-    if (!prev || (prev.base_spending_cents ?? prev.spending_cents) !== spending) {
+    if (spendingTyped && prevBase !== spending) {
       carry.base_spending_cents = spending;
       carry.spending_cents = spending;
     }

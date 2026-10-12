@@ -10,6 +10,8 @@ import {
   ageInYear,
   estimatePension,
   incomeForYear,
+  inflateTo,
+  investShareOfNew,
   projectFi,
   rentalForYear,
   rentalsForYear,
@@ -31,9 +33,12 @@ export type FiPlan = {
   targetRetireMonth: number | null;
   annualSpendCents: number | null;
   annualContributionCents: number | null;
-  realReturnPct: number;
+  /** Expected yearly return on investments. */
+  investmentReturnPct: number;
   withdrawalRatePct: number;
-  /** Pension + VA + Social Security per year, in today's money. */
+  /** When withdrawals at that rate start; null = the military retirement year. */
+  withdrawStartYear: number | null;
+  /** Pension + VA + Social Security per year. */
   guaranteedIncomeCents: number | null;
   /** First year that income arrives; null means it already does. */
   guaranteedIncomeStartYear: number | null;
@@ -41,15 +46,18 @@ export type FiPlan = {
   serviceStartYear: number | null;
   serviceStartMonth: number | null;
   high3MonthlyCents: number | null;
+  /** Raises spending, healthcare and rental prices each year. */
   inflationPct: number;
+  /** Yearly raise on retired pay, VA, Social Security and other income. */
+  colaPct: number;
+  /** What savings (checking + savings buckets) earn a year. */
+  cashReturnPct: number;
   sbpEnabled: boolean;
   sbpPct: number;
-  /** Default tax on retirement income; a year in the table can override it. */
-  retirementTaxPct: number;
   /** The age the plan runs to. */
   longevityAge: number;
-  /** TRICARE For Life: yearly Medicare Part B premium (today's dollars)
-   *  from the start age, rising growthPct a year above inflation. */
+  /** TRICARE For Life: yearly Medicare Part B premium at current rates
+   *  from the start age, rising inflation + growthPct a year. */
   healthcareAnnualCents: number | null;
   /** Health plans from military retirement until TFL, each with its yearly
    *  premium. More than one runs side by side. */
@@ -78,6 +86,10 @@ export type FiMeasured = {
    *  Assets card: no kids accounts, no cards or loans, debts netted off) —
    *  cash and savings included. */
   assetsCents: number;
+  /** Checking + savings buckets now (live) — grown at the savings APY. */
+  cashCents: number;
+  /** Investment accounts now (live). */
+  investCents: number;
   /** The month `assetsCents` closed (YYYY-MM-01); null = live balances. */
   asOfMonth: string | null;
   /** Bills + expenses over the last twelve months. */
@@ -112,6 +124,7 @@ export function FiSection({
   currency,
   thisYear,
   projection,
+  children,
 }: {
   plan: FiPlan;
   measured: FiMeasured;
@@ -120,6 +133,9 @@ export function FiSection({
   /** Victor's year-by-year plan. When it has future years, they drive the
    *  spending and saving this section projects with. */
   projection: FiProjectionYear[];
+  /** Where the pieces go: Current and Projected Net Worth lays them out, so
+   *  the plan, its rates and its retirement read as one section. */
+  children: (parts: { assumptions: React.ReactNode; details: React.ReactNode }) => React.ReactNode;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-fi", () => ({ open: false }));
@@ -127,20 +143,21 @@ export function FiSection({
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
   const [editing, setEditing] = useState(false);
-  // Year shown on the net worth card; null = today.
-  const [nwYear, setNwYear] = useState<number | null>(null);
 
   const portfolioCents = measured.assetsCents;
   // The projection starts from this year's planned year-end net worth (the
   // Current and Projected Net Worth table's own figure), so every future year matches the
-  // table exactly. Today's actual balance still shows on the Net worth card.
+  // table exactly.
   const startCents =
     projection.find((p) => p.year === thisYear)?.eoyCents || portfolioCents;
-  // Last year's closing net worth: the recorded figure, else the plan's.
-  const lastYearRow = projection.find((p) => p.year === thisYear - 1);
-  const prevNwCents = lastYearRow ? lastYearRow.actualCents ?? lastYearRow.eoyCents : null;
+  // The first FULL year of military retirement: a November retirement year
+  // holds ten months of active-duty pay and only two of retired pay.
+  const firstFullRetiredYear =
+    plan.targetRetireYear == null
+      ? thisYear + 1
+      : plan.targetRetireYear + ((plan.targetRetireMonth ?? 1) > 1 ? 1 : 0);
 
-  // Military retired pay in today's dollars, from the DFAS High-3 formula.
+  // Military retired pay from the DFAS High-3 formula, with a COLA each year after.
   const pension = estimatePension(
     {
       retireYear: plan.targetRetireYear,
@@ -148,20 +165,18 @@ export function FiSection({
       serviceStartYear: plan.serviceStartYear,
       serviceStartMonth: plan.serviceStartMonth,
       high3MonthlyCents: plan.high3MonthlyCents,
-      inflationPct: plan.inflationPct,
+      colaPct: plan.colaPct,
       sbpEnabled: plan.sbpEnabled,
       sbpPct: plan.sbpPct,
     },
-    thisYear,
   );
-  const incomeIn = (year: number, taxPct: number | null) =>
-    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, taxPct ?? plan.retirementTaxPct);
-  const rentIn = (year: number, taxPct: number | null) =>
-    rentalsForYear(plan.rentals, year, thisYear, plan.inflationPct, taxPct ?? plan.retirementTaxPct);
+  // Income is gross: taxes are budgeted as spending.
+  const incomeIn = (year: number) =>
+    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, 0, thisYear, plan.colaPct);
+  const rentIn = (year: number) => rentalsForYear(plan.rentals, year, thisYear, plan.inflationPct, 0);
 
-  // The Net Worth Plan table, read as today's money — which is what it holds
-  // (round figures typed by hand: $90k while the kids are home, $45k once they
-  // aren't). Its income already includes the retirement income lines after
+  // The Net Worth Plan table, each year as typed (round figures typed by
+  // hand: $90k while the kids are home, $45k once they aren't). Its income already includes the retirement income lines after
   // tax, so saving = income − spending is right in every year, working or not.
   const schedule = useMemo<FiScheduleYear[]>(
     () =>
@@ -176,7 +191,7 @@ export function FiSection({
           // Retired pay, VA, Social Security and net rent lower the FI goal —
           // a job or a spouse's pay can stop.
           guaranteedCents:
-            incomeIn(p.year, p.taxPct).guaranteedCents + Math.max(0, rentIn(p.year, p.taxPct).cashAfterTaxCents),
+            incomeIn(p.year).guaranteedCents + Math.max(0, rentIn(p.year).cashAfterTaxCents),
           // The table's own gains, so the chart can't drift from it (they
           // hold rental equity, which earns no investment return).
           growthCents: p.year > thisYear ? p.growthCents : undefined,
@@ -186,7 +201,8 @@ export function FiSection({
   );
 
   const usingGrid = schedule.length > 0;
-  const contributionCents = measured.contributionCents;
+  // New savings split like the accounts are today — savings vs investments.
+  const toInvestPct = investShareOfNew(measured.cashCents, measured.investCents);
   const untilYear = plan.birthYear ? plan.birthYear + plan.longevityAge : null;
 
   const fi = useMemo(
@@ -196,21 +212,22 @@ export function FiSection({
           portfolioCents: startCents,
           annualContributionCents: measured.contributionCents,
           annualSpendCents: measured.spendCents,
-          realReturnPct: plan.realReturnPct,
+          returnPct: plan.investmentReturnPct,
           withdrawalRatePct: plan.withdrawalRatePct,
           schedule,
           untilYear,
+          cash: { nowCents: measured.cashCents, pct: plan.cashReturnPct, toInvestPct },
         },
         thisYear,
       ),
-    [startCents, measured.contributionCents, measured.spendCents, plan.realReturnPct, plan.withdrawalRatePct, schedule, untilYear, thisYear],
+    [startCents, measured.contributionCents, measured.spendCents, measured.cashCents, plan.investmentReturnPct, plan.cashReturnPct, toInvestPct, plan.withdrawalRatePct, schedule, untilYear, thisYear],
   );
 
   const fiAge = ageInYear(plan.birthYear, fi.fiYear ?? thisYear);
-  // What the plan says about the military retirement year, when one is set.
-  const atTarget = plan.targetRetireYear
-    ? fi.years.find((y) => y.year === plan.targetRetireYear) ?? null
-    : null;
+  // The year 4% withdrawals start — set on its own (a civilian job can follow
+  // military retirement), else the military retirement year.
+  const withdrawYear = plan.withdrawStartYear ?? plan.targetRetireYear;
+  const atTarget = withdrawYear ? fi.years.find((y) => y.year === withdrawYear) ?? null : null;
   // The year the plan first crosses its target. Crossing today has no row in
   // fi.years (it starts next year), so today's figures stand in for it.
   const fiRow =
@@ -224,19 +241,19 @@ export function FiSection({
           guaranteedCents: 0,
         };
 
-  // What's left for the kids: net worth at 80 and at the plan-until age.
+  // Net worth at age 80.
   const endAt = (age: number) =>
     plan.birthYear ? fi.years.find((y) => y.year === plan.birthYear! + age)?.endCents ?? null : null;
   const at80 = endAt(80);
-  const atEnd = endAt(plan.longevityAge);
   const runsOutAge = fi.runsOutYear && plan.birthYear ? fi.runsOutYear - plan.birthYear : null;
 
-  // Monthly income the first year of military retirement, by source.
+  // Monthly income in the first FULL year of military retirement, by source —
+  // the same year as a row of the table, so "Left to save" matches it.
+  const incomeYear = firstFullRetiredYear;
   const retireIncome = (() => {
     if (!plan.targetRetireYear) return null;
-    const tax = projection.find((p) => p.year === plan.targetRetireYear)?.taxPct ?? null;
-    const base = incomeIn(plan.targetRetireYear, tax);
-    const rent = rentIn(plan.targetRetireYear, tax);
+    const base = incomeIn(incomeYear);
+    const rent = rentIn(incomeYear);
     const parts = [
       ...base.parts,
       ...rent.parts.map((r) => ({
@@ -249,7 +266,7 @@ export function FiSection({
     return {
       parts,
       afterTaxCents: base.afterTaxCents + rent.cashAfterTaxCents,
-      taxPct: tax ?? plan.retirementTaxPct,
+      taxPct: 0,
       // The tax is whatever separates the before- and after-tax rows, so the
       // breakdown always adds up exactly.
       taxMonthly:
@@ -257,13 +274,11 @@ export function FiSection({
         parts.reduce((t, p) => t + p.monthlyAfterTaxCents, 0),
     };
   })();
-  // The year the Investments panel checks: military retirement when set,
-  // otherwise the year the plan becomes financially free.
+  // The year the Investments panel checks: when withdrawals start, otherwise
+  // the year the plan becomes financially free.
   const mile = atTarget ?? fiRow;
-  // The Growth card's year: whatever was picked, else the first plan year.
-  const nwRow = (nwYear == null ? null : fi.years.find((y) => y.year === nwYear)) ?? fi.years[0] ?? null;
   const retireSpendYearly = plan.targetRetireYear
-    ? projection.find((p) => p.year === plan.targetRetireYear)?.spendingCents ?? 0
+    ? projection.find((p) => p.year === incomeYear)?.spendingCents ?? 0
     : 0;
   const retireSpendMonthly = Math.round(retireSpendYearly / 12);
   const ssLine = plan.incomeLines.find((l) => l.kind === "social_security" && l.startYear != null) ?? null;
@@ -271,19 +286,20 @@ export function FiSection({
   // ---- Bad-market test: the same plan, but the portfolio drops in the year
   // retirement starts, the worst year for it to happen.
   const [dropPct, setDropPct] = useState(30);
-  const shockYear = Math.max(thisYear + 1, plan.targetRetireYear ?? fi.fiYear ?? thisYear + 1);
+  const shockYear = Math.max(thisYear + 1, withdrawYear ?? fi.fiYear ?? thisYear + 1);
   const baseInputs = {
     portfolioCents: startCents,
     annualContributionCents: measured.contributionCents,
     annualSpendCents: measured.spendCents,
-    realReturnPct: plan.realReturnPct,
+    returnPct: plan.investmentReturnPct,
     withdrawalRatePct: plan.withdrawalRatePct,
     untilYear,
+    cash: { nowCents: measured.cashCents, pct: plan.cashReturnPct, toInvestPct },
   };
   const stressed = useMemo(
     () => projectFi({ ...baseInputs, schedule, shock: { year: shockYear, pct: dropPct } }, thisYear),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [startCents, measured.contributionCents, measured.spendCents, plan.realReturnPct, plan.withdrawalRatePct, schedule, untilYear, thisYear, shockYear, dropPct],
+    [startCents, measured.contributionCents, measured.spendCents, measured.cashCents, plan.investmentReturnPct, plan.cashReturnPct, toInvestPct, plan.withdrawalRatePct, schedule, untilYear, thisYear, shockYear, dropPct],
   );
   const endOf = (years: { year: number; endCents: number }[]) =>
     untilYear == null ? null : years.find((y) => y.year === untilYear)?.endCents ?? null;
@@ -292,16 +308,15 @@ export function FiSection({
   const stressEnd = endOf(stressed.years);
 
   // ---- Survivor view: the plan from `deathYear` on, if Victor dies first.
-  // Only from military retirement on: before it, the plan's income is his
-  // active-duty pay, which the table doesn't split out.
-  const survivorFirst = Math.max(thisYear + 1, plan.targetRetireYear ?? thisYear + 1);
+  // Only from the first FULL year of military retirement: before it, the
+  // plan's income is his active-duty pay, which the table doesn't split out.
+  const survivorFirst = Math.max(thisYear + 1, firstFullRetiredYear);
   const [deathYearPick, setDeathYear] = useState<number | null>(null);
   const deathYear = Math.max(survivorFirst, deathYearPick ?? survivorFirst);
   const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
   const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
-  const taxFor = (year: number) => projection.find((p) => p.year === year)?.taxPct ?? null;
   const survIn = (year: number) =>
-    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, taxFor(year) ?? plan.retirementTaxPct);
+    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, 0, thisYear, plan.colaPct);
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
     // The plan's years carried forward to the plan-until year, so a death
@@ -311,17 +326,17 @@ export function FiSection({
     if (last) for (let y = last.year + 1; y <= untilYear; y++) full.push({ ...last, year: y, growthCents: undefined });
     const survSchedule = full.map((y) => {
       if (y.year < deathYear) return y;
-      const tax = taxFor(y.year);
-      const base = incomeIn(y.year, tax);
+      const base = incomeIn(y.year);
       const surv = survIn(y.year);
-      const rent = Math.max(0, rentIn(y.year, tax).cashAfterTaxCents);
+      const rent = Math.max(0, rentIn(y.year).cashAfterTaxCents);
+      const benefits = Math.round(benefitsMonthly * 12 * inflateTo(y.year, thisYear, plan.colaPct));
       return {
         year: y.year,
         spendCents: y.spendCents,
         // Same spending; his income out, the survivor's in, the payout once.
         contributionCents:
-          y.contributionCents - base.afterTaxCents + surv.afterTaxCents + benefitsMonthly * 12 + (y.year === deathYear ? insuranceCents : 0),
-        guaranteedCents: surv.guaranteedCents + benefitsMonthly * 12 + rent,
+          y.contributionCents - base.afterTaxCents + surv.afterTaxCents + benefits + (y.year === deathYear ? insuranceCents : 0),
+        guaranteedCents: surv.guaranteedCents + benefits + rent,
       };
     });
     return projectFi({ ...baseInputs, schedule: survSchedule, ownGrowthFrom: deathYear }, thisYear);
@@ -334,144 +349,55 @@ export function FiSection({
     const beforeTax = surv.parts.reduce((t, p) => t + p.monthlyBeforeTaxCents, 0);
     const afterTax = surv.parts.reduce((t, p) => t + p.monthlyAfterTaxCents, 0);
     return {
-      tax: taxFor(deathYear) ?? plan.retirementTaxPct,
+      tax: 0,
       parts: surv.parts,
       taxMonthly: beforeTax - afterTax,
-      afterTaxMonthly: afterTax + benefitsMonthly,
+      afterTaxMonthly: afterTax + Math.round(benefitsMonthly * inflateTo(deathYear, thisYear, plan.colaPct)),
       spendMonthly: Math.round(spendYearly / 12),
     };
   })();
   const yearOptions =
     untilYear == null ? [] : Array.from({ length: Math.max(0, untilYear - survivorFirst + 1) }, (_, i) => survivorFirst + i);
 
-  return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="px-4 py-3">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex w-full min-w-0 items-center gap-2 text-left"
+  // The button that opens the rates that rebuild the table, above it.
+  const assumptions = (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-foreground">
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        // Soft blue from the viz palette (not brand indigo — no purple on data).
+        className="rounded-md px-2 py-0.5 text-xs font-semibold sm:text-sm ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
+      >
+        Edit assumptions
+      </button>
+    </p>
+  );
+
+  // Everything behind the Retirement card, under the table, closed by default.
+  const details = (
+    <div className="border-t border-line px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-2 text-left"
+      >
+        <svg
+          aria-hidden
+          viewBox="0 0 20 20"
+          className={`h-3.5 w-3.5 shrink-0 text-foreground transition-transform ${open ? "" : "-rotate-90"}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         >
-          <svg
-            aria-hidden
-            viewBox="0 0 20 20"
-            className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M5 7.5 10 12.5 15 7.5" />
-          </svg>
-          <span className="text-sm font-semibold sm:text-lg">Retirement Financial Planner</span>
-        </button>
-
-        {/* Today, growth to a picked year, and whether the plan works.
-            The breakdown behind "On track" lives in the panels below. */}
-        <div className={`mt-3 grid grid-cols-2 gap-2 ${nwRow ? "sm:grid-cols-3" : ""}`}>
-          {/* The last finished month's close — the year picker lives on the Growth card. */}
-          <Figure
-            label={
-              measured.asOfMonth
-                ? `Net worth: ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(measured.asOfMonth.slice(5, 7)) - 1]} ${measured.asOfMonth.slice(0, 4)}`
-                : `Net worth: ${thisYear}`
-            }
-            value={formatMoneyWhole(portfolioCents, currency)}
-            tone="text-foreground"
-            sub={prevNwCents != null ? `${thisYear - 1} NW: ${formatMoneyWhole(prevNwCents, currency)}` : "today"}
-          />
-          {/* How much the picked year adds on top of today's net worth
-              (same figures as the chart and the Investments panel). */}
-          {nwRow ? (
-            <Figure
-              label={
-                <span className="flex flex-col items-center justify-center gap-1 sm:flex-row sm:gap-1.5">
-                  NW Growth by:
-                  <select
-                    value={nwRow.year}
-                    onChange={(e) => setNwYear(Number(e.target.value))}
-                    aria-label="Growth year"
-                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 max-sm:text-[12px] sm:text-sm font-semibold normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-                  >
-                    {fi.years.map((y) => (
-                      <option key={y.year} value={y.year}>
-                        {y.year}
-                        {plan.birthYear ? ` · age ${y.year - plan.birthYear}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-              }
-              value={`${nwRow.endCents >= portfolioCents ? "+" : "−"}${formatMoneyWhole(Math.abs(nwRow.endCents - portfolioCents), currency)}`}
-              tone={nwRow.endCents >= portfolioCents ? "text-positive" : "text-negative"}
-              sub={
-                <>
-                  {formatMoneyWhole(nwRow.endCents, currency)} expected
-                  {portfolioCents > 0
-                    ? ` · ${nwRow.endCents >= portfolioCents ? "+" : "−"}${Math.round((Math.abs(nwRow.endCents - portfolioCents) / portfolioCents) * 100)}%`
-                    : ""}
-                </>
-              }
-            />
-          ) : null}
-          {mile ? (
-            <Figure
-              className={nwRow ? "col-span-2 sm:col-span-1" : ""}
-              label={`Retirement ${mile.year}`}
-              value={
-                mile.endCents >= mile.targetCents
-                  ? "On track"
-                  : `Short ${formatMoneyWhole(mile.targetCents - mile.endCents, currency)}`
-              }
-              tone={mile.endCents >= mile.targetCents ? "text-positive" : "text-negative"}
-              sub={
-                <>
-                  <span className="font-semibold text-positive">{axisMoney(mile.endCents)} expected</span>
-                  {" · "}
-                  {/* The target, not a shortfall — blue, so "On track" doesn't
-                      sit beside a figure in alarm red. */}
-                  <span className="font-semibold" style={{ color: "var(--viz-savings)" }}>
-                    {axisMoney(mile.targetCents)} needed
-                  </span>
-                </>
-              }
-            />
-          ) : (
-            <Figure
-              className={nwRow ? "col-span-2 sm:col-span-1" : ""}
-              label="Retirement"
-              value="Not on this plan"
-              tone="text-negative"
-            />
-          )}
-        </div>
-      </div>
-
+          <path d="M5 7.5 10 12.5 15 7.5" />
+        </svg>
+        <span className="text-sm font-semibold sm:text-lg">Retirement details</span>
+      </button>
       {open ? (
-        <div className="px-4 pb-4">
-          {/* One plain line of assumptions, then the two years that matter
-              side by side. This used to be two long sentences, and because
-              the plan spends more at retirement than at FI they quoted two
-              different targets ($2.25M and $1.125M) with nothing saying why. */}
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-foreground">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              // Soft blue from the viz palette (not brand indigo — no purple on data).
-              className="rounded-md px-2 py-0.5 text-xs font-semibold sm:text-sm ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
-            >
-              Edit assumptions
-            </button>
-            <span>
-              {plan.realReturnPct}% growth a year after inflation · withdraw {plan.withdrawalRatePct}% a year
-              {" "}· {plan.retirementTaxPct}% tax on retirement income
-              {usingGrid ? "" : ` · saving ${formatMoneyWhole(contributionCents, currency)} a year`}
-              {" "}· in today&rsquo;s dollars
-            </span>
-          </p>
-
+        <div>
           {/* Two panels instead of five scattered cards: what retirement
               pays (before tax, the tax, after tax, against spending) and what
               the investments have to do about the gap. Each reads top to
@@ -480,9 +406,11 @@ export function FiSection({
             {retireIncome && plan.targetRetireYear ? (
               <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
                 <p className="text-center text-sm font-bold sm:text-lg">
-                  Income in {plan.targetRetireYear}
-                  {plan.birthYear ? ` · age ${plan.targetRetireYear - plan.birthYear}` : ""}
-                  <span className="font-normal text-foreground"> · today&rsquo;s dollars</span>
+                  Income in {incomeYear}
+                  {plan.birthYear ? ` · age ${incomeYear - plan.birthYear}` : ""}
+                  {incomeYear !== plan.targetRetireYear ? (
+                    <span className="block text-xs font-normal sm:text-sm">First full year retired</span>
+                  ) : null}
                 </p>
                 {retireIncome.parts.length === 0 ? (
                   <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit assumptions.</p>
@@ -515,7 +443,7 @@ export function FiSection({
                       />
                     ) : null}
                     <IncomeRow
-                      label="Income after tax"
+                      label={retireIncome.taxMonthly > 0 ? "Income after tax" : "Total income"}
                       monthly={Math.round(retireIncome.afterTaxCents / 12)}
                       yearly={retireIncome.afterTaxCents}
                       currency={currency}
@@ -544,17 +472,7 @@ export function FiSection({
                     })()}
                   </ul>
                 )}
-                {pension ? (
-                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">
-                    {/* Spelled out as the DFAS sum — service × 2.5% = the share of High-3 —
-                        so the percentage is never a bare number to take on trust. */}
-                    Retired pay{plan.targetRetireMonth ? ` from ${MONTHS[plan.targetRetireMonth - 1]} ${plan.targetRetireYear}` : ""}:{" "}
-                    {pension.yearsOfService} yrs{pension.extraMonths ? ` ${pension.extraMonths} mos` : ""} of service × 2.5% ={" "}
-                    {pension.multiplierPct}% of your {formatMoneyWhole(plan.high3MonthlyCents ?? 0, currency)}/mo High-3 ={" "}
-                    {formatMoneyWhole(pension.grossAtRetireCents, currency)}/mo in {plan.targetRetireYear} dollars
-                    {pension.sbpTodayCents > 0 ? ` · after SBP of ${formatMoneyWhole(pension.sbpTodayCents, currency)}/mo` : ""}
-                  </p>
-                ) : (
+                {pension ? null : (
                   <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and High-3 in Edit assumptions.</p>
                 )}
               </div>
@@ -614,19 +532,14 @@ export function FiSection({
                   }
                   tone={untilYear == null ? "" : runsOutAge != null ? "text-negative" : "text-positive"}
                 />
-                {[
-                  { age: 80, cents: at80 },
-                  { age: plan.longevityAge, cents: atEnd },
-                ].map((row) => (
-                  <ValueRow
-                    key={row.age}
-                    label={`Left at age ${row.age}`}
-                    // The year that age falls in — the balance is its year-end
-                    // bar in the chart below.
-                    note={plan.birthYear ? `Year: ${plan.birthYear + row.age}` : undefined}
-                    value={row.cents == null ? "—" : formatMoneyWhole(Math.max(0, row.cents), currency)}
-                  />
-                ))}
+                {/* The plan-until age is the last card above the table. */}
+                <ValueRow
+                  label="Left at age 80"
+                  // The year that age falls in — the balance is its year-end
+                  // bar in the chart below.
+                  note={plan.birthYear ? `Year: ${plan.birthYear + 80}` : undefined}
+                  value={at80 == null ? "—" : formatMoneyWhole(Math.max(0, at80), currency)}
+                />
               </ul>
             </div>
           </div>
@@ -713,9 +626,10 @@ export function FiSection({
                     currency={currency}
                   />
                 ))}
-                {plan.survivorExtras.benefits.map((b) => (
-                  <IncomeRow key={b.name} label={b.name} note="from Estate guide" monthly={b.monthlyCents} yearly={b.monthlyCents * 12} currency={currency} />
-                ))}
+                {plan.survivorExtras.benefits.map((b) => {
+                  const monthly = Math.round(b.monthlyCents * inflateTo(deathYear, thisYear, plan.colaPct));
+                  return <IncomeRow key={b.name} label={b.name} note="from Estate guide" monthly={monthly} yearly={monthly * 12} currency={currency} />;
+                })}
                 {survivorYear.taxMonthly > 0 ? (
                   <IncomeRow
                     label={`Tax (${survivorYear.tax}%)`}
@@ -726,7 +640,7 @@ export function FiSection({
                   />
                 ) : null}
                 <IncomeRow
-                  label="Income after tax"
+                  label={survivorYear.taxMonthly > 0 ? "Income after tax" : "Total income"}
                   monthly={survivorYear.afterTaxMonthly}
                   yearly={survivorYear.afterTaxMonthly * 12}
                   currency={currency}
@@ -773,12 +687,6 @@ export function FiSection({
                   bold
                 />
               </ul>
-              <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">
-                {plan.sbpEnabled ? "SBP: 55% of retired pay" : "No SBP: retired pay stops"} · VA and second job stop · larger Social Security kept
-              </p>
-              {insuranceCents === 0 && plan.survivorExtras.benefits.length === 0 ? (
-                <p className="mt-0.5 text-center text-xs sm:text-sm text-foreground">Life insurance: add it in Accounts → Estate guide</p>
-              ) : null}
             </div>
           </div>
 
@@ -791,14 +699,18 @@ export function FiSection({
             projection={projection}
             currency={currency}
           />
-
         </div>
       ) : null}
+    </div>
+  );
 
+  return (
+    <>
+      {children({ assumptions, details })}
       {editing ? (
         <PlanModal plan={plan} thisYear={thisYear} currency={currency} onClose={() => setEditing(false)} />
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -1146,7 +1058,6 @@ function FiChart({
             Money ran out
           </span>
         ) : null}
-        <span>Tap a bar to see that year.</span>
       </div>
     </div>
   );
@@ -1272,11 +1183,10 @@ function PlanModal({
       serviceStartYear: toYear(serviceStart),
       serviceStartMonth: serviceMonth ? Number(serviceMonth) : null,
       high3MonthlyCents: high3.trim() ? Math.round(Number(high3.replace(/[$,]/g, "")) * 100) || null : null,
-      inflationPct: Number(inflation) || 0,
+      colaPct: plan.colaPct,
       sbpEnabled,
       sbpPct: Number(sbpPct) || 0,
     },
-    thisYear,
   );
 
   const [lines, setLines] = useState<LineDraft[]>(() =>
@@ -1359,9 +1269,9 @@ function PlanModal({
     if (first == null || (!owned && model.valueCents <= 0)) return null;
     const y = rentalForYear(model, first, thisYear, Number(inflation) || 0);
     if (!y) return null;
-    const payMonthly = Math.round((12 * (model.monthlyRentCents - model.monthlyCostsCents) - y.cashFlowCents) / 12);
-    const payThenMonthly = Math.round(payMonthly * Math.pow(1 + (Number(inflation) || 0) / 100, Math.max(0, first - thisYear)));
-    return { first, cashMonthly: Math.round(y.cashFlowCents / 12), payMonthly, payThenMonthly, purchaseCash: y.purchaseCashCents, equity: y.equityEndCents };
+    const netRent = 12 * (model.monthlyRentCents - model.monthlyCostsCents) * inflateTo(first, thisYear, Number(inflation) || 0);
+    const payMonthly = Math.round((netRent - y.cashFlowCents) / 12);
+    return { first, cashMonthly: Math.round(y.cashFlowCents / 12), payMonthly, purchaseCash: y.purchaseCashCents, equity: y.equityEndCents };
   };
 
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
@@ -1545,7 +1455,7 @@ function PlanModal({
                 onChange={(e) => setSbpPct(e.target.value)}
                 disabled={!sbpEnabled}
                 aria-label="SBP rate %"
-                className="w-full min-w-0 rounded-md bg-sky-50 dark:bg-background py-1.5 pl-2 pr-6 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                className="w-full min-w-0 rounded-md bg-surface py-1.5 pl-2 pr-6 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
               />
               <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground">%</span>
             </span>
@@ -1554,24 +1464,20 @@ function PlanModal({
         {estimate ? (
           <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
             <span className="font-semibold">Retired pay: {formatMoneyWhole(estimate.grossAtRetireCents, currency)}/mo</span>{" "}
-            in {toYear(retireYear)} dollars ={" "}
-            <span className="font-semibold">{formatMoneyWhole(estimate.grossTodayCents, currency)}/mo</span>{" "}
-            in today&rsquo;s dollars
-            {estimate.sbpTodayCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpTodayCents, currency)} SBP` : ""}, before tax.
+            in {toYear(retireYear)}
+            {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents, currency)} SBP` : ""}, before tax.
             {/* The same pay a year at a time — twelve of each monthly figure. */}
             <span className="block">
-              <span className="font-semibold">Yearly: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}</span>{" "}
-              in {toYear(retireYear)} dollars ={" "}
-              <span className="font-semibold">{formatMoneyWhole(estimate.grossTodayCents * 12, currency)}</span>{" "}
-              in today&rsquo;s dollars
-              {estimate.sbpTodayCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpTodayCents * 12, currency)} SBP` : ""}, before tax.
+              <span className="font-semibold">Yearly: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}</span>
+              {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents * 12, currency)} SBP` : ""}, before tax.
+              {" "}Goes up by the COLA each year after.
             </span>
           </p>
         ) : null}
 
         <h3 className={heading}>Healthcare in retirement</h3>
         <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Yearly premiums for the family, in today&rsquo;s dollars. Each one is added to that year&rsquo;s spending.
+          Yearly premiums for the family at current rates. Each one is added to that year&rsquo;s spending.
         </p>
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
@@ -1586,7 +1492,7 @@ function PlanModal({
                 value={row.kind}
                 onChange={(e) => updateHealthPlan(row.key, { kind: e.target.value as HealthPlanKind })}
                 aria-label="Health plan"
-                className="w-40 cursor-pointer rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-44"
+                className="w-40 cursor-pointer rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-44"
               >
                 <option value="tricare_prime">TRICARE Prime</option>
                 <option value="tricare_select">TRICARE Select</option>
@@ -1598,7 +1504,7 @@ function PlanModal({
                 onChange={(e) => updateHealthPlan(row.key, { amount: e.target.value })}
                 placeholder="0.00"
                 aria-label="Premium per year"
-                className="w-24 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-28"
+                className="w-24 rounded-md bg-surface px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-28"
               />
               <button
                 type="button"
@@ -1670,18 +1576,18 @@ function PlanModal({
         >
           <input name="healthcareStartAge" inputMode="numeric" defaultValue={plan.healthcareStartAge} className={inputClass} />
         </Field>
-        <Field label="Rises above inflation (%/yr)" hint="Medical costs grow faster than prices overall. 1.5% = medical inflation of about 4%.">
+        <Field label="Rises above inflation (%/yr)" hint="Medical costs grow faster than prices overall: inflation + this. 2.5% + 1.5% = 4% a year.">
           <input name="healthcareGrowthPct" inputMode="decimal" defaultValue={plan.healthcareGrowthPct} className={inputClass} />
         </Field>
 
-        <h3 className={heading}>Growth, Withdrawal &amp; Tax Rates</h3>
-        <Field label="Real return (%)" hint="Yearly growth of your investments, after inflation.">
-          <input name="realReturnPct" inputMode="decimal" defaultValue={plan.realReturnPct} className={inputClass} />
+        <h3 className={heading}>Rates &amp; withdrawals</h3>
+        <Field label="Expected rate of return (%)" hint="What your investments earn a year. Only investments — not income or savings.">
+          <input name="investmentReturnPct" inputMode="decimal" defaultValue={plan.investmentReturnPct} className={inputClass} />
         </Field>
-        <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once retired. Needed = the yearly gap ÷ this rate.">
-          <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
+        <Field label="Savings APY (%)" hint="What your checking and savings accounts on Accounts earn a year.">
+          <input name="cashReturnPct" inputMode="decimal" defaultValue={plan.cashReturnPct} className={inputClass} />
         </Field>
-        <Field label="Inflation (%)" hint="Brings the High-3 back to today's dollars. Retired pay, VA and Social Security rise with it each year.">
+        <Field label="Spending inflation (%)" hint="How much your spending, healthcare and rental costs go up each year.">
           <input
             name="inflationPct"
             inputMode="decimal"
@@ -1690,18 +1596,30 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Tax on retirement income (%)" hint="Default for every year. Change a single year in the Current and Projected Net Worth table. VA is never taxed.">
-          <input name="retirementTaxPct" inputMode="decimal" defaultValue={plan.retirementTaxPct} className={inputClass} />
+        <Field label="Expected COLA increase (%)" hint="The yearly raise on retired pay, VA, Social Security and other income.">
+          <input name="colaPct" inputMode="decimal" defaultValue={plan.colaPct} className={inputClass} />
+        </Field>
+        <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once you stop working. Needed = the yearly gap ÷ this rate.">
+          <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
+        </Field>
+        <Field label="Withdrawals start (year)" hint="When you stop working and start drawing on investments. Blank = the military retirement year.">
+          <input
+            name="withdrawStartYear"
+            inputMode="numeric"
+            defaultValue={plan.withdrawStartYear ?? ""}
+            placeholder={plan.targetRetireYear ? String(plan.targetRetireYear) : ""}
+            className={inputClass}
+          />
         </Field>
 
         <h3 className={heading}>Other income</h3>
         <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Per month in today&rsquo;s dollars, before tax. If an amount changes, type an End Year on the old line,
+          Per month at current rates, before tax; goes up by the COLA each year. If an amount changes, type an End Year on the old line,
           then + Add income with the new amount starting the year after.
         </p>
         <div className="space-y-2 sm:col-span-2">
           {lines.map((l) => (
-            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_4.5rem_4.5rem_auto_auto]">
+            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_4.5rem_4.5rem_auto]">
               <LineField label="Type" className="col-span-2 sm:col-span-1">
                 <select
                   value={l.kind}
@@ -1743,16 +1661,6 @@ function PlanModal({
                   className={`${lineInput} text-center`}
                 />
               </LineField>
-              <label className="flex h-[34px] items-center gap-1.5 text-xs font-semibold">
-                <input
-                  type="checkbox"
-                  checked={l.kind === "va" ? false : l.taxable}
-                  disabled={l.kind === "va"}
-                  onChange={(e) => updateLine(l.key, { taxable: e.target.checked })}
-                  className="size-4 cursor-pointer accent-[color:var(--brand)] disabled:opacity-50"
-                />
-                Taxed
-              </label>
               <button
                 type="button"
                 onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
@@ -1780,7 +1688,7 @@ function PlanModal({
 
         <h3 className={heading}>Rental properties</h3>
         <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Prices, rent and costs in today&rsquo;s dollars. Net rent counts as income (taxed when positive); equity
+          Prices, rent and costs at current rates; they go up with inflation each year. Net rent counts as income; equity
           (value − loan) counts toward net worth. Planning to buy? Fill it in here. Already own one? Add it on
           Accounts under Property, then pick it in Property.
         </p>
@@ -1871,11 +1779,8 @@ function PlanModal({
                         {formatMoneyWhole(Math.abs(preview.cashMonthly), currency)}/mo
                       </span>{" "}
                       after a {formatMoneyWhole(preview.payMonthly, currency)}/mo loan payment
-                      {preview.payThenMonthly !== preview.payMonthly
-                        ? ` (${formatMoneyWhole(preview.payThenMonthly, currency)} in ${preview.first} dollars)`
-                        : ""}
                       {preview.purchaseCash > 0 ? ` · ${formatMoneyWhole(preview.purchaseCash, currency)} down + closing from savings` : ""}
-                      {" "}· equity {formatMoneyWhole(preview.equity, currency)} by year end. Costs = taxes, insurance, management, repairs, vacancy. Value growth is above inflation.
+                      {" "}· equity {formatMoneyWhole(preview.equity, currency)} by year end. Costs = taxes, insurance, management, repairs, vacancy. Value growth is on top of inflation.
                     </>
                   ) : (
                     "Enter the year and price to see the first year's cash flow."
@@ -1951,7 +1856,7 @@ function MonthYear({
         value={month}
         onChange={(e) => onMonth(e.target.value)}
         aria-label={`${label} month`}
-        className="w-[5.5rem] shrink-0 cursor-pointer rounded-md bg-sky-50 dark:bg-background px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-[5.5rem] shrink-0 cursor-pointer rounded-md bg-surface px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       >
         <option value="">Month</option>
         {MONTHS.map((m, i) => (
@@ -1967,14 +1872,14 @@ function MonthYear({
         onChange={(e) => onYear(e.target.value)}
         aria-label={`${label} year`}
         placeholder="Year"
-        className="w-full min-w-0 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       />
     </span>
   );
 }
 
 const inputClass =
-  "w-28 rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  "w-28 rounded-md bg-surface px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 
 // Each field: bold title on top, then the box with its note beside it, so
 // the note explains the box it sits next to.
@@ -2026,43 +1931,4 @@ function IncomeRow({
   );
 }
 
-function Figure({
-  label,
-  value,
-  tone,
-  style,
-  className,
-  bar,
-  sub,
-  subClassName,
-}: {
-  label: React.ReactNode;
-  value: string;
-  tone: string;
-  style?: React.CSSProperties;
-  className?: string;
-  /** 0–1: draws a thin progress bar under the value. */
-  bar?: number;
-  /** A short "how it's worked out" line under the value. */
-  sub?: React.ReactNode;
-  subClassName?: string;
-}) {
-  return (
-    <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
-      <div className="max-sm:text-[12px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</div>
-      <p className={`mt-0.5 truncate text-base font-bold tabular-nums sm:text-2xl ${tone}`} style={style}>
-        {value}
-      </p>
-      {sub ? <p className={`max-sm:text-[12px] sm:text-sm leading-tight ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
-      {bar != null ? (
-        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
-          <div
-            className="h-full rounded-full"
-            style={{ width: `${Math.round(Math.min(1, Math.max(0, bar)) * 100)}%`, backgroundColor: "var(--viz-savings)" }}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
