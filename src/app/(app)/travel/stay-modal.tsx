@@ -36,10 +36,17 @@ export function StayModal({
   embed,
   roomOf,
   allowRooms,
+  siblings,
+  roomNo,
   onBack,
   onClose,
 }: {
   stay: TravelStay | null;
+  /** The hotel's other reservations (its other rooms, or other nights of a
+   *  room), shown as sections under this one so the hotel is edited as a whole. */
+  siblings?: TravelStay[];
+  /** Embedded as one of a hotel's rooms: the room the section above it picked. */
+  roomNo?: number | null;
   /** A new stay started as another room of this one: same hotel, city, dates,
    *  trip and brand; cost, points, card and pax left for the new room. */
   roomOf?: TravelStay | null;
@@ -110,11 +117,18 @@ export function StayModal({
           freeNightUsed: false, isEstimate, plannedCostCents: null, freeNightPoints: null,
           plannedCostForeignCents: null, costForeignCents: null, foreignCurrency,
           movesCardPoints: true,
+          // A second room is often paid a different way (points, a free
+          // night), so how it's paid and its cancel date start fresh.
+          payAtProperty: false, freeCancelUntil: null, roomNo: null,
         };
   }
   // Extra rooms added under a saved stay, each its own embedded stay form.
   const formId = useId();
-  const [rooms, setRooms] = useState<{ id: number; roomOf: TravelStay }[]>([]);
+  const [rooms, setRooms] = useState<{ id: number; roomOf: TravelStay | null; stay: TravelStay | null; roomNo: number }[]>(() =>
+    (siblings ?? []).map((s, i) => ({ id: i + 1, roomOf: null, stay: s, roomNo: s.roomNo ?? 2 })),
+  );
+  // This reservation's room, picked in its band once the hotel has more than one.
+  const [mainRoom, setMainRoom] = useState(stay?.roomNo ?? 1);
   const roomHandles = useRef<Record<number, SectionHandle | null>>({});
   const [accountId, setAccountId] = useState(stay?.accountId ?? defaultAccountId ?? NO_CARD);
   const preset = defaultAccountId ? cards.find((c) => c.id === defaultAccountId) ?? null : null;
@@ -138,7 +152,8 @@ export function StayModal({
       !!(
         stay.cardLabel?.trim() || stay.holder?.trim() || stay.pointsCost > 0 || stay.hotelCreditCents > 0 ||
         stay.hotelCostCents > 0 || stay.freeNightUsed || stay.pointsUsed || stay.breakfastIncluded ||
-        stay.remarks?.trim() || stay.costForeignCents || stay.plannedCostForeignCents
+        stay.remarks?.trim() || stay.costForeignCents || stay.plannedCostForeignCents ||
+        stay.payAtProperty || stay.freeCancelUntil
       ),
   );
   const more = showMore ? "contents" : "hidden";
@@ -189,6 +204,9 @@ export function StayModal({
   }));
   // Blank is None: dollars only.
   const [foreignCurrency, setForeignCurrency] = useState(base?.foreignCurrency ?? "");
+  // The hotel takes the card at check-in, and the last day to cancel free.
+  const [payAtProperty, setPayAtProperty] = useState(stay?.payAtProperty ?? false);
+  const [freeCancelUntil, setFreeCancelUntil] = useState(stay?.freeCancelUntil ?? "");
   const lastSlot = useRef<PlanSpentSlot | null>(null);
   // Booked once a Spent figure or the booking date is in; a plan until then.
   const isEstimate = isPlannedOnly(Boolean(fig.spent.trim() || fig.spentForeign.trim()), reservedOn);
@@ -369,11 +387,11 @@ export function StayModal({
             // Then each added room. A saved room leaves the list, so a retry
             // after a failed one doesn't save it twice.
             const failed: string[] = [];
-            for (const [i, r] of rooms.entries()) {
+            for (const r of rooms) {
               const handle = roomHandles.current[r.id];
-              if (!handle || handle.isEmpty()) continue;
+              if (!handle || (!r.stay && handle.isEmpty())) continue;
               const roomResult = await handle.save();
-              if (roomResult.error) failed.push(`Room ${i + 2}: ${roomResult.error}`);
+              if (roomResult.error) failed.push(`Room ${r.roomNo}: ${roomResult.error}`);
               else setRooms((rs) => rs.filter((x) => x.id !== r.id));
             }
             // revalidatePath alone leaves the client router cache in place,
@@ -396,9 +414,14 @@ export function StayModal({
           <TripPicker trips={trips} value={trip} onChange={setTrip} startNew={!stay && !roomOf && !defaultTripId} hiddenInputs className="sm:col-span-2" />
         ) : null}
         {stay ? <input type="hidden" name="id" value={stay.id} /> : null}
-        {/* With a second room added, this form's fields are Room 1 — named
-            the same way, so the rooms read as a set. */}
-        {!embed && rooms.length > 0 ? <RoomBand label="Room 1" className="sm:col-span-2" /> : null}
+        {/* With the hotel's other reservations below, this one is a room too:
+            its band says which, picked by hand. Alone, it saves no room. */}
+        {!embed && rooms.length > 0 ? <RoomBand room={mainRoom} onRoom={setMainRoom} className="sm:col-span-2" /> : null}
+        {embed ? (
+          roomNo !== undefined ? <input type="hidden" name="roomNo" value={roomNo ?? ""} /> : null
+        ) : (
+          <input type="hidden" name="roomNo" value={rooms.length > 0 ? mainRoom : ""} />
+        )}
         {stay?.cancelledAt ? (
           <p className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 text-xs font-semibold text-muted dark:bg-sky-900/50">
             Cancelled booking — kept in the archive, left out of every total.
@@ -703,9 +726,15 @@ export function StayModal({
           </Field>
         </div>
 
-        {/* The flag sits beside the note it used to be written inside — the
-            log's B'fast column and filter read it instead of the text. */}
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3 sm:col-span-2 sm:flex-nowrap">
+        {/* Remarks on a line of their own — confirmation numbers run long. */}
+        <Field label="Remarks" className="sm:col-span-2">
+          <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
+        </Field>
+
+        {/* How it was paid, in one row (each label on one line): free night, points, breakfast, pay at
+            the hotel (Spent stays empty until the check-in charge is linked),
+            and the last day to cancel without a charge. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 sm:col-span-2">
           {/* Free night and points are either/or: ticking one clears the
               other. Ticking free night stamps the card's Booked date with this
               stay's check-in and takes no points. */}
@@ -720,11 +749,7 @@ export function StayModal({
               }}
               className="h-4 w-4 accent-sky-700"
             />
-            <span>
-              Free night
-              <br />
-              used
-            </span>
+            <span className="whitespace-nowrap">Free night used</span>
           </label>
           {/* The one switch that says whether those points actually left the
               card. Unticked, the stay was paid in cash and the figure is
@@ -741,11 +766,7 @@ export function StayModal({
               }}
               className="h-4 w-4 accent-sky-700"
             />
-            <span>
-              Pts
-              <br />
-              used
-            </span>
+            <span className="whitespace-nowrap">Pts used</span>
           </label>
           <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
             <input
@@ -754,17 +775,29 @@ export function StayModal({
               defaultChecked={stay?.breakfastIncluded ?? false}
               className="h-4 w-4 accent-sky-700"
             />
-            {/* Two short lines rather than one long one, so the note beside it
-                keeps the width. */}
-            <span>
-              B&apos;fast
-              <br />
-              incl
-            </span>
+            <span className="whitespace-nowrap">B&apos;fast incl</span>
           </label>
-          <Field label="Remarks" className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
-            <input name="remarks" defaultValue={stay?.remarks ?? ""} className={inputClass} />
-          </Field>
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold leading-tight">
+            <input type="hidden" name="payAtPropertySent" value="1" />
+            <input
+              type="checkbox"
+              name="payAtProperty"
+              checked={payAtProperty}
+              onChange={(e) => setPayAtProperty(e.target.checked)}
+              className="h-4 w-4 accent-sky-700"
+            />
+            <span className="whitespace-nowrap">Due at check-in</span>
+          </label>
+          <label className="flex shrink-0 items-center gap-2 text-xs font-semibold">
+            <span className="whitespace-nowrap uppercase tracking-wide">Cancel by</span>
+            <input
+              type="date"
+              name="freeCancelUntil"
+              value={freeCancelUntil}
+              onChange={(e) => setFreeCancelUntil(e.target.value)}
+              className={`${inputClass} w-40`}
+            />
+          </label>
         </div>
         </div>
 
@@ -777,7 +810,7 @@ export function StayModal({
         {freeNightUsed && (card || (Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints))) ? (
           <p className="sm:col-span-2 -mt-1 text-xs font-medium text-muted">
             {card ? (
-              <>Saving sets <span className="font-semibold text-foreground">{card.name}</span>&apos;s Booked date to {checkIn || "the check-in date"}. No points come off the card.</>
+              <>Free night: uses <span className="font-semibold text-foreground">{card.name}</span>&apos;s night credit</>
             ) : null}
             {Number(freeNightPoints) > 0 && pointsTyped > Number(freeNightPoints) ? (
               <span className="mt-0.5 block text-negative">
@@ -797,25 +830,29 @@ export function StayModal({
         ) : null}
 
         {draw && (draw.points !== 0 || draw.credit !== 0) ? (
-          <p className="sm:col-span-2 text-xs text-muted">
-            Saving {draw.points < 0 || draw.credit < 0 ? "returns" : "takes"}{" "}
+          <p className="sm:col-span-2 text-xs font-medium text-foreground">
+            {draw.points ? "Points" : "Night credit"}:{" "}
             {[
               draw.points ? `${Math.abs(draw.points).toLocaleString()} pts` : null,
               draw.credit ? `${formatMoneyWhole(Math.abs(draw.credit), currency)} night credit` : null,
             ]
               .filter(Boolean)
               .join(" and ")}{" "}
-            {draw.points < 0 || draw.credit < 0 ? "to" : "from"} {card?.name} on Accounts.
+            {draw.points < 0 || draw.credit < 0 ? "back to" : "off"} <span className="font-semibold">{card?.name}</span>
           </p>
         ) : null}
       </form>
-      {rooms.map((r, i) => (
+      {rooms.map((r) => (
         // Each added room is its own boxed section with a heading band — as a
         // bold "Room 2" over a thin line it was easy to miss in the form.
         <div key={r.id} className="mt-5 overflow-hidden rounded-xl ring-1 ring-line">
           <RoomBand
-            label={`Room ${i + 2}`}
+            room={r.roomNo}
+            onRoom={(n) => setRooms((rs) => rs.map((x) => (x.id === r.id ? { ...x, roomNo: n } : x)))}
             action={
+            // A saved reservation is cancelled or deleted from its own form;
+            // only one being added here can be dropped.
+            r.stay ? null : (
             <button
               type="button"
               onClick={() => {
@@ -826,12 +863,14 @@ export function StayModal({
             >
               Remove room
             </button>
+            )
             }
           />
           <div className="px-4 py-3">
           <StayModal
-            stay={null}
+            stay={r.stay}
             roomOf={r.roomOf}
+            roomNo={r.roomNo}
             cards={cards}
             brands={brands}
             currency={currency}
@@ -864,7 +903,17 @@ export function StayModal({
                 type="button"
                 disabled={pending}
                 onClick={() =>
-                  setRooms((rs) => [...rs, { id: (rs.at(-1)?.id ?? 0) + 1, roomOf: currentAsRoom() }])
+                  setRooms((rs) => [
+                    ...rs,
+                    {
+                      id: Math.max(0, ...rs.map((x) => x.id)) + 1,
+                      roomOf: currentAsRoom(),
+                      stay: null,
+                      // The next room up; a further night of a room already
+                      // here is set back to that room in its band.
+                      roomNo: Math.min(9, Math.max(mainRoom, ...rs.map((x) => x.roomNo)) + 1),
+                    },
+                  ])
                 }
                 className="rounded-md border border-black/25 bg-background px-3 py-1.5 text-xs font-semibold transition hover:border-sky-400 hover:bg-sky-100 dark:border-white/30 dark:hover:border-sky-500 dark:hover:bg-sky-900/40"
               >
@@ -912,10 +961,36 @@ function Field({
 
 // A room's heading inside the stay form: the white band with a teal bar used
 // for group headings on Travel, so Room 1, Room 2… stand out from the fields.
-function RoomBand({ label, action, className = "" }: { label: string; action?: React.ReactNode; className?: string }) {
+// The room is picked here, by hand: a room booked night by night (a free night,
+// then a points night) is several reservations with the same room number.
+export function RoomBand({
+  room,
+  onRoom,
+  action,
+  className = "",
+}: {
+  room: number;
+  onRoom: (room: number) => void;
+  action?: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className={`flex items-center justify-between gap-2 border-l-[6px] border-l-teal-600 bg-surface px-4 py-2 ring-1 ring-line dark:border-l-teal-400 ${className}`}>
-      <span className="text-base font-extrabold text-foreground">{label}</span>
+    // A soft teal fill under the teal bar, so each room's section stands
+    // apart from the fields around it.
+    <div className={`flex items-center justify-between gap-2 border-l-[6px] border-l-teal-600 bg-teal-50 px-4 py-2 ring-1 ring-teal-200 dark:border-l-teal-400 dark:bg-teal-950/40 dark:ring-teal-800 ${className}`}>
+      <label className="flex items-center gap-2 text-base font-extrabold text-foreground">
+        Room
+        <select
+          value={room}
+          onChange={(e) => onRoom(Number(e.target.value))}
+          aria-label="Room"
+          className="rounded-md bg-background px-2 py-0.5 text-base font-extrabold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+        >
+          {[1, 2, 3, 4, 5, 6].map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+      </label>
       {action}
     </div>
   );

@@ -289,7 +289,7 @@ export async function upsertNetworthYear(formData: FormData) {
   }
   if ((snapshotCount ?? 0) > 0) {
     return {
-      error: `${year} is already tracked account by account — edit it in Monthly Actual Balances instead.`,
+      error: `${year} is already tracked account by account — edit it in Net Worth Monthly Balances instead.`,
     };
   }
 

@@ -150,6 +150,16 @@ export async function saveTravelStay(formData: FormData) {
     breakfast_included: formData.get("breakfastIncluded") === "on",
     free_night_used: freeNightUsed,
     free_night_points: freeNightUsed ? freeNightPoints : null,
+    // Only a form that offers them sends them; one that doesn't (the Add
+    // Travel Log popup's older sections) leaves the stay's own values alone.
+    // Sent only by a form that shows rooms; blank is a single room.
+    ...(formData.has("roomNo") ? { room_no: Math.min(9, int(formData, "roomNo")) || null } : {}),
+    ...(formData.has("payAtPropertySent")
+      ? {
+          pay_at_property: formData.get("payAtProperty") === "on",
+          free_cancel_until: isDate(text(formData, "freeCancelUntil") ?? "") ? text(formData, "freeCancelUntil") : null,
+        }
+      : {}),
     updated_at: new Date().toISOString(),
   };
 

@@ -2400,7 +2400,9 @@ function CreditCardPanel({
               </MetricCell>
               <MetricCell label="Night credit">
                 {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax) ? (
-                  <span className="tabular-nums font-bold" style={{ color: "var(--viz-savings)" }}>
+                  // Struck through once the night is booked or used — that
+                  // credit is spoken for until the card renews it.
+                  <span className={`tabular-nums font-bold ${d?.benefitUsedOn || d?.benefitBookedOn ? "line-through decoration-2 decoration-[var(--negative)]" : ""}`} style={{ color: "var(--viz-savings)" }}>
                     {d?.freeNightCreditCents
                       ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
                       : d?.freeNightPointsLimit
@@ -2573,7 +2575,8 @@ function CreditCardPanel({
             // A break is allowed after a slash only ("iCloud/ Talkatone"), never mid-word.
             // text-sm like the figures across the row; only Benefit expires
             // keeps its small tags.
-            <span className="inline-block max-w-full rounded-md bg-sky-100 px-2 py-1 text-sm font-semibold dark:bg-sky-900/50">{d.charging.replace(/\//g, "/\u200b")}</span>
+            // Plain text, no pill (Victor, 2026-10-12).
+            <span className="inline-block max-w-full text-sm font-semibold">{d.charging.replace(/\//g, "/\u200b")}</span>
           ) : DASH_CELL}
         </span>
         <span className="text-center text-sm font-semibold tabular-nums">
@@ -2594,7 +2597,9 @@ function CreditCardPanel({
         </span>
         <span className="text-center">
           {(d?.freeNightCreditCents || d?.freeNightPointsLimit || d?.freeNightCategoryMax) ? (
-            <span className="inline-block rounded-full bg-sky-50 px-2 py-0.5 text-sm font-bold tabular-nums text-sky-700 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800">
+            // Struck through once the night is booked or used (the Benefit
+            // column says which) — that credit is spoken for until renewal.
+            <span className={`inline-block rounded-full bg-sky-50 px-2 py-0.5 text-sm font-bold tabular-nums text-sky-700 ring-1 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-800 ${d?.benefitUsedOn || d?.benefitBookedOn ? "line-through decoration-2 decoration-[var(--negative)]" : ""}`}>
               {d?.freeNightCreditCents
                 ? `$${Math.round(d.freeNightCreditCents / 100).toLocaleString()}`
                 : d?.freeNightPointsLimit

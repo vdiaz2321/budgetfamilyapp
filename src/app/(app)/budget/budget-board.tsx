@@ -17,6 +17,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { SubscriptionsSummaryCard, IrregularBillsSummaryCard } from "./subscriptions-summary";
 import { BulkAddSubcategories } from "./bulk-add-subcategories";
 import { AddCategoryGroupButton } from "./category-group-controls";
+import { DOT } from "./category-icons";
 import type {
   AccountOption,
   BucketOption,
@@ -291,8 +292,8 @@ export function BudgetBoard({
     // outstanding this month against the planned payment.
     const budgetItems = groups
       .filter((group) => KINDS_WITH_DUE.includes(group.kind))
-      .flatMap((group) => group.rows.map((row) => ({ row, kind: group.kind })))
-      .flatMap(({ row, kind }) => {
+      .flatMap((group) => group.rows.map((row) => ({ row, kind: group.kind, group })))
+      .flatMap(({ row, kind, group }) => {
         const dueDay = kind === "debt" ? (row.debt?.dueDay ?? row.dueDay) : row.dueDay;
         if (!dueDay) return [];
         const y = viewedMonth.getFullYear();
@@ -311,6 +312,8 @@ export function BudgetBoard({
           accountId: row.paymentAccountId,
           accountName: row.paymentAccountId ? accountNameById.get(row.paymentAccountId) ?? null : null,
           source: "budget" as const,
+          categoryName: group.name,
+          categoryKind: group.kind,
         }];
       });
     const subscriptionItems = subscriptions.flatMap((subscription) => {
@@ -327,6 +330,7 @@ export function BudgetBoard({
       // and never appear — those are precisely the ones needing the prefill.
       const paidCents = subscription.monthSpentCents ?? 0;
       if (paidCents > 0 && paidCents >= subscription.amountCents) return [];
+      const group = groups.find((g) => g.rows.some((row) => row.subId === subscription.subcategoryId));
       return [{
         id: subscription.id,
         name: subscription.name,
@@ -337,6 +341,8 @@ export function BudgetBoard({
         accountId: subscription.accountId,
         accountName: subscription.accountId ? accountNameById.get(subscription.accountId) ?? null : null,
         source: "subscription" as const,
+        categoryName: group?.name,
+        categoryKind: group?.kind,
         prevSpentCents: subscription.isRecurring ? subscription.prevSpentCents ?? 0 : 0,
       }];
     });
@@ -1617,16 +1623,21 @@ function DueItemsList({
   const [, startSkip] = useTransition();
   return (
     // Desktop: one shared grid (rows are subgrids) so date, name, account,
-    // amount and buttons line up in columns sized to the longest entry, all
-    // packed to the left.
-    <ul className="divide-y divide-line rounded-xl border border-line bg-surface sm:grid sm:grid-cols-[auto_auto_auto_auto_1fr] sm:gap-x-6">
+    // amount, category and buttons line up in columns sized to the longest
+    // entry, spread across the card with each cell centered under its header.
+    // The gap is only the minimum: justify-between hands out whatever room is
+    // left, so a fixed wide gap squeezed the columns into each other on a
+    // laptop-width card. Item and Account are the columns allowed to shrink
+    // (they truncate) when even that doesn't fit.
+    <ul className="divide-y divide-line rounded-xl border border-line bg-surface sm:grid sm:grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)_max-content_max-content_max-content] sm:justify-between sm:gap-x-4">
       {/* Column headers (desktop only — phones stack each row instead), so
           the cells below don't each need an "Account:" / "Amount Owed:" label. */}
-      <li className="hidden px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide text-foreground sm:col-span-5 sm:grid sm:grid-cols-subgrid">
+      <li className="hidden px-4 py-1.5 text-center text-[11px] font-bold uppercase tracking-wide text-foreground sm:col-span-6 sm:grid sm:grid-cols-subgrid">
         <span>Due</span>
         <span>Item</span>
         <span>Account</span>
         <span>Amount Owed</span>
+        <span>Category</span>
         <span />
       </li>
       {dueItems.map((item) => {
@@ -1635,14 +1646,14 @@ function DueItemsList({
         todayMidnight.setHours(0, 0, 0, 0);
         const isOverdue = dueTarget < todayMidnight;
         return (
-          <li key={`${item.source}:${item.id}`} className="flex items-center gap-2 px-4 py-2.5 sm:col-span-5 sm:grid sm:grid-cols-subgrid">
+          <li key={`${item.source}:${item.id}`} className="flex flex-wrap items-center gap-2 px-4 py-2.5 sm:col-span-6 sm:grid sm:grid-cols-subgrid">
             {/* The name side opens the item's editor (due date, amount); the
                 Pay button on the right still logs the payment. */}
             <button
               type="button"
               onClick={() => onOpen?.(item)}
               disabled={!onOpen}
-              className="-my-1.5 -ml-2 min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition hover:bg-sky-100 sm:col-span-3 sm:grid sm:grid-cols-subgrid sm:items-baseline dark:hover:bg-sky-950/40"
+              className="-my-1.5 -ml-2 min-w-[9rem] flex-1 rounded-md sm:min-w-0 px-2 py-1.5 text-left transition hover:bg-sky-100 sm:col-span-3 sm:grid sm:grid-cols-subgrid sm:items-baseline sm:justify-items-center dark:hover:bg-sky-950/40"
             >
               <div className="flex min-w-0 items-baseline gap-x-2 sm:contents">
                 <span className={`shrink-0 text-xs font-semibold ${isOverdue ? "text-negative" : "text-brand"}`}>
@@ -1655,10 +1666,10 @@ function DueItemsList({
                     </span>
                   )}
                 </span>
-                <span className="truncate text-sm font-semibold sm:max-w-[16rem]">{item.name}</span>
+                <span className="truncate text-sm font-semibold sm:max-w-[16rem] sm:justify-self-stretch sm:text-center">{item.name}</span>
                 {/* Desktop keeps the whole row on one line; phones keep the
                     account on its own line below (there's no room). */}
-                <span className="hidden min-w-0 truncate text-sm font-semibold sm:inline">
+                <span className="hidden min-w-0 truncate text-sm font-semibold sm:inline sm:justify-self-stretch sm:text-center">
                   {item.accountName ? (
                     item.accountName
                   ) : (
@@ -1670,8 +1681,9 @@ function DueItemsList({
                 {item.accountName ? `Charged to ${item.accountName}` : "No account linked"}
               </p>
             </button>
-            {/* Amount, Prev Mo and Pay sit on one line beside the name. */}
-            <div className="flex shrink-0 items-center justify-end gap-2 sm:col-span-2 sm:grid sm:grid-cols-subgrid">
+            {/* Amount and buttons sit beside the name; on a phone a row with
+                all three buttons wraps them to a second line. */}
+            <div className="ml-auto flex shrink-0 items-center sm:ml-0 justify-end gap-2 sm:col-span-3 sm:grid sm:grid-cols-subgrid sm:justify-items-center">
               {/* A zero here is a subscription whose price isn't on file (it
                   varies, or was never entered) — those are kept in the list on
                   purpose. "$0.00" read as "nothing owed", which is the opposite
@@ -1685,21 +1697,21 @@ function DueItemsList({
                 // Phones drop it: with Skip and Pay beside it, the name had no room left.
                 <p className="hidden text-[11px] font-semibold text-muted sm:block">Amount not set</p>
               )}
+              {/* Desktop only — the phone row has no room for it. */}
+              <p className="hidden items-center gap-1.5 text-sm font-semibold sm:flex">
+                {item.categoryKind && <span className={`h-2 w-2 shrink-0 rounded-full ${DOT[item.categoryKind]}`} aria-hidden />}
+                {item.categoryName ?? ""}
+              </p>
               {onPayDue && (
-                <div className="flex items-center gap-2">
-                  {/* Only when last month actually had a charge to copy, and
-                      only when it differs from the planned amount — otherwise
-                      the chip is a second button that does exactly what
-                      Pay already does. */}
-                  {item.prevSpentCents && item.prevSpentCents > 0 && item.prevSpentCents !== item.amountCents ? (
-                    <button
-                      type="button"
-                      onClick={() => onPayDue(item, item.prevSpentCents)}
-                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
-                    >
-                      <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
-                    </button>
-                  ) : null}
+                // Pay first so every row's Pay lines up; then Skip, then Prev Mo.
+                <div className="flex items-center gap-2 sm:justify-self-start">
+                  <button
+                    type="button"
+                    onClick={() => onPayDue(item)}
+                    className="rounded-md bg-negative/15 px-2 py-1 text-[11px] font-semibold text-negative transition hover:bg-negative/25"
+                  >
+                    Pay
+                  </button>
                   {item.source === "subscription" && onSkipDue ? (
                     <button
                       type="button"
@@ -1716,13 +1728,19 @@ function DueItemsList({
                       {skippingId === item.id ? "Saving…" : <>Skip<span className="hidden sm:inline"> month</span></>}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    onClick={() => onPayDue(item)}
-                    className="rounded-md bg-negative/15 px-2 py-1 text-[11px] font-semibold text-negative transition hover:bg-negative/25"
-                  >
-                    Pay
-                  </button>
+                  {/* Only when last month actually had a charge to copy, and
+                      only when it differs from the planned amount — otherwise
+                      the chip is a second button that does exactly what
+                      Pay already does. */}
+                  {item.prevSpentCents && item.prevSpentCents > 0 && item.prevSpentCents !== item.amountCents ? (
+                    <button
+                      type="button"
+                      onClick={() => onPayDue(item, item.prevSpentCents)}
+                      className="whitespace-nowrap rounded-md bg-sky-100 px-2 py-1 text-[11px] font-semibold text-foreground transition hover:bg-sky-200 dark:bg-sky-900/50 dark:hover:bg-sky-900"
+                    >
+                      <span aria-hidden="true">↺</span> Prev Mo {formatMoney(item.prevSpentCents, currency)}
+                    </button>
+                  ) : null}
                 </div>
               )}
             </div>

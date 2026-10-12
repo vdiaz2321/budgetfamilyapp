@@ -365,7 +365,7 @@ export function FiSection({
           >
             <path d="M5 7.5 10 12.5 15 7.5" />
           </svg>
-          <span className="text-sm font-semibold sm:text-base">Retirement Financial Planner</span>
+          <span className="text-sm font-semibold sm:text-lg">Retirement Financial Planner</span>
         </button>
 
         {/* Today, growth to a picked year, and whether the plan works.
@@ -393,7 +393,7 @@ export function FiSection({
                     value={nwRow.year}
                     onChange={(e) => setNwYear(Number(e.target.value))}
                     aria-label="Growth year"
-                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 max-sm:text-[12px] sm:text-sm font-semibold normal-case tracking-normal text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                   >
                     {fi.years.map((y) => (
                       <option key={y.year} value={y.year}>
@@ -455,12 +455,12 @@ export function FiSection({
               side by side. This used to be two long sentences, and because
               the plan spends more at retirement than at FI they quoted two
               different targets ($2.25M and $1.125M) with nothing saying why. */}
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-foreground">
             <button
               type="button"
               onClick={() => setEditing(true)}
               // Soft blue from the viz palette (not brand indigo — no purple on data).
-              className="rounded-md px-2 py-0.5 text-xs font-semibold ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
+              className="rounded-md px-2 py-0.5 text-xs font-semibold sm:text-sm ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
             >
               Edit assumptions
             </button>
@@ -479,20 +479,20 @@ export function FiSection({
           <div className={`mt-3 grid gap-3 ${retireIncome ? "md:grid-cols-2" : ""}`}>
             {retireIncome && plan.targetRetireYear ? (
               <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-                <p className="text-center text-sm font-bold">
+                <p className="text-center text-sm font-bold sm:text-lg">
                   Income in {plan.targetRetireYear}
                   {plan.birthYear ? ` · age ${plan.targetRetireYear - plan.birthYear}` : ""}
                   <span className="font-normal text-foreground"> · today&rsquo;s dollars</span>
                 </p>
                 {retireIncome.parts.length === 0 ? (
-                  <p className="mt-1 text-center text-xs text-foreground">No retirement income yet — add it in Edit assumptions.</p>
+                  <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit assumptions.</p>
                 ) : (
-                  <ul className="mt-1.5 divide-y divide-line/60 text-sm">
-                    <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
+                  <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
+                    <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
                       <span />
                       <span className="flex shrink-0">
-                        <span className="w-[4.5rem] text-right sm:w-20">Monthly</span>
-                        <span className="w-[5.75rem] text-right sm:w-24">Yearly</span>
+                        <span className="w-[4.5rem] text-right sm:w-24">Monthly</span>
+                        <span className="w-[5.75rem] text-right sm:w-28">Yearly</span>
                       </span>
                     </li>
                     {retireIncome.parts.map((part, i) => (
@@ -545,7 +545,7 @@ export function FiSection({
                   </ul>
                 )}
                 {pension ? (
-                  <p className="mt-1.5 text-center text-xs text-foreground">
+                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">
                     {/* Spelled out as the DFAS sum — service × 2.5% = the share of High-3 —
                         so the percentage is never a bare number to take on trust. */}
                     Retired pay{plan.targetRetireMonth ? ` from ${MONTHS[plan.targetRetireMonth - 1]} ${plan.targetRetireYear}` : ""}:{" "}
@@ -555,14 +555,14 @@ export function FiSection({
                     {pension.sbpTodayCents > 0 ? ` · after SBP of ${formatMoneyWhole(pension.sbpTodayCents, currency)}/mo` : ""}
                   </p>
                 ) : (
-                  <p className="mt-1.5 text-center text-xs text-foreground">Add service start and High-3 in Edit assumptions.</p>
+                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and High-3 in Edit assumptions.</p>
                 )}
               </div>
             ) : null}
 
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-              <p className="text-center text-sm font-bold">Investments</p>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm">
+              <p className="text-center text-sm font-bold sm:text-lg">Investments</p>
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
                 {mile ? (
                   <>
                     <ValueRow
@@ -635,8 +635,8 @@ export function FiSection({
               Victor dies first. Each reruns the same plan with one thing changed. */}
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-              <p className="text-center text-sm font-bold">Bad-market test</p>
-              <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-xs">
+              <p className="text-center text-sm font-bold sm:text-lg">Bad-market test</p>
+              <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-xs sm:text-sm">
                 <span className="text-foreground">Drop in {shockYear}:</span>
                 {[20, 30, 40].map((pct) => (
                   <button
@@ -654,7 +654,7 @@ export function FiSection({
                   </button>
                 ))}
               </div>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm">
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
                 <ValueRow
                   label={`Lost in ${shockYear}`}
                   value={shockRow ? `−${formatMoneyWhole(Math.abs(shockRow.growthCents), currency)}` : "—"}
@@ -681,26 +681,26 @@ export function FiSection({
             </div>
 
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-              <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold">
+              <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
                 If you die first, in
                 <select
                   value={deathYear}
                   onChange={(e) => setDeathYear(Number(e.target.value))}
                   aria-label="Year"
                   disabled={yearOptions.length === 0}
-                  className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold sm:text-lg text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                 >
                   {(yearOptions.length ? yearOptions : [deathYear]).map((y) => (
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
               </p>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm">
-                <li className="flex justify-between gap-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
+                <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
                   <span>Family income</span>
                   <span className="flex shrink-0">
-                    <span className="w-[4.5rem] text-right sm:w-20">Monthly</span>
-                    <span className="w-[5.75rem] text-right sm:w-24">Yearly</span>
+                    <span className="w-[4.5rem] text-right sm:w-24">Monthly</span>
+                    <span className="w-[5.75rem] text-right sm:w-28">Yearly</span>
                   </span>
                 </li>
                 {survivorYear.parts.map((part, i) => (
@@ -773,11 +773,11 @@ export function FiSection({
                   bold
                 />
               </ul>
-              <p className="mt-1.5 text-center text-xs text-foreground">
+              <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">
                 {plan.sbpEnabled ? "SBP: 55% of retired pay" : "No SBP: retired pay stops"} · VA and second job stop · larger Social Security kept
               </p>
               {insuranceCents === 0 && plan.survivorExtras.benefits.length === 0 ? (
-                <p className="mt-0.5 text-center text-xs text-foreground">Life insurance: add it in Accounts → Estate guide</p>
+                <p className="mt-0.5 text-center text-xs sm:text-sm text-foreground">Life insurance: add it in Accounts → Estate guide</p>
               ) : null}
             </div>
           </div>
@@ -1125,7 +1125,7 @@ function FiChart({
 
       {/* What the two bar colours mean. The chart has no hover state on
           purpose — the colours have to say it on their own. */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-foreground">
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 max-sm:text-[12px] sm:text-sm text-foreground">
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block h-2 w-2.5 rounded-[1px]"
@@ -1170,7 +1170,7 @@ function ValueRow({
     <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
       <span className="min-w-0">
         {label}
-        {note ? <span className="block text-xs font-normal text-foreground">{note}</span> : null}
+        {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
       </span>
       <span className={`shrink-0 text-right tabular-nums ${tone}`}>{value}</span>
     </li>
@@ -1181,7 +1181,7 @@ function ValueRow({
 function Readout({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 text-center">
-      <p className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</p>
+      <p className="max-sm:text-[12px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</p>
       <p className="mt-0.5 truncate text-sm font-bold tabular-nums sm:text-base">{value}</p>
     </div>
   );
@@ -1576,7 +1576,7 @@ function PlanModal({
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
         <div className="space-y-2 sm:col-span-2">
-          <span className="block text-[11px] font-bold uppercase tracking-wide text-foreground">Health plan (/yr)</span>
+          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Health plan (/yr)</span>
           {healthPlans.length === 0 ? (
             <p className="text-xs text-foreground">No health plan premium before TRICARE For Life.</p>
           ) : null}
@@ -1916,7 +1916,7 @@ const lineInput =
 function LineField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
     <label className={`block min-w-0 ${className ?? ""}`}>
-      <span className="mb-0.5 block text-center text-[11px] font-bold uppercase tracking-wide text-foreground">{label}</span>
+      <span className="mb-0.5 block text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
       {children}
     </label>
   );
@@ -1981,7 +1981,7 @@ const inputClass =
 function Field({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-foreground">{label}</span>
+      <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
       <span className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3">
         {children}
         {hint ? <span className="text-xs leading-snug text-foreground">{hint}</span> : null}
@@ -2016,11 +2016,11 @@ function IncomeRow({
     <li className={`flex items-center justify-between gap-3 py-1 ${bold ? "font-semibold" : ""}`}>
       <span className="min-w-0">
         {label}
-        {note ? <span className="block text-xs font-normal text-foreground">{note}</span> : null}
+        {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
       </span>
       <span className={`flex shrink-0 tabular-nums ${tone}`}>
-        <span className="w-[4.5rem] text-right sm:w-20">{formatMoneyWhole(monthly, currency)}</span>
-        <span className="w-[5.75rem] text-right sm:w-24">{formatMoneyWhole(yearly, currency)}</span>
+        <span className="w-[4.5rem] text-right sm:w-24">{formatMoneyWhole(monthly, currency)}</span>
+        <span className="w-[5.75rem] text-right sm:w-28">{formatMoneyWhole(yearly, currency)}</span>
       </span>
     </li>
   );
@@ -2049,11 +2049,11 @@ function Figure({
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className ?? ""}`}>
-      <div className="text-[11px] font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</div>
-      <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${tone}`} style={style}>
+      <div className="max-sm:text-[12px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-foreground">{label}</div>
+      <p className={`mt-0.5 truncate text-base font-bold tabular-nums sm:text-2xl ${tone}`} style={style}>
         {value}
       </p>
-      {sub ? <p className={`text-[11px] leading-tight ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
+      {sub ? <p className={`max-sm:text-[12px] sm:text-sm leading-tight ${subClassName ?? "text-foreground"}`}>{sub}</p> : null}
       {bar != null ? (
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900/50">
           <div

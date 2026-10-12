@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { formatForeignWhole, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { bookingForeign, bookingPlanActual, bookingWhen, tripDate, type Booking, type TripSummary } from "./trip-summary";
+import { bookingForeign, bookingLines, bookingPlanActual, bookingWhen, freeCancelOpen, stayDueAtHotel, tripDate, type Booking, type BookingLine, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES, actualCents, type TripTaggedPurchase } from "./types";
 import { MatchPurchasesModal } from "./match-purchases-modal";
 import { AddTransactionButton } from "./add-transaction-button";
@@ -45,10 +45,6 @@ function KindDay({ booking, className = "" }: { booking: Booking; className?: st
 // The booking's own remarks, under its date line.
 function bookingRemarks(booking: Booking) {
   return (booking.kind === "flight" ? booking.flight : booking.kind === "stay" ? booking.stay : booking.car).remarks?.trim() || null;
-}
-function BookingRemarks({ booking }: { booking: Booking }) {
-  const remarks = bookingRemarks(booking);
-  return remarks ? <span className="whitespace-pre-line text-xs text-foreground">{remarks}</span> : null;
 }
 
 // Who the booking is with — the airline, the hotel brand or site it was
@@ -128,6 +124,7 @@ const ADD_BUTTON =
 export function TripDetailModal({
   summary: t,
   currency,
+  cardNames,
   onEditBooking,
   onAddBooking,
   onEditSpending,
@@ -135,6 +132,8 @@ export function TripDetailModal({
 }: {
   summary: TripSummary;
   currency: string;
+  /** Card names by account id — a room line says which card or account paid. */
+  cardNames?: Map<string, string>;
   onEditBooking: (booking: Booking) => void;
   onAddBooking: () => void;
   onEditSpending: () => void;
@@ -175,6 +174,10 @@ export function TripDetailModal({
   const [endOn, setEndOn] = useState(t.trip.endOn ?? "");
   const [notes, setNotes] = useState(t.trip.notes ?? "");
 
+  // A hotel booked as several reservations (two rooms, night by night) is
+  // listed once, its reservations under it.
+  const lines = bookingLines(t.bookings);
+  const tripYear = t.start?.slice(0, 4);
   // Cancelled bookings stay listed but are left out of the totals.
   const bookingTotals = t.bookings
     .filter((b) => !b.cancelled)
@@ -308,7 +311,9 @@ export function TripDetailModal({
     t.plannedMisc +
     t.bookings
       .filter((b) => !b.cancelled && (b.kind === "flight" ? b.flight : b.kind === "stay" ? b.stay : b.car).isEstimate)
-      .reduce((sum, b) => sum + b.pocket, 0);
+      .reduce((sum, b) => sum + b.pocket, 0) +
+    // Pay-at-hotel rooms not charged yet: still to go out, at check-in.
+    t.bookings.reduce((sum, b) => sum + (b.kind === "stay" && stayDueAtHotel(b.stay) ? b.stay.plannedCostCents ?? 0 : 0), 0);
   const budgetMonth = t.start ? t.start.slice(0, 7) : null;
 
   function run(action: () => Promise<{ error: string | null }>, after: () => void) {
@@ -541,7 +546,13 @@ export function TripDetailModal({
             {/* Phones: one card per booking, its three figures side by side
                 under the name — the table's four columns don't fit. */}
             <ul className="divide-y divide-line/60 rounded-lg ring-1 ring-line sm:hidden">
-              {t.bookings.map((b) => {
+              {lines.map((line) => {
+                if (line.type === "rooms") {
+                  return (
+                    <RoomsMobile key={line.key} line={line} currency={currency} tripYear={tripYear} cardNames={cardNames} todayIso={todayIso} onEdit={onEditBooking} />
+                  );
+                }
+                const b = line.booking;
                 const { planned, actual } = bookingPlanActual(b);
                 const fx = bookingForeign(b);
                 const diff = planned != null && actual != null ? planned - actual : null;
@@ -560,7 +571,7 @@ export function TripDetailModal({
                           <span className="text-xs text-foreground">
                             <BookingWhen booking={b} tripYear={t.start?.slice(0, 4)} />
                           </span>
-                          <BookingRemarks booking={b} />
+                          <CancelRemarks booking={b} todayIso={todayIso} tripYear={tripYear} />
                         </span>
                       </span>
                       <MobileFigures
@@ -578,6 +589,8 @@ export function TripDetailModal({
                           <>
                             {actual != null ? (
                               <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(actual, currency)}</span>
+                            ) : b.kind === "stay" && stayDueAtHotel(b.stay) ? (
+                              <DueAtCheckIn />
                             ) : (
                               <span className="font-normal text-muted">{DASH}</span>
                             )}
@@ -703,11 +716,18 @@ export function TripDetailModal({
                     on a row of their own spanning every column — so a long
                     remark runs out under the figures instead of wrapping
                     inside the name column. Hover and click cover both rows. */}
-                  {t.bookings.map((b) => {
+                  {lines.map((line) => {
+                    if (line.type === "rooms") {
+                      return (
+                        <RoomsDesktop key={line.key} line={line} currency={currency} tripYear={tripYear} cardNames={cardNames} todayIso={todayIso} onEdit={onEditBooking} />
+                      );
+                    }
+                    const b = line.booking;
                     const { planned, actual } = bookingPlanActual(b);
                     const fx = bookingForeign(b);
                     const diff = planned != null && actual != null ? planned - actual : null;
-                    const remarks = bookingRemarks(b);
+                    // The cancel date rides on the remarks line, left of them.
+                    const remarks = bookingRemarks(b) || (b.kind === "stay" && freeCancelOpen(b.stay, todayIso)) || null;
                     const allSeats = flightSeats(b);
                     const seats = openSeats.has(b.id) ? allSeats : [];
                     const payments = bookingPayments(b);
@@ -749,6 +769,8 @@ export function TripDetailModal({
                         <td className="whitespace-nowrap px-3 py-2 text-center font-semibold tabular-nums">
                           {actual != null ? (
                             <span className={actual > 0 ? "text-negative" : "text-muted"}>{formatMoneyWhole(actual, currency)}</span>
+                          ) : b.kind === "stay" && stayDueAtHotel(b.stay) ? (
+                            <DueAtCheckIn />
                           ) : (
                             <span className="font-normal text-muted">{DASH}</span>
                           )}
@@ -809,8 +831,8 @@ export function TripDetailModal({
                       {paymentsOpen ? <PurchaseRows list={payments} currency={currency} tripYear={t.start?.slice(0, 4)} /> : null}
                       {remarks ? (
                         <tr>
-                          <td colSpan={4} className={`whitespace-pre-line px-3 pb-2 pl-[7.25rem] text-xs text-foreground ${seats.length || paymentsOpen ? "pt-1.5" : ""}`}>
-                            {remarks}
+                          <td colSpan={4} className={`px-3 pb-2 pl-[7.25rem] ${seats.length || paymentsOpen ? "pt-1.5" : ""}`}>
+                            <CancelRemarks booking={b} todayIso={todayIso} tripYear={tripYear} />
                           </td>
                         </tr>
                       ) : null}
@@ -1251,5 +1273,302 @@ function TaggedPurchaseList({ list, currency, tripYear }: { list: TripTaggedPurc
         </li>
       ))}
     </ul>
+  );
+}
+
+// "Due at check-in" in a Spent cell: a pay-at-hotel room that is reserved but
+// not charged yet. Plain text rather than a red figure — nothing has gone out,
+// and it isn't money saved either.
+function DueAtCheckIn() {
+  return <span className="block whitespace-nowrap text-xs font-semibold text-foreground">Due at check-in</span>;
+}
+
+// A booking's note line: "Cancel by 21-Mar" (while that day is still ahead)
+// on the left, then its remarks — one line, not two stacked.
+function CancelRemarks({ booking, todayIso, tripYear }: { booking: Booking; todayIso: string; tripYear: string | undefined }) {
+  const until = booking.kind === "stay" ? freeCancelOpen(booking.stay, todayIso) : null;
+  const remarks = bookingRemarks(booking);
+  if (!until && !remarks) return null;
+  return (
+    <span className="block text-xs text-foreground">
+      {until ? <span className="mr-3 whitespace-nowrap font-semibold text-negative">Cancel by {tripDate(until, tripYear)}</span> : null}
+      {remarks ? <span className="whitespace-pre-line">{remarks}</span> : null}
+    </span>
+  );
+}
+
+type RoomsLine = Extract<BookingLine, { type: "rooms" }>;
+type RoomsProps = {
+  line: RoomsLine;
+  currency: string;
+  tripYear: string | undefined;
+  cardNames: Map<string, string> | undefined;
+  todayIso: string;
+  onEdit: (booking: Booking) => void;
+};
+
+// One reservation under its hotel: which card or account it's on.
+function roomCard(b: Booking, cardNames: Map<string, string> | undefined): string | null {
+  if (b.kind !== "stay") return null;
+  const s = b.stay;
+  return (s.accountId ? cardNames?.get(s.accountId) : null) ?? s.cardLabel?.trim() ?? null;
+}
+
+// How one reservation was paid, for its Spent cell: a free-night certificate,
+// points, cash still due at the hotel, or the money already paid.
+function RoomPaid({ booking, currency }: { booking: Booking; currency: string }) {
+  if (booking.kind !== "stay") return null;
+  const s = booking.stay;
+  const { actual } = bookingPlanActual(booking);
+  const fx = bookingForeign(booking);
+  const parts: React.ReactNode[] = [];
+  if (s.freeNightUsed) {
+    parts.push(<span key="free" className="block font-semibold" style={{ color: "var(--viz-savings)" }}>Free night</span>);
+  }
+  if (booking.points > 0) {
+    parts.push(<span key="pts" className="block font-semibold" style={{ color: "var(--viz-savings)" }}>{booking.points.toLocaleString()} pts</span>);
+  }
+  if (stayDueAtHotel(s)) parts.push(<DueAtCheckIn key="due" />);
+  else if (actual != null && actual > 0) {
+    parts.push(
+      <span key="cash" className="block font-semibold text-negative">
+        {formatMoneyWhole(actual, currency)}
+        {fx.actual != null ? <span className="font-normal text-foreground"> / {formatForeignWhole(fx.actual, fx.code)}</span> : null}
+      </span>,
+    );
+  }
+  return parts.length ? <>{parts}</> : <span className="text-muted">{DASH}</span>;
+}
+
+// The hotel's figures: its reservations added up, the points and free nights
+// they used, and how many people across its rooms (each room's largest count).
+function roomsFigures(line: RoomsLine) {
+  let planned = 0;
+  let actual = 0;
+  let diff: number | null = null;
+  let points = 0;
+  let freeNights = 0;
+  let due = false;
+  // Unpicked reservations count as rooms of their own.
+  const paxByRoom = new Map<string, number>();
+  const fx = line.members.map((m) => bookingForeign(m.booking));
+  for (const m of line.members) {
+    const pa = bookingPlanActual(m.booking);
+    planned += pa.planned ?? 0;
+    actual += pa.actual ?? 0;
+    if (pa.planned != null && pa.actual != null) diff = (diff ?? 0) + pa.planned - pa.actual;
+    points += m.booking.points;
+    if (m.booking.kind === "stay") {
+      if (m.booking.stay.freeNightUsed) freeNights += 1;
+      if (stayDueAtHotel(m.booking.stay)) due = true;
+      const key = m.room != null ? `room:${m.room}` : `own:${m.booking.id}`;
+      paxByRoom.set(key, Math.max(paxByRoom.get(key) ?? 0, m.booking.stay.pax ?? 0));
+    }
+  }
+  const codes = new Set(fx.filter((x) => x.planned != null || x.actual != null).map((x) => x.code));
+  const code = codes.size === 1 ? [...codes][0] : null;
+  const sumFx = (k: "planned" | "actual") =>
+    code && fx.some((x) => x[k] != null) ? fx.reduce((sum, x) => sum + (x.code === code ? x[k] ?? 0 : 0), 0) : null;
+  const pax = [...paxByRoom.values()].reduce((a, b) => a + b, 0);
+  const nights = Math.round((Date.parse(line.end) - Date.parse(line.start)) / 86_400_000);
+  const first = line.members[0].booking;
+  const city = first.kind === "stay" ? first.stay.city : null;
+  return {
+    planned, actual, diff, points, freeNights, due, pax, nights, city,
+    plannedFx: sumFx("planned"), actualFx: sumFx("actual"), code: code ?? "",
+  };
+}
+
+// "2 rooms · 5 pax" once each reservation has its room picked; until then
+// "4 reservations", since no room is claimed that wasn't picked.
+function roomsSummaryText(line: RoomsLine, f: ReturnType<typeof roomsFigures>) {
+  const what = line.roomCount != null
+    ? `${line.roomCount} room${line.roomCount === 1 ? "" : "s"}`
+    : `${line.members.length} reservations`;
+  // People only once rooms are picked: unpicked, a room's nights would each
+  // count its guests again.
+  return `${what}${f.pax && line.roomCount != null ? ` · ${f.pax} pax` : ""}`;
+}
+
+// A reservation's first line under its hotel: "Room 2 · 29-Mar – 30-Mar".
+function RoomLabel({ room, date }: { room: number | null; date: string }) {
+  return (
+    <>
+      {room != null ? <span className="whitespace-nowrap font-semibold">Room {room} · </span> : null}
+      <span className="whitespace-nowrap">{date}</span>
+    </>
+  );
+}
+
+// The hotel's Spent cell: cash paid, then the points and free nights, then
+// "Due at check-in" while a room is still to be charged.
+function RoomsSpent({ f, currency }: { f: ReturnType<typeof roomsFigures>; currency: string }) {
+  return (
+    <>
+      {f.actual > 0 ? (
+        <span className="text-negative">
+          {formatMoneyWhole(f.actual, currency)}
+          {f.actualFx != null ? <span className="font-normal text-foreground"> / {formatForeignWhole(f.actualFx, f.code)}</span> : null}
+        </span>
+      ) : !f.points && !f.freeNights && !f.due ? (
+        <span className="font-normal text-muted">{DASH}</span>
+      ) : null}
+      {f.points > 0 ? (
+        <span className="block text-xs font-semibold" style={{ color: "var(--viz-savings)" }}>{f.points.toLocaleString()} pts</span>
+      ) : null}
+      {f.freeNights > 0 ? (
+        <span className="block text-xs font-semibold" style={{ color: "var(--viz-savings)" }}>
+          {f.freeNights} free night{f.freeNights === 1 ? "" : "s"}
+        </span>
+      ) : null}
+      {f.due ? <DueAtCheckIn /> : null}
+    </>
+  );
+}
+
+/**
+ * A hotel booked as several reservations, on the desktop table: one line for
+ * the hotel (its dates, rooms, people and the reservations added up), then a
+ * line per reservation — its room, nights, card, how it was paid and its
+ * confirmation in the remarks. Each reservation opens its own stay form.
+ */
+function RoomsDesktop({ line, currency, tripYear, cardNames, todayIso, onEdit }: RoomsProps) {
+  const f = roomsFigures(line);
+  const first = line.members[0].booking;
+  return (
+    <tbody className="border-b border-line/60">
+      <tr className="[&>td]:pb-1">
+        <td className="px-3 py-2 text-left">
+          <span className="flex min-w-0 items-start gap-2">
+            <KindDay booking={first} />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-sm font-semibold">
+                {line.title}
+                <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+                  {tripDate(line.start, tripYear)} – {tripDate(line.end, tripYear)}
+                </span>
+              </span>
+              {/* Rooms and people on the line under the name, so the name and
+                  its dates keep one line. */}
+              <span className="text-xs text-foreground">
+                {f.city ? `${f.city} ` : ""}({f.nights}&nbsp;night{f.nights === 1 ? "" : "s"}) ·{" "}
+                <span className="font-semibold">{roomsSummaryText(line, f)}</span>
+              </span>
+            </span>
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2 text-center tabular-nums">
+          {f.planned ? formatMoneyWhole(f.planned, currency) : DASH}
+          {f.planned && f.plannedFx != null ? <span className="text-foreground"> / {formatForeignWhole(f.plannedFx, f.code)}</span> : null}
+        </td>
+        <td className="whitespace-nowrap px-3 py-2 text-center font-semibold tabular-nums">
+          <RoomsSpent f={f} currency={currency} />
+        </td>
+        <td className={`whitespace-nowrap px-3 py-2 text-center tabular-nums ${f.diff == null ? "text-muted" : f.diff >= 0 ? "text-positive" : "text-negative"}`}>
+          {f.diff == null ? DASH : `${f.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(f.diff), currency)}`}
+        </td>
+      </tr>
+      {line.members.map((m, i) => {
+        const b = m.booking;
+        const { planned, actual } = bookingPlanActual(b);
+        const fx = bookingForeign(b);
+        const diff = planned != null && actual != null ? planned - actual : null;
+        const card = roomCard(b, cardNames);
+        const pax = b.kind === "stay" ? b.stay.pax : null;
+        return (
+          <tr
+            key={b.id}
+            onClick={() => onEdit(b)}
+            className={`cursor-pointer align-top text-xs tabular-nums transition hover:bg-sky-50 dark:hover:bg-sky-900/20 [&>td]:py-1 ${i === line.members.length - 1 ? "[&>td]:pb-2" : ""}`}
+          >
+            <td className="px-3 pl-[7.25rem] text-left">
+              <RoomLabel room={m.room} date={bookingWhen(b, tripYear).date} />
+              {pax ? <span className="whitespace-nowrap"> · {pax} pax</span> : null}
+              {card ? <span> · {card}</span> : null}
+              <CancelRemarks booking={b} todayIso={todayIso} tripYear={tripYear} />
+            </td>
+            <td className="whitespace-nowrap px-3 text-center">
+              {planned != null ? formatMoneyWhole(planned, currency) : DASH}
+              {planned != null && fx.planned != null ? <span className="text-foreground"> / {formatForeignWhole(fx.planned, fx.code)}</span> : null}
+            </td>
+            <td className="whitespace-nowrap px-3 text-center">
+              <RoomPaid booking={b} currency={currency} />
+            </td>
+            <td className={`whitespace-nowrap px-3 text-center ${diff == null ? "text-muted" : diff >= 0 ? "text-positive" : "text-negative"}`}>
+              {diff == null ? DASH : `${diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(diff), currency)}`}
+            </td>
+          </tr>
+        );
+      })}
+    </tbody>
+  );
+}
+
+// The same hotel on a phone: its card with the totals, then a short line per
+// reservation — room, nights and card on the left, how it was paid on the right.
+function RoomsMobile({ line, currency, tripYear, cardNames, todayIso, onEdit }: RoomsProps) {
+  const f = roomsFigures(line);
+  const first = line.members[0].booking;
+  return (
+    <li className="px-3 py-2">
+      <span className="flex min-w-0 items-start gap-2">
+        <KindDay booking={first} className="mt-0.5" />
+        <span className="flex min-w-0 flex-col">
+          <span className="text-[13px] font-semibold">
+            {line.title}
+            <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground">
+              {tripDate(line.start, tripYear)} – {tripDate(line.end, tripYear)}
+            </span>
+          </span>
+          <span className="text-xs text-foreground">
+            {f.city ? `${f.city} ` : ""}({f.nights}&nbsp;night{f.nights === 1 ? "" : "s"}) ·{" "}
+            <span className="font-semibold">{roomsSummaryText(line, f)}</span>
+          </span>
+        </span>
+      </span>
+      <MobileFigures
+        planned={
+          f.planned ? (
+            <>
+              {formatMoneyWhole(f.planned, currency)}
+              {f.plannedFx != null ? <span className="block text-xs text-foreground">{formatForeignWhole(f.plannedFx, f.code)}</span> : null}
+            </>
+          ) : DASH
+        }
+        actual={<RoomsSpent f={f} currency={currency} />}
+        diff={f.diff == null ? DASH : `${f.diff >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(f.diff), currency)}`}
+        diffClass={f.diff == null ? "text-muted" : f.diff >= 0 ? "text-positive" : "text-negative"}
+      />
+      <ul className="mt-2 space-y-0.5 border-t border-line/60 pt-1.5">
+        {line.members.map((m) => {
+          const b = m.booking;
+          const { planned } = bookingPlanActual(b);
+          const card = roomCard(b, cardNames);
+          const pax = b.kind === "stay" ? b.stay.pax : null;
+          const due = b.kind === "stay" && stayDueAtHotel(b.stay);
+          return (
+            <li key={b.id}>
+              <button
+                type="button"
+                onClick={() => onEdit(b)}
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded px-1 py-1 text-left text-xs transition active:bg-sky-50 dark:active:bg-sky-950/40"
+              >
+                <span className="min-w-0">
+                  <RoomLabel room={m.room} date={bookingWhen(b, tripYear).date} />
+                  {/* People and card on their own line: beside the dates they
+                      ran into the figure on the right. */}
+                  {pax || card ? <span className="block">{[pax ? `${pax} pax` : null, card].filter(Boolean).join(" · ")}</span> : null}
+                  <CancelRemarks booking={b} todayIso={todayIso} tripYear={tripYear} />
+                </span>
+                <span className="text-right tabular-nums">
+                  {due && planned ? <span className="block">{formatMoneyWhole(planned, currency)}</span> : null}
+                  <RoomPaid booking={b} currency={currency} />
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </li>
   );
 }

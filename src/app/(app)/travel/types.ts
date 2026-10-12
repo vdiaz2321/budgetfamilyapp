@@ -57,6 +57,14 @@ export type TravelStay = {
   // True only for stays created in the app. Imported stays never took points
   // off a card, so editing them must not move a balance.
   movesCardPoints: boolean;
+  // Booked, but the hotel takes the card at check-in: nothing is spent until
+  // that charge is linked, so the trip shows "Due at check-in", not savings.
+  payAtProperty: boolean;
+  // Last day it can be cancelled (or refunded) at no cost.
+  freeCancelUntil: string | null;
+  // Which room this reservation is for, picked on the stay form when the
+  // hotel was booked as several rooms/reservations. Null on a single room.
+  roomNo: number | null;
 };
 
 export type PocketPaidWith = "card" | "points" | "credit";

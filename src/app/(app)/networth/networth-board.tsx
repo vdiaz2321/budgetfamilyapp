@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useTransition, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   centsToDisplay,
@@ -108,9 +108,13 @@ function makeTicks(min: number, max: number): number[] {
 function useChartSize() {
   const ref = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(640);
-  useEffect(() => {
+  // Measured before the first paint: the graph used to draw at the 640px
+  // guess, then grow a frame later, so swapping graphs (tapping an account)
+  // made it shrink and spring back — the page below flickered with it.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    setWidth(Math.max(280, Math.round(el.clientWidth)));
     const ro = new ResizeObserver(([entry]) => setWidth(Math.max(280, Math.round(entry.contentRect.width))));
     ro.observe(el);
     return () => ro.disconnect();
@@ -216,9 +220,15 @@ export function NetworthBoard({
 
   // The projection as a chart series: each year closes in its December, which
   // is where the plan line meets the month scale the record is drawn on.
+  // Carries the table's own figures for the year so the graph's hover can
+  // show the same breakdown the table does.
   const planPoints: PlanPoint[] = projectionYears.map((p) => ({
     month: `${p.year}-12-01`,
     net: p.eoyCents,
+    age: p.age,
+    growthCents: p.growthCents,
+    savedCents: p.incomeCents - p.spendingCents,
+    oneOffCents: p.oneOffCents,
   }));
   const [showPlan, setShowPlan] = useState(false);
 
@@ -227,28 +237,23 @@ export function NetworthBoard({
   const chartOpen = !!chartState.open;
   const setChartOpen = (v: boolean) => setChartState((s) => ({ ...s, open: v }));
 
-  // Clicking an account row filters the chart; Ctrl+click adds/removes from selection.
+  // Tapping an account name adds it to the graph; tapping it again takes it
+  // off. Always additive — the chips above the graph show what's picked and
+  // each has its own ×, so a separate Compare mode was one step too many.
   const [selectedRows, setSelectedRows] = useState<GridRow[]>([]);
-  // Comparing several accounts used to require ctrl/cmd-click, which is
-  // undiscoverable on desktop and impossible on a phone — there is no modifier
-  // key, so the multi-series chart was unreachable on mobile entirely. The
-  // Compare toggle makes a plain tap additive; ctrl/cmd still works as before.
-  const [compare, setCompare] = useState(false);
-  const handleSelectAccount = (row: GridRow, ctrlKey: boolean) => {
+  const handleSelectAccount = (row: GridRow) => {
     setSelectedRows((prev) => {
       const key = gridRowKey(row);
-      const already = prev.some((r) => gridRowKey(r) === key);
-      if (ctrlKey || compare) {
-        return already ? prev.filter((r) => gridRowKey(r) !== key) : [...prev, row];
-      }
-      return already && prev.length === 1 ? [] : [row];
+      return prev.some((r) => gridRowKey(r) === key)
+        ? prev.filter((r) => gridRowKey(r) !== key)
+        : [...prev, row];
     });
     if (!chartOpen) setChartOpen(true);
   };
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4">
-      <h1 className="text-lg font-bold sm:text-xl">Net Worth</h1>
+    <div className="mx-auto w-full max-w-[110rem] space-y-4">
+      <h1 className="text-lg font-bold sm:text-2xl">Net Worth</h1>
 
       {/* The household's own year-by-year plan, and how the record compares.
           Rendered even with no years yet — that empty case is the only place
@@ -278,28 +283,9 @@ export function NetworthBoard({
           the tables below it. It scrolls away with everything else now: a card
           that floats over the page takes a third of the screen with it, and
           every section that passed underneath had to be read around it. */}
-      <div className="space-y-4">
-      <div>
-        <ChartSection
-          points={points}
-          currency={currency}
-          open={chartOpen}
-          onToggle={setChartOpen}
-          selectedRows={selectedRows}
-          compare={compare}
-          onToggleCompare={() => setCompare((v) => !v)}
-          gridMonths={gridMonths}
-          onClearFilter={() => setSelectedRows([])}
-          onRemoveRow={(row) =>
-            setSelectedRows((prev) => prev.filter((r) => gridRowKey(r) !== gridRowKey(row)))
-          }
-          plan={planPoints}
-          showPlan={showPlan}
-          onTogglePlan={() => setShowPlan((v) => !v)}
-        />
-      </div>
-
-      {/* Monthly Actual Balances by account — the sheet's per-account grid */}
+      {/* Net Worth Monthly Balances by account — the sheet's per-account grid,
+          with the net worth graph inside it: tapping an account name in the
+          table is what filters the graph, so they're one section. */}
       {gridRows.length > 0 ? (
         <BalanceGrid
           months={gridMonths}
@@ -309,12 +295,28 @@ export function NetworthBoard({
           selectedKeys={selectedRows.map(gridRowKey).filter(Boolean)}
           onSelectAccount={handleSelectAccount}
           pointNets={Object.fromEntries(points.map((p) => [p.month, p.net]))}
+          chart={
+            <ChartSection
+              points={points}
+              currency={currency}
+              open={chartOpen}
+              onToggle={setChartOpen}
+              selectedRows={selectedRows}
+              gridMonths={gridMonths}
+              onClearFilter={() => setSelectedRows([])}
+              onRemoveRow={(row) =>
+                setSelectedRows((prev) => prev.filter((r) => gridRowKey(r) !== gridRowKey(row)))
+              }
+              plan={planPoints}
+              showPlan={showPlan}
+              onTogglePlan={() => setShowPlan((v) => !v)}
+            />
+          }
         />
       ) : null}
-      </div>
 
       {/* The sheet's YearlyNetWorth tab. Its top block (net worth, growth,
-          change per month) now lives in Monthly Actual Balances above. */}
+          change per month) now lives in Net Worth Monthly Balances above. */}
       {points.length > 0 ? (
         <MonthlyTraction
           points={points}
@@ -354,8 +356,6 @@ function ChartSection({
   gridMonths,
   onClearFilter,
   onRemoveRow,
-  compare,
-  onToggleCompare,
   plan,
   showPlan,
   onTogglePlan,
@@ -368,39 +368,47 @@ function ChartSection({
   gridMonths: string[];
   onClearFilter: () => void;
   onRemoveRow: (row: GridRow) => void;
-  compare: boolean;
-  onToggleCompare: () => void;
   plan: PlanPoint[];
   showPlan: boolean;
   onTogglePlan: () => void;
 }) {
+  // Lives inside Net Worth Monthly Balances (between its cards and the table)
+  // rather than as its own card above it: the table's account names are what
+  // filter it, so the two read as one tool.
+  // While open it pins to the top of the screen as the table scrolls under
+  // it, so a tapped account's graph is always in view. Sticky is scoped to the
+  // section, so it lets go once Net Worth Monthly Balances has scrolled past
+  // rather than floating over the sections below. Desktop only: on a phone
+  // the graph is a third of the screen and would leave no room for the table.
   return (
-    <section className="overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex flex-wrap items-center">
+    <div
+      data-nw-pinned-chart
+      className={`px-4 pb-3 ${open ? "md:sticky md:top-0 md:z-30 md:bg-surface md:pt-2" : ""}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => onToggle(!open)}
           aria-expanded={open}
-          className="flex flex-1 items-center sm:flex-none gap-2.5 px-4 py-2.5 text-left transition hover:bg-brand-soft/25"
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
+            open
+              ? "bg-brand text-white"
+              : "bg-sky-100 text-foreground hover:bg-sky-200 dark:bg-sky-900/50"
+          }`}
         >
-          <svg
-            width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-            className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`}
-            aria-hidden
-          >
-            <path d="M6 9l6 6 6-6" />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
+            <path d="M3 3v18h18" />
+            <path d="M7 15l4-4 3 3 5-6" />
           </svg>
-          <h2 className="whitespace-nowrap text-sm font-semibold sm:text-base">Net Worth Graph Breakdown</h2>
+          {open ? "Hide Graph" : "Show Graph"}
         </button>
-        {/* Own row on a phone, so the title stays on one line. */}
-        <div className="flex w-full items-center gap-2 px-4 pb-2 sm:w-auto sm:p-0 sm:pr-2">
+        {open ? <>
         {plan.length > 0 ? (
           <button
             type="button"
             onClick={onTogglePlan}
             aria-pressed={showPlan}
-            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
+            className={`shrink-0 rounded-full px-2.5 py-1 max-sm:text-[12px] sm:text-sm font-semibold transition ${
               showPlan
                 ? "bg-positive text-white"
                 : "bg-sky-100 text-muted hover:text-foreground dark:bg-sky-900/50"
@@ -409,21 +417,8 @@ function ChartSection({
             Plan
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={onToggleCompare}
-          aria-pressed={compare}
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition ${
-            compare
-              ? "bg-brand text-white"
-              : "bg-sky-100 text-muted hover:text-foreground dark:bg-sky-900/50"
-          }`}
-        >
-          Compare accounts
-        </button>
-        </div>
         {selectedRows.length > 0 ? (
-          <div className="flex w-full flex-wrap items-center gap-1.5 px-4 pb-2 sm:w-auto sm:px-0 sm:pb-0 sm:pr-4">
+          <div className="flex flex-wrap items-center gap-1.5">
             {selectedRows.map((r, i) => (
               <button
                 key={gridRowKey(r)}
@@ -451,22 +446,16 @@ function ChartSection({
             </button>
           </div>
         ) : null}
+        </> : null}
       </div>
-      {/* Said once the toggle is on, since the button alone can't say where
-          the accounts are picked. */}
-      {compare && selectedRows.length === 0 ? (
-        <p className="px-4 pb-2 text-xs text-foreground">
-          <span className="font-semibold text-foreground">Compare:</span> tap account names in Monthly Actual Balances.
-        </p>
-      ) : null}
       {open ? (
         points.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted">
+          <p className="py-8 text-center text-sm text-muted">
             No history yet — it starts accruing as soon as you enter account balances.
             Each month freezes automatically; check back as months pass.
           </p>
         ) : (
-          <div className="mx-4 mb-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
+          <div className="mt-2 overflow-hidden rounded-lg bg-background ring-1 ring-line">
             {selectedRows.length > 0 ? (
               <AccountChart rows={selectedRows} months={gridMonths} currency={currency} colors={CHART_COLORS} />
             ) : (
@@ -475,12 +464,21 @@ function ChartSection({
           </div>
         )
       ) : null}
-    </section>
+    </div>
   );
 }
 
 /** One year of the projection, pinned to the month it closes in. */
-export type PlanPoint = { month: string; net: number };
+export type PlanPoint = {
+  month: string;
+  net: number;
+  age?: number | null;
+  /** Investment gains for the year, from the projection table. */
+  growthCents?: number;
+  /** Income minus spending — negative in retirement, when savings pay the gap. */
+  savedCents?: number;
+  oneOffCents?: number;
+};
 
 // Single-series line: 2px brand line, 10% area wash, end dot with surface
 // ring, hairline gridlines, crosshair + tooltip snapping to nearest month.
@@ -497,6 +495,8 @@ function NetworthChart({
   plan?: PlanPoint[];
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  // A plan year under the pointer, once it's past the last real month.
+  const [planHover, setPlanHover] = useState<number | null>(null);
   const { ref: boxRef, W, H, font } = useChartSize();
   const M = { l: 56, r: 20, t: 16, b: 26 };
   const iw = W - M.l - M.r;
@@ -535,7 +535,12 @@ function NetworthChart({
   const yearStep = Math.max(1, Math.ceil((lastYear - firstYear) / Math.max(2, Math.floor(iw / 50))));
   const axisYears: number[] = [];
   for (let yr = firstYear; yr <= lastYear; yr += yearStep) axisYears.push(yr);
-  if (axisYears.at(-1) !== lastYear) axisYears.push(lastYear);
+  // The last year always gets a label; if the step lands just short of it,
+  // swap that mark for the last year so "2070" and "2071" don't overprint.
+  if (axisYears.at(-1) !== lastYear) {
+    if (axisYears.length > 1 && lastYear - axisYears.at(-1)! < yearStep) axisYears.pop();
+    axisYears.push(lastYear);
+  }
 
   const planPath =
     plan.length > 1
@@ -552,6 +557,25 @@ function NetworthChart({
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - rect.left) / rect.width) * W;
+    // Past the last real month, the pointer reads the plan line instead.
+    if (plan.length > 0 && points.length > 0 && px > x(points.length - 1) + 4) {
+      let bestPlan: number | null = null;
+      let bestPlanDist = Infinity;
+      plan.forEach((p, i) => {
+        if (monthNo(p.month) <= lastActualNo) return;
+        const d = Math.abs(xAt(p.month) - px);
+        if (d < bestPlanDist) {
+          bestPlanDist = d;
+          bestPlan = i;
+        }
+      });
+      if (bestPlan != null) {
+        setHover(null);
+        setPlanHover(bestPlan);
+        return;
+      }
+    }
+    setPlanHover(null);
     // Nearest actual point by x distance: with the plan drawn, the months are
     // no longer evenly spaced across the full width.
     let best = 0;
@@ -587,7 +611,10 @@ function NetworthChart({
         viewBox={`0 0 ${W} ${H}`}
         className="block w-full"
         onPointerMove={onMove}
-        onPointerLeave={() => setHover(null)}
+        onPointerLeave={() => {
+          setHover(null);
+          setPlanHover(null);
+        }}
       >
         <defs>
           <linearGradient id="nw-fill" x1="0" y1="0" x2="0" y2="1">
@@ -670,6 +697,17 @@ function NetworthChart({
           />
         ) : null}
 
+        {planHover != null ? (
+          <>
+            <line
+              x1={xAt(plan[planHover].month)} x2={xAt(plan[planHover].month)} y1={M.t} y2={M.t + ih}
+              stroke="var(--muted)" strokeWidth="1"
+            />
+            <circle cx={xAt(plan[planHover].month)} cy={y(plan[planHover].net)} r="6" fill="var(--background)" />
+            <circle cx={xAt(plan[planHover].month)} cy={y(plan[planHover].net)} r="4" fill="var(--positive)" />
+          </>
+        ) : null}
+
         {/* With the plan drawn the record occupies only the first third of the
             width, so month labels bunch up against each other. Across a
             multi-decade span the axis wants years, evenly spaced over the whole
@@ -716,6 +754,39 @@ function NetworthChart({
           </p>
         </div>
       ) : null}
+
+      {/* Same box as the record's: what the year closes at, when, and what
+          moved it — the projection table's gains, savings and one-offs. */}
+      {planHover != null ? (() => {
+        const pp = plan[planHover];
+        const pct = (xAt(pp.month) / W) * 100;
+        const signedMoney = (v: number) => `${v < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(v), currency)}`;
+        const toneOf = (v: number) => (v < 0 ? "text-negative" : "text-positive");
+        return (
+          <div
+            className="pointer-events-none absolute top-2 z-10 max-w-[18rem] rounded-lg bg-surface px-3 py-2 text-center shadow-md ring-1 ring-black/10 dark:ring-white/15"
+            style={{ left: `${pct}%`, transform: pct < 20 ? "translateX(0)" : pct > 80 ? "translateX(-100%)" : "translateX(-50%)" }}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Projected net worth</p>
+            <p className="text-sm font-bold tabular-nums">{formatMoney(Math.round(pp.net / 100) * 100, currency)}</p>
+            <p className="text-[11px] text-muted">
+              {monthLabel(pp.month)}
+              {pp.age != null ? ` · age ${pp.age}` : ""}
+            </p>
+            {pp.growthCents != null && pp.savedCents != null ? (
+              <p className="text-[10px] text-muted tabular-nums">
+                <span className={`font-semibold ${toneOf(pp.growthCents)}`}>{signedMoney(pp.growthCents)}</span> growth ·{" "}
+                <span className={`font-semibold ${toneOf(pp.savedCents)}`}>{signedMoney(pp.savedCents)}</span> saved
+                {pp.oneOffCents ? (
+                  <>
+                    {" "}· <span className={`font-semibold ${toneOf(pp.oneOffCents)}`}>{signedMoney(pp.oneOffCents)}</span> one-off
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+          </div>
+        );
+      })() : null}
     </div>
   );
 }
@@ -1010,16 +1081,19 @@ function BalanceGrid({
   selectedKeys,
   onSelectAccount,
   pointNets = {},
+  chart,
 }: {
   months: string[];
   rows: GridRow[];
   currency: string;
   lockedFromMonth: string;
   selectedKeys?: string[] | null;
-  onSelectAccount?: (row: GridRow, ctrlKey: boolean) => void;
+  onSelectAccount?: (row: GridRow) => void;
   /** Net worth for every month on record, imported history included — so
    *  January can be measured against the December before the grid starts. */
   pointNets?: Record<string, number>;
+  /** The net worth graph, shown between the cards and the table. */
+  chart?: ReactNode;
 }) {
   // Reorder optimistically — a drag updates this local copy immediately;
   // `rows` (from the server) wins once it's revalidated. The hand-off is done
@@ -1303,19 +1377,12 @@ function BalanceGrid({
   const closedIdxs = closedIdx === -1 ? [] : months.map((_, i) => i).slice(closedIdx);
   const withNet = closedIdxs.filter((i) => netAt(i) != null);
   const firstIdx = withNet.at(-1);
-  // A calendar year grows from the close of the December before it — the
-  // same start the forecast and Total Net Worth by Year use — so January's
-  // own growth counts. Without that December, from the year's first month.
-  const priorDec = gridYear === "all" ? null : pointNets[`${Number(gridYear) - 1}-12-01`] ?? null;
-  const lastNet = withNet.length > 0 ? netAt(withNet[0]) : null;
+  // Growth runs from the year's first month on screen to its newest finished
+  // one (Jan → Sep), the same span as the Growth column — Victor wants the
+  // year to stay inside the year, not start from the December before it.
   const growth =
-    priorDec != null && lastNet != null
-      ? lastNet - priorDec
-      : withNet.length > 1 && firstIdx != null ? netAt(withNet[0])! - netAt(firstIdx)! : null;
-  const spanMonths =
-    priorDec != null && withNet.length > 0
-      ? Number(months[withNet[0]].slice(5, 7))
-      : withNet.length > 1 && firstIdx != null ? firstIdx - withNet[0] : 0;
+    withNet.length > 1 && firstIdx != null ? netAt(withNet[0])! - netAt(firstIdx)! : null;
+  const spanMonths = withNet.length > 1 && firstIdx != null ? firstIdx - withNet[0] : 0;
   const avg = growth != null && spanMonths > 0 ? Math.round(growth / spanMonths) : null;
   const best = closedIdxs.reduce<{ i: number; amount: number } | null>((b, i) => {
     const c = changeAt(i);
@@ -1420,10 +1487,13 @@ function BalanceGrid({
     let frame = 0;
     const sync = () => {
       frame = 0;
-      // Nothing floats above the page any more, so the header parks at the
-      // viewport's own top edge.
+      // The header parks just under the pinned graph when there is one, else
+      // at the viewport's own top edge (a graph that has scrolled away has a
+      // negative bottom, which clamps to 0).
+      const chart = document.querySelector("[data-nw-pinned-chart]");
+      const anchor = Math.max(0, chart ? chart.getBoundingClientRect().bottom : 0);
       const top = box.getBoundingClientRect().top;
-      box.style.setProperty("--grid-sticky-top", `${Math.max(0, -top)}px`);
+      box.style.setProperty("--grid-sticky-top", `${Math.max(0, anchor - top)}px`);
     };
     const onScroll = () => {
       if (frame) return;
@@ -1432,21 +1502,30 @@ function BalanceGrid({
     sync();
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
+    // Showing or hiding the graph moves the header's resting spot without a
+    // scroll, so re-measure whenever the graph changes size.
+    const chart = document.querySelector("[data-nw-pinned-chart]");
+    const ro = chart ? new ResizeObserver(onScroll) : null;
+    if (chart) ro?.observe(chart);
     return () => {
       if (frame) cancelAnimationFrame(frame);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      ro?.disconnect();
     };
   }, [gridOpen]);
 
   return (
     <section style={{ overflow: "clip" }} className="rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+      {/* Three columns on desktop so the month label sits dead centre between
+          the title and the year picker; on the phone it drops to its own
+          centred line under them. */}
+      <div className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1.5 px-4 py-2.5 sm:grid-cols-[1fr_auto_1fr]">
         <button
           type="button"
           onClick={toggleGrid}
           aria-expanded={gridOpen}
-          className="flex flex-1 items-center gap-2.5 text-left"
+          className="flex min-w-0 items-center gap-2.5 text-left"
         >
           <svg
             width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -1456,10 +1535,29 @@ function BalanceGrid({
           >
             <path d="M6 9l6 6 6-6" />
           </svg>
-          <h2 className="text-sm font-semibold sm:text-base">Monthly Actual Balances</h2>
+          <h2 className="text-sm font-semibold sm:text-lg">Net Worth Monthly Balances</h2>
         </button>
+        {/* Names the month the header cards show, once, instead of on every
+            card. Boxed with a calendar so it reads as a label, not part of the
+            title; square corners keep it apart from the round chips. */}
+        {headerCards.length > 0 ? (
+          <span className="col-span-2 row-start-2 inline-flex items-center gap-1.5 justify-self-center whitespace-nowrap rounded-md bg-sky-50 px-2 py-0.5 max-sm:text-[11px] font-semibold text-foreground ring-1 ring-sky-200 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:text-sm dark:bg-sky-950/40 dark:ring-sky-800">
+            <svg
+              width="13" height="13" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+              className="shrink-0" style={{ color: "var(--viz-savings)" }}
+              aria-hidden
+            >
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M16 3v4M8 3v4M3 10h18" />
+            </svg>
+            Cards Show {new Date(`${months[cardIdx]}T00:00:00`).toLocaleString("en-US", { month: "long" })} Figures
+          </span>
+        ) : null}
         {gridYears.length > 0 ? (
-          <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
+          <div className="col-start-2 row-start-1 justify-self-end sm:col-start-3">
+            <YearPicker years={gridYears} year={gridYear} onYearChange={setGridYear} />
+          </div>
         ) : null}
       </div>
       {headerCards.length > 0 ? (
@@ -1475,11 +1573,11 @@ function BalanceGrid({
                 label={c.label}
                 value={c.now == null ? "—" : formatMoneyWhole(c.now, currency)}
                 valueClass={c.liability ? "text-negative" : ""}
-                sub={`${shortMonth(months[cardIdx])}${
+                sub={
                   delta != null && months[cardIdx + 1]
-                    ? ` · ${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(months[cardIdx + 1])}`
-                    : ""
-                }`}
+                    ? `${delta < 0 ? "−" : "+"}${formatMoneyWhole(Math.abs(delta), currency)} vs ${shortMonth(months[cardIdx + 1])}`
+                    : undefined
+                }
                 subClass={good == null ? "text-muted" : good ? "font-semibold text-positive" : "font-semibold text-negative"}
               />
             );
@@ -1505,6 +1603,7 @@ function BalanceGrid({
         </div>
       ) : null}
       {gridOpen ? <>
+      {chart}
       {reorderError ? (
         <p className="px-4 pb-2 text-xs font-medium text-negative">{reorderError}</p>
       ) : null}
@@ -1512,7 +1611,7 @@ function BalanceGrid({
       <div className="mx-4 mb-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
       <div ref={scrollBoxRef} className={`max-h-[70vh] overflow-auto${wideLayout ? "" : " overflow-x-auto"}`}>
         <table
-          className={`table-fixed border-collapse text-[11px] sm:text-xs ${
+          className={`table-fixed border-collapse max-sm:text-[12px] sm:text-sm ${
             wideLayout
               ? "w-full"
               : "min-w-full w-[calc(9rem+6rem+var(--month-count)*5rem)] sm:w-[calc(14rem+7rem+var(--month-count)*6rem)]"
@@ -1543,14 +1642,15 @@ function BalanceGrid({
             style={{ top: "var(--grid-sticky-top, 0px)" }}
           >
             <tr className="border-b border-line">
-              <th className={`${stickyCls} bg-background px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-[11px]`}>
+              <th className={`${stickyCls} bg-background px-3 py-2 text-left max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:px-4 sm:text-xs`}>
                 Account
               </th>
-              <th className="border-x border-line bg-sky-50 dark:bg-sky-950 px-2 leading-tight py-2 text-center text-[10px] font-medium uppercase tracking-wide text-muted sm:text-[11px]">
-                {growthRange ? `Growth ${growthRange}` : "Growth"}
+              <th className="border-x border-line bg-sky-50 dark:bg-sky-950 px-2 leading-tight py-2 text-center max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:text-xs">
+                Growth
+                {growthRange ? <span className="block whitespace-nowrap">{growthRange}</span> : null}
               </th>
               {months.map((m) => (
-                <th key={m} className={`${wideLayout ? "" : "w-20 sm:w-24"} bg-background whitespace-nowrap px-2 py-2 text-center text-[10px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-[11px]`}>
+                <th key={m} className={`${wideLayout ? "" : "w-20 sm:w-24"} bg-background whitespace-nowrap px-2 py-2 text-center max-sm:text-[11px] font-medium uppercase tracking-wide text-muted sm:px-3 sm:text-xs`}>
                   {monthLabel(m)}
                   {m >= lockedFromMonth ? <span className="block normal-case">so far</span> : null}
                 </th>
@@ -1566,7 +1666,7 @@ function BalanceGrid({
               const totalRow = (
                 <tr className="border-t-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
                   <td className="sticky left-0 z-10 bg-background px-3 py-2 pr-2 sm:px-4 sm:pr-3">
-                    <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground sm:text-xs sm:tracking-wider">
+                    <span className="whitespace-nowrap max-sm:text-[12px] font-bold uppercase tracking-wide text-foreground sm:text-sm sm:tracking-wider">
                       Total Net Worth
                     </span>
                   </td>
@@ -1589,7 +1689,7 @@ function BalanceGrid({
               const changeRow = (
                 <tr className="border-b-2 border-brand/40 bg-brand/10 dark:bg-brand/20">
                   <td className="sticky left-0 z-10 bg-background px-3 py-1.5 pr-2 sm:px-4 sm:pr-3">
-                    <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-muted sm:text-xs">
+                    <span className="whitespace-nowrap max-sm:text-[12px] font-semibold uppercase tracking-wide text-muted sm:text-sm">
                       Change
                     </span>
                   </td>
@@ -1655,7 +1755,7 @@ function BalanceGrid({
                         >
                           <path d="M9 6l6 6-6 6" />
                         </svg>
-                        <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-foreground sm:text-xs">
+                        <span className="whitespace-nowrap max-sm:text-[12px] font-bold uppercase tracking-wide text-foreground sm:text-sm">
                           {g.section}
                         </span>
                         <span className="hidden min-w-0 truncate text-xs font-normal normal-case text-muted sm:block">
@@ -1718,7 +1818,7 @@ function BalanceGrid({
                                     {r.accountId ? (
                                       <button
                                         type="button"
-                                        onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
+                                        onClick={() => onSelectAccount?.(r)}
                                         className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:text-brand sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                       >
                                         {r.name}
@@ -1740,7 +1840,7 @@ function BalanceGrid({
                                     />
                                     <button
                                       type="button"
-                                      onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
+                                      onClick={() => onSelectAccount?.(r)}
                                       className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:text-brand sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                     >
                                       {r.name}
@@ -1759,7 +1859,7 @@ function BalanceGrid({
                                         silent rename. */}
                                     <button
                                       type="button"
-                                      onClick={(e) => onSelectAccount?.(r, e.ctrlKey || e.metaKey)}
+                                      onClick={() => onSelectAccount?.(r)}
                                       className={`min-w-0 whitespace-normal rounded px-1 py-0.5 text-left text-xs font-medium leading-tight transition hover:text-brand sm:text-[13px] ${selectedKeys?.includes(gridRowKey(r)) ? "text-brand" : ""}`}
                                     >
                                       {r.name}
@@ -1841,7 +1941,7 @@ function YearPicker({
         aria-label="Year"
         value={year}
         onChange={(e) => onYearChange(e.target.value)}
-        className="cursor-pointer rounded-lg bg-sky-50 dark:bg-background px-2 py-1 text-sm font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+        className="cursor-pointer rounded-lg bg-sky-50 dark:bg-background px-2 py-1 text-sm font-semibold sm:text-base ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
       >
         <option value="all">All</option>
         {years.map((y) => (
@@ -1966,9 +2066,9 @@ function StatCard({
 }) {
   return (
     <div className={`min-w-0 rounded-lg bg-background px-3 py-2 text-center ring-1 ring-line ${className}`}>
-      <p className="text-[10px] font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 truncate text-base font-bold tabular-nums ${valueClass}`}>{value}</p>
-      {sub ? <p className={`text-[10px] leading-tight ${subClass}`}>{sub}</p> : null}
+      <p className="max-sm:text-[11px] sm:text-sm font-semibold uppercase leading-tight tracking-wide text-muted">{label}</p>
+      <p className={`mt-0.5 truncate text-base font-bold tabular-nums sm:text-2xl ${valueClass}`}>{value}</p>
+      {sub ? <p className={`max-sm:text-[11px] sm:text-sm leading-tight ${subClass}`}>{sub}</p> : null}
     </div>
   );
 }
@@ -1982,13 +2082,13 @@ function CardToggle({ title, collapsed, onToggle }: { title: string; collapsed: 
       >
         <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
-      <h2 className="whitespace-nowrap text-sm font-semibold sm:text-base">{title}</h2>
+      <h2 className="whitespace-nowrap text-sm font-semibold sm:text-lg">{title}</h2>
     </button>
   );
 }
 
 // The sheet's YearlyNetWorth tab, month by month. No header cards: each one
-// repeated a Monthly Actual Balances card above it.
+// repeated a Net Worth Monthly Balances card above it.
 function MonthlyTraction({
   points,
   lockedFromMonth,
@@ -2062,7 +2162,7 @@ function MonthlyTable({
   return (
       <div className="mx-4 mb-4 max-h-[520px] overflow-auto rounded-lg bg-background ring-1 ring-line">
         <table
-          className={`border-collapse whitespace-nowrap text-[11px] sm:text-xs ${!showChanges ? "w-full table-fixed" : ""}`}
+          className={`border-collapse whitespace-nowrap max-sm:text-[12px] sm:text-sm ${!showChanges ? "w-full table-fixed" : ""}`}
           style={!showChanges ? { minWidth: NW_TABLE_MIN_WIDTH } : undefined}
         >
           {!showChanges ? (
@@ -2074,7 +2174,7 @@ function MonthlyTable({
           ) : null}
           <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
             {/* Grouped metric names, centered over their columns */}
-            <tr className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+            <tr className="max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-muted">
               <th className="sticky left-0 z-30 bg-brand-soft px-2 pt-1.5 pb-1.5 text-center" rowSpan={2}>
                 Month
               </th>
@@ -2087,7 +2187,7 @@ function MonthlyTable({
               <th className="px-1.5 pt-1.5 text-center" rowSpan={2}>Actual NW</th>
               <th className="px-1.5 pt-1.5 text-center" rowSpan={2}>Debt Ratio</th>
             </tr>
-            <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
+            <tr className="border-b border-line max-sm:text-[11px] sm:text-xs font-medium uppercase tracking-wide text-muted">
               {METRICS.map((m) => (
                 <Fragment key={m.key}>
                   <th className="border-l border-line px-1.5 pb-1.5 text-center">Current</th>
@@ -2236,7 +2336,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
           >
             <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <h2 className="text-sm font-semibold sm:text-base">Total Net Worth by Year</h2>
+          <h2 className="text-sm font-semibold sm:text-lg">Total Net Worth by Year</h2>
         </button>
       </div>
       {latestRow ? (
@@ -2280,7 +2380,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
       {!collapsed && (
         <div className="mx-4 mb-4 overflow-x-auto rounded-lg bg-background ring-1 ring-line">
           <table
-            className="w-full border-collapse whitespace-nowrap text-[11px] table-fixed sm:text-xs"
+            className="w-full border-collapse whitespace-nowrap max-sm:text-[12px] table-fixed sm:text-sm"
             style={{ minWidth: NW_TABLE_MIN_WIDTH }}
           >
             <colgroup>
@@ -2289,7 +2389,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
               ))}
             </colgroup>
             <thead>
-              <tr className="border-b border-line bg-brand-soft/25 text-[10px] font-semibold uppercase tracking-wide text-muted">
+              <tr className="border-b border-line bg-brand-soft/25 max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-muted">
                 <th rowSpan={2} className="sticky left-0 z-20 border-r border-line bg-brand-soft px-2 py-1 text-center align-middle">
                   Date
                 </th>
@@ -2300,7 +2400,7 @@ function YearTable({ points, currency, lockedFromMonth }: { points: MonthPoint[]
                 <th colSpan={2} className="border-r border-line px-1.5 py-1 text-center">Total NW w/out Debt</th>
                 <th colSpan={3} className="px-1.5 py-1 text-center">Actual NW</th>
               </tr>
-              <tr className="border-b border-line text-[10px] font-medium uppercase tracking-wide text-muted">
+              <tr className="border-b border-line max-sm:text-[11px] sm:text-xs font-medium uppercase tracking-wide text-muted">
                 <th className="px-1.5 py-1 text-center">Value</th>
                 <th className="border-r border-line px-1.5 py-1 text-center">Y2Y Diff</th>
                 <th className="px-1.5 py-1 text-center">Value</th>

@@ -63,7 +63,9 @@ export function AddTravelLogModal({
   const [open, setOpen] = useState<Record<Kind, boolean>>({ stay: false, misc: false, flight: false, car: false });
   // A family of five books two rooms: each extra room is its own stay form,
   // started as a copy of the first room's hotel, city, dates and brand.
-  const [rooms, setRooms] = useState<{ id: number; roomOf: TravelStay | null }[]>([{ id: 0, roomOf: null }]);
+  // Each has its room number, picked by hand: a room booked night by night
+  // is several reservations with the same number.
+  const [rooms, setRooms] = useState<{ id: number; roomOf: TravelStay | null; roomNo: number }[]>([{ id: 0, roomOf: null, roomNo: 1 }]);
   const roomHandles = useRef<Record<number, SectionHandle | null>>({});
   // Units ("stay:0", "stay:1", "misc", …) already saved by an earlier press,
   // when another one failed. They are not saved twice on the retry.
@@ -168,7 +170,7 @@ export function AddTravelLogModal({
       ...SECTIONS.filter((s) => s.kind !== "stay").map((s) => ({ id: s.kind as string, kind: s.kind, handle: handles[s.kind].current })),
     ];
   }
-  const roomLabel = (i: number) => (i === 0 ? "Stay" : `Room ${i + 1}`);
+  const roomLabel = (i: number) => (i === 0 ? "Stay" : `Room ${rooms[i]?.roomNo ?? i + 1}`);
   const label = (id: string) => {
     if (id === "dates") return "Trip dates";
     const i = rooms.findIndex((r) => `stay:${r.id}` === id);
@@ -177,7 +179,10 @@ export function AddTravelLogModal({
 
   function addRoom() {
     const copy = roomHandles.current[rooms[0].id]?.copyForRoom?.() ?? null;
-    setRooms((rs) => [...rs, { id: Math.max(...rs.map((r) => r.id)) + 1, roomOf: copy }]);
+    setRooms((rs) => [
+      ...rs,
+      { id: Math.max(...rs.map((r) => r.id)) + 1, roomOf: copy, roomNo: Math.min(9, Math.max(...rs.map((r) => r.roomNo)) + 1) },
+    ]);
   }
 
   return (
@@ -289,8 +294,21 @@ export function AddTravelLogModal({
                       <div key={r.id} className={i > 0 ? "border-t border-line pt-3" : ""}>
                         {i > 0 ? (
                           <div className="mb-2 flex items-center justify-between">
-                            <span className="text-sm font-bold">
-                              {roomLabel(i)}
+                            <span className="flex items-center gap-2 text-sm font-bold">
+                              Room
+                              <select
+                                value={r.roomNo}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value);
+                                  setRooms((rs) => rs.map((x) => (x.id === r.id ? { ...x, roomNo: n } : x)));
+                                }}
+                                aria-label="Room"
+                                className="rounded-md bg-background px-2 py-0.5 text-sm font-bold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500"
+                              >
+                                {[1, 2, 3, 4, 5, 6].map((n) => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
                               {roomSaved ? <span className="ml-2 text-xs font-semibold text-positive">Saved</span> : null}
                             </span>
                             {roomSaved ? null : (
@@ -311,6 +329,8 @@ export function AddTravelLogModal({
                           <StayModal
                             stay={null}
                             roomOf={r.roomOf}
+                            // A single stay saves no room; with more, each its own.
+                            roomNo={rooms.length > 1 ? r.roomNo : null}
                             cards={cards}
                             brands={brands}
                             trips={trips}

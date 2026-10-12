@@ -13,7 +13,7 @@ export default async function TravelPage() {
     supabase
       .from("travel_stays")
       .select(
-        "id, trip_id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_used, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, breakfast_included, cancelled_at, reward_activity_id, free_night_used, free_night_points, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, cost_foreign_cents, foreign_currency",
+        "id, trip_id, account_id, card_label, holder, property_name, city, brand, booking_channel, reserved_on, check_in, nights, pax, points_cost, points_used, points_value_micros, hotel_credit_cents, hotel_cost_cents, pocket_cost_cents, pocket_paid_with, remarks, breakfast_included, cancelled_at, reward_activity_id, free_night_used, free_night_points, moves_card_points, is_estimate, planned_cost_cents, planned_cost_foreign_cents, cost_foreign_cents, foreign_currency, pay_at_property, free_cancel_until, room_no",
       )
       .eq("household_id", household.id)
       .order("check_in", { ascending: false }),
@@ -226,6 +226,9 @@ export default async function TravelPage() {
     plannedCostForeignCents: s.planned_cost_foreign_cents == null ? null : Number(s.planned_cost_foreign_cents),
     costForeignCents: s.cost_foreign_cents == null ? null : Number(s.cost_foreign_cents),
     foreignCurrency: s.foreign_currency ?? "",
+    payAtProperty: s.pay_at_property ?? false,
+    freeCancelUntil: s.free_cancel_until ?? null,
+    roomNo: s.room_no ?? null,
   }));
 
   const flightRows: TravelFlight[] = (flights.data ?? []).map((f) => ({

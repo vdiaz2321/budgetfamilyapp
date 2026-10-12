@@ -198,6 +198,10 @@ export type DueItem = {
   accountId: string | null;
   accountName: string | null;
   source: "budget" | "subscription";
+  // The budget category group the item sits under (e.g. "Bills"), shown in
+  // its own column on desktop. Absent when the item's row isn't in any group.
+  categoryName?: string;
+  categoryKind?: CategoryKind;
   // Recurring subscriptions carry what they actually cost last month, so the
   // row can offer a one-click prefill at that figure rather than the planned
   // amount. 0 (or absent) means there was nothing to copy and no chip shows.

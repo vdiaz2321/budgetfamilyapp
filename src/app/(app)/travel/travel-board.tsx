@@ -17,7 +17,7 @@ import { TripCards } from "./trip-cards";
 import { TripLogPanel } from "./trip-log-panel";
 import { TripDetailModal } from "./trip-detail-modal";
 import { MiscModal } from "./misc-modal";
-import { sheetDateRange, summarizeTrips } from "./trip-summary";
+import { sameHotelReservations, sheetDateRange, summarizeTrips } from "./trip-summary";
 import { formatCentsPerPoint, redemptionsByCard } from "./points-value";
 import { AddTravelLogModal } from "./add-travel-log-modal";
 import { EditTripPicker } from "./edit-trip-picker";
@@ -1533,6 +1533,7 @@ export function TravelBoard({
           key={`trip-${openTrip.trip.id}`}
           summary={openTrip}
           currency={currency}
+          cardNames={cardName}
           onEditBooking={(b) =>
             b.kind === "flight" ? setEditingFlight(b.flight) : b.kind === "stay" ? setEditing(b.stay) : setEditingCar(b.car)
           }
@@ -1581,7 +1582,11 @@ export function TravelBoard({
       ) : null}
       {editing ? (
         <StayModal
+          // A different reservation of the same hotel starts its own form.
+          key={editing.id}
           stay={editing}
+          // The hotel's other reservations, shown as rooms under this one.
+          siblings={sameHotelReservations(editing, stays)}
           cards={cards}
           brands={brandList}
           currency={currency}

@@ -343,8 +343,14 @@ export function TransactionsTable({
     />
   );
   {
+    // Same-day rows follow the order they were added (the page loads them
+    // oldest-added first), flipped with the date: newest-first puts the
+    // charge just added at the top of its day, not under earlier ones.
     const dir = dateSort === "desc" ? -1 : 1;
-    filtered.sort((a, b) => (a.date < b.date ? -dir : a.date > b.date ? dir : 0));
+    const addedOrder = new Map(transactions.map((t, i) => [t.id, i]));
+    filtered.sort((a, b) =>
+      a.date < b.date ? -dir : a.date > b.date ? dir : ((addedOrder.get(a.id) ?? 0) - (addedOrder.get(b.id) ?? 0)) * dir,
+    );
   }
 
   const incomeTotal = filtered

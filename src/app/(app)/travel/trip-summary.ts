@@ -81,6 +81,8 @@ export function flightRoute(f: TravelFlight): string {
  * it ever was one. Stays and rentals work the same way.
  */
 export function bookingPlanActual(b: Booking): { planned: number | null; actual: number | null } {
+  // Reserved but paid at check-in: all plan until the charge is linked.
+  if (b.kind === "stay" && stayDueAtHotel(b.stay)) return { planned: b.stay.plannedCostCents, actual: null };
   if (b.kind === "flight") {
     return b.flight.isEstimate
       ? { planned: b.pocket, actual: null }
@@ -105,6 +107,7 @@ export function bookingForeign(b: Booking): { code: string; planned: number | nu
   }
   if (b.kind === "stay") {
     const s = b.stay;
+    if (stayDueAtHotel(s)) return { code: s.foreignCurrency, planned: s.plannedCostForeignCents, actual: null };
     return s.isEstimate
       ? { code: s.foreignCurrency, planned: s.costForeignCents, actual: null }
       : { code: s.foreignCurrency, planned: s.plannedCostForeignCents, actual: s.costForeignCents };
@@ -113,6 +116,98 @@ export function bookingForeign(b: Booking): { code: string; planned: number | nu
   return c.isEstimate
     ? { code: c.foreignCurrency, planned: c.costEurCents, actual: null }
     : { code: c.foreignCurrency, planned: c.plannedCostForeignCents, actual: c.costEurCents };
+}
+
+/**
+ * Booked at a hotel that takes the card at check-in, and nothing paid yet —
+ * no charge linked and no Spent typed. Its plan is money still to go, not
+ * money saved.
+ */
+export function stayDueAtHotel(s: TravelStay): boolean {
+  return s.payAtProperty && !s.isEstimate && !s.cancelledAt && s.paidCents == null && s.pocketCostCents === 0;
+}
+
+/** Free cancellation still open on this booking: its last day, or null. */
+export function freeCancelOpen(s: TravelStay, todayIso: string): string | null {
+  return s.freeCancelUntil && !s.cancelledAt && s.freeCancelUntil >= todayIso ? s.freeCancelUntil : null;
+}
+
+/**
+ * The trip's bookings as the popup lists them: a family needing two rooms
+ * books the same hotel several times (a cash room, plus a second room night by
+ * night on points and free-night certificates), and each reservation is its
+ * own stay. Those are gathered into one line per hotel — same name, dates
+ * that touch — with each reservation under it and the room picked for it on
+ * the stay form (null when none was picked: then no room is claimed). Everything
+ * else stays a line of its own, in the same order.
+ */
+export type BookingLine =
+  | { type: "single"; booking: Booking }
+  | {
+      type: "rooms";
+      key: string;
+      title: string;
+      start: string;
+      end: string;
+      /** Distinct rooms, when every reservation has one picked; else null. */
+      roomCount: number | null;
+      members: Array<{ booking: Booking; room: number | null }>;
+    };
+
+export function bookingLines(bookings: Booking[]): BookingLine[] {
+  const norm = (name: string) => name.trim().toLowerCase();
+  const groups: Booking[][] = [];
+  const groupOf = new Map<string, Booking[]>();
+  for (const b of bookings) {
+    if (b.kind !== "stay" || b.cancelled) continue;
+    // Joins a group of the same hotel whose dates it touches.
+    const home = groups.find(
+      (g) => norm(g[0].title) === norm(b.title) && g.some((m) => b.start <= m.end && m.start <= b.end),
+    );
+    if (home) home.push(b);
+    else groups.push([b]);
+  }
+  for (const g of groups) if (g.length > 1) g.forEach((b) => groupOf.set(b.id, g));
+
+  const lines: BookingLine[] = [];
+  const placed = new Set<Booking[]>();
+  for (const b of bookings) {
+    const g = b.kind === "stay" ? groupOf.get(b.id) : undefined;
+    if (!g) {
+      lines.push({ type: "single", booking: b });
+      continue;
+    }
+    if (placed.has(g)) continue;
+    placed.add(g);
+    // By the room picked on each reservation, then by date.
+    const ordered = [...g].sort((x, y) => x.start.localeCompare(y.start) || y.end.localeCompare(x.end));
+    const members = ordered.map((m) => ({ booking: m, room: m.kind === "stay" ? m.stay.roomNo : null }));
+    members.sort((x, y) => (x.room ?? 99) - (y.room ?? 99) || x.booking.start.localeCompare(y.booking.start));
+    const allPicked = members.every((m) => m.room != null);
+    lines.push({
+      type: "rooms",
+      key: g.map((m) => m.id).join("+"),
+      title: ordered[0].title,
+      start: ordered.reduce((min, m) => (m.start < min ? m.start : min), ordered[0].start),
+      end: ordered.reduce((max, m) => (m.end > max ? m.end : max), ordered[0].end),
+      roomCount: allPicked ? new Set(members.map((m) => m.room)).size : null,
+      members,
+    });
+  }
+  return lines;
+}
+
+/**
+ * The hotel's other reservations in the same trip — what the trip popup lists
+ * under the same hotel line — so the stay form can show them all together.
+ */
+export function sameHotelReservations(stay: TravelStay, stays: TravelStay[]): TravelStay[] {
+  if (!stay.tripId || stay.cancelledAt) return [];
+  const line = bookingLines(stays.filter((s) => s.tripId === stay.tripId).map(stayBooking)).find(
+    (l) => l.type === "rooms" && l.members.some((m) => m.booking.id === stay.id),
+  );
+  if (!line || line.type !== "rooms") return [];
+  return line.members.flatMap((m) => (m.booking.kind === "stay" && m.booking.id !== stay.id ? [m.booking.stay] : []));
 }
 
 function flightBooking(f: TravelFlight): Booking {
@@ -230,8 +325,10 @@ export function summarizeTrips(
       );
       const live = bookings.filter((b) => !b.cancelled);
       const tripExpenses = expenses.filter((e) => e.tripId === trip.id);
+      // A hotel booked as several reservations (two rooms) counts once, as
+      // the trip popup lists it.
       const counts = { flight: 0, stay: 0, car: 0 };
-      live.forEach((b) => (counts[b.kind] += 1));
+      bookingLines(live).forEach((l) => (counts[l.type === "rooms" ? "stay" : l.booking.kind] += 1));
 
       // The trip's own dates win; without them, the bookings' span.
       const start = trip.startOn ?? (live.length ? live.reduce((m, b) => (b.start < m ? b.start : m), live[0].start) : null);

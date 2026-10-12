@@ -362,7 +362,7 @@ export default async function NetworthPage() {
     };
   });
 
-  // ---- Monthly Actual Balances grid (per-account era only) ----
+  // ---- Net Worth Monthly Balances grid (per-account era only) ----
   // The detailed accounts×months grid only spans months that actually have
   // per-account snapshots. Pre-per-account history shows in the analytics table,
   // not here (there's no account-level detail to show).
@@ -611,7 +611,7 @@ export default async function NetworthPage() {
   // half-updated by design — investments only move at the month-end update,
   // while checking accounts move every day — so October read as a $7,469
   // fall against September that was only bills paid on the 1st. Same rule as
-  // the Monthly Actual Balances cards.
+  // the Net Worth Monthly Balances cards.
   const closedPoints = points.filter((p) => p.month < fiToMonth);
   const lastClosed = closedPoints.at(-1) ?? null;
   if (lastClosed) {

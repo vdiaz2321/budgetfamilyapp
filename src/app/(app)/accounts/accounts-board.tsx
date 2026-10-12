@@ -42,6 +42,7 @@ import {
   type Section,
 } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
+import { AddTransactionButton } from "../travel/add-transaction-button";
 import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
 import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
 
@@ -1061,6 +1062,8 @@ function CreditCardListSection({
   onToggle: () => void;
 }) {
   const [payCardFor, setPayCardFor] = useState<AccountData | null>(null);
+  // The header's Card Payment button: choose a card first, then Pay opens.
+  const [pickingCard, setPickingCard] = useState(false);
   const isMain = section.key === "credit";
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
 
@@ -1119,6 +1122,28 @@ function CreditCardListSection({
           </span>
         </button>
         <div className="order-last flex w-full flex-wrap items-center gap-x-4 gap-y-1 sm:order-none sm:w-auto">
+        {/* Says outright where paying a card starts — the tiles' chevrons
+            alone didn't. Picks the card, then opens the same Pay form a tile
+            does. Outlined, not red: the owed figures already carry the red. */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPickingCard(true);
+          }}
+          className="h-7 shrink-0 cursor-pointer rounded-full bg-surface px-3 text-xs font-bold text-brand shadow-sm ring-1 ring-inset ring-sky-300 transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/50"
+        >
+          Make Card Payment
+        </button>
+        {/* Wraps "Not in Net Worth" under the total on a phone. */}
+        <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 whitespace-nowrap">
+          <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total credit card owed:</span>
+          <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
+            {formatMoney(totalOwed, currency)}
+          </span>
+          {/* A light-blue pill so it reads as a note on the total. */}
+          <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-foreground dark:bg-sky-900/50">Not in Net Worth</span>
+        </span>
         {/* The points live on the Travel Log — named for the page it opens. */}
         <Link
           href="/travel"
@@ -1127,13 +1152,15 @@ function CreditCardListSection({
         >
           Travel Log Page →
         </Link>
-        {/* Wraps "Not in Net Worth" under the total on a phone. */}
-        <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 whitespace-nowrap">
-          <span className="text-xs font-semibold uppercase tracking-wide text-foreground">Total credit card owed:</span>
-          <span className="text-sm font-bold tabular-nums text-negative sm:text-base">
-            {formatMoney(totalOwed, currency)}
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-wide text-foreground"><span className="max-sm:hidden">· </span>Not in Net Worth</span>
+        {/* Log a charge seen in the card's own app without leaving this page —
+            the same form as Budget and Transactions, so it lands everywhere
+            and moves the card's owed amount. Its clicks (form included) must
+            not reach the header's collapse toggle. */}
+        <span className="contents" onClick={(e) => e.stopPropagation()}>
+          <AddTransactionButton
+            label="+ Transaction"
+            className="h-7 shrink-0 cursor-pointer rounded-full bg-brand px-3 text-xs font-bold text-white shadow-sm transition hover:bg-brand-strong disabled:opacity-60"
+          />
         </span>
         </div>
         <button
@@ -1186,9 +1213,12 @@ function CreditCardListSection({
                     {/* Red is for money actually owed. A settled card prints
                         nothing at all — twelve rows of "$0.00" buried the one
                         card that actually owes money. */}
+                    {/* Labelled so the figure reads as what's owed; the header's
+                        Make Card Payment button says how to pay it. */}
                     {(a.owedCents ?? 0) > 0 ? (
-                      <span className="shrink-0 text-sm font-semibold tabular-nums text-negative">
-                        {formatMoney(a.owedCents ?? 0, currency)}
+                      <span className="shrink-0 whitespace-nowrap text-sm font-semibold">
+                        {/* "Card" drops on a phone, where it cut the card's name. */}
+                        <span className="max-sm:hidden">Card </span>Owed: <span className="tabular-nums text-negative">{formatMoney(a.owedCents ?? 0, currency)}</span>
                       </span>
                     ) : null}
                     {/* The chevron says "opens something", the same cue the
@@ -1222,6 +1252,17 @@ function CreditCardListSection({
       ) : null}
       {reorderError ? <p className="px-4 pb-2 text-xs font-medium text-negative sm:px-6">{reorderError}</p> : null}
 
+      {pickingCard ? (
+        <PickCardModal
+          cards={localCards.filter((a) => !a.dateClosed)}
+          currency={currency}
+          onPick={(card) => {
+            setPickingCard(false);
+            setPayCardFor(card);
+          }}
+          onClose={() => setPickingCard(false)}
+        />
+      ) : null}
       {payCardFor ? (
         <PayCardModal
           card={payCardFor}
@@ -1235,6 +1276,60 @@ function CreditCardListSection({
   );
 }
 
+// Card Payment's first step: which card? Cards that owe money come first,
+// with what they owe; picking one opens its Pay form.
+function PickCardModal({
+  cards,
+  currency,
+  onPick,
+  onClose,
+}: {
+  cards: AccountData[];
+  currency: string;
+  onPick: (card: AccountData) => void;
+  onClose: () => void;
+}) {
+  useScrollLock();
+  const ordered = [...cards.filter((a) => (a.owedCents ?? 0) > 0), ...cards.filter((a) => (a.owedCents ?? 0) <= 0)];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[85dvh] w-full max-w-sm flex-col rounded-xl bg-surface p-4 shadow-lg ring-1 ring-black/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-bold">Pay which card?</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-muted hover:bg-sky-50 hover:text-foreground dark:hover:bg-sky-950/40"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <ul className="-mx-1 space-y-1 overflow-y-auto px-1">
+          {ordered.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button"
+                onClick={() => onPick(a)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left ring-1 ring-line transition hover:bg-sky-50 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
+                {(a.owedCents ?? 0) > 0 ? (
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-negative">
+                    {formatMoney(a.owedCents ?? 0, currency)}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 // Move money between two of your own accounts. Budget-neutral by design —
 // see `transferBetweenAccounts` for why funding a savings goal stays on the

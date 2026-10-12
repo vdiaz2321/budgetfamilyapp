@@ -210,7 +210,7 @@ export function CardPaymentsLedger({
   // line up well enough down a column.
   // Desktop reads one step bigger (sm:); the phone keeps its sizes.
   const cell = "px-2 py-1.5 text-center tabular-nums whitespace-nowrap";
-  const headBase = "px-2 py-2 max-sm:text-[12px] sm:text-xs font-semibold uppercase tracking-wide text-muted whitespace-nowrap";
+  const headBase = "px-2 py-2 max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-muted whitespace-nowrap";
   const head = `${headBase} text-center`;
 
   return (
@@ -234,7 +234,7 @@ export function CardPaymentsLedger({
             >
               <path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="min-w-0 text-sm font-bold">{labels.title}</span>
+            <span className="min-w-0 text-sm font-bold sm:text-base">{labels.title}</span>
           </button>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-0.5 rounded-lg bg-surface p-0.5 ring-1 ring-line">
@@ -244,7 +244,7 @@ export function CardPaymentsLedger({
                   type="button"
                   onClick={() => setView(v)}
                   aria-pressed={view === v}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold sm:text-sm transition ${
                     view === v ? "font-bold text-foreground shadow-sm ring-1 ring-foreground/25" : "text-foreground hover:ring-1 hover:ring-line"
                   }`}
                 >
@@ -262,7 +262,7 @@ export function CardPaymentsLedger({
                 onChange={(e) => setYear(e.target.value)}
                 aria-hidden={view !== "month"}
                 tabIndex={view === "month" ? undefined : -1}
-                className={`cursor-pointer rounded-lg bg-surface px-2 py-1 text-xs font-semibold ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
+                className={`cursor-pointer rounded-lg bg-surface px-2 py-1 text-xs font-semibold sm:text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand ${
                   view === "month" ? "" : "invisible"
                 }`}
               >
@@ -277,16 +277,16 @@ export function CardPaymentsLedger({
             caption: its own tile, label above value. */}
         <div className="flex items-center justify-center divide-x divide-line">
           <div className="px-3 py-1.5 text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{labels.total}</div>
-            <div className="text-sm font-bold tabular-nums text-negative">
+            <div className="max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">{labels.total}</div>
+            <div className="text-sm font-bold sm:text-base tabular-nums text-negative">
               {money(grandTotal)}
             </div>
           </div>
           {/* Shown in both views — in By year it's the average month across
               the whole history — so the header keeps its width. */}
           <div className="px-3 py-1.5 text-center">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-foreground">Avg / month</div>
-            <div className="text-sm font-bold tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
+            <div className="max-sm:text-[11px] sm:text-xs font-semibold uppercase tracking-wide text-foreground">Avg / month</div>
+            <div className="text-sm font-bold sm:text-base tabular-nums text-foreground">{money(perMonth(grandTotal))}</div>
           </div>
         </div>
       </div>
@@ -308,7 +308,7 @@ export function CardPaymentsLedger({
                 Credit Card and Debt tables stacked on Accounts line up column
                 for column; extra room is shared out evenly between them. */}
             <table
-              className={`w-full border-collapse text-xs sm:table-fixed sm:text-[15px] sm:min-w-[var(--ledger-min)] ${columns.length > 3 ? "min-w-[42rem]" : ""}`}
+              className={`w-full border-collapse text-xs sm:table-fixed sm:text-[17px] sm:min-w-[var(--ledger-min)] ${columns.length > 3 ? "min-w-[42rem]" : ""}`}
               style={{ "--ledger-min": `${COL_NAME + (view === "month" ? COL_AVG : 0) + COL_TOTAL + (showPeriodColumns ? columns.length * COL_PERIOD : 0)}rem` } as React.CSSProperties}
             >
               <colgroup>
@@ -358,7 +358,7 @@ export function CardPaymentsLedger({
                   >
                     <th
                       scope="row"
-                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold sm:text-[15px] group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
+                      className="sticky left-0 z-10 max-w-[11rem] bg-surface px-2.5 py-1.5 text-left text-xs font-semibold sm:text-[17px] group-hover:bg-[color-mix(in_srgb,var(--surface),black_3%)] sm:max-w-none"
                     >
                       <span className="flex items-center gap-1">
                         <span className="truncate sm:overflow-visible sm:whitespace-nowrap">{r.name}</span>
@@ -387,7 +387,7 @@ export function CardPaymentsLedger({
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-foreground/20 bg-surface font-bold">
-                  <th scope="row" className="sticky left-0 z-10 bg-surface px-2.5 py-2 text-left text-xs sm:text-[15px]">
+                  <th scope="row" className="sticky left-0 z-10 bg-surface px-2.5 py-2 text-left text-xs sm:text-[17px]">
                     {labels.all}
                   </th>
                   {view === "month" ? (
@@ -412,7 +412,7 @@ export function CardPaymentsLedger({
               </tfoot>
             </table>
           </div>
-          <p className="border-t border-line px-4 py-2 text-xs text-muted">Select a row to edit its payments.</p>
+          <p className="border-t border-line px-4 py-2 text-xs text-muted sm:text-sm">Select a row to edit its payments.</p>
         </>
       )}
       {detailCardId ? (
@@ -822,10 +822,11 @@ function MoneyBox({
 
 // Desktop column widths (rem), shared by every ledger so the Credit Card and
 // Debt tables on Accounts line up. Sized for the widest figure each holds at
-// 15px; "Annual Total" wraps to two lines inside COL_TOTAL.
+// 17px; "Annual Total" fits on one line on a wide screen and wraps to two
+// inside COL_TOTAL when the table is at its minimum width.
 const COL_NAME = 15;
 const COL_AVG = 6;
-const COL_TOTAL = 6.5;
+const COL_TOTAL = 7.5;
 const COL_PERIOD = 5.75;
 
 /** A column header that sorts the table. The arrow only shows on the sorted
