@@ -786,7 +786,7 @@ export function StayModal({
               onChange={(e) => setPayAtProperty(e.target.checked)}
               className="h-4 w-4 accent-sky-700"
             />
-            <span className="whitespace-nowrap">Due at check-in</span>
+            <span className="whitespace-nowrap">Pay at check-in</span>
           </label>
           <label className="flex shrink-0 items-center gap-2 text-xs font-semibold">
             <span className="whitespace-nowrap uppercase tracking-wide">Cancel by</span>

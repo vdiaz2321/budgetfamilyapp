@@ -147,6 +147,12 @@ export function useLinkedPayments(payments: TripTaggedPurchase[] | undefined, cu
     /** An error opening a single payment, shown under the box. */
     error: picking ? null : error,
     open,
+    /** Opens one payment straight in the form — a transaction row's click. */
+    openOne: (id: string) => {
+      if (!loadingId) void openTx(id);
+    },
+    /** The payment being fetched, so its row can say "Opening…". */
+    loadingId,
     overlay,
   };
 }

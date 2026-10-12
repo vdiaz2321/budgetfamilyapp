@@ -127,6 +127,11 @@ export function stayDueAtHotel(s: TravelStay): boolean {
   return s.payAtProperty && !s.isEstimate && !s.cancelledAt && s.paidCents == null && s.pocketCostCents === 0;
 }
 
+/** Still only planned — no booking date and nothing spent on it yet. */
+export function bookingPlannedOnly(b: Booking): boolean {
+  return b.kind === "stay" ? b.stay.isEstimate : b.kind === "flight" ? b.flight.isEstimate : b.car.isEstimate;
+}
+
 /** Free cancellation still open on this booking: its last day, or null. */
 export function freeCancelOpen(s: TravelStay, todayIso: string): string | null {
   return s.freeCancelUntil && !s.cancelledAt && s.freeCancelUntil >= todayIso ? s.freeCancelUntil : null;

@@ -559,7 +559,7 @@ function ForecastBreakdown({
   const grown = f.monthEndCents - f.startCents;
   const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
   return (
-    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs tabular-nums text-foreground dark:bg-sky-900/50">
+    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground dark:bg-sky-900/50">
       <p className="pb-0.5 font-semibold text-foreground">
         Forecast breakdown and the &quot;Proj Forecast NW&quot; card:
       </p>
@@ -756,7 +756,7 @@ function YearModal({
   }
 
   return (
-    <ModalShell title={`Year: ${row.year} EOY Net Worth`} onClose={onClose}>
+    <ModalShell title={`Year: ${row.year} EOY Net Worth`} onClose={onClose} className="sm:max-w-4xl">
       <form
         action={(formData) =>
           start(async () => {
@@ -780,10 +780,10 @@ function YearModal({
             copy in at year end, shown where they are needed rather than on
             another page. */}
         <div className="sm:col-span-2 rounded-md bg-sky-100 px-3 py-2 dark:bg-sky-900/50">
-          <p className="text-center max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-foreground">
+          <p className="text-center max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
             {row.inProgress ? "Total Current Amounts From Pages" : `${row.year}: actual from other pages`}
           </p>
-          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-5 text-center">
+          <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:text-base sm:grid-cols-5 text-center">
             {/* The register's own figures, always — this panel reports, it
                 doesn't offer. What may be copied into the boxes above is a
                 narrower question (`measured`), and tying the two together
@@ -833,18 +833,18 @@ function YearModal({
             value from sm up, so four columns don't wrap mid-figure; one line
             each on a phone, where they stack anyway. */}
         <div
-          className={`sm:col-span-2 grid grid-cols-1 gap-1 text-xs sm:text-center ${
-            forecastCents != null ? "sm:grid-cols-4" : "sm:grid-cols-3"
+          className={`sm:col-span-2 grid grid-cols-1 gap-1 text-xs sm:text-base sm:text-center ${
+            forecastCents != null ? "sm:grid-cols-[repeat(3,minmax(0,1fr))_auto]" : "sm:grid-cols-[repeat(2,minmax(0,1fr))_auto]"
           }`}
         >
           <p>
-            <span className="text-muted">Proj EOY NW: </span>
+            <span className="text-foreground">Proj EOY NW: </span>
             <span className="font-semibold text-foreground sm:block">
               {formatMoneyWhole(predictedEoyCents, currency)}
             </span>
           </p>
           <p>
-            <span className="text-muted">
+            <span className="text-foreground">
               {row.inProgress ? "Current NW: " : "Actual net worth: "}
             </span>
             <span className="font-semibold text-foreground sm:block">
@@ -855,7 +855,7 @@ function YearModal({
               green ahead of the plan, red behind it. */}
           {forecastCents != null ? (
             <p>
-              <span className="text-muted">Forecast: </span>
+              <span className="text-foreground">Forecast: </span>
               <span
                 className={`font-semibold sm:block ${
                   forecastCents >= predictedEoyCents ? "text-positive" : "text-negative"
@@ -864,14 +864,14 @@ function YearModal({
                 {formatMoneyWhole(forecastCents, currency)}
               </span>
               {forecast && forecast.travelCents > 0 ? (
-                <span className="text-muted sm:block">
+                <span className="text-foreground max-sm:text-xs sm:block sm:text-sm">
                   {" "}after {formatMoneyWhole(forecast.travelCents, currency)} planned trips
                 </span>
               ) : null}
             </p>
           ) : null}
           <p>
-            <span className="text-muted">{row.inProgress ? "Current vs Proj NW: " : "Actual vs Proj NW: "}</span>
+            <span className="text-foreground sm:whitespace-nowrap">{row.inProgress ? "Proj EOY NW vs Current NW: " : "Proj EOY NW vs Actual NW: "}</span>
             {liveDiffCents == null ? (
               <span className="font-semibold text-foreground sm:block">—</span>
             ) : (
@@ -891,7 +891,7 @@ function YearModal({
             spending + gains + one-off = Proj EOY NW. Every box shows whole
             dollars; the two calculated ones are locked, so there is only ever
             one way to change a number (Victor, 2026-09-28). */}
-        <p className="sm:col-span-2 border-t border-line pt-3 text-center max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-foreground">
+        <p className="sm:col-span-2 border-t border-line pt-3 text-center max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
           NW Estimated Projection: {row.year}
         </p>
         {/* Read left to right, top to bottom, as the sum itself:
@@ -1007,7 +1007,7 @@ function YearModal({
         {/* Explained in full sentences under the boxes, where there's width for
             them — squeezed under a narrow box they wrapped into fragments
             ("House, car, windfall. This year only") that said nothing. */}
-        <div className="sm:col-span-2 space-y-1 text-left text-xs text-foreground">
+        <div className="sm:col-span-2 space-y-1 text-left text-xs sm:text-sm text-foreground">
           <p>
             <span className="font-semibold text-foreground">One-off:</span> {row.year} only
             — bonus, inheritance, closing costs.
@@ -1261,11 +1261,11 @@ function valueTone(tone: Tone | undefined, cents: number | null): { className: s
 }
 
 const inputClass =
-  "mx-auto block w-28 rounded-md bg-background px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  "mx-auto block w-28 sm:w-32 rounded-md bg-background px-2 py-1.5 text-center text-sm sm:text-base tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
 // Boxes sized to what goes in them: six-figure dollars fit w-28, an age or a
 // tax rate is two digits (Victor, 2026-09-28: full-width boxes for small
 // values read as a form to fill, not a sum to check).
-const smallInputClass = inputClass.replace("w-28", "w-16");
+const smallInputClass = inputClass.replace("w-28 sm:w-32", "w-16 sm:w-20");
 
 // Whole dollars with commas for the plan boxes — "130,000", not "130000.00".
 // displayToCents strips the commas back out on save.
@@ -1293,12 +1293,12 @@ function Field({
 }) {
   return (
     <label className={`block text-center ${className}`}>
-      <span className="mb-0.5 block max-sm:text-[12px] sm:text-sm font-semibold uppercase tracking-wide text-foreground">
+      <span className="mb-0.5 block max-sm:text-[12px] sm:text-[15px] font-semibold uppercase tracking-wide text-foreground">
         {label}
       </span>
       {children}
       {hint ? (
-        <span className={`mt-0.5 block text-xs ${hintTone ?? "text-foreground"}`}>{hint}</span>
+        <span className={`mt-0.5 block text-xs sm:text-sm ${hintTone ?? "text-foreground"}`}>{hint}</span>
       ) : null}
     </label>
   );

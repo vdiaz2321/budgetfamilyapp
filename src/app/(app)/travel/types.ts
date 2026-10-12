@@ -58,7 +58,7 @@ export type TravelStay = {
   // off a card, so editing them must not move a balance.
   movesCardPoints: boolean;
   // Booked, but the hotel takes the card at check-in: nothing is spent until
-  // that charge is linked, so the trip shows "Due at check-in", not savings.
+  // that charge is linked, so the trip shows "Pay at check-in", not savings.
   payAtProperty: boolean;
   // Last day it can be cancelled (or refunded) at no cost.
   freeCancelUntil: string | null;
