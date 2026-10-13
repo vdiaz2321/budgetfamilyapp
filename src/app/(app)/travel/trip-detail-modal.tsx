@@ -93,7 +93,7 @@ function flightSeats(b: Booking) {
       actual,
       actualFx,
       points: p.pointsUsed ? p.pointsCost : 0,
-      diff: planned != null && actual != null ? planned - actual : null,
+      diff: planDiff(planned, actual),
       code: f.foreignCurrency,
     };
   });
@@ -214,10 +214,10 @@ export function TripDetailModal({
       ? `${planned - actual >= 0 ? "" : "−"}${formatForeignWhole(Math.abs(planned - actual), code)}`
       : null;
 
-  // The Spending Total's difference covers only rows with both a plan and an
-  // actual (see spendingDiff); with none, it's a dash too.
+  // The Spending Total's difference sums every row that has one (see
+  // planDiff), unplanned spends included; with none, it's a dash too.
   const comparedRows = t.expenses
-    .map((e) => spendingDiff(e.plannedCents, actualCents(e)))
+    .map((e) => planDiff(e.plannedCents, actualCents(e)))
     .filter((d): d is number => d != null);
   const spendingTotalDiff = comparedRows.length ? comparedRows.reduce((a, b) => a + b, 0) : null;
 
@@ -265,7 +265,8 @@ export function TripDetailModal({
   // popup: each booking type (all flights, all stays, all rentals) compares
   // its whole plan with what's been paid so far — an unpaid flight's plan is
   // money still to go (Victor, 2026-10-08) — and a spending row counts once
-  // it has both a plan and spending. Nothing paid, or no plan: left out.
+  // it has spending. Spent with no plan is an unplanned cost (plan $0);
+  // nothing paid: left out.
   const live = t.bookings.filter((b) => !b.cancelled);
   const byKind = (["flight", "stay", "car"] as const).map((kind) =>
     live
@@ -277,9 +278,10 @@ export function TripDetailModal({
       ),
   );
   const compared = [
-    ...byKind.filter((k) => k.planned > 0 && k.actual > 0),
+    ...byKind.filter((k) => k.actual > 0),
     ...t.expenses
-      .map((e) => ({ planned: e.plannedCents, actual: actualCents(e) }))
+      // Spent with no plan counts as planned $0 — an unplanned cost.
+      .map((e) => ({ planned: e.plannedCents ?? (actualCents(e) ? 0 : null), actual: actualCents(e) }))
       .filter((x): x is { planned: number; actual: number } => x.planned != null && x.actual != null),
   ];
   const comparedPlanned = compared.reduce((sum, x) => sum + x.planned, 0);
@@ -556,7 +558,7 @@ export function TripDetailModal({
                 const b = line.booking;
                 const { planned, actual } = bookingPlanActual(b);
                 const fx = bookingForeign(b);
-                const diff = planned != null && actual != null ? planned - actual : null;
+                const diff = planDiff(planned, actual);
                 return (
                   <li key={`${b.kind}-${b.id}`} className={b.cancelled ? "opacity-60" : ""}>
                     <button type="button" onClick={() => onEditBooking(b)} className="w-full px-3 py-2 text-left transition active:bg-sky-50 dark:active:bg-sky-950/40">
@@ -724,7 +726,7 @@ export function TripDetailModal({
                     const b = line.booking;
                     const { planned, actual } = bookingPlanActual(b);
                     const fx = bookingForeign(b);
-                    const diff = planned != null && actual != null ? planned - actual : null;
+                    const diff = planDiff(planned, actual);
                     // The cancel date rides on the remarks line, left of them.
                     const remarks = bookingRemarks(b) || (b.kind === "stay" && freeCancelOpen(b.stay, todayIso)) || null;
                     const allSeats = flightSeats(b);
@@ -893,7 +895,7 @@ export function TripDetailModal({
                 const e = t.expenses.find((x) => x.category === key);
                 if (!e) return null;
                 const actual = actualCents(e);
-                const diff = spendingDiff(e.plannedCents, actual);
+                const diff = planDiff(e.plannedCents, actual);
                 return (
                   <li key={key} className="px-3 py-2">
                     <span className="text-sm font-semibold">
@@ -985,7 +987,7 @@ export function TripDetailModal({
                     // Blank counts as zero, same as the spending form, so the
                     // Total row's difference is its planned minus its actual.
                     const actual = actualCents(e);
-                    const diff = spendingDiff(e.plannedCents, actual);
+                    const diff = planDiff(e.plannedCents, actual);
                     return (
                       <Fragment key={key}>
                       {/* Open, the divider moves below its purchases so they read as the row's. */}
@@ -1070,8 +1072,11 @@ function Stat({ label, value, className, note, wide }: { label: string; value: s
 // yet used to read as green savings (+$840 before the trip), and an imported
 // actual with no plan as red overspend (Berlin −$1,460) — neither is a
 // difference, so both show a dash.
-function spendingDiff(planned: number | null, actual: number | null): number | null {
-  return planned != null && actual != null ? planned - actual : null;
+function planDiff(planned: number | null, actual: number | null): number | null {
+  if (planned != null && actual != null) return planned - actual;
+  // Spent with no plan: an unplanned cost, so the whole spend is over.
+  if (actual != null && actual > 0) return -actual;
+  return null;
 }
 
 // A phone row's Planned / Actual / Difference, side by side under its name —
@@ -1408,7 +1413,8 @@ function roomsFigures(line: RoomsLine) {
     const pa = bookingPlanActual(m.booking);
     planned += pa.planned ?? 0;
     actual += pa.actual ?? 0;
-    if (pa.planned != null && pa.actual != null) diff = (diff ?? 0) + pa.planned - pa.actual;
+    const d = planDiff(pa.planned, pa.actual);
+    if (d != null) diff = (diff ?? 0) + d;
     if (m.booking.kind === "stay") {
       const key = m.room != null ? `room:${m.room}` : `own:${m.booking.id}`;
       paxByRoom.set(key, Math.max(paxByRoom.get(key) ?? 0, m.booking.stay.pax ?? 0));
@@ -1511,7 +1517,7 @@ function RoomsDesktop({ line, currency, tripYear, cardNames, todayIso, onEdit }:
         const b = m.booking;
         const { planned, actual } = bookingPlanActual(b);
         const fx = bookingForeign(b);
-        const diff = planned != null && actual != null ? planned - actual : null;
+        const diff = planDiff(planned, actual);
         const card = roomCard(b, cardNames);
         const pax = b.kind === "stay" ? b.stay.pax : null;
         return (

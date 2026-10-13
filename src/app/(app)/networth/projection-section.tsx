@@ -464,7 +464,9 @@ export function ProjectionSection({
                                 f >= y.eoyCents ? "text-positive" : "text-negative"
                               }`}
                             >
-                              Forecast: {formatMoneyWhole(f, currency)}
+                              {/* Two lines on a phone, so the longer label
+                                  doesn't push past the column's edge. */}
+                              <span className="max-sm:block">Proj Forecast NW:</span> {formatMoneyWhole(f, currency)}
                             </span>
                           );
                         })()}
@@ -554,12 +556,10 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 
 function ForecastBreakdown({
   forecast: f,
-  year,
   currency,
   planCents,
 }: {
   forecast: YearForecast;
-  year: number;
   currency: string;
   /** The year's Proj EOY NW — the forecast is green ahead of it, red behind. */
   planCents: number;
@@ -567,39 +567,21 @@ function ForecastBreakdown({
   const $ = (cents: number) => formatMoneyWhole(cents, currency);
   // Same colours as the rest of the popup: growth green, a fall or a cost red.
   const sign = (cents: number) => (cents < 0 ? "text-negative" : "text-positive");
-  const grown = f.monthEndCents - f.startCents;
   const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
   return (
-    <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground dark:bg-sky-900/50">
-      <p className="pb-0.5 font-semibold text-foreground">
-        Forecast breakdown and the &quot;Proj Forecast NW&quot; card:
-      </p>
-      <Line label={`Start of ${year}`}>{$(f.startCents)}</Line>
-      <Line label={`End of ${MONTH_NAMES[f.monthsDone - 1]}`}>
-        {$(f.monthEndCents)} (
-        <span className={sign(grown)}>
-          {grown >= 0 ? "+" : "−"}
-          {$(Math.abs(grown))}
-        </span>{" "}
-        in {months(f.monthsDone)})
-      </Line>
-      <Line label="Pace">
-        <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> a month
-      </Line>
-      <Line label="Forecast">
-        {$(f.monthEndCents)} + <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> ×{" "}
-        {months(f.monthsLeft)}
-        {f.travelCents > 0 ? (
-          <>
-            {" "}− <span className="text-negative">{$(f.travelCents)}</span> planned trips
-          </>
-        ) : null}{" "}
-        ={" "}
-        <span className={`font-semibold ${f.cents >= planCents ? "text-positive" : "text-negative"}`}>
-          {$(f.cents)}
-        </span>
-      </Line>
-    </div>
+    <Line label="Proj Forecast NW">
+      Cur NW {$(f.monthEndCents)} + <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> avg a
+      month × {months(f.monthsLeft)}
+      {f.travelCents > 0 ? (
+        <>
+          {" "}− <span className="text-negative">{$(f.travelCents)}</span> planned trips
+        </>
+      ) : null}{" "}
+      ={" "}
+      <span className={`font-semibold ${f.cents >= planCents ? "text-positive" : "text-negative"}`}>
+        {$(f.cents)}
+      </span>
+    </Line>
   );
 }
 
@@ -800,12 +782,12 @@ function YearModal({
                 narrower question (`measured`), and tying the two together
                 blanked the "so far" lines for the year in progress, which is
                 the year you most want them for. */}
-            <Recorded label="Income" cents={row.actualIncomeCents} currency={currency} from="Transactions" tone="income" />
+            <Recorded label="Income" cents={row.actualIncomeCents} currency={currency} from={row.inProgress ? "Logged so far" : "Logged"} tone="income" />
             <Recorded
               label="Spending"
               cents={row.actualSpendingCents}
               currency={currency}
-              from={row.actualKidsCents ? "Transactions + 529s" : "Transactions"}
+              from={`${row.inProgress ? "Logged so far" : "Logged"}${row.actualKidsCents ? " + 529s" : ""}`}
               tone="spending"
             />
             <Recorded
@@ -866,7 +848,7 @@ function YearModal({
               green ahead of the plan, red behind it. */}
           {forecastCents != null ? (
             <p>
-              <span className="text-foreground">Forecast: </span>
+              <span className="text-foreground">Proj Forecast NW: </span>
               <span
                 className={`font-semibold sm:block ${
                   forecastCents >= predictedEoyCents ? "text-positive" : "text-negative"
@@ -953,15 +935,6 @@ function YearModal({
               className={`${inputClass} text-negative`}
             />
           </Field>
-          <Field label="Est. Saved / Invested">
-            <input
-              value={formatMoneyWhole(savedCents, currency)}
-              readOnly
-              disabled
-              className={`${inputClass} opacity-60 ${valueTone("savings", savedCents).className}`}
-              style={valueTone("savings", savedCents).style}
-            />
-          </Field>
           <Field label="Est. gains" hint={futureYear ? "Return on the start balance" : "Market growth"}>
             <input
               name="growth"
@@ -989,6 +962,15 @@ function YearModal({
           <Field label="Age">
             <input name="age" inputMode="numeric" defaultValue={row.age ?? ""} className={smallInputClass} />
           </Field>
+          <Field label="Diff Income - Spending">
+            <input
+              value={formatMoneyWhole(savedCents, currency)}
+              readOnly
+              disabled
+              className={`${inputClass} opacity-60 ${valueTone("savings", savedCents).className}`}
+              style={valueTone("savings", savedCents).style}
+            />
+          </Field>
           <Field label="Proj EOY NW">
             <input
               value={formatMoneyWhole(predictedEoyCents, currency)}
@@ -1005,21 +987,22 @@ function YearModal({
             ("House, car, windfall. This year only") that said nothing. */}
         <div className="sm:col-span-2 space-y-1 text-left text-xs sm:text-sm text-foreground">
           <p>
-            <span className="font-semibold text-foreground">One-off:</span> {row.year} only
-            — bonus, inheritance, closing costs.
+            <span className="font-semibold text-foreground">One-off:</span> extra money in (+) or
+            out (−), {row.year} only — bonus, inheritance, closing costs.
           </p>
           <p>
-            <span className="font-semibold text-foreground">Proj EOY NW:</span> Auto-calculate
-            from entries: Start of NW + Est. Income − Est. Spending + Est. Gains + One-off.
+            <span className="font-semibold text-foreground">Diff Income - Spending:</span>{" "}Est.
+            Income − Est. Spending — what&apos;s left over.
           </p>
         </div>
 
-        {/* The forecast worked out, so it's never a black box — under the
-            footnotes (Victor, 2026-09-29). Month-end figures, so it only
-            changes on the 1st. */}
-        {forecast ? (
-          <ForecastBreakdown forecast={forecast} year={row.year} currency={currency} planCents={predictedEoyCents} />
-        ) : null}
+        {/* The plan and the forecast worked out together, so neither is a
+            black box — under the footnotes (Victor, 2026-09-29). Month-end
+            figures, so the forecast only changes on the 1st. */}
+        <div className="sm:col-span-2 space-y-0.5 rounded-md bg-sky-100 px-3 py-2 text-xs sm:text-sm tabular-nums text-foreground dark:bg-sky-900/50">
+          <Line label="Proj EOY NW">Start of NW + Diff Income - Spending + Est. Gains + One-off.</Line>
+          {forecast ? <ForecastBreakdown forecast={forecast} currency={currency} planCents={predictedEoyCents} /> : null}
+        </div>
 
         {/* Exactly what would change, before it changes. */}
         {preview ? (
@@ -1133,9 +1116,9 @@ function ProjectionEmpty({
           <SeedTile label="Income / yr" value={formatMoneyWhole(seed.incomeCents, currency)} sub="last 12 months" />
           <SeedTile label="Spending / yr" value={formatMoneyWhole(seed.spendingCents, currency)} sub="last 12 months" />
           <SeedTile
-            label="Saved / invested"
+            label="Diff Income - Spending"
             value={formatMoneyWhole(savedCents, currency)}
-            sub="income − spending"
+            sub="what's left over"
           />
         </div>
 
