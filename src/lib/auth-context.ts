@@ -14,7 +14,7 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
  * fallback if local verification ever fails, which is what the middleware
  * does too.
  */
-async function verifiedUser(supabase: SupabaseClient): Promise<{ id: string; email: string | null } | null> {
+export async function verifiedUser(supabase: SupabaseClient): Promise<{ id: string; email: string | null } | null> {
   try {
     const { data, error } = await supabase.auth.getClaims();
     if (!error && data?.claims?.sub) {

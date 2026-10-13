@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { verifiedUser } from "@/lib/auth-context";
 import { displayToCents } from "@/lib/money";
 import { currentMonthFirst } from "@/lib/snapshots";
 import { unwrap } from "@/lib/supabase-result";
@@ -31,9 +32,9 @@ const MONTH_RE = /^\d{4}-\d{2}-01$/;
 
 async function requireHousehold() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Checked locally from the session token, like the pages do — getUser()
+  // asked the auth server first and added ~300ms to every save.
+  const user = await verifiedUser(supabase);
   if (!user) redirect("/login");
 
   const { data: profile, error: profileError } = await supabase
@@ -705,7 +706,7 @@ const LINE_KINDS: IncomeLineKind[] = ["va", "social_security", "job", "spouse", 
 async function recomputeRetirementIncome(
   supabase: Awaited<ReturnType<typeof createClient>>,
   householdId: string,
-) {
+): Promise<boolean> {
   const thisYear = new Date().getFullYear();
   const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes] = await Promise.all([
     supabase.from("retirement_plan").select("*").eq("household_id", householdId).maybeSingle(),
@@ -733,7 +734,7 @@ async function recomputeRetirementIncome(
 
   const plan = planRes.data;
   const rows = (rowsRes.data ?? []).map((r) => ({ ...r, one_off_cents: r.one_off_cents ?? 0 }));
-  if (!plan || rows.length === 0) return;
+  if (!plan || rows.length === 0) return false;
 
   const lines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
     id: l.id,
@@ -869,12 +870,13 @@ async function recomputeRetirementIncome(
     });
     carry = eoy;
   }
-  if (out.length === 0) return;
+  if (out.length === 0) return false;
 
   const { error } = await supabase
     .from("networth_projection")
     .upsert(out, { onConflict: "household_id,year" });
   if (error) throw new Error(`Could not update the projection: ${error.message}`);
+  return true;
 }
 
 // ---- The year-by-year net worth projection (Victor's sheet, now data).
@@ -1127,6 +1129,9 @@ export async function saveProjectionYear(formData: FormData) {
   }
   // Signed, unlike the others: a windfall is positive, a house is negative.
   const oneOff = displayToCents(String(formData.get("oneOff") ?? "0"));
+  // Blank = no estimate. Tracking only; never carried forward or into EOY.
+  const contributedRaw = String(formData.get("contributed") ?? "").trim();
+  const contributed = contributedRaw === "" ? null : Math.max(0, displayToCents(contributedRaw));
 
   // What the year held before this save, so the carry-forward below can tell
   // which figures were actually typed and which were merely resubmitted.
@@ -1161,6 +1166,7 @@ export async function saveProjectionYear(formData: FormData) {
       base_spending_cents: baseSpending,
       growth_cents: growth,
       one_off_cents: oneOff,
+      contributed_cents: contributed,
       tax_pct: taxPct,
       eoy_cents: 0,
       updated_at: new Date().toISOString(),
@@ -1221,8 +1227,14 @@ export async function saveProjectionYear(formData: FormData) {
   }
 
   try {
-    await rebuildProjectionChain(supabase, householdId, year);
-    await recomputeRetirementIncome(supabase, householdId);
+    // The retirement recompute re-chains every year from this one on, so for
+    // this year or later the plain chain rebuild was the same work twice
+    // (~450ms). It still runs for a past year — the recompute never touches
+    // history — or when there is no retirement plan to recompute from.
+    const thisYear = new Date().getFullYear();
+    if (year < thisYear) await rebuildProjectionChain(supabase, householdId, year);
+    const rechained = await recomputeRetirementIncome(supabase, householdId);
+    if (!rechained && year >= thisYear) await rebuildProjectionChain(supabase, householdId, year);
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Could not rebuild the projection." };
   }

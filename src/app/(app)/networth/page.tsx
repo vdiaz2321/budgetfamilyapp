@@ -166,7 +166,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, eoy_cents, tax_pct")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -521,6 +521,9 @@ export default async function NetworthPage() {
   let fiIncomeCents = 0;
   const spentByYear = new Map<number, number>();
   const earnedByYear = new Map<number, number>();
+  // Debt payments each year — part of what's left after spending, shown in
+  // the year popup's "where it went" line.
+  const debtPaidByYear = new Map<number, number>();
   const bump = (map: Map<number, number>, year: number, cents: number) =>
     map.set(year, (map.get(year) ?? 0) + cents);
   // How much of each year the register actually covers. A year with one
@@ -551,6 +554,8 @@ export default async function NetworthPage() {
     } else if (kind === "income") {
       if (inFiWindow) fiIncomeCents += cents;
       bump(earnedByYear, yr, cents);
+    } else if (kind === "debt") {
+      bump(debtPaidByYear, yr, cents);
     }
   }
 
@@ -824,7 +829,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, eoy_cents, tax_pct")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -853,6 +858,7 @@ export default async function NetworthPage() {
     debtFreedCents: r.debt_freed_cents ?? 0,
     growthCents: r.growth_cents ?? 0,
     oneOffCents: r.one_off_cents ?? 0,
+    contributedCents: r.contributed_cents ?? null,
     eoyCents: r.eoy_cents ?? 0,
     actualCents: netByYear.get(r.year) ?? null,
     // Where the year actually started: last year's recorded close. The pace
@@ -865,6 +871,7 @@ export default async function NetworthPage() {
     actualSavedCents: investedByYear.get(r.year) ?? null,
     actualIncomeCents: earnedByYear.get(r.year) ?? null,
     actualSpendingCents: spentByYear.get(r.year) ?? null,
+    actualDebtPaidCents: debtPaidByYear.get(r.year) ?? null,
     actualKidsCents: kidsByYear.get(r.year) || null,
     actualMonths: monthsByYear.get(r.year)?.size ?? 0,
     // `|| null`, not `?? null`: every year with an investment slot gets a
