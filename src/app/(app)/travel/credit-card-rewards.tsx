@@ -3051,6 +3051,49 @@ function LockedDate({ label, name, value }: { label: string; name: string; value
   );
 }
 
+export type FreeNightStayLite = Pick<TravelStay, "id" | "accountId" | "propertyName" | "reservedOn" | "checkIn">;
+
+/**
+ * The card's Edit form for the Accounts page — the very form the Travel Log
+ * opens, so a card can't be edited two different ways. Accounts has no
+ * rewards provider, so this hands the form the little it reads from one: the
+ * cards (for the Bank list) and the stays holding a free night (which lock
+ * its Booked on / Check-in). No "Open stay" link here — stays live on /travel.
+ */
+export function EditCardModal({
+  card,
+  cards,
+  currency,
+  freeNightStays,
+  onDone,
+}: {
+  card: AccountData;
+  cards: AccountData[];
+  currency: string;
+  /** Only the fields the form reads from a stay. */
+  freeNightStays: FreeNightStayLite[];
+  onDone: () => void;
+}) {
+  return (
+    <RewardsDataContext.Provider
+      value={{
+        accounts: cards,
+        currency,
+        nonCardAccounts: [],
+        allBuckets: [],
+        rewardEntries: [],
+        redemptions: new Map(),
+        collapsed: {},
+        toggleSection: () => {},
+        // The form reads only these fields off a stay (nightStay above).
+        freeNightStays: freeNightStays as TravelStay[],
+      }}
+    >
+      <EditCreditCardForm card={card} onDone={onDone} />
+    </RewardsDataContext.Provider>
+  );
+}
+
 function EditCreditCardForm({
   card,
   onDone,
@@ -3224,6 +3267,9 @@ function EditCreditCardForm({
             <LabeledInput label="Date opened" name="dateOpened" type="date" defaultValue={card.dateOpened ?? ""} />
             <LabeledInput label="Date closed" name="dateClosed" type="date" defaultValue={card.dateClosed ?? ""} />
             <LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" prefix="$" defaultValue={card.annualFeeCents ? centsToDisplay(card.annualFeeCents) : ""} />
+            {/* Feeds the Accounts tiles' "Payment due" strip, and a payoff
+                debt's due day — one box for both. */}
+            <LabeledInput label="Payment due day" name="paymentDueDay" type="number" min="1" max="31" step="1" defaultValue={card.paymentDueDay ?? d?.payoffDueDay ?? ""} placeholder="1–31" />
             <label className="block">
               <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-foreground">Rewards category</span>
               <select name="rewardsCategory" defaultValue={d?.rewardsCategory ?? ""} className="w-full rounded-md bg-sky-50 dark:bg-background px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-sky-500">
@@ -3278,14 +3324,13 @@ function EditCreditCardForm({
                 </span>
               </span>
             </label>
-            {/* All six on one line from md up — the date widest, APR and due
-                day narrow; three to a row in between. */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,0.6fr)_minmax(0,1fr)]">
+            {/* All five on one line from md up — the date widest, APR narrow;
+                three to a row in between. The due day is Basics' Payment due day. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
               <LabeledInput label="Balance owed" name="payoffBalance" type="number" min="0" step="0.01" defaultValue={d?.payoffBalanceCents ? centsToDisplay(d.payoffBalanceCents) : card.owedCents ? centsToDisplay(Math.max(0, card.owedCents)) : ""} />
               <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" defaultValue={d?.payoffApr ?? ""} />
               <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" defaultValue={d?.promoAprEndsOn ?? ""} />
               <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" defaultValue={d?.payoffMinimumCents ? centsToDisplay(d.payoffMinimumCents) : ""} />
-              <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" defaultValue={d?.payoffDueDay ?? ""} />
               <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" defaultValue={d?.payoffPlannedCents ? centsToDisplay(d.payoffPlannedCents) : ""} />
             </div>
             <p className="text-xs text-foreground">

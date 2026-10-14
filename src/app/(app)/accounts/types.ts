@@ -128,6 +128,8 @@ export type AccountData = {
   feeWaived: boolean;
   dateOpened: string | null;
   dateClosed: string | null;
+  /** Credit cards: the day of the month the payment is due (1–31). */
+  paymentDueDay: number | null;
   // Credit-card only. Auto-computed on the server for CCs.
   cardDetails?: CardDetails | null;
   rewardActivities: RewardActivity[];

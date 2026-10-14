@@ -697,6 +697,19 @@ export async function upsertCardDetails(formData: FormData) {
   const rawCardUrl = optText("cardUrl");
   const cardUrl = rawCardUrl && !/^https?:\/\//i.test(rawCardUrl) ? `https://${rawCardUrl}` : rawCardUrl;
 
+  // The card's payment due day (1–31) — one field for the card, which also
+  // sets a payoff debt's due day below, so the two can't drift apart.
+  const rawPaymentDue = Number(String(formData.get("paymentDueDay") ?? "").trim() || "0");
+  const paymentDueDay = Number.isFinite(rawPaymentDue) && rawPaymentDue > 0 ? Math.min(31, Math.max(1, Math.trunc(rawPaymentDue))) : null;
+  if (formData.has("paymentDueDay")) {
+    const { error: dueError } = await supabase
+      .from("accounts")
+      .update({ payment_due_day: paymentDueDay })
+      .eq("id", accountId)
+      .eq("household_id", householdId);
+    if (dueError) return { error: "Couldn't save the payment due day. Try again." };
+  }
+
   const trackAsPayoffDebt = formData.get("trackAsPayoffDebt") === "on";
   // Resolve the linked debt from the `debts` table first, falling back to the
   // details column. Reading the column alone is what let the two drift apart:
@@ -718,7 +731,8 @@ export async function upsertCardDetails(formData: FormData) {
     null;
   if (trackAsPayoffDebt) {
     const aprValue = Number(String(formData.get("payoffApr") ?? "0"));
-    const rawDue = Number(String(formData.get("payoffDueDay") ?? "0"));
+    // The Basics tab's Payment due day; an older form's Debt-tab box otherwise.
+    const rawDue = formData.has("paymentDueDay") ? paymentDueDay ?? 0 : Number(String(formData.get("payoffDueDay") ?? "0"));
     try {
       const rawPromo = String(formData.get("promoAprEndsOn") ?? "").trim();
       const promoAprEndsOn = /^\d{4}-\d{2}-\d{2}$/.test(rawPromo) ? rawPromo : null;

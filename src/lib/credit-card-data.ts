@@ -35,7 +35,7 @@ export async function loadCreditCardBoardData(
     await Promise.all([
       supabase
         .from("accounts")
-        .select("id, name, kind, subtype, holder, institution, account_number, ownership, active, is_kids_account, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, balance_updated_at")
+        .select("id, name, kind, subtype, holder, institution, account_number, ownership, active, is_kids_account, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, balance_updated_at")
         .eq("household_id", householdId)
         .order("sort_order")
         .order("name"),
@@ -206,6 +206,7 @@ export async function loadCreditCardBoardData(
       feeWaived: a.fee_waived ?? false,
       dateOpened: a.date_opened ?? null,
       dateClosed: a.date_closed ?? null,
+      paymentDueDay: (a.payment_due_day as number | null) ?? null,
       cardDetails: detailsByAccount.get(a.id) ?? null,
       rewardActivities: rewardsByAccount.get(a.id) ?? [],
       owedCents: owed.get(a.id) ?? 0,

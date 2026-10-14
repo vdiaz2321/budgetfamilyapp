@@ -6,7 +6,7 @@ import { ModalShell } from "@/components/modal-shell";
 import { formatForeignWhole, formatMoneyWhole } from "@/lib/money";
 import { deleteTrip, updateTrip } from "./trip-actions";
 import { Field, inputClass } from "./travel-form";
-import { bookingForeign, bookingPlannedOnly, bookingLines, bookingPlanActual, bookingWhen, freeCancelOpen, stayDueAtHotel, tripDate, type Booking, type BookingLine, type TripSummary } from "./trip-summary";
+import { bookingForeign, bookingPlannedOnly, bookingLines, bookingPlanActual, bookingWhen, freeCancelOpen, stayDueAtHotel, tripDate, tripDifference, type Booking, type BookingLine, type TripSummary } from "./trip-summary";
 import { EXPENSE_CATEGORIES, actualCents, type TripTaggedPurchase } from "./types";
 import { MatchPurchasesModal } from "./match-purchases-modal";
 import { AddTransactionButton } from "./add-transaction-button";
@@ -177,10 +177,18 @@ export function TripDetailModal({
 
   // A hotel booked as several reservations (two rooms, night by night) is
   // listed once, its reservations under it.
-  const lines = bookingLines(t.bookings);
+  // "Flights" or "Stays" clicked in the Planned / Spent cards narrows the
+  // bookings table to that kind; null shows everything. Stays covers rentals
+  // too, the same as the cards' "Stays" figure.
+  const [kindFilter, setKindFilter] = useState<"flights" | "stays" | null>(null);
+  const toggleKind = (kind: "flights" | "stays") => setKindFilter((k) => (k === kind ? null : kind));
+  const kindShown = (kind: Booking["kind"]) => kindFilter == null || (kindFilter === "flights") === (kind === "flight");
+  const shownBookings = t.bookings.filter((b) => kindShown(b.kind));
+  // A hotel split into rooms is one line of stays.
+  const lines = bookingLines(t.bookings).filter((line) => kindShown(line.type === "rooms" ? "stay" : line.booking.kind));
   const tripYear = t.start?.slice(0, 4);
   // Cancelled bookings stay listed but are left out of the totals.
-  const bookingTotals = t.bookings
+  const totalsOf = (list: Booking[]) => list
     .filter((b) => !b.cancelled)
     .reduce(
       (sum, b) => {
@@ -195,9 +203,12 @@ export function TripDetailModal({
       },
       { rows: 0, planned: 0, actual: 0, flightPlanned: 0 },
     );
+  // The cards always add up every booking; the table's Total only the rows shown.
+  const allBookingTotals = totalsOf(t.bookings);
+  const bookingTotals = totalsOf(shownBookings);
   // The bookings' other-currency figures added up — only when every booking
   // that has one is in the same currency (euros and pounds don't add).
-  const liveFx = t.bookings.filter((b) => !b.cancelled).map(bookingForeign).filter((x) => x.planned != null || x.actual != null);
+  const liveFx = shownBookings.filter((b) => !b.cancelled).map(bookingForeign).filter((x) => x.planned != null || x.actual != null);
   const fxCodes = new Set(liveFx.map((x) => x.code));
   const bookingFxTotals =
     fxCodes.size === 1
@@ -257,8 +268,8 @@ export function TripDetailModal({
   const spentFlights = t.flights - t.planOnly.flights;
   const spentStays = t.hotels + t.rentals - t.planOnly.hotels - t.planOnly.rentals;
   const spentSpending = t.miscTotal - t.planOnly.miscTotal;
-  const plannedBookings = bookingTotals.planned;
-  const plannedFlights = bookingTotals.flightPlanned;
+  const plannedBookings = allBookingTotals.planned;
+  const plannedFlights = allBookingTotals.flightPlanned;
   const plannedTotal = t.plannedTotal;
   // What the Difference compares, and its planned and spent totals — shown
   // under it as "Planned $1,660 / Spent $830". Same rule as the Spending
@@ -267,26 +278,7 @@ export function TripDetailModal({
   // money still to go (Victor, 2026-10-08) — and a spending row counts once
   // it has spending. Spent with no plan is an unplanned cost (plan $0);
   // nothing paid: left out.
-  const live = t.bookings.filter((b) => !b.cancelled);
-  const byKind = (["flight", "stay", "car"] as const).map((kind) =>
-    live
-      .filter((b) => b.kind === kind)
-      .map((b) => bookingPlanActual(b))
-      .reduce<{ planned: number; actual: number }>(
-        (sum, x) => ({ planned: sum.planned + (x.planned ?? 0), actual: sum.actual + (x.actual ?? 0) }),
-        { planned: 0, actual: 0 },
-      ),
-  );
-  const compared = [
-    ...byKind.filter((k) => k.actual > 0),
-    ...t.expenses
-      // Spent with no plan counts as planned $0 — an unplanned cost.
-      .map((e) => ({ planned: e.plannedCents ?? (actualCents(e) ? 0 : null), actual: actualCents(e) }))
-      .filter((x): x is { planned: number; actual: number } => x.planned != null && x.actual != null),
-  ];
-  const comparedPlanned = compared.reduce((sum, x) => sum + x.planned, 0);
-  const comparedSpent = compared.reduce((sum, x) => sum + x.actual, 0);
-  const differenceCents = compared.length ? comparedPlanned - comparedSpent : null;
+  const { planned: comparedPlanned, spent: comparedSpent, diff: differenceCents } = tripDifference(t);
   // "Flights: $0 / Spending: $320" under a card's figure — "Spending" on the
   // Planned card (money set aside), "Spent" on the Spent card. Flights and
   // the third part always show, $0 included; Stays only on a trip that has a stay
@@ -299,9 +291,27 @@ export function TripDetailModal({
     // breaks in the same place instead of wherever its width runs out.
     return list.map(([label, cents], i) => {
       const last = i === list.length - 1;
+      // Flights and Stays filter the table below; the spending part doesn't.
+      // Only when the trip has that kind — "Flights: $0" on a stays-only trip stays plain.
+      const want = label === "Flights" ? "flights" : label === "Stays" ? "stays" : null;
+      const kind = want && t.bookings.some((b) => (want === "flights") === (b.kind === "flight")) ? want : null;
+      const text = `${label}: ${formatMoneyWhole(cents, currency)}`;
       return (
         <span key={label} className={`block whitespace-nowrap ${last ? "" : "sm:inline-block"}`}>
-          {label}: {formatMoneyWhole(cents, currency)}
+          {kind ? (
+            <button
+              type="button"
+              onClick={() => toggleKind(kind)}
+              aria-pressed={kindFilter === kind}
+              className={`rounded px-1 underline decoration-sky-700/40 underline-offset-2 transition hover:decoration-sky-700 dark:decoration-sky-300/40 ${
+                kindFilter === kind ? "bg-sky-100 text-sky-800 decoration-sky-700 dark:bg-sky-900/50 dark:text-sky-200" : ""
+              }`}
+            >
+              {text}
+            </button>
+          ) : (
+            text
+          )}
           {i < list.length - 2 ? <span className="hidden sm:inline">&nbsp;/&nbsp;</span> : null}
         </span>
       );
@@ -539,7 +549,10 @@ export function TripDetailModal({
         <section>
           {/* Phones only: the desktop table's own header names the section. */}
           <div className="mb-1.5 sm:hidden">
-            <h3 className="text-xs font-bold uppercase tracking-wide">Flights/Stays/Rentals</h3>
+            <h3 className="text-xs font-bold uppercase tracking-wide">
+              {kindFilter === "flights" ? "Flights only" : kindFilter === "stays" ? "Stays only" : "Flights/Stays/Rentals"}
+              {kindFilter ? <ShowAllButton onClick={() => setKindFilter(null)} /> : null}
+            </h3>
           </div>
           {t.bookings.length ? (
             // Planned against actual, like Spending below. A flight not bought
@@ -707,7 +720,10 @@ export function TripDetailModal({
                 </colgroup>
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-foreground">
-                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Flight/Stay/Rental</th>
+                    <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">
+                      {kindFilter === "flights" ? "Flights only" : kindFilter === "stays" ? "Stays only" : "Flight/Stay/Rental"}
+                      {kindFilter ? <ShowAllButton onClick={() => setKindFilter(null)} /> : null}
+                    </th>
                     <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Planned</th>
                     <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Spent</th>
                     <th className="sticky top-[var(--trip-stats-h,0px)] z-10 bg-surface px-3 py-2 text-center font-bold shadow-[inset_0_-1px_0_var(--color-line)]">Difference</th>
@@ -1109,6 +1125,19 @@ function MobileFigures({
 
 // "8 purchases ▾" beside a Spending row's actual — the purchases tagged to
 // the trip that make up that figure. (Was a bare "8 tx", which read as code.)
+// Beside "Flights only" / "Stays only": puts every booking back in the table.
+function ShowAllButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-sky-800 transition hover:bg-sky-200 dark:bg-sky-900/50 dark:text-sky-200 dark:hover:bg-sky-900"
+    >
+      Show all
+    </button>
+  );
+}
+
 // "Flight Pax Breakdown ▾" under a flight — folds its passengers' own lines out and back.
 function PaxToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
@@ -1170,14 +1199,36 @@ function BookingDate({ booking, tripYear }: { booking: Booking; tripYear: string
   return <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">{date}</span>;
 }
 
-// A flight's head count, right after its route (and date): the line under
-// the legs used to read "Vueling · 2 pax", repeating the airline its chip
-// already names.
+// Who is on a flight, right after its route (and date). One seat names its
+// passenger, so a lone leg says whose seat it is; two or more stay "3 pax" —
+// "Flight Pax Breakdown" under the row lists them. A stay shows its own
+// head count the same way ("3 pax"); a hotel split into rooms has its own line.
+// inline-block so a full phone row drops it to the next line instead of
+// running it off the card (the date beside it gives no break point).
 function BookingPax({ booking }: { booking: Booking }) {
+  if (booking.kind === "stay") {
+    return booking.stay.pax ? (
+      <span className="ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+        {booking.stay.pax} pax
+      </span>
+    ) : null;
+  }
   if (booking.kind !== "flight" || !booking.flight.passengers.length) return null;
+  const { passengers } = booking.flight;
+  if (passengers.length > 1) {
+    return (
+      <span className="ml-3 inline-block whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+        {passengers.length} pax
+      </span>
+    );
+  }
   return (
-    <span className="ml-3 whitespace-nowrap text-xs font-semibold tabular-nums text-foreground sm:text-sm">
-      {booking.flight.passengers.length} pax
+    <span className="ml-3 inline-flex items-baseline gap-1 whitespace-nowrap text-xs font-semibold text-foreground sm:text-sm">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 self-center text-sky-700 dark:text-sky-300">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+      </svg>
+      {passengers[0].name?.trim() || "Passenger 1"}
     </span>
   );
 }

@@ -6,7 +6,7 @@ import { SearchBox } from "./search-box";
 import { YearPicker, inYears, thisAndFutureYears, useSessionYears } from "./year-picker";
 import { ModalShell } from "@/components/modal-shell";
 import { formatMoneyWhole } from "@/lib/money";
-import { sheetDateRange, type TripSummary } from "./trip-summary";
+import { sheetDateRange, tripDifference, type TripSummary } from "./trip-summary";
 import type { ExpenseCategory } from "./types";
 
 
@@ -103,6 +103,18 @@ export function TripLogPanel({
   // spent" figure, so plans for 2027 read as money already gone.
   const totalSpent = sum((t) => t.spent);
   const totalPlanned = sum((t) => t.plannedTotal);
+  // Planned minus spent, on the trip popup's rule (tripDifference). A trip
+  // that never had a plan has no estimate to be over or under, so it reads
+  // a dash instead of "over" by everything it cost.
+  const diffOf = (t: TripSummary) => (t.plannedTotal > 0 ? tripDifference(t).diff : null);
+  const diffs = shown.map(diffOf).filter((d): d is number => d != null);
+  const totalDiff = diffs.length ? diffs.reduce((a, b) => a + b, 0) : null;
+  const diffCell = (d: number | null) =>
+    d == null ? (
+      <span className="font-normal text-muted">{DASH}</span>
+    ) : (
+      <span className={d >= 0 ? "text-positive" : "text-negative"}>{`${d >= 0 ? "" : "−"}${formatMoneyWhole(Math.abs(d), currency)}`}</span>
+    );
 
   // The sheet's year block: what each year's trips came to.
   const byYear = useMemo(() => {
@@ -202,7 +214,7 @@ export function TripLogPanel({
 
   const table = (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1400px] text-sm">
+      <table className="w-full min-w-[1480px] text-sm">
         <thead>
           <tr className="border-b border-line text-[11px] uppercase tracking-wide text-muted">
             <th className="sticky left-0 z-10 bg-surface px-3 py-2 text-center font-semibold">Travel location</th>
@@ -211,8 +223,9 @@ export function TripLogPanel({
             {MONEY_COLUMNS.map((c) => (
               <th key={c.label} className="px-2 py-2 text-center font-semibold">{c.label}</th>
             ))}
-            <th className="whitespace-nowrap border-t-2 border-x-2 border-sky-400 dark:border-sky-500 px-2 py-2 text-center font-semibold">Spent</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Planned</th>
+            <th className="whitespace-nowrap border-t-2 border-x-2 border-sky-400 dark:border-sky-500 px-2 py-2 text-center font-semibold">Spent</th>
+            <th className="px-2 py-2 text-center font-semibold"><span className="whitespace-nowrap">Diff Plan -</span><br />Spent</th>
             <th className="whitespace-nowrap px-2 py-2 text-center font-semibold">Pts used</th>
             <th className="px-2 py-2 text-center font-semibold">Saved</th>
           </tr>
@@ -246,12 +259,13 @@ export function TripLogPanel({
                   {pickCell(t, c.label, c.read(t), c.plan(t))}
                 </td>
               ))}
-              <td className="whitespace-nowrap border-x-2 border-sky-400 dark:border-sky-500 px-1 py-1.5 text-center font-bold tabular-nums text-negative">
-                {pickCell(t, "Spent", t.spent, 0)}
-              </td>
               <td className="whitespace-nowrap px-1 py-1.5 text-center font-semibold tabular-nums text-muted">
                 {pickCell(t, "Planned", t.plannedTotal, t.plannedTotal, { pill: false })}
               </td>
+              <td className="whitespace-nowrap border-x-2 border-sky-400 dark:border-sky-500 px-1 py-1.5 text-center font-bold tabular-nums text-negative">
+                {pickCell(t, "Spent", t.spent, 0)}
+              </td>
+              <td className="whitespace-nowrap px-2 py-1.5 text-center font-semibold tabular-nums">{diffCell(diffOf(t))}</td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {t.points > 0 ? t.points.toLocaleString() : <span className="text-muted">{DASH}</span>}
               </td>
@@ -270,8 +284,9 @@ export function TripLogPanel({
               {MONEY_COLUMNS.map((c) => (
                 <td key={c.label} className={`whitespace-nowrap px-2 py-2 text-center tabular-nums ${planClass(sum(c.read), sum(c.plan))}`}>{money(sum(c.read))}</td>
               ))}
-              <td className="whitespace-nowrap border-b-2 border-x-2 border-sky-400 dark:border-sky-500 px-2 py-2 text-center tabular-nums text-negative">{money(totalSpent)}</td>
               <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums text-muted">{money(totalPlanned)}</td>
+              <td className="whitespace-nowrap border-b-2 border-x-2 border-sky-400 dark:border-sky-500 px-2 py-2 text-center tabular-nums text-negative">{money(totalSpent)}</td>
+              <td className="whitespace-nowrap px-2 py-2 text-center tabular-nums">{diffCell(totalDiff)}</td>
               <td className="px-2 py-2 text-center tabular-nums" style={{ color: "var(--viz-savings)" }}>
                 {sum((t) => t.points) > 0 ? sum((t) => t.points).toLocaleString() : DASH}
               </td>

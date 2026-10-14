@@ -47,6 +47,8 @@ import { TransferActivityModal } from "./transfer-activity";
 import type { EditableTransfer } from "../transactions/transfer-editor-modal";
 import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
 import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
+import { CardFace, DUE_SOON_DAYS, cardShortName, formatDueDate, nextDueDate, useLocalToday } from "./card-face";
+import { EditCardModal, type FreeNightStayLite } from "../travel/credit-card-rewards";
 
 // Re-exported so importers (page.tsx) keep one import site for the board and
 // the shapes it takes.
@@ -189,6 +191,8 @@ type Props = {
   // Month-end update checkmarks for this month and last.
   monthEndChecks?: MonthEndCheck[];
   estate?: EstateData;
+  /** Stays using a card's free night — the card Edit form locks their dates. */
+  freeNightStays?: FreeNightStayLite[];
 };
 
 /** Shared tax <select>. Kept in one place so the account and bucket controls
@@ -453,6 +457,7 @@ export function AccountsBoard({
   eoyHistoryNetCents = null,
   monthEndChecks = [],
   estate = { accounts: {}, guide: { executor: null, willLocation: null, attorney: null, powerOfAttorney: null, instructions: null }, items: [] },
+  freeNightStays = [],
 }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [estateOpen, setEstateOpen] = useState(false);
@@ -1002,6 +1007,8 @@ export function AccountsBoard({
               currency={currency}
               nonCardAccounts={nonCardAccounts}
               allBuckets={accounts.flatMap((a) => a.buckets)}
+              allCards={creditCards}
+              freeNightStays={freeNightStays}
               open={!collapsed[section.key]}
               onToggle={() => toggleSection(section.key)}
             />
@@ -1125,12 +1132,105 @@ function PropertyLinkSelect({ value, className }: { value: string | null; classN
 // The points, free nights and rewards ledger moved to /travel — this is the
 // money half. A card's balance belongs beside the accounts that pay it.
 
+// One card on the desktop Credit Cards grid, laid out like the Amex
+// dashboard: the card's face, "Card owed: $7.79" with the name under it, and
+// a strip saying when the payment is due. The top opens Pay, as the phone row
+// does; the strip's Edit opens the card's own form (due day included) — the
+// same one the Travel Log uses, so cards are editable without leaving here.
+function CardTile({
+  card,
+  currency,
+  due,
+  ready,
+  grip,
+  onPay,
+  onEdit,
+}: {
+  card: AccountData;
+  currency: string;
+  due: { iso: string; daysLeft: number } | null;
+  /** False until the browser's date is known — the strip waits for it. */
+  ready: boolean;
+  grip: React.ReactNode;
+  onPay: () => void;
+  onEdit: () => void;
+}) {
+  const owed = card.owedCents ?? 0;
+  const closed = !!card.dateClosed;
+  const bank = card.cardDetails?.bank ?? card.institution;
+  // The strip under the card: when the payment is due, red within a week.
+  let strip: { text: string; className: string } | null = null;
+  if (closed) {
+    strip = { text: "Closed", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
+  } else if (owed <= 0) {
+    strip = { text: "Nothing owed", className: "bg-emerald-50 text-positive dark:bg-emerald-950/30" };
+  } else if (!card.paymentDueDay) {
+    strip = { text: "No due day set", className: "bg-sky-50 text-foreground dark:bg-sky-950/40" };
+  } else if (due) {
+    const soon = due.daysLeft <= DUE_SOON_DAYS;
+    const when = due.daysLeft === 0 ? "today" : due.daysLeft === 1 ? "tomorrow" : `in ${due.daysLeft} days`;
+    strip = {
+      text: soon ? `Payment due ${formatDueDate(due.iso)} · ${when}` : `Payment due ${formatDueDate(due.iso)}`,
+      className: soon
+        ? "bg-rose-50 text-negative dark:bg-rose-950/40"
+        : "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200",
+    };
+  }
+  const top = (
+    <>
+      <CardFace name={card.name} bank={bank} muted={closed} />
+      <span className="min-w-0 flex-1">
+        {/* Label and figure one size, on one line. */}
+        <span className="block whitespace-nowrap text-lg font-bold leading-tight">
+          Card owed:{" "}
+          <span className={`tabular-nums ${owed > 0 && !closed ? "text-negative" : "text-foreground"}`}>
+            {formatMoney(Math.max(0, owed), currency)}
+          </span>
+        </span>
+        <span className={`mt-1 block truncate text-sm font-semibold ${closed ? "text-foreground" : "text-sky-800 dark:text-sky-200"}`}>
+          {cardShortName(card.name)}
+        </span>
+      </span>
+    </>
+  );
+  return (
+    <div className="relative hidden overflow-hidden rounded-xl bg-surface ring-1 ring-line transition hover:ring-sky-400 sm:block">
+      {/* The drag grip in the tile's top corner, over the padding, so it
+          takes no width from "Card owed: $3,481.74". */}
+      <span className="absolute right-1.5 top-1.5 z-10">{grip}</span>
+      {closed ? (
+        <span className="flex min-w-0 items-start gap-3 p-3 pr-6">{top}</span>
+      ) : (
+        <button type="button" onClick={onPay} className="flex w-full min-w-0 cursor-pointer items-start gap-3 p-3 pr-6 text-left">
+          {top}
+        </button>
+      )}
+      <div className={`flex min-h-[2.4rem] items-center justify-between gap-2 border-t border-line px-3 py-1.5 text-sm font-semibold ${ready && strip ? strip.className : ""}`}>
+        <span className="min-w-0 truncate">{ready && strip ? strip.text : null}</span>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface px-2 py-0.5 text-xs font-bold text-foreground ring-1 ring-sky-300 transition hover:bg-sky-100 dark:ring-sky-700 dark:hover:bg-sky-900/50"
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+          </svg>
+          Edit
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CreditCardListSection({
   section,
   accounts,
   currency,
   nonCardAccounts,
   allBuckets,
+  allCards,
+  freeNightStays,
   open,
   onToggle,
 }: {
@@ -1139,14 +1239,28 @@ function CreditCardListSection({
   currency: string;
   nonCardAccounts: NonCardAccount[];
   allBuckets: BucketData[];
+  /** Every credit card, closed ones too — the Edit form's Bank list. */
+  allCards: AccountData[];
+  freeNightStays: FreeNightStayLite[];
   open: boolean;
   onToggle: () => void;
 }) {
   const [payCardFor, setPayCardFor] = useState<AccountData | null>(null);
+  // The card whose Edit form is open (desktop tiles' Edit button).
+  const [editCardFor, setEditCardFor] = useState<AccountData | null>(null);
   // The header's Card Payment button: choose a card first, then Pay opens.
   const [pickingCard, setPickingCard] = useState(false);
   const isMain = section.key === "credit";
   const totalOwed = accounts.reduce((s, a) => s + (a.owedCents ?? 0), 0);
+  // Payment due dates, from each card's due day. Today is the browser's own
+  // day (null on the server), so nothing date-based renders until then.
+  const todayIso = useLocalToday();
+  const dueOf = (a: AccountData) =>
+    todayIso && a.paymentDueDay && !a.dateClosed && (a.owedCents ?? 0) > 0 ? nextDueDate(a.paymentDueDay, todayIso) : null;
+  const dueSoon = accounts.filter((a) => {
+    const due = dueOf(a);
+    return due != null && due.daysLeft <= DUE_SOON_DAYS;
+  }).length;
 
   // Drag a tile by its grip onto another to SWAP the two. Inserting (as the
   // account lists do) shifted every later tile one slot and reflowed the
@@ -1158,7 +1272,11 @@ function CreditCardListSection({
   // `accounts` is a fresh filtered array on every parent render; syncing on
   // it would snap a just-made swap back before the save lands. Sync only when
   // the server's order or figures actually change.
-  const serverKey = accounts.map((a) => `${a.id}:${a.owedCents ?? 0}:${a.dateClosed ?? ""}:${a.name}`).join("|");
+  // The due day and bank are in it too: the tiles' strip and card face read
+  // them, and an Edit save changes them without touching the rest.
+  const serverKey = accounts
+    .map((a) => `${a.id}:${a.owedCents ?? 0}:${a.dateClosed ?? ""}:${a.name}:${a.paymentDueDay ?? ""}:${a.cardDetails?.bank ?? a.institution ?? ""}`)
+    .join("|");
   const [syncedKey, setSyncedKey] = useState(serverKey);
   if (syncedKey !== serverKey) {
     setSyncedKey(serverKey);
@@ -1188,9 +1306,10 @@ function CreditCardListSection({
 
   return (
     <section id={isMain ? "credit-cards" : undefined} className="@container overflow-hidden rounded-xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-      {/* One line, left to right: title, the points link, the total. The
-          chevron keeps the far edge. On a phone the link + total wrap under
-          the title. The whole header toggles, blank space included — the
+      {/* One line, left to right: title, Make Card Payment, the total,
+          + Transaction. The chevron keeps the far edge. On a phone the
+          buttons + total wrap under the title. (The Travel Log link was
+          dropped — the sidebar already goes there.) The whole header toggles, blank space included — the
           title and chevron buttons' clicks bubble up to this one. */}
       <div
         onClick={onToggle}
@@ -1225,14 +1344,13 @@ function CreditCardListSection({
           {/* A light-blue pill so it reads as a note on the total. */}
           <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-foreground dark:bg-sky-900/50">Not in Net Worth</span>
         </span>
-        {/* The points live on the Travel Log — named for the page it opens. */}
-        <Link
-          href="/travel"
-          onClick={(e) => e.stopPropagation()}
-          className="shrink-0 whitespace-nowrap rounded-full bg-surface px-3 py-1 text-xs font-bold text-brand shadow-sm ring-[1.5px] ring-inset ring-brand transition hover:bg-brand hover:text-white"
-        >
-          Travel Log Page →
-        </Link>
+        {/* Cards owing money whose due date is a week away or less — said
+            once here so it isn't missed among the tiles. Desktop only. */}
+        {dueSoon > 0 ? (
+          <span className="hidden whitespace-nowrap rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-negative ring-1 ring-rose-200 sm:inline-block dark:bg-rose-950/40 dark:ring-rose-900">
+            {dueSoon} card{dueSoon === 1 ? "" : "s"} due this week
+          </span>
+        ) : null}
         {/* Log a charge seen in the card's own app without leaving this page —
             the same form as Budget and Transactions, so it lands everywhere
             and moves the card's owed amount. Its clicks (form included) must
@@ -1271,12 +1389,26 @@ function CreditCardListSection({
           // owed, Pay; the annual fee lives on /travel with the rest of the
           // card's detail. Columns follow the card's own width, not the
           // window's — the sidebar takes a different share of the screen per
-          // device. Three across from a 56rem card, four from 72rem — a
-          // long name like "1002 Hilton Aspire Amex V" still needs room for
-          // an owed amount beside it.
-          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:px-6 @[56rem]:grid-cols-3 @[72rem]:grid-cols-4">
+          // device. Desktop tiles need ~345px: the card face, "Card owed:
+          // $3,481.74" (214px) and the corner drag grip. Two across up to a
+          // 70rem card (a 13" laptop), three from 70rem, four from 92rem
+          // (27"/34" screens). No fifth: at the page's 110rem cap five-wide
+          // tiles (333px) ran the amount into the grip.
+          <ul className="grid grid-cols-1 gap-2 border-t border-line px-4 py-3 @[40rem]:grid-cols-2 sm:gap-3 sm:px-6 @[70rem]:grid-cols-3 @[92rem]:grid-cols-4">
             {localCards.map((a) => (
               <li key={a.id} data-drop-key={`card:${a.id}`} className={`rounded-lg ${dragOverId === a.id ? "ring-2 ring-sky-400" : ""}`}>
+                {/* Desktop: a tile like the Amex dashboard — the card drawn
+                    in its brand's look, what it owes, its name, and when the
+                    payment is due. The phone keeps the one-line row below. */}
+                <CardTile
+                  card={a}
+                  currency={currency}
+                  due={dueOf(a)}
+                  ready={todayIso != null}
+                  grip={grip(a.id)}
+                  onPay={() => setPayCardFor(a)}
+                  onEdit={() => setEditCardFor(a)}
+                />
                 {/* An open card is the whole row: thirteen Pay pills read as a
                     field of buttons, and the card is the thing you mean to
                     press. A closed card keeps the row, minus the action. */}
@@ -1286,8 +1418,8 @@ function CreditCardListSection({
                     onClick={() => setPayCardFor(a)}
                     // A soft fill instead of a ring: the tile shape still
                     // handles the ragged last row, without a border inside
-                    // the card's own border.
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-surface px-2.5 py-2 text-left ring-1 ring-line transition hover:ring-foreground/30"
+                    // the card's own border. Phone only — desktop has CardTile.
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg bg-surface px-2.5 py-2 text-left ring-1 ring-line transition hover:ring-foreground/30 sm:hidden"
                   >
                     {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{a.name}</span>
@@ -1316,7 +1448,7 @@ function CreditCardListSection({
                     </svg>
                   </button>
                 ) : (
-                  <div className="flex w-full items-center gap-2 rounded-lg bg-surface px-2.5 py-2 ring-1 ring-line">
+                  <div className="flex w-full items-center gap-2 rounded-lg bg-surface px-2.5 py-2 ring-1 ring-line sm:hidden">
                     {grip(a.id)}
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold text-muted">{a.name}</span>
                     {(a.owedCents ?? 0) > 0 ? (
@@ -1342,6 +1474,15 @@ function CreditCardListSection({
             setPayCardFor(card);
           }}
           onClose={() => setPickingCard(false)}
+        />
+      ) : null}
+      {editCardFor ? (
+        <EditCardModal
+          card={editCardFor}
+          cards={allCards}
+          currency={currency}
+          freeNightStays={freeNightStays}
+          onDone={() => setEditCardFor(null)}
         />
       ) : null}
       {payCardFor ? (
@@ -1389,7 +1530,10 @@ function PickCardModal({
             ✕
           </button>
         </div>
-        <ul className="-mx-1 space-y-1 overflow-y-auto px-1">
+        {/* Room on all four sides for the rows' rings: the scroll box clips
+            anything outside it, and the first and last rows lost their top
+            and bottom lines. */}
+        <ul className="-m-1 space-y-1 overflow-y-auto p-1">
           {ordered.map((a) => (
             <li key={a.id}>
               <button
@@ -3174,6 +3318,7 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 <select name="ownership" defaultValue="sole" className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="sole">Sole</option><option value="joint">Joint</option></select>
               </label>
               <div className="space-y-2"><LabeledInput label="Annual fee" name="annualFee" type="number" step="0.01" placeholder="0.00" /><label className="flex items-center gap-1.5 px-0.5 text-xs text-muted"><input type="checkbox" name="feeWaived" className="h-3.5 w-3.5 rounded accent-[var(--brand)]" />Fee waived (e.g. military benefit)</label></div>
+              <LabeledInput label="Payment due day" name="paymentDueDay" type="number" min="1" max="31" step="1" placeholder="1–31" />
               <LabeledInput label="Date opened" name="dateOpened" type="date" />
               <LabeledInput label="Date closed" name="dateClosed" type="date" />
               <label className="block"><span className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-muted">Rewards category</span><select name="rewardsCategory" defaultValue="" className="w-full rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"><option value="">Not set</option><option value="travel">Travel</option><option value="hotel">Hotel</option></select></label>
@@ -3206,7 +3351,6 @@ function AddAccountForm({ section, onDone, estateNames: names = [] }: { section:
                 <LabeledInput label="APR %" name="payoffApr" type="number" min="0" step="0.001" />
                 <LabeledInput label="0% promo ends" name="promoAprEndsOn" type="date" />
                 <LabeledInput label="Minimum / mo" name="payoffMinimum" type="number" min="0" step="0.01" />
-                <LabeledInput label="Due day" name="payoffDueDay" type="number" min="1" max="31" step="1" />
                 <LabeledInput label="Planned / mo" name="payoffPlanned" type="number" min="0" step="0.01" />
               </div>
               <p className="text-[11px] text-muted">APR % should be 0 during a 0% promo period; update to the regular rate when the promo ends. Balance and payment plan sync to Budget → Debt/Loans.</p>

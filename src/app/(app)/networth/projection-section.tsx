@@ -143,7 +143,6 @@ export function ProjectionSection({
   seed,
   militaryRetireYear,
   currentNwCents,
-  currentNwMonth,
   assumptions,
   details,
 }: {
@@ -259,7 +258,8 @@ export function ProjectionSection({
               tone="text-foreground"
               sub={
                 <>
-                  {`${currentNwMonth ? MONTH_NAMES[Number(currentNwMonth.slice(5, 7)) - 1] : "Current"} NW: ${formatMoneyWhole(currentNwCents, currency)}`}
+                  {/* "Current NW", not the month's name — matches the table's Current NW column. */}
+                  {`Current NW: ${formatMoneyWhole(currentNwCents, currency)}`}
                   {/* How the latest month stands against this year's
                       projection: ahead reads Up in green, behind Down in red. Its own
                       line on a phone, where the slash fell at a line end. */}
@@ -323,7 +323,7 @@ export function ProjectionSection({
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Income</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Spending</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Income -<br />Spending</th>
-                  <th className="px-2.5 py-2 text-center font-semibold">Actual<br />NW</th>
+                  <th className="px-2.5 py-2 text-center font-semibold">Current<br />NW</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Proj<br />EOY NW</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Actual -<br />Proj NW</th>
                 </tr>

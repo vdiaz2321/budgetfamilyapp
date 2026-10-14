@@ -52,6 +52,19 @@ export default async function AccountsPage() {
       .then((r) => r),
   ]);
 
+  // Stays that use a card's free night: the card Edit form (opened from a
+  // credit-card tile) shows those cards' Booked on / Check-in locked to the
+  // stay, as it does on /travel. Only the four fields the form reads.
+  const freeNightStaysPromise = supabase
+    .from("travel_stays")
+    .select("id, account_id, property_name, reserved_on, check_in")
+    .eq("household_id", household.id)
+    .eq("free_night_used", true)
+    .eq("is_estimate", false)
+    .is("cancelled_at", null)
+    .not("account_id", "is", null)
+    .then((r) => r);
+
   // Per-card owed and this month's spend, summed in Postgres by
   // v_card_balances / v_card_month_spend (migration 20260826183000) rather
   // than by adding up every charge here — one row per card, so it can't be
@@ -86,7 +99,7 @@ export default async function AccountsPage() {
   ] = await Promise.all([
     supabase
       .from("accounts")
-      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, tax_treatment, retirement_kind, balance_updated_at")
+      .select("id, name, kind, subtype, holder, institution, account_number, ownership, debt_tracking_mode, active, is_kids_account, bank_group, current_balance_cents, annual_fee_cents, fee_waived, date_opened, date_closed, payment_due_day, tax_treatment, retirement_kind, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -400,6 +413,7 @@ export default async function AccountsPage() {
     feeWaived: a.fee_waived ?? false,
     dateOpened: a.date_opened ?? null,
     dateClosed: a.date_closed ?? null,
+    paymentDueDay: (a.payment_due_day as number | null) ?? null,
     cardDetails: cardDetailsByAccount.get(a.id) ?? null,
     rewardActivities: rewardActivitiesByAccount.get(a.id) ?? [],
     owedCents: cardOwed.get(a.id) ?? 0,
@@ -568,6 +582,9 @@ export default async function AccountsPage() {
   }));
 
   const [estateAccountsRes, estateGuideRes, estateItemsRes] = await estatePromise;
+  const freeNightStays = (
+    unwrap(await freeNightStaysPromise, "travel_stays") as { id: string; account_id: string; property_name: string; reserved_on: string | null; check_in: string }[]
+  ).map((r) => ({ id: r.id, accountId: r.account_id, propertyName: r.property_name, reservedOn: r.reserved_on, checkIn: r.check_in }));
   const estateGuide = unwrap(estateGuideRes, "estate guide");
   const estate: EstateData = {
     accounts: Object.fromEntries(
@@ -608,6 +625,7 @@ export default async function AccountsPage() {
       budgetDebts={budgetDebts}
       currency={household.currency}
       nonCardAccounts={nonCardAccounts}
+      freeNightStays={freeNightStays}
       historyMonths={[currentMonth, prevMonth, prev2Month]}
       cardPayments={cardPayments}
       transfers={transfers}

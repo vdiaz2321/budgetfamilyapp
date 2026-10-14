@@ -1471,7 +1471,9 @@ function BalanceGrid({
   const acctPct = wideLayout ? Math.max(35, 70 - months.length * 8) : null;
   const monthPct = wideLayout && acctPct != null ? (100 - acctPct) / (months.length + 1) : null;
 
-  const [gridOpenState, setGridOpenState] = useSessionCollapse("networth-monthly-balances-open", () => ({ open: false }));
+  // Open on arrival — Victor wants the grid showing without a click. The
+  // chevron still folds it for the rest of the session.
+  const [gridOpenState, setGridOpenState] = useSessionCollapse("networth-monthly-balances-open", () => ({ open: true }));
   const gridOpen = gridOpenState.open;
   const toggleGrid = () => setGridOpenState((s) => ({ ...s, open: !s.open }));
 

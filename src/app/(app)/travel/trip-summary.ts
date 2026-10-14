@@ -464,3 +464,34 @@ export function bookingForeignTotalsFor(
     car: add(cars.filter((c) => c.tripId === tripId).map(carBooking)),
   };
 }
+
+/**
+ * A trip's planned-against-spent difference — the trip popup's Total
+ * Difference, also the Trip Log's Difference column. Each booking kind (all
+ * flights, all stays, all rentals) compares its whole plan with what's been
+ * paid once anything of that kind is paid — an unpaid flight's plan is money
+ * still to go (Victor, 2026-10-08) — and a spending row counts once it has
+ * spending. Spent with no plan is an unplanned cost (plan $0). `diff` is null
+ * while nothing has been paid; positive = under plan.
+ */
+export function tripDifference(t: Pick<TripSummary, "bookings" | "expenses">): { planned: number; spent: number; diff: number | null } {
+  const live = t.bookings.filter((b) => !b.cancelled);
+  const byKind = (["flight", "stay", "car"] as const).map((kind) =>
+    live
+      .filter((b) => b.kind === kind)
+      .map((b) => bookingPlanActual(b))
+      .reduce<{ planned: number; actual: number }>(
+        (sum, x) => ({ planned: sum.planned + (x.planned ?? 0), actual: sum.actual + (x.actual ?? 0) }),
+        { planned: 0, actual: 0 },
+      ),
+  );
+  const compared = [
+    ...byKind.filter((k) => k.actual > 0),
+    ...t.expenses
+      .map((e) => ({ planned: e.plannedCents ?? (actualCents(e) ? 0 : null), actual: actualCents(e) }))
+      .filter((x): x is { planned: number; actual: number } => x.planned != null && x.actual != null),
+  ];
+  const planned = compared.reduce((sum, x) => sum + x.planned, 0);
+  const spent = compared.reduce((sum, x) => sum + x.actual, 0);
+  return { planned, spent, diff: compared.length ? planned - spent : null };
+}
