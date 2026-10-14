@@ -132,12 +132,25 @@ export async function setInvestmentYear(formData: FormData) {
 // the sum of its buckets, so writing the account total directly would leave
 // the two disagreeing (the same rule the bank-to-bank transfer enforces).
 export async function transferFromInvestment(formData: FormData): Promise<{ error: string | null }> {
+  return saveInvestmentTransfer(formData, null);
+}
+
+// Edit an investment → bank transfer from Transactions or Accounts' Transfer
+// Activity. The old movement is put back on both sides first, then the new one
+// is applied, so a changed amount, date, account or bucket all land correctly.
+export async function updateInvestmentTransfer(formData: FormData): Promise<{ error: string | null }> {
+  const id = String(formData.get("transactionId") ?? "").trim();
+  if (!id) return { error: "Transfer not found." };
+  return saveInvestmentTransfer(formData, id);
+}
+
+async function saveInvestmentTransfer(formData: FormData, transactionId: string | null): Promise<{ error: string | null }> {
   const { supabase, householdId } = await requireHousehold();
 
-  const sourceAccountId = String(formData.get("sourceAccountId") ?? "");
-  const sourceBucketId = String(formData.get("sourceBucketId") ?? "").trim() || null;
-  const destAccountId = String(formData.get("destAccountId") ?? "");
-  const destBucketId = String(formData.get("destBucketId") ?? "").trim() || null;
+  const sourceAccountId = String(formData.get("sourceAccountId") ?? formData.get("fromAccountId") ?? "");
+  const sourceBucketId = String(formData.get("sourceBucketId") ?? formData.get("fromBucketId") ?? "").trim() || null;
+  const destAccountId = String(formData.get("destAccountId") ?? formData.get("toAccountId") ?? "");
+  const destBucketId = String(formData.get("destBucketId") ?? formData.get("toBucketId") ?? "").trim() || null;
   const amountCents = displayToCents(String(formData.get("amount") ?? "0"));
   const occurredOn = String(formData.get("date") ?? "").trim() || new Date().toISOString().slice(0, 10);
   const memo = String(formData.get("memo") ?? "").trim() || null;
@@ -182,11 +195,7 @@ export async function transferFromInvestment(formData: FormData): Promise<{ erro
     return { error: "That bucket isn't part of the destination account." };
   }
 
-  // 1. The audit transaction: a withdrawal from the investment, paid to the
-  //    banking account (and bucket) — what Transactions lists and what a
-  //    delete reverses.
-  const { error: insertError } = await supabase.from("transactions").insert({
-    household_id: householdId,
+  const row = {
     occurred_on: occurredOn,
     amount_cents: amountCents,
     account_id: sourceAccountId,
@@ -196,32 +205,73 @@ export async function transferFromInvestment(formData: FormData): Promise<{ erro
     movement_type: "investment_transfer",
     is_withdrawal: true,
     memo: memo ?? `Transfer to ${destAcct.name}`,
-    source: "manual",
-  });
-  if (insertError) return { error: `Couldn't save the transfer — ${insertError.message}` };
+  };
 
-  // 2. Take it off the investment side.
-  if (sourceBucketId) {
-    await adjustBucketBalance(supabase, householdId, sourceBucketId, -amountCents);
+  if (transactionId) {
+    // 1. Put the old movement back on both sides before applying the new one.
+    const old = unwrap(
+      await supabase
+        .from("transactions")
+        .select("amount_cents, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id")
+        .eq("id", transactionId)
+        .eq("household_id", householdId)
+        .eq("movement_type", "investment_transfer")
+        .maybeSingle(),
+      "transactions",
+    );
+    if (!old?.account_id || !old.paid_to_account_id) return { error: "Transfer not found." };
+    const { error: updateError } = await supabase
+      .from("transactions")
+      .update({ ...row, updated_at: new Date().toISOString() })
+      .eq("id", transactionId)
+      .eq("household_id", householdId);
+    if (updateError) return { error: `Couldn't save the transfer — ${updateError.message}` };
+    await moveInvestmentTransfer(supabase, householdId, {
+      sourceAccountId: old.account_id,
+      sourceBucketId: old.bucket_id,
+      destAccountId: old.paid_to_account_id,
+      destBucketId: old.paid_to_bucket_id,
+    }, -old.amount_cents);
   } else {
-    await adjustInvestmentAccount(supabase, householdId, sourceAccountId, -amountCents);
+    // 1. The audit transaction: a withdrawal from the investment, paid to the
+    //    banking account (and bucket) — what Transactions lists and what a
+    //    delete reverses.
+    const { error: insertError } = await supabase
+      .from("transactions")
+      .insert({ ...row, household_id: householdId, source: "manual" });
+    if (insertError) return { error: `Couldn't save the transfer — ${insertError.message}` };
   }
 
-  // 3. Put it on the banking side — the bucket when it has them, else the
-  //    account ledger.
-  if (destBucketId) {
-    await adjustBucketBalance(supabase, householdId, destBucketId, amountCents);
-  } else {
-    await adjustAccountLedger(supabase, householdId, destAccountId, amountCents);
-  }
+  // 2. Take it off the investment side and put it on the banking side.
+  await moveInvestmentTransfer(supabase, householdId, { sourceAccountId, sourceBucketId, destAccountId, destBucketId }, amountCents);
 
-  // 4. Snapshot & revalidate.
+  // 3. Snapshot & revalidate.
   await captureSnapshots(supabase, householdId, { force: true });
   revalidatePath("/invest");
   revalidatePath("/accounts");
   revalidatePath("/networth");
   revalidatePath("/transactions");
   return { error: null };
+}
+
+// Both legs of an investment → bank transfer. A negative amount undoes one.
+async function moveInvestmentTransfer(
+  supabase: Awaited<ReturnType<typeof requireHousehold>>["supabase"],
+  householdId: string,
+  legs: { sourceAccountId: string; sourceBucketId: string | null; destAccountId: string; destBucketId: string | null },
+  amountCents: number,
+) {
+  if (legs.sourceBucketId) {
+    await adjustBucketBalance(supabase, householdId, legs.sourceBucketId, -amountCents);
+  } else {
+    await adjustInvestmentAccount(supabase, householdId, legs.sourceAccountId, -amountCents);
+  }
+  // The bucket when it has them, else the account ledger.
+  if (legs.destBucketId) {
+    await adjustBucketBalance(supabase, householdId, legs.destBucketId, amountCents);
+  } else {
+    await adjustAccountLedger(supabase, householdId, legs.destAccountId, amountCents);
+  }
 }
 
 // An investment account with no buckets: adjustAccountLedger refuses

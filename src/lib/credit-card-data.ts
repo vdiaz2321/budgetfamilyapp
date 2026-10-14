@@ -174,6 +174,7 @@ export async function loadCreditCardBoardData(
     name: b.name,
     balanceCents: b.balance_cents ?? 0,
     bankGroup: null,
+    subtype: null,
     taxTreatment: null,
     retirementKind: null,
     holder: null,

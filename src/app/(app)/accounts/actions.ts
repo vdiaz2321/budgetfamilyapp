@@ -1326,6 +1326,7 @@ export async function addBucket(formData: FormData) {
   const balanceCents = displayToCents(String(formData.get("balance") ?? "0"));
   const bankGroupRaw = String(formData.get("bankGroup") ?? "");
   const bankGroup = bankGroupRaw === "savings" || bankGroupRaw === "spending" ? bankGroupRaw : null;
+  const subtype = String(formData.get("subtype") ?? "").trim() || null;
   if (!accountId) return { error: "Missing account." };
   if (!name) return { error: "Bucket name is required." };
 
@@ -1348,6 +1349,7 @@ export async function addBucket(formData: FormData) {
     balance_cents: balanceCents,
     sort_order: sortOrder,
     bank_group: bankGroup,
+    subtype,
   });
 
   if (error) {
@@ -1380,6 +1382,15 @@ export async function updateBucket(formData: FormData) {
   if (formData.has("retirementKind")) {
     const raw = String(formData.get("retirementKind") ?? "");
     update.retirement_kind = isRetirementKind(raw) ? raw : null;
+  }
+  // The bucket's own Type. Empty = same as the account, stored as NULL so a
+  // later change to the account's Type still reaches it.
+  if (formData.has("subtype")) {
+    update.subtype = String(formData.get("subtype") ?? "").trim() || null;
+  }
+  if (formData.has("bankGroup")) {
+    const raw = String(formData.get("bankGroup") ?? "");
+    update.bank_group = raw === "savings" || raw === "spending" ? raw : null;
   }
 
   const { error } = await supabase

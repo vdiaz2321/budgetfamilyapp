@@ -14,6 +14,9 @@ export type BucketData = {
   // "Checking" bucket and a "Savings" bucket under one bank account) no
   // longer have to force the whole account into one type.
   bankGroup: "savings" | "spending" | null;
+  // Its own Type (529, UTMA, Trump Account…) for Investments / Kids Funding.
+  // Null = same as the account's subtype.
+  subtype: string | null;
   taxTreatment: string | null;
   // Which contribution limit governs this bucket, and whose money it is. Both
   // live on the bucket as well as the account because one brokerage can hold a

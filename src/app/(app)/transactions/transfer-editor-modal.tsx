@@ -3,10 +3,18 @@
 import { useState, useTransition } from "react";
 import { centsToGroupedDisplay } from "@/lib/money";
 import { updateAccountTransfer } from "../accounts/actions";
+import { updateInvestmentTransfer } from "../invest/actions";
 import { deleteTransaction } from "../budget/actions";
 import type { AccountOption, TxData } from "../budget/types";
 
 type TransferBucket = { id: string; accountId: string; name: string };
+
+// Just the fields the editor reads, so Accounts' Transfer Activity can open it
+// without building a whole register row.
+export type EditableTransfer = Pick<
+  TxData,
+  "id" | "date" | "amountCents" | "memo" | "accountId" | "toAccountId" | "fromBucketId" | "toBucketId" | "isInvestmentTransfer"
+>;
 
 export function TransferEditorModal({
   transfer,
@@ -14,7 +22,7 @@ export function TransferEditorModal({
   buckets,
   onClose,
 }: {
-  transfer: TxData;
+  transfer: EditableTransfer;
   accounts: AccountOption[];
   buckets: TransferBucket[];
   onClose: () => void;
@@ -22,7 +30,11 @@ export function TransferEditorModal({
   const movable = accounts.filter((account) =>
     !["Credit Cards", "Investments", "Loans"].includes(account.group ?? "Other"),
   );
-  const [fromId, setFromId] = useState(transfer.accountId ?? movable[0]?.id ?? "");
+  // Money out of an investment comes from an investment account and lands in
+  // a bank account — the same pairing Transfer Funds offers.
+  const isInvestment = transfer.isInvestmentTransfer;
+  const sources = isInvestment ? accounts.filter((account) => account.group === "Investments") : movable;
+  const [fromId, setFromId] = useState(transfer.accountId ?? sources[0]?.id ?? "");
   const [toId, setToId] = useState(transfer.toAccountId ?? movable[1]?.id ?? "");
   const [fromBucketId, setFromBucketId] = useState(transfer.fromBucketId ?? "");
   const [toBucketId, setToBucketId] = useState(transfer.toBucketId ?? "");
@@ -61,7 +73,7 @@ export function TransferEditorModal({
         action={(fd) =>
           start(async () => {
             setError(null);
-            const result = await updateAccountTransfer(fd);
+            const result = await (isInvestment ? updateInvestmentTransfer(fd) : updateAccountTransfer(fd));
             if (result?.error) setError(result.error);
             else onClose();
           })
@@ -92,71 +104,77 @@ export function TransferEditorModal({
           </Field>
         </div>
 
-        <Field label="From">
-          <select
-            name="fromAccountId"
-            value={fromId}
-            onChange={(event) => {
-              setFromId(event.target.value);
-              setFromBucketId("");
-            }}
-            required
-            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            {movable.map((account) => (
-              <option key={account.id} value={account.id}>{account.name}</option>
-            ))}
-          </select>
-        </Field>
-        {fromBuckets.length > 0 ? (
-          <Field label="From bucket">
-            <select
-              name="fromBucketId"
-              value={fromBucketId}
-              onChange={(event) => setFromBucketId(event.target.value)}
-              required
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Choose a bucket…</option>
-              {fromBuckets.map((bucket) => (
-                <option key={bucket.id} value={bucket.id}>{bucket.name}</option>
-              ))}
-            </select>
-          </Field>
-        ) : null}
-
-        <Field label="To">
-          <select
-            name="toAccountId"
-            value={toId}
-            onChange={(event) => {
-              setToId(event.target.value);
-              setToBucketId("");
-            }}
-            required
-            className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-          >
-            {movable.map((account) => (
-              <option key={account.id} value={account.id}>{account.name}</option>
-            ))}
-          </select>
-        </Field>
-        {toBuckets.length > 0 ? (
-          <Field label="To bucket">
-            <select
-              name="toBucketId"
-              value={toBucketId}
-              onChange={(event) => setToBucketId(event.target.value)}
-              required
-              className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
-            >
-              <option value="">Choose a bucket…</option>
-              {toBuckets.map((bucket) => (
-                <option key={bucket.id} value={bucket.id}>{bucket.name}</option>
-              ))}
-            </select>
-          </Field>
-        ) : null}
+        {/* From and To side by side, so the whole form fits without scrolling. */}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-3">
+            <Field label="From">
+              <select
+                name="fromAccountId"
+                value={fromId}
+                onChange={(event) => {
+                  setFromId(event.target.value);
+                  setFromBucketId("");
+                }}
+                required
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                {sources.map((account) => (
+                  <option key={account.id} value={account.id}>{account.name}</option>
+                ))}
+              </select>
+            </Field>
+            {fromBuckets.length > 0 ? (
+              <Field label="From bucket">
+                <select
+                  name="fromBucketId"
+                  value={fromBucketId}
+                  onChange={(event) => setFromBucketId(event.target.value)}
+                  required
+                  className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="">Choose a bucket…</option>
+                  {fromBuckets.map((bucket) => (
+                    <option key={bucket.id} value={bucket.id}>{bucket.name}</option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+          </div>
+          <div className="space-y-3">
+            <Field label="To">
+              <select
+                name="toAccountId"
+                value={toId}
+                onChange={(event) => {
+                  setToId(event.target.value);
+                  setToBucketId("");
+                }}
+                required
+                className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+              >
+                {movable.map((account) => (
+                  <option key={account.id} value={account.id}>{account.name}</option>
+                ))}
+              </select>
+            </Field>
+            {toBuckets.length > 0 ? (
+              <Field label="To bucket">
+                <select
+                  name="toBucketId"
+                  value={toBucketId}
+                  onChange={(event) => setToBucketId(event.target.value)}
+                  required
+                  className="w-full rounded-lg bg-sky-50 dark:bg-background px-3 py-2 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                >
+                  <option value="">Choose a bucket…</option>
+                  {toBuckets.map((bucket) => (
+                    <option key={bucket.id} value={bucket.id}>{bucket.name}</option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+          </div>
+        </div>
 
         <Field label="Note">
           <input

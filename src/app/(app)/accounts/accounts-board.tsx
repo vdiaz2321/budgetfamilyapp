@@ -43,6 +43,8 @@ import {
 } from "./types";
 import { useScrollLock } from "@/lib/use-scroll-lock";
 import { AddTransactionButton } from "../travel/add-transaction-button";
+import { TransferActivityModal } from "./transfer-activity";
+import type { EditableTransfer } from "../transactions/transfer-editor-modal";
 import { MonthEndUpdateModal, type MonthEndCheck } from "./month-end-update";
 import { EstateAddFields, EstateGuideModal, estateNames, estateToFillCount, type EstateData } from "./estate-guide";
 
@@ -177,6 +179,7 @@ type Props = {
   // Payments made TO cards — feeds the read-only "Card payments" report at
   // the bottom of the Credit Cards section. Never used for balances.
   cardPayments?: CardPayment[];
+  transfers?: EditableTransfer[];
   debtPayments?: CardPayment[];
   debtNames?: Record<string, string>;
   owingDebtIds?: string[];
@@ -276,6 +279,9 @@ const ACCOUNT_SUBTYPES = [
   "TSP Roth",
   "TSP Traditional",
   "REIT",
+  "529",
+  "UTMA",
+  "Trump Account",
 ];
 
 /** A section whose Type field has a fixed vocabulary (Property). Unlike
@@ -333,14 +339,57 @@ const WIDE_COLS: Record<number, string> = {
 
 const usesSubtypeList = (sectionKey: string) => sectionKey === "investments" || sectionKey === "kids";
 
+// One login at a bank or brokerage often holds several kinds of account — the
+// kids' Fidelity holds a 529 and a UTMA per child, Cap One V a checking and a
+// savings. So, like Monarch and the bank sites themselves, the Type lives on
+// each bucket, and the account row just summarises its buckets' Types.
+const bucketTypesAllowed = (sectionKey: string) => sectionKey === "banking" || usesSubtypeList(sectionKey);
+
+const bankGroupLabel = (g: "savings" | "spending" | null) =>
+  g === "savings" ? "Savings" : g === "spending" ? "Checking" : null;
+
+/** A bucket's Type: its own, else the account's. */
+function bucketTypeLabel(section: Section, account: AccountData, bucket: BucketData): string | null {
+  if (section.key === "banking") return bankGroupLabel(bucket.bankGroup ?? account.bankGroup);
+  if (usesSubtypeList(section.key)) return bucket.subtype?.trim() || account.subtype?.trim() || null;
+  return null;
+}
+
+/** Every Type an account holds, in bucket order. One entry = a plain pill;
+ *  more = the account is mixed and each bucket shows its own. */
+function accountTypeLabels(section: Section, account: AccountData): string[] {
+  const own = section.key === "banking" ? bankGroupLabel(account.bankGroup) : account.subtype?.trim() || null;
+  if (account.buckets.length === 0 || !bucketTypesAllowed(section.key)) return own ? [own] : [];
+  const out: string[] = [];
+  let untyped = false;
+  for (const b of account.buckets) {
+    const t = bucketTypeLabel(section, account, b);
+    if (!t) untyped = true;
+    else if (!out.includes(t)) out.push(t);
+  }
+  // Some buckets typed, some not: say so, rather than let the one Type that
+  // is set stand for the whole account.
+  if (out.length > 0 && untyped) out.push("Not set");
+  return out;
+}
+
+const typePillClass = (label: string, section: Section) =>
+  section.key === "banking" && label === "Savings"
+    ? "bg-positive/15 text-positive hover:ring-positive"
+    : "bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40";
+
 function SubtypeSelect({
   name,
   value,
   className,
+  emptyLabel = "Type…",
 }: {
   name: string;
   value: string | null;
   className?: string;
+  /** The blank choice. A bucket's reads "Same as account (…)", since blank
+   *  there means it follows the account's Type. */
+  emptyLabel?: string;
 }) {
   const known = React.useContext(SubtypeOptionsContext);
   const current = (value ?? "").trim();
@@ -379,7 +428,7 @@ function SubtypeSelect({
       }}
       className={`${base} ${className ?? ""}`}
     >
-      <option value="">Type…</option>
+      <option value="">{emptyLabel}</option>
       {options.map((t) => (
         <option key={t} value={t}>
           {t}
@@ -397,6 +446,7 @@ export function AccountsBoard({
   nonCardAccounts = [],
   historyMonths,
   cardPayments = [],
+  transfers = [],
   debtPayments = [],
   debtNames = {},
   owingDebtIds = [],
@@ -409,6 +459,7 @@ export function AccountsBoard({
   const estateToFill = estateToFillCount(accounts, estate);
   const [monthEndOpen, setMonthEndOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState<false | "banking" | "investment">(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const creditCards = accounts.filter((a) => a.kind === "credit_card");
   // Period picker on the Accounts header — same control as Insights. Local
   // state (no URL sync) since the state is UI-only here. The picker's
@@ -683,7 +734,8 @@ export function AccountsBoard({
     new Set(
       accounts
         .filter((a) => a.kind === "investment" || a.isKidsAccount)
-        .map((a) => (a.subtype ?? "").trim())
+        .flatMap((a) => [a.subtype, ...a.buckets.map((b) => b.subtype)])
+        .map((t) => (t ?? "").trim())
         .filter(Boolean),
     ),
   );
@@ -693,6 +745,7 @@ export function AccountsBoard({
     { label: estateToFill > 0 ? `Estate guide (${estateToFill} to fill in)` : "Estate guide", onSelect: () => setEstateOpen(true) },
     { label: "Add account", onSelect: () => setAddOpen(true) },
     { label: "Transfer Funds", onSelect: () => setTransferOpen("banking") },
+    { label: "Transfer Activity", onSelect: () => setActivityOpen(true) },
   ]);
 
   return (
@@ -749,6 +802,13 @@ export function AccountsBoard({
               <path d="M7 7h13m0 0-4-4m4 4-4 4M17 17H4m0 0 4 4m-4-4 4-4" />
             </svg>
             Transfer Funds
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivityOpen(true)}
+            className="hidden shrink-0 md:inline-block whitespace-nowrap rounded-lg bg-surface px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-inset ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+          >
+            Transfer Activity
           </button>
           <button
             type="button"
@@ -1005,6 +1065,27 @@ export function AccountsBoard({
           allBuckets={accounts.flatMap((a) => a.buckets)}
           startFrom={transferOpen}
           onClose={() => setTransferOpen(false)}
+        />
+      ) : null}
+      {activityOpen ? (
+        <TransferActivityModal
+          transfers={transfers}
+          accounts={accounts
+            .filter((a) => a.kind !== "property")
+            .map((a) => ({
+              id: a.id,
+              name: a.name,
+              // Same groups the Transactions editor reads.
+              group: a.isKidsAccount ? "Kids Funding"
+                : a.kind === "investment" ? "Investments"
+                : a.kind === "credit_card" ? "Credit Cards"
+                : a.kind === "debt_loan" ? "Loans"
+                : a.kind === "checking" || a.kind === "savings_bucket" ? "Banking"
+                : "Other",
+            }))}
+          buckets={accounts.flatMap((a) => a.buckets.map((b) => ({ id: b.id, accountId: b.accountId, name: b.name })))}
+          currency={currency}
+          onClose={() => setActivityOpen(false)}
         />
       ) : null}
       </div>
@@ -2091,6 +2172,7 @@ function AccountRow({
   // credit cards or loans.
   const allowBuckets = !section.liability;
   const bucketCount = account.buckets.length;
+  const typeLabels = accountTypeLabels(section, account);
   // Column values follow whichever three months the header is showing, rather
   // than the fixed prevMonth/prev2Month the server computed for "today".
   // Null means no snapshot was recorded for that month — rendered muted.
@@ -2139,17 +2221,25 @@ function AccountRow({
               Joint
             </EditPill>
           ) : null}
-          {section.key === "banking" && account.bankGroup ? (
-            <EditPill
-              onClick={onToggleEdit}
-              className={`${account.bankGroup === "savings" ? "bg-positive/15 text-positive hover:ring-positive" : "bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40"}`}
-            >
-              {account.bankGroup === "savings" ? "Savings" : "Checking"}
+          {typeLabels.length === 1 ? (
+            <EditPill onClick={onToggleEdit} className={typePillClass(typeLabels[0], section)}>
+              {typeLabels[0]}
+            </EditPill>
+          ) : typeLabels.length > 1 ? (
+            // Buckets of different Types: list them where there's room, and
+            // just "Mixed" on a phone, where the list would crowd out the name.
+            // Each bucket row below carries its own Type either way.
+            <EditPill onClick={onToggleEdit} className="bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40">
+              <span className="@[560px]:hidden">Mixed</span>
+              <span className="hidden @[560px]:inline">{typeLabels.join(" · ")}</span>
             </EditPill>
           ) : null}
-          {account.subtype ? (
+          {/* The pills above are how a row opens its edit form. A row with
+              none of them (a kids' bank account) gets a plain Edit pill so it
+              can still be renamed. */}
+          {typeLabels.length === 0 ? (
             <EditPill onClick={onToggleEdit} className="bg-surface text-foreground ring-1 ring-line hover:ring-foreground/40">
-              {account.subtype}
+              Edit
             </EditPill>
           ) : null}
           {bucketCount > 0 ? (
@@ -2234,6 +2324,7 @@ function AccountRow({
       {allowBuckets && bucketsOpen ? (
               <BucketDrawer
                 account={account}
+                section={section}
                 currency={currency}
                 historyMonths={historyMonths}
                 isPastPeriod={isPastPeriod}
@@ -2252,11 +2343,13 @@ function AccountRow({
 // bucket (e.g. "Extra Cash").
 function BucketDrawer({
   account,
+  section,
   currency,
   historyMonths,
   isPastPeriod,
 }: {
   account: AccountData;
+  section: Section;
   currency: string;
   historyMonths: string[];
   isPastPeriod: boolean;
@@ -2289,6 +2382,7 @@ function BucketDrawer({
     });
   };
   const { dragOverId, startDrag } = usePointerReorder("bucket", reorder);
+  const mixedTypes = accountTypeLabels(section, account).length > 1;
 
   return (
     <div className="border-t border-line bg-background/40 px-4 py-1">
@@ -2304,7 +2398,11 @@ function BucketDrawer({
             <BucketRow
               key={b.id}
               bucket={b}
-              accountKind={account.kind}
+              account={account}
+              section={section}
+              // Only a mixed account labels its buckets; when they all share
+              // one Type the account pill already says it.
+              typeLabel={mixedTypes ? bucketTypeLabel(section, account, b) : null}
               currency={currency}
               historyMonths={historyMonths}
               isPastPeriod={isPastPeriod}
@@ -2316,7 +2414,7 @@ function BucketDrawer({
       )}
 
       {adding ? (
-        <AddBucketForm accountId={account.id} onDone={() => setAdding(false)} />
+        <AddBucketForm account={account} section={section} onDone={() => setAdding(false)} />
       ) : (
         <button
           type="button"
@@ -2332,7 +2430,9 @@ function BucketDrawer({
 
 function BucketRow({
   bucket,
-  accountKind,
+  account,
+  section,
+  typeLabel,
   currency,
   historyMonths,
   isPastPeriod,
@@ -2340,7 +2440,9 @@ function BucketRow({
   isDragOver,
 }: {
   bucket: BucketData;
-  accountKind: string;
+  account: AccountData;
+  section: Section;
+  typeLabel: string | null;
   currency: string;
   historyMonths: string[];
   isPastPeriod: boolean;
@@ -2381,6 +2483,11 @@ function BucketRow({
         >
           {bucket.name}
         </button>
+        {typeLabel ? (
+          <EditPill onClick={() => setEditing((v) => !v)} className={typePillClass(typeLabel, section)}>
+            {typeLabel}
+          </EditPill>
+        ) : null}
       </div>
       <SumCell
         pickKey={`b:${bucket.id}:${historyMonths[ANCHOR_IDX]}`}
@@ -2417,7 +2524,8 @@ function BucketRow({
       {editing ? (
         <BucketEditPanel
           bucket={bucket}
-          accountKind={accountKind}
+          account={account}
+          section={section}
           onDone={() => setEditing(false)}
         />
       ) : null}
@@ -2435,13 +2543,16 @@ function BucketRow({
 // confirmed Delete the same shape the account rows already use.
 function BucketEditPanel({
   bucket,
-  accountKind,
+  account,
+  section,
   onDone,
 }: {
   bucket: BucketData;
-  accountKind: string;
+  account: AccountData;
+  section: Section;
   onDone: () => void;
 }) {
+  const accountKind = account.kind;
   // Holder and retirement type only mean something on an investment account —
   // a savings bucket under Banking is never a Roth IRA, and offering the
   // choice there just invites a wrong answer. updateBucket only writes
@@ -2472,8 +2583,9 @@ function BucketEditPanel({
           // Holder and retirement type joined this row, and three fields
           // sharing one line clipped the name to a few characters. The name
           // takes the full width and the other two wrap beneath it.
-          className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand @[420px]:w-auto @[420px]:flex-1 @[420px]:basis-48"
+          className="w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand @[420px]:w-64"
         />
+        <BucketTypeField account={account} section={section} bucket={bucket} />
         {/* Whose money this bucket is. IRA limits are per person and one
             brokerage account routinely holds a Roth for each spouse, so
             without this the cap card can only fall back to the account's
@@ -2734,13 +2846,52 @@ function HistoricBucketBalanceInput({
   );
 }
 
+/** A bucket's Type control: Checking/Savings under Banking, the account-type
+ *  list under Investments and Kids Funding, nothing elsewhere. */
+function BucketTypeField({
+  account,
+  section,
+  bucket,
+}: {
+  account: AccountData;
+  section: Section;
+  bucket?: BucketData;
+}) {
+  if (section.key === "banking") {
+    return (
+      <select
+        name="bankGroup"
+        defaultValue={bucket?.bankGroup ?? account.bankGroup ?? "spending"}
+        aria-label="Bucket type"
+        className="rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      >
+        <option value="spending">Checking</option>
+        <option value="savings">Savings</option>
+      </select>
+    );
+  }
+  if (!usesSubtypeList(section.key)) return null;
+  const own = account.subtype?.trim();
+  return (
+    <SubtypeSelect
+      name="subtype"
+      value={bucket?.subtype ?? null}
+      emptyLabel={own ? `Same as account (${own})` : "Type…"}
+      className="w-44"
+    />
+  );
+}
+
 function AddBucketForm({
-  accountId,
+  account,
+  section,
   onDone,
 }: {
-  accountId: string;
+  account: AccountData;
+  section: Section;
   onDone: () => void;
 }) {
+  const accountId = account.id;
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -2772,6 +2923,7 @@ function AddBucketForm({
           placeholder="Balance"
           className="w-24 rounded-md bg-surface px-2 py-1 text-right text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
         />
+        <BucketTypeField account={account} section={section} />
         <button
           type="submit"
           disabled={pending}

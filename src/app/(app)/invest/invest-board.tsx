@@ -5,7 +5,6 @@ import { useRegisterMobilePageActions } from "@/lib/mobile-page-actions";
 import {
   TAX_COLOR,
   TAX_LABEL,
-  TAX_MEANING,
   resolveTaxTreatment,
   type TaxTreatment,
 } from "@/lib/tax-treatment";
@@ -263,6 +262,7 @@ export function InvestBoard({
   const [taxPick, setTaxPick] = useState<TaxTreatment[]>([]);
 
   const mine = accounts.filter((a) => !a.isKids);
+  const kidsAccounts = accounts.filter((a) => a.isKids);
   const selectedAccount = selectedId ? accounts.find((a) => a.id === selectedId) ?? null : null;
 
   // The chart's accounts for the picked bands. An account whose holdings are
@@ -432,12 +432,6 @@ export function InvestBoard({
     return { rows, total, top: rows[0] ?? null };
   }, [mine]);
   const showAllocation = allocation.rows.length > 1 && allocation.total > 0;
-  // The holdings list follows the picked tax bands; its total is theirs.
-  const shownAllocation = useMemo(() => {
-    if (taxPick.length === 0) return allocation;
-    const rows = allocation.rows.filter((r) => taxPick.includes(r.treatment));
-    return { ...allocation, rows, total: rows.reduce((s, r) => s + r.cents, 0) };
-  }, [allocation, taxPick]);
   const toggleTax = (t: TaxTreatment) => {
     // A holding picked in the list would hide the band filter on the chart,
     // so picking a band clears it.
@@ -771,104 +765,6 @@ export function InvestBoard({
         </div>
       ) : (
         <>
-          {taxSplit.rows.length > 1 ? (
-            <section className="rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-black/5 dark:ring-white/10">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
-                <h2 className="text-sm font-bold">How it&rsquo;s taxed</h2>
-              </div>
-              <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-line/60">
-                {taxSplit.rows.map((r) => (
-                  <span
-                    key={r.treatment}
-                    style={{
-                      width: `${(r.cents / taxSplit.total) * 100}%`,
-                      backgroundColor: TAX_COLOR[r.treatment],
-                      opacity: taxPick.length > 0 && !taxPick.includes(r.treatment) ? 0.3 : 1,
-                    }}
-                  />
-                ))}
-              </div>
-              <ul className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                {taxSplit.rows.map((r) => {
-                  const open = taxPick.includes(r.treatment);
-                  return (
-                    <li key={r.treatment}>
-                      <button
-                        type="button"
-                        aria-pressed={open}
-                        onClick={() => toggleTax(r.treatment)}
-                        className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs sm:text-sm transition hover:brightness-95 dark:hover:brightness-125"
-                        style={{
-                          // Tinted in the band's own colour so each chip ties
-                          // back to its stretch of the bar; open = stronger.
-                          backgroundColor: `color-mix(in srgb, ${TAX_COLOR[r.treatment]} ${open ? 30 : 16}%, transparent)`,
-                          boxShadow: open
-                            ? `inset 0 0 0 1.5px ${TAX_COLOR[r.treatment]}`
-                            : `inset 0 0 0 1px color-mix(in srgb, ${TAX_COLOR[r.treatment]} 35%, transparent)`,
-                        }}
-                      >
-                        <span
-                          className="h-2 w-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: TAX_COLOR[r.treatment] }}
-                          aria-hidden
-                        />
-                        <span className="font-bold text-muted">{TAX_LABEL[r.treatment]}:</span>
-                        <span className="font-semibold tabular-nums">
-                          {formatMoney(r.cents, currency)}
-                        </span>
-                        <span className="tabular-nums text-muted">
-                          {((r.cents / taxSplit.total) * 100).toFixed(0)}%
-                        </span>
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
-                          aria-hidden
-                        >
-                          <path d="M6 9l6 6 6-6" />
-                        </svg>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-              {taxSplit.rows
-                .filter((r) => taxPick.includes(r.treatment))
-                .map((r) => (
-                  <div key={r.treatment} className="mt-2.5 rounded-xl bg-canvas/60 px-3 py-2.5">
-                    <p className="text-xs sm:text-sm text-muted">{TAX_MEANING[r.treatment]}</p>
-                    {/* Columns, not one tall list: a band can hold eight
-                        holdings, and a single column strands every amount at
-                        the far right edge of a wide card, miles from its own
-                        label. Narrower columns keep the two together. */}
-                    <ul className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-                      {r.holdings.map((h) => (
-                        <li
-                          key={h.name}
-                          className="flex items-baseline justify-between gap-2 border-b border-line/40 py-0.5 text-xs sm:text-sm last:border-0"
-                        >
-                          <span className="min-w-0 truncate">{h.name}</span>
-                          <span className="shrink-0 font-semibold tabular-nums">
-                            {formatMoney(h.cents, currency)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="mt-2 max-sm:text-[12px] sm:text-sm text-muted">
-                      Set each holding&rsquo;s tax treatment on Accounts. Anything left on Auto
-                      is read from its name.
-                    </p>
-                  </div>
-                ))}
-            </section>
-          ) : null}
-
           {/* The holdings sit beside the chart inside one card: the chart is
               a fixed-ratio SVG that left white space on both sides of a
               full-width card, and the list fills it. They stack on a phone. */}
@@ -888,45 +784,94 @@ export function InvestBoard({
                       year"), edge to edge across the column: the negative
                       margins cancel the column's padding. */}
                   <div className="-mx-2 -mt-3 mb-2 flex items-baseline justify-between gap-2 bg-brand-soft/35 px-4 py-2.5 lg:-mt-1">
-                    <h3 className="text-xs sm:text-sm font-bold">Total Investment Holdings</h3>
-                    <span className="text-xs sm:text-sm font-bold tabular-nums">{formatMoneyWhole(shownAllocation.total, currency)}</span>
+                    <h3 className="text-xs sm:text-base font-bold">Total Investment Holdings</h3>
+                    <span className="text-xs sm:text-base font-bold tabular-nums">{formatMoneyWhole(allocation.total, currency)}</span>
                   </div>
-                  {/* Picking a holding filters the chart, the same as picking a
-                      row in Investments. It filters to the holding's whole
-                      account: a bucket's history only starts at its split (the
-                      older years live on the account), so a bucket-only chart
-                      would show those years empty. Its sibling buckets light
-                      up with it to say so. */}
-                  <ul className="space-y-0.5">
-                    {shownAllocation.rows.slice(0, 8).map((r) => {
-                      const pct = (r.cents / shownAllocation.total) * 100;
-                      const active = selectedId === r.accountId;
+                  {/* How it's taxed and the holdings list used to be two
+                      cards that listed the same holdings twice. Now it's one
+                      list: the tax bands, each opening onto its holdings.
+                      Opening a band filters the chart to it; picking a holding
+                      filters to that holding's whole account (a bucket's
+                      history only starts at its split, so a bucket-only chart
+                      would show the older years empty). */}
+                  <div className="mx-2 mb-3 mt-1 flex h-2.5 overflow-hidden rounded-full bg-line/60">
+                    {taxSplit.rows.map((band) => (
+                      <span
+                        key={band.treatment}
+                        style={{
+                          width: `${(band.cents / taxSplit.total) * 100}%`,
+                          backgroundColor: TAX_COLOR[band.treatment],
+                          opacity: taxPick.length > 0 && !taxPick.includes(band.treatment) ? 0.3 : 1,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <ul className="divide-y divide-line/60">
+                    {taxSplit.rows.map((band) => {
+                      const open = taxPick.includes(band.treatment);
+                      const holdings = allocation.rows.filter((r) => r.treatment === band.treatment);
                       return (
-                        <li key={r.label} className="min-w-0">
+                        <li key={band.treatment}>
                           <button
                             type="button"
-                            aria-pressed={active}
-                            onClick={() => setSelectedId((prev) => (prev === r.accountId ? null : r.accountId))}
-                            className={`w-full cursor-pointer rounded-md px-2 py-1 text-left ring-inset transition ${
-                              active
-                                ? "bg-sky-100 ring-1 ring-sky-400 dark:bg-sky-900/40 dark:ring-sky-500"
-                                : `hover:bg-black/[0.04] dark:hover:bg-white/[0.06] ${selectedId ? "opacity-50" : ""}`
-                            }`}
+                            aria-expanded={open}
+                            onClick={() => toggleTax(band.treatment)}
+                            className="flex w-full items-center gap-2.5 rounded-md px-2 py-2.5 text-left text-xs transition hover:bg-sky-50 sm:text-base dark:hover:bg-sky-950/40"
+                            style={open ? { backgroundColor: `color-mix(in srgb, ${TAX_COLOR[band.treatment]} 16%, transparent)` } : undefined}
                           >
-                            <div className="flex items-baseline justify-between gap-2">
-                              <span className="truncate text-xs sm:text-sm">{r.label}</span>
-                              <span className="shrink-0 text-xs sm:text-sm font-semibold tabular-nums">
-                                {formatMoneyWhole(r.cents, currency)}{" "}
-                                <span className="font-normal text-muted">({pct.toFixed(0)}%)</span>
-                              </span>
-                            </div>
-                            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
-                              <div
-                                className="h-full rounded-full"
-                                style={{ width: `${pct}%`, backgroundColor: "var(--viz-savings)" }}
-                              />
-                            </div>
+                            <svg
+                              width="12" height="12" viewBox="0 0 24 24" fill="none"
+                              stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                              className={`shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+                              aria-hidden
+                            >
+                              <path d="M6 9l6 6 6-6" />
+                            </svg>
+                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: TAX_COLOR[band.treatment] }} aria-hidden />
+                            <span className="min-w-0 flex-1 truncate font-bold">{TAX_LABEL[band.treatment]}</span>
+                            <span className="shrink-0 font-semibold tabular-nums">{formatMoneyWhole(band.cents, currency)}</span>
+                            <span className="w-10 shrink-0 text-right tabular-nums">
+                              {((band.cents / taxSplit.total) * 100).toFixed(0)}%
+                            </span>
                           </button>
+                          {open ? (
+                            <div className="pb-2 pl-6">
+                              <ul className="space-y-0.5">
+                                {holdings.map((r) => {
+                                  const pct = band.cents > 0 ? (r.cents / band.cents) * 100 : 0;
+                                  const active = selectedId === r.accountId;
+                                  return (
+                                    <li key={r.label} className="min-w-0">
+                                      <button
+                                        type="button"
+                                        aria-pressed={active}
+                                        onClick={() => setSelectedId((prev) => (prev === r.accountId ? null : r.accountId))}
+                                        className={`w-full cursor-pointer rounded-md px-2 py-1.5 text-left ring-inset transition ${
+                                          active
+                                            ? "bg-sky-100 ring-1 ring-sky-400 dark:bg-sky-900/40 dark:ring-sky-500"
+                                            : `hover:bg-sky-50 dark:hover:bg-sky-950/40 ${selectedId ? "opacity-50" : ""}`
+                                        }`}
+                                      >
+                                        <div className="flex items-baseline justify-between gap-2">
+                                          <span className="truncate text-xs sm:text-base">{r.label}</span>
+                                          <span className="shrink-0 text-xs sm:text-base font-semibold tabular-nums">
+                                            {formatMoneyWhole(r.cents, currency)}{" "}
+                                            <span className="font-normal">({pct.toFixed(0)}%)</span>
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-line/60">
+                                          <div
+                                            className="h-full rounded-full"
+                                            style={{ width: `${pct}%`, backgroundColor: TAX_COLOR[band.treatment] }}
+                                          />
+                                        </div>
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -953,6 +898,14 @@ export function InvestBoard({
           )}
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-black/5 dark:ring-white/10">
             <PerfTable title="Investments" accounts={mine} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+            {/* The kids' accounts, kept apart from the household's: they're
+                not in net worth, so they never mix into the totals above. */}
+            {kidsAccounts.length > 0 ? (
+              <>
+                <div className="border-t border-foreground/10" />
+                <PerfTable title="Kids Funding" accounts={kidsAccounts} year={year} currency={currency} selectedId={selectedId} onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))} noCard />
+              </>
+            ) : null}
             <div className="border-t border-foreground/10" />
             <YearByYear accounts={accounts} years={years} currency={currency} />
           </div>
@@ -1193,7 +1146,7 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition ${
+      className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold sm:text-base transition ${
         active
           ? "border-brand text-brand"
           : "border-transparent text-muted hover:border-line hover:text-foreground"
@@ -1280,19 +1233,20 @@ function PerformanceChart({
     [desc, accounts],
   );
 
-  // Beside the holdings list (lg up), the chart fills its column's height
-  // instead of keeping the 600×220 shape, which left a gap under the bars.
-  // The viewBox stays 600 wide so labels keep their size; only H grows to
-  // the box's measured shape.
+  // Beside the holdings panel (lg up), the chart is drawn at the box's real
+  // pixel size — one viewBox unit per pixel — so the bars spread across the
+  // whole width and labels stay a fixed 16px. Keeping a fixed 600×220 shape
+  // scaled it down to fit the box's height and stranded it in the middle with
+  // empty bands either side.
   const plotRef = useRef<HTMLDivElement>(null);
-  const [fillRatio, setFillRatio] = useState<number | null>(null);
+  const [plotSize, setPlotSize] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     const el = plotRef.current;
     if (!aside || !el) return;
     const wide = window.matchMedia("(min-width: 1024px)");
     const measure = () => {
       const { width, height } = el.getBoundingClientRect();
-      setFillRatio(wide.matches && width > 0 ? height / width : null);
+      setPlotSize(wide.matches && width > 0 ? { w: Math.round(width), h: Math.round(height) } : null);
     };
     const observer = new ResizeObserver(measure);
     observer.observe(el);
@@ -1303,8 +1257,10 @@ function PerformanceChart({
     };
   }, [aside, chartOpen]);
 
-  const W = 600;
-  const H = fillRatio ? Math.max(220, Math.round(W * fillRatio)) : 220;
+  // Height capped: an opened tax band makes the panel beside it tall, and
+  // bars stretched to match read as a skyline, not a comparison.
+  const W = plotSize ? plotSize.w : 600;
+  const H = plotSize ? Math.min(340, Math.max(220, plotSize.h)) : 220;
   const PAD = { top: 32, right: 16, bottom: 32, left: 56 };
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
@@ -1322,8 +1278,8 @@ function PerformanceChart({
 
   const slotW = chartW / bars.length;
   const barW = mode === "grouped"
-    ? Math.min(20, (chartW / bars.length) * 0.28)
-    : Math.min(40, (chartW / bars.length) * 0.55);
+    ? Math.min(44, (chartW / bars.length) * 0.24)
+    : Math.min(96, (chartW / bars.length) * 0.5);
 
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(niceCeil * f));
 
@@ -1362,7 +1318,7 @@ function PerformanceChart({
             <path d="M6 9l6 6 6-6" />
           </svg>
           <div>
-            <h2 className="text-sm font-bold">
+            <h2 className="text-sm font-bold sm:text-base">
               Performance by year
               {selectedName ? <span className="ml-1.5 font-medium text-brand">· {selectedName}</span> : null}
             </h2>
@@ -1370,7 +1326,7 @@ function PerformanceChart({
         </button>
         <div className="flex items-center gap-2">
           {/* Mode toggle */}
-          <div className="flex overflow-hidden rounded-lg ring-1 ring-line max-sm:text-[12px] sm:text-sm">
+          <div className="flex overflow-hidden rounded-lg ring-1 ring-line max-sm:text-[12px] sm:text-base">
             {(["stacked", "grouped"] as ChartMode[]).map((m) => (
               <button
                 key={m}
@@ -1386,7 +1342,7 @@ function PerformanceChart({
             <button
               type="button"
               onClick={onClear}
-              className="rounded-md px-2 py-1 max-sm:text-[12px] sm:text-sm font-medium text-muted ring-1 ring-line hover:bg-brand-soft hover:text-foreground"
+              className="rounded-md px-2 py-1 max-sm:text-[12px] sm:text-base font-medium ring-1 ring-line hover:bg-brand-soft"
             >
               ✕ Clear filter
             </button>
@@ -1394,10 +1350,12 @@ function PerformanceChart({
         </div>
       </div>
 
-      {chartOpen ? <div className={aside ? "lg:grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : ""}>
+      {/* The panel gets a fixed width so each amount stays near its name;
+          the chart takes whatever is left. */}
+      {chartOpen ? <div className={aside ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(24rem,34rem)]" : ""}>
       <div className="flex min-w-0 flex-col">
       {/* Legend */}
-      <div className="flex items-center gap-4 px-4 pb-2 text-xs sm:text-sm text-muted">
+      <div className="flex items-center gap-4 px-4 pb-2 text-xs sm:text-base">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-savings)" }} />
           Contributed
@@ -1409,13 +1367,16 @@ function PerformanceChart({
       </div>
 
       {/* SVG chart */}
-      <div className={`relative px-2 pb-4 ${aside ? "lg:min-h-[220px] lg:flex-1" : ""}`}>
+      <div className={`relative px-2 pb-4 ${aside ? "lg:min-h-[260px] lg:flex-1" : ""}`}>
         {/* The measured box: the padding-free area the SVG fills from lg up. */}
         <div ref={plotRef} className={aside ? "lg:absolute lg:inset-x-2 lg:bottom-4 lg:top-0" : ""} aria-hidden />
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          className={`w-full ${fillRatio ? "absolute inset-x-2 bottom-4 top-0 !w-[calc(100%-1rem)]" : ""}`}
-          style={fillRatio ? { height: "calc(100% - 1rem)" } : { height: "clamp(160px, 24vw, 220px)" }}
+          className={plotSize ? "absolute left-2" : "w-full"}
+          // Centred in its box: an opened tax band makes the panel beside it
+          // taller than the capped chart, and top-aligned that left a block of
+          // empty space under the bars.
+          style={plotSize ? { width: W, height: H, top: Math.max(0, (plotSize.h - H) / 2) } : { height: "clamp(160px, 24vw, 220px)" }}
           aria-label="Investment performance chart"
         >
           {/* Y-axis grid + labels */}
@@ -1703,7 +1664,10 @@ function PerfTable({
         >
           <path d="M9 6l6 6-6 6" />
         </svg>
-        <h2 className="flex flex-1 items-center gap-2 text-sm lg:text-base font-bold">
+        {/* A fixed-width title on desktop, so the collapsed totals beside it
+            start at the same spot in Investments and Kids Funding and line
+            up in columns, near the title rather than at the far edge. */}
+        <h2 className="flex flex-1 items-center gap-2 text-sm lg:text-base font-bold sm:w-[27rem] sm:flex-none">
           {title}
           <span className="rounded bg-sky-100 px-1.5 py-0.5 text-xs sm:text-sm lg:text-sm font-semibold text-muted dark:bg-sky-900/50">{year}</span>
           {/* Rows are accounts; split accounts hold several holdings, so both
@@ -1718,10 +1682,10 @@ function PerfTable({
           </span>
         </h2>
         {collapsed && (
-          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs sm:text-sm lg:text-sm tabular-nums text-muted">
-            <span>Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
-            <span>Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
-            {endAny && <span>Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-1 text-xs tabular-nums sm:flex-nowrap sm:text-base">
+            <span className="flex gap-2 sm:w-52 sm:justify-between">Contrib <span className={`font-semibold ${contribSum === 0 ? zeroCls : "text-foreground"}`}>{formatMoney(contribSum, currency)}</span></span>
+            <span className="flex gap-2 sm:w-52 sm:justify-between">Gains <span className={`font-semibold ${accruedSum === 0 ? zeroCls : ""}`} style={accruedSum > 0 ? { color: "var(--viz-bills)" } : accruedSum < 0 ? { color: "var(--color-negative)" } : undefined}>{formatMoney(accruedSum, currency)}</span></span>
+            {endAny && <span className="flex gap-2 sm:w-56 sm:justify-between">Current <span className="font-semibold text-foreground">{formatMoney(endSum, currency)}</span></span>}
           </div>
         )}
       </button>

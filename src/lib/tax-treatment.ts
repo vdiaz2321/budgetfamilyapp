@@ -66,10 +66,12 @@ export function asTaxTreatment(value: string | null | undefined): TaxTreatment |
 export function classifyTax(label: string | null | undefined): TaxTreatment | null {
   if (!label) return null;
   const s = label.toLowerCase();
-  if (/\b529\b|utma|ugma|coverdell/.test(s)) return "education";
+  if (/\b529\b|coverdell/.test(s)) return "education";
   if (/roth/.test(s)) return "free";
   if (/401|403b|tsp|traditional|sep|simple|\bira\b|pension/.test(s)) return "deferred";
-  if (/taxable|brokerage|reit|crypto|individual/.test(s)) return "taxable";
+  // UTMA/UGMA are custodial brokerage accounts — taxed like any other
+  // (kiddie tax), not education accounts, whatever they're saved for.
+  if (/taxable|brokerage|reit|crypto|individual|utma|ugma/.test(s)) return "taxable";
   return null;
 }
 

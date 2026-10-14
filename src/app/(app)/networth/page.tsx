@@ -118,7 +118,7 @@ export default async function NetworthPage() {
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, sort_order, balance_cents")
+      .select("id, account_id, name, sort_order, balance_cents, bank_group")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -304,6 +304,24 @@ export default async function NetworthPage() {
     const t = derived.get(s.month) ?? zero();
     t[slice] += s.balance_cents;
     derived.set(s.month, t);
+  }
+  // A Banking account can hold a checking bucket and a savings bucket (Cap One
+  // V). Its snapshot landed on the account's own side above; move each bucket
+  // tagged the other way across, so Savings vs Bank follows the buckets.
+  const bucketGroupById = new Map(
+    (bucketRows ?? []).map((b) => [b.id, (b as { bank_group?: string | null }).bank_group ?? null]),
+  );
+  for (const s of bucketSnaps ?? []) {
+    const kind = accountKindById.get(s.account_id);
+    const from = kind ? sliceForAccount(s.account_id, kind) : null;
+    if (from !== "savings" && from !== "bank") continue;
+    const group = bucketGroupById.get(s.bucket_id);
+    if (!group) continue;
+    const to = group === "savings" ? "savings" : "bank";
+    const t = derived.get(s.month);
+    if (to === from || !t) continue;
+    t[from] -= s.balance_cents;
+    t[to] += s.balance_cents;
   }
   for (const s of debtSnaps ?? []) {
     snapshotMonths.add(s.month);

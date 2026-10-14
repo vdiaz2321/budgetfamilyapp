@@ -92,7 +92,7 @@ export default async function AccountsPage() {
       .order("name"),
     supabase
       .from("buckets")
-      .select("id, account_id, name, balance_cents, bank_group, tax_treatment, retirement_kind, holder, balance_updated_at")
+      .select("id, account_id, name, balance_cents, bank_group, subtype, tax_treatment, retirement_kind, holder, balance_updated_at")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("name"),
@@ -163,12 +163,12 @@ export default async function AccountsPage() {
     // the register. Read-only; nothing here writes back to balances.
     fetchAllRows<{
       id: string; occurred_on: string; amount_cents: number; memo: string | null;
-      account_id: string | null; bucket_id: string | null; paid_to_account_id: string | null; movement_type: string | null;
+      account_id: string | null; bucket_id: string | null; paid_to_account_id: string | null; paid_to_bucket_id: string | null; movement_type: string | null;
       reimbursed_cents: number; created_at: string; updated_at: string; reward_activity_id: string | null;
     }>((from, to) =>
       supabase
         .from("transactions")
-        .select("id, occurred_on, amount_cents, reimbursed_cents, memo, account_id, bucket_id, paid_to_account_id, movement_type, created_at, updated_at, reward_activity_id")
+        .select("id, occurred_on, amount_cents, reimbursed_cents, memo, account_id, bucket_id, paid_to_account_id, paid_to_bucket_id, movement_type, created_at, updated_at, reward_activity_id")
         .eq("household_id", household.id)
         .not("paid_to_account_id", "is", null)
         .order("occurred_on", { ascending: false })
@@ -424,6 +424,7 @@ export default async function AccountsPage() {
         name: b.name,
         balanceCents: b.balance_cents ?? 0,
         bankGroup: (b.bank_group as "savings" | "spending" | null) ?? null,
+        subtype: (b.subtype as string | null) ?? null,
         taxTreatment: (b.tax_treatment as string | null) ?? null,
         retirementKind: (b.retirement_kind as string | null) ?? null,
         holder: (b.holder as string | null) ?? null,
@@ -522,6 +523,25 @@ export default async function AccountsPage() {
       undo: undoOf(t.account_id, t.bucket_id, debtByCard.get(t.paid_to_account_id as string)),
     }));
 
+  // Transfer Activity: money moved between your own accounts — every movement
+  // row that doesn't land on a card. Same fallback as above for rows written
+  // before movement_type existed.
+  const transfers = (cardPaymentRows ?? [])
+    .filter((t) => t.paid_to_account_id && !cardIds.has(t.paid_to_account_id) && t.movement_type !== "card_payment")
+    .map((t) => ({
+      id: t.id,
+      date: t.occurred_on,
+      amountCents: t.amount_cents,
+      memo: t.memo ?? null,
+      accountId: t.account_id ?? null,
+      toAccountId: t.paid_to_account_id,
+      fromBucketId: t.bucket_id ?? null,
+      toBucketId: t.paid_to_bucket_id ?? null,
+      isInvestmentTransfer:
+        t.movement_type === "investment_transfer" ||
+        (t.movement_type == null && accountById.get(t.account_id ?? "")?.kind === "investment"),
+    }));
+
   const debtPayments: CardPayment[] = (debtPaymentRows ?? []).map((t) => ({
     id: t.id,
     date: t.occurred_on,
@@ -590,6 +610,7 @@ export default async function AccountsPage() {
       nonCardAccounts={nonCardAccounts}
       historyMonths={[currentMonth, prevMonth, prev2Month]}
       cardPayments={cardPayments}
+      transfers={transfers}
       debtPayments={debtPayments}
       debtNames={debtNames}
       owingDebtIds={owingDebtIds}

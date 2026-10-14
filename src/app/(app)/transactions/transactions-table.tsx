@@ -748,7 +748,7 @@ export function TransactionsTable({
                     selected={selectedIds.has(t.id)}
                     onSelect={() => toggleSelected(t.id)}
                     onEdit={() => {
-                      if (t.isTransfer) setTransferEdit(t);
+                      if (t.isTransfer || t.isInvestmentTransfer) setTransferEdit(t);
                       else if (!t.isCardPayment && !t.isInvestmentTransfer) openModal(t);
                     }}
                   />
@@ -780,7 +780,7 @@ export function TransactionsTable({
                 onSelect={() => toggleSelected(t.id)}
                 onTap={() => {
                   if (selectMode) toggleSelected(t.id);
-                  else if (t.isTransfer) setTransferEdit(t);
+                  else if (t.isTransfer || t.isInvestmentTransfer) setTransferEdit(t);
                   else if (!t.isCardPayment && !t.isInvestmentTransfer) openModal(t);
                 }}
               />
@@ -920,7 +920,7 @@ function TxLine({
   const [amountValue, setAmountValue] = useState((tx.amountCents / 100).toFixed(2));
   const [amountPending, startAmountSave] = useTransition();
   const isIncome = tx.kind === "income";
-  const canEdit = !tx.isCardPayment && !tx.isInvestmentTransfer;
+  const canEdit = !tx.isCardPayment;
 
   const saveAmount = () => {
     const normalized = Number(amountValue.replace(",", "."));
@@ -1110,7 +1110,7 @@ function TxCard({
   onSelect: () => void;
   onTap: () => void;
 }) {
-  const canEdit = !tx.isCardPayment && !tx.isInvestmentTransfer;
+  const canEdit = !tx.isCardPayment;
   const isIncome = tx.kind === "income";
   const dateStr = `${tx.date.slice(5, 7)}/${tx.date.slice(8, 10)}`;
 
