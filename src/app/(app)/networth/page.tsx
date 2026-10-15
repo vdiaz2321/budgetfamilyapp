@@ -1,4 +1,4 @@
-import { CASH_KINDS, inflatedSpending, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
+import { CASH_KINDS, inflatedSpending, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -145,7 +145,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, inflation_pct, cola_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_vision_annual_cents, healthcare_start_age, healthcare_growth_pct")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -186,7 +186,7 @@ export default async function NetworthPage() {
     // Retirement income that switches on and off by year (VA, SS, a job…).
     supabase
       .from("retirement_income_lines")
-      .select("id, name, kind, monthly_cents, start_year, end_year, taxable")
+      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, taxable")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("created_at"),
@@ -937,15 +937,15 @@ export default async function NetworthPage() {
         serviceStartYear: planRow?.service_start_year ?? null,
         serviceStartMonth: planRow?.service_start_month ?? null,
         high3MonthlyCents: planRow?.high3_monthly_cents ?? null,
+        basePayByYear: (planRow?.base_pay_by_year ?? {}) as Record<string, number>,
         inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
-        colaPct: planRow?.cola_pct == null ? 2.5 : Number(planRow.cola_pct),
         cashReturnPct: planRow?.cash_return_pct == null ? 3 : Number(planRow.cash_return_pct),
         sbpEnabled: !!planRow?.sbp_enabled,
         sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
         longevityAge: planRow?.longevity_age ?? 90,
         healthcareAnnualCents: planRow?.healthcare_annual_cents ?? null,
         healthPlans: parseHealthPlans(planRow?.health_plans),
-        dentalVisionAnnualCents: planRow?.dental_vision_annual_cents ?? null,
+        dentalPlans: parseDentalPlans(planRow?.dental_plans),
         healthcareStartAge: planRow?.healthcare_start_age ?? 65,
         healthcareGrowthPct: planRow?.healthcare_growth_pct == null ? 1.5 : Number(planRow.healthcare_growth_pct),
         rentalRows: (rentalRows ?? []) as RentalRow[],
@@ -975,6 +975,7 @@ export default async function NetworthPage() {
           kind: l.kind,
           monthlyCents: l.monthly_cents,
           startYear: l.start_year,
+          startMonth: l.start_month ?? null,
           endYear: l.end_year,
           taxable: l.taxable,
         })),

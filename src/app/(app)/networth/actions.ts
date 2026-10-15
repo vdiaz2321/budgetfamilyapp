@@ -11,6 +11,8 @@ import { unwrap } from "@/lib/supabase-result";
 import {
   estimatePension,
   healthcareForYear,
+  high3FromBasePay,
+  high3Window,
   incomeForYear,
   inflatedSpending,
   CASH_KINDS,
@@ -19,7 +21,10 @@ import {
   yearGrowth,
   retiredShareOfYear,
   type HealthcarePlan,
+  type CostDates,
+  type DentalPlan,
   type HealthPlan,
+  parseDentalPlans,
   parseHealthPlans,
   rentalsForYear,
   toRentalProperty,
@@ -363,7 +368,6 @@ export async function saveRetirementPlan(formData: FormData) {
   const targetMonth = month("targetRetireMonth");
   const serviceStartMonth = month("serviceStartMonth");
   const investReturn = num("investmentReturnPct");
-  const cola = num("colaPct");
   const withdrawStart = num("withdrawStartYear");
   const withdrawal = num("withdrawalRatePct");
   const inflation = num("inflationPct");
@@ -371,16 +375,47 @@ export async function saveRetirementPlan(formData: FormData) {
   const sbpPct = num("sbpPct");
   const longevity = num("longevityAge");
   const healthStartAge = num("healthcareStartAge");
-  // Each row: a plan kind and its yearly premium as typed.
-  let healthPlans: HealthPlan[] = [];
-  try {
-    const raw = JSON.parse(String(formData.get("healthPlans") ?? "[]")) as { kind: string; amount: string }[];
-    healthPlans = parseHealthPlans(
-      raw.map((r) => ({ kind: r.kind, annualCents: r.amount?.trim() ? Math.max(0, displayToCents(r.amount)) : 0 })),
-    );
-  } catch {
-    return { error: "Could not read the health plans." };
-  }
+  // Each row: a plan kind, its yearly premium as typed, and its dates.
+  // Health plans and dental & vision plans ride along as JSON: each row a
+  // kind, its yearly premium as typed, and its start/end.
+  type PlanIn = { kind: string; amount: string; startYear?: string; startMonth?: string; endYear?: string; endMonth?: string };
+  const readPlans = (key: string, label: string): { rows: unknown[] } | { error: string } => {
+    let raw: PlanIn[];
+    try {
+      raw = JSON.parse(String(formData.get(key) ?? "[]"));
+      if (!Array.isArray(raw)) raw = [];
+    } catch {
+      return { error: `Could not read the ${label.toLowerCase()} plans.` };
+    }
+    for (const r of raw) {
+      for (const y of [r.startYear, r.endYear]) {
+        if (String(y ?? "").trim() && !/^\d{4}$/.test(String(y).trim())) {
+          return { error: `${label}: start and end years have to be four-digit years.` };
+        }
+      }
+    }
+    return {
+      rows: raw.map((r) => ({
+        kind: r.kind,
+        annualCents: r.amount?.trim() ? Math.max(0, displayToCents(r.amount)) : 0,
+        startYear: r.startYear?.trim(),
+        startMonth: r.startMonth,
+        endYear: r.endYear?.trim(),
+        endMonth: r.endMonth,
+      })),
+    };
+  };
+  const healthIn = readPlans("healthPlans", "Health plan");
+  if ("error" in healthIn) return healthIn;
+  const dentalIn = readPlans("dentalPlans", "Dental & vision");
+  if ("error" in dentalIn) return dentalIn;
+  const healthPlans: HealthPlan[] = parseHealthPlans(healthIn.rows);
+  const dentalPlans: DentalPlan[] = parseDentalPlans(dentalIn.rows);
+  // An end has to come after its start.
+  const endsBeforeStart = (d: CostDates) =>
+    d.startYear != null && d.endYear != null && d.endYear * 12 + (d.endMonth ?? 12) < d.startYear * 12 + (d.startMonth ?? 1);
+  if (healthPlans.some(endsBeforeStart)) return { error: "Health plan: the end can't be before the start." };
+  if (dentalPlans.some(endsBeforeStart)) return { error: "Dental & vision: the end can't be before the start." };
   const healthGrowth = num("healthcareGrowthPct");
 
   if (!year(birthYear)) return { error: "Enter a four-digit birth year." };
@@ -393,11 +428,23 @@ export async function saveRetirementPlan(formData: FormData) {
   ) {
     return { error: "Service has to start before the military retirement year." };
   }
+  // High-3 from each year's monthly base pay (fields basePay_2031, …), only
+  // the years inside the 36 months before retired pay starts.
+  const basePayByYear: Record<string, number> = {};
+  if (targetYear != null) {
+    const window = high3Window(targetYear, targetMonth);
+    for (const w of window) {
+      const cents = money(`basePay_${w.year}`);
+      if (cents) basePayByYear[String(w.year)] = cents;
+    }
+    const missing = window.filter((w) => !basePayByYear[String(w.year)]).map((w) => w.year);
+    if (missing.length > 0 && missing.length < window.length) {
+      return { error: `High-3: enter the base pay for ${missing.join(", ")}.` };
+    }
+  }
+  const high3Cents = high3FromBasePay(targetYear, targetMonth, basePayByYear);
   if (investReturn != null && (investReturn < -20 || investReturn > 30)) {
     return { error: "A rate of return outside -20%…30% isn't a plan, it's a bet." };
-  }
-  if (cola != null && (cola < 0 || cola > 20)) {
-    return { error: "COLA has to be between 0% and 20%." };
   }
   if (!year(withdrawStart)) return { error: "Enter a four-digit year for when withdrawals start." };
   if (withdrawal != null && (withdrawal <= 0 || withdrawal > 20)) {
@@ -429,6 +476,7 @@ export async function saveRetirementPlan(formData: FormData) {
     kind?: string;
     monthly?: string;
     startYear?: string;
+    startMonth?: string;
     endYear?: string;
     taxable?: boolean;
   };
@@ -451,6 +499,7 @@ export async function saveRetirementPlan(formData: FormData) {
     kind: IncomeLineKind;
     monthly_cents: number;
     start_year: number | null;
+    start_month: number | null;
     end_year: number | null;
     taxable: boolean;
     sort_order: number;
@@ -465,6 +514,10 @@ export async function saveRetirementPlan(formData: FormData) {
     const start = lineYear(l.startYear);
     const end = lineYear(l.endYear);
     if (start === "bad") return { error: `${label}: first year has to be a four-digit year.` };
+    const startMonth = String(l.startMonth ?? "").trim() ? Number(l.startMonth) : null;
+    if (startMonth != null && !(Number.isInteger(startMonth) && startMonth >= 1 && startMonth <= 12)) {
+      return { error: `${label}: pick a start month.` };
+    }
     if (end === "bad") return { error: `${label}: last year has to be a four-digit year.` };
     if (start != null && end != null && end < start) {
       return { error: `${label}: last year can't be before the first year.` };
@@ -475,6 +528,8 @@ export async function saveRetirementPlan(formData: FormData) {
       kind,
       monthly_cents: Math.max(0, displayToCents(String(l.monthly))),
       start_year: start,
+      // A month only means something with a first year.
+      start_month: start == null ? null : startMonth,
       end_year: end,
       // VA disability is never taxed, whatever the box says.
       taxable: kind === "va" ? false : !!l.taxable,
@@ -567,9 +622,9 @@ export async function saveRetirementPlan(formData: FormData) {
       target_retire_month: targetMonth,
       service_start_year: serviceStart,
       service_start_month: serviceStartMonth,
-      high3_monthly_cents: money("high3"),
+      high3_monthly_cents: high3Cents,
+      base_pay_by_year: basePayByYear,
       investment_return_pct: investReturn ?? 7.5,
-      cola_pct: cola ?? 2.5,
       withdraw_start_year: withdrawStart,
       withdrawal_rate_pct: withdrawal ?? 4,
       inflation_pct: inflation ?? 2.5,
@@ -579,7 +634,7 @@ export async function saveRetirementPlan(formData: FormData) {
       longevity_age: longevity ?? 90,
       health_plans: healthPlans,
       healthcare_annual_cents: money("healthcareAnnual"),
-      dental_vision_annual_cents: money("dentalVisionAnnual"),
+      dental_plans: dentalPlans,
       healthcare_start_age: healthStartAge ?? 65,
       healthcare_growth_pct: healthGrowth ?? 1.5,
       // Replaced by the Net Worth Plan table (spending, saving) and the income
@@ -634,6 +689,7 @@ export async function saveRetirementPlan(formData: FormData) {
           kind: l.kind,
           monthly_cents: l.monthly_cents,
           start_year: l.start_year,
+          start_month: l.start_month,
           end_year: l.end_year,
           taxable: l.taxable,
           sort_order: l.sort_order,
@@ -742,6 +798,7 @@ async function recomputeRetirementIncome(
     kind: l.kind,
     monthlyCents: l.monthly_cents,
     startYear: l.start_year,
+    startMonth: l.start_month ?? null,
     endYear: l.end_year,
     taxable: l.taxable,
   }));
@@ -754,12 +811,10 @@ async function recomputeRetirementIncome(
       serviceStartYear: plan.service_start_year,
       serviceStartMonth: plan.service_start_month ?? null,
       high3MonthlyCents: plan.high3_monthly_cents,
-      colaPct: Number(plan.cola_pct ?? 2.5),
       sbpEnabled: !!plan.sbp_enabled,
       sbpPct: Number(plan.sbp_pct ?? 6.5),
     },
   );
-  const colaPct = Number(plan.cola_pct ?? 2.5);
   const inflationPct = Number(plan.inflation_pct ?? 2.5);
   const balances = new Map((acctRes.data ?? []).map((a) => [a.id as string, Number(a.current_balance_cents ?? 0)]));
   const loanByProperty = new Map<string, number>();
@@ -772,10 +827,10 @@ async function recomputeRetirementIncome(
     birthYear: plan.birth_year,
     retireYear,
     retireMonth,
-    planAnnualCents: parseHealthPlans(plan.health_plans).reduce((t, p) => t + p.annualCents, 0),
+    plans: parseHealthPlans(plan.health_plans),
     tflAnnualCents: plan.healthcare_annual_cents,
     tflStartAge: Number(plan.healthcare_start_age ?? 65),
-    dentalVisionAnnualCents: plan.dental_vision_annual_cents ?? null,
+    dentalPlans: parseDentalPlans(plan.dental_plans),
     growthPct: Number(plan.healthcare_growth_pct ?? 1.5),
     inflationPct,
   };
@@ -828,7 +883,7 @@ async function recomputeRetirementIncome(
     const retiredShare = retiredShareOfYear(row.year, retireYear, retireMonth);
     const work = Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare));
     // Income is gross: taxes are budgeted as spending.
-    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0, thisYear, colaPct);
+    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0);
     const pensionYearly = (yearIncome.parts.find((p) => p.kind === "pension")?.monthlyAfterTaxCents ?? 0) * 12;
     const lineIncome = yearIncome.afterTaxCents - Math.round(pensionYearly * (1 - retiredShare));
     // Rentals: net rent is income; equity is part of net worth but earns no

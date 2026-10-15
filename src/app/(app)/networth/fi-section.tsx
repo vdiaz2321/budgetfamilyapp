@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
-import { centsToDisplay, formatMoneyWhole } from "@/lib/money";
+import { centsToDisplay, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
   INCOME_LINE_KINDS,
   ageInYear,
   estimatePension,
+  high3FromBasePay,
+  high3Window,
   incomeForYear,
   inflateTo,
   investShareOfNew,
@@ -19,6 +21,10 @@ import {
   type FiScheduleYear,
   type HealthPlan,
   type HealthPlanKind,
+  type CostDates,
+  type DentalPlan,
+  type DentalPlanKind,
+  DENTAL_PLAN_KINDS,
   type IncomeLine,
   type IncomeLineKind,
   type RentalProperty,
@@ -46,10 +52,10 @@ export type FiPlan = {
   serviceStartYear: number | null;
   serviceStartMonth: number | null;
   high3MonthlyCents: number | null;
+  /** Monthly base pay per calendar year (cents) — the High-3 is averaged from these. */
+  basePayByYear: Record<string, number>;
   /** Raises spending, healthcare and rental prices each year. */
   inflationPct: number;
-  /** Yearly raise on retired pay, VA, Social Security and other income. */
-  colaPct: number;
   /** What savings (checking + savings buckets) earn a year. */
   cashReturnPct: number;
   sbpEnabled: boolean;
@@ -62,8 +68,8 @@ export type FiPlan = {
   /** Health plans from military retirement until TFL, each with its yearly
    *  premium. More than one runs side by side. */
   healthPlans: HealthPlan[];
-  /** Dental & vision per year from military retirement on. */
-  dentalVisionAnnualCents: number | null;
+  /** Dental & vision plans (FEDVIP or private); blank start = retirement month, blank end = for life. */
+  dentalPlans: DentalPlan[];
   healthcareStartAge: number;
   healthcareGrowthPct: number;
   incomeLines: IncomeLine[];
@@ -158,7 +164,7 @@ export function FiSection({
       ? thisYear + 1
       : plan.targetRetireYear + ((plan.targetRetireMonth ?? 1) > 1 ? 1 : 0);
 
-  // Military retired pay from the DFAS High-3 formula, with a COLA each year after.
+  // Military retired pay from the DFAS High-3 formula — the same every year, no COLA.
   const pension = estimatePension(
     {
       retireYear: plan.targetRetireYear,
@@ -166,14 +172,13 @@ export function FiSection({
       serviceStartYear: plan.serviceStartYear,
       serviceStartMonth: plan.serviceStartMonth,
       high3MonthlyCents: plan.high3MonthlyCents,
-      colaPct: plan.colaPct,
       sbpEnabled: plan.sbpEnabled,
       sbpPct: plan.sbpPct,
     },
   );
   // Income is gross: taxes are budgeted as spending.
   const incomeIn = (year: number) =>
-    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, 0, thisYear, plan.colaPct);
+    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, 0);
   const rentIn = (year: number) => rentalsForYear(plan.rentals, year, thisYear, plan.inflationPct, 0);
 
   // The Net Worth Plan table, each year as typed (round figures typed by
@@ -264,6 +269,8 @@ export function FiSection({
         kind: "other" as const,
         monthlyAfterTaxCents: r.monthlyAfterTaxCents,
         monthlyBeforeTaxCents: r.monthlyBeforeTaxCents,
+        months: 12 as number,
+        firstMonth: undefined as number | undefined,
       })),
     ];
     return {
@@ -325,7 +332,7 @@ export function FiSection({
   const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
   const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
   const survIn = (year: number) =>
-    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, 0, thisYear, plan.colaPct);
+    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, 0);
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
     // The plan's years carried forward to the plan-until year, so a death
@@ -338,7 +345,7 @@ export function FiSection({
       const base = incomeIn(y.year);
       const surv = survIn(y.year);
       const rent = Math.max(0, rentIn(y.year).cashAfterTaxCents);
-      const benefits = Math.round(benefitsMonthly * 12 * inflateTo(y.year, thisYear, plan.colaPct));
+      const benefits = benefitsMonthly * 12;
       return {
         year: y.year,
         spendCents: y.spendCents,
@@ -357,11 +364,14 @@ export function FiSection({
     const spendYearly = projection.find((p) => p.year === deathYear)?.spendingCents ?? schedule.at(-1)?.spendCents ?? 0;
     const beforeTax = surv.parts.reduce((t, p) => t + p.monthlyBeforeTaxCents, 0);
     const afterTax = surv.parts.reduce((t, p) => t + p.monthlyAfterTaxCents, 0);
+    const benefits = benefitsMonthly;
     return {
       tax: 0,
       parts: surv.parts,
       taxMonthly: beforeTax - afterTax,
-      afterTaxMonthly: afterTax + Math.round(benefitsMonthly * inflateTo(deathYear, thisYear, plan.colaPct)),
+      afterTaxMonthly: afterTax + benefits,
+      // Counts a line's first year only from its start month.
+      afterTaxYearly: surv.afterTaxCents + benefits * 12,
       spendMonthly: Math.round(spendYearly / 12),
     };
   })();
@@ -452,9 +462,9 @@ export function FiSection({
                       <IncomeRow
                         key={i}
                         label={part.name}
-                        note={retireIncome.taxMonthly > 0 ? "before tax" : undefined}
+                        note={[partNote(part), retireIncome.taxMonthly > 0 ? "before tax" : ""].filter(Boolean).join(", ") || undefined}
                         monthly={part.monthlyBeforeTaxCents}
-                        yearly={part.monthlyBeforeTaxCents * 12}
+                        yearly={part.monthlyBeforeTaxCents * (part.months ?? 12)}
                         currency={currency}
                       />
                     ))}
@@ -469,6 +479,7 @@ export function FiSection({
                     ) : null}
                     <IncomeRow
                       label={retireIncome.taxMonthly > 0 ? "Income after tax" : "Total income"}
+                      note={retireIncome.parts.some((p) => (p.months ?? 12) < 12) ? "monthly = yearly ÷ 12" : undefined}
                       monthly={Math.round(retireIncome.afterTaxCents / 12)}
                       yearly={retireIncome.afterTaxCents}
                       currency={currency}
@@ -499,7 +510,7 @@ export function FiSection({
                   </ul>
                 )}
                 {pension ? null : (
-                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and High-3 in Edit Retirement / FI Assumptions.</p>
+                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and base pay in Edit Retirement / FI Assumptions.</p>
                 )}
               </div>
             ) : null}
@@ -605,14 +616,14 @@ export function FiSection({
                   <IncomeRow
                     key={i}
                     label={part.name}
-                    note={part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : undefined}
+                    note={[partNote(part), part.monthlyBeforeTaxCents !== part.monthlyAfterTaxCents ? "before tax" : ""].filter(Boolean).join(", ") || undefined}
                     monthly={part.monthlyBeforeTaxCents}
-                    yearly={part.monthlyBeforeTaxCents * 12}
+                    yearly={part.monthlyBeforeTaxCents * (part.months ?? 12)}
                     currency={currency}
                   />
                 ))}
                 {plan.survivorExtras.benefits.map((b) => {
-                  const monthly = Math.round(b.monthlyCents * inflateTo(deathYear, thisYear, plan.colaPct));
+                  const monthly = b.monthlyCents;
                   return <IncomeRow key={b.name} label={b.name} note="from Estate guide" monthly={monthly} yearly={monthly * 12} currency={currency} />;
                 })}
                 {survivorYear.taxMonthly > 0 ? (
@@ -627,7 +638,7 @@ export function FiSection({
                 <IncomeRow
                   label={survivorYear.taxMonthly > 0 ? "Income after tax" : "Total income"}
                   monthly={survivorYear.afterTaxMonthly}
-                  yearly={survivorYear.afterTaxMonthly * 12}
+                  yearly={survivorYear.afterTaxYearly}
                   currency={currency}
                   tone="text-positive"
                   bold
@@ -641,11 +652,12 @@ export function FiSection({
                 />
                 {(() => {
                   const net = survivorYear.afterTaxMonthly - survivorYear.spendMonthly;
+                  const netYearly = survivorYear.afterTaxYearly - survivorYear.spendMonthly * 12;
                   return (
                     <IncomeRow
                       label={net >= 0 ? "Left to save" : "Gap from savings"}
                       monthly={Math.abs(net)}
-                      yearly={Math.abs(net) * 12}
+                      yearly={Math.abs(netYearly)}
                       currency={currency}
                       tone={net >= 0 ? "text-positive" : "text-negative"}
                       bold
@@ -1261,9 +1273,30 @@ type LineDraft = {
   kind: IncomeLineKind;
   monthly: string;
   startYear: string;
+  /** "1"–"12", or "" for January. */
+  startMonth: string;
   endYear: string;
   taxable: boolean;
 };
+
+/** A health or dental & vision plan row as typed. */
+type PlanDraft<K extends string> = {
+  key: string;
+  kind: K;
+  amount: string;
+  startYear: string;
+  startMonth: string;
+  endYear: string;
+  endMonth: string;
+};
+
+const HEALTH_PLAN_KINDS: { value: HealthPlanKind; label: string }[] = [
+  { value: "tricare_prime", label: "TRICARE Prime" },
+  { value: "tricare_select", label: "TRICARE Select" },
+  { value: "private", label: "Private insurance" },
+];
+
+const NO_DATES: CostDates = { startYear: null, startMonth: null, endYear: null, endMonth: null };
 
 type RentalDraft = {
   key: string;
@@ -1322,33 +1355,76 @@ function PlanModal({
   const [serviceStart, setServiceStart] = useState(plan.serviceStartYear?.toString() ?? "");
   const [retireMonth, setRetireMonth] = useState(plan.targetRetireMonth?.toString() ?? "");
   const [serviceMonth, setServiceMonth] = useState(plan.serviceStartMonth?.toString() ?? "");
-  const [high3, setHigh3] = useState(plan.high3MonthlyCents ? centsToDisplay(plan.high3MonthlyCents) : "");
+  const [basePay, setBasePay] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(plan.basePayByYear).map(([y, c]) => [y, c ? centsToDisplay(c) : ""])),
+  );
   const [inflation, setInflation] = useState(String(plan.inflationPct));
   const [sbpEnabled, setSbpEnabled] = useState(plan.sbpEnabled);
   const [sbpPct, setSbpPct] = useState(String(plan.sbpPct));
+  // A blank start means the retirement month, so it's filled in with it —
+  // the box shows the date the cost really starts.
+  // The month boxes show January (starts) and December (ends) as blank.
+  const startMonthDraft = (m: number | string | null | undefined) => (m == null || Number(m) === 1 ? "" : String(m));
+  const endMonthDraft = (m: number | null) => (m == null || m === 12 ? "" : String(m));
+  const datesDraft = (d: CostDates) => ({
+    startYear: (d.startYear ?? plan.targetRetireYear)?.toString() ?? "",
+    startMonth: startMonthDraft(d.startYear != null ? d.startMonth : plan.targetRetireMonth),
+    endYear: d.endYear?.toString() ?? "",
+    endMonth: endMonthDraft(d.endMonth),
+  });
   // Starts with one TRICARE Select row so the choice is visible; an empty
   // amount saves as $0.
-  const [healthPlans, setHealthPlans] = useState<{ key: string; kind: HealthPlanKind; amount: string }[]>(() =>
+  const [healthPlans, setHealthPlans] = useState<PlanDraft<HealthPlanKind>[]>(() =>
     plan.healthPlans.length > 0
       ? plan.healthPlans.map((p, i) => ({
           key: `saved-${i}`,
           kind: p.kind,
           amount: p.annualCents ? centsToDisplay(p.annualCents) : "",
+          ...datesDraft(p),
         }))
-      : [{ key: "new-0", kind: "tricare_select", amount: "" }],
+      : [{ key: "new-0", kind: "tricare_select", amount: "", ...datesDraft(NO_DATES) }],
   );
-  const updateHealthPlan = (key: string, patch: Partial<{ kind: HealthPlanKind; amount: string }>) =>
+  const updateHealthPlan = (key: string, patch: Partial<PlanDraft<HealthPlanKind>>) =>
     setHealthPlans((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  // Same shape for dental & vision; starts with one FEDVIP dental row.
+  const [dentalPlans, setDentalPlans] = useState<PlanDraft<DentalPlanKind>[]>(() =>
+    plan.dentalPlans.length > 0
+      ? plan.dentalPlans.map((p, i) => ({
+          key: `saved-${i}`,
+          kind: p.kind,
+          amount: p.annualCents ? centsToDisplay(p.annualCents) : "",
+          ...datesDraft(p),
+        }))
+      : [{ key: "new-0", kind: "fedvip_dental", amount: "", ...datesDraft(NO_DATES) }],
+  );
+  const updateDentalPlan = (key: string, patch: Partial<PlanDraft<DentalPlanKind>>) =>
+    setDentalPlans((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  // A new row starts in the retirement month as currently typed.
+  const newPlanDates = () => ({ ...datesDraft(NO_DATES), startYear: retireYear, startMonth: startMonthDraft(retireMonth) });
+  const [birthYear, setBirthYear] = useState(plan.birthYear?.toString() ?? "");
+  const [tflInfoOpen, setTflInfoOpen] = useState(false);
 
   const toYear = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
+  const retireMonthNum = retireMonth ? Number(retireMonth) : null;
+  // The year TRICARE For Life starts — where a health plan's blank end lands.
+  // Medicare (and with it TFL) starts at 65, so there's no age to type.
+  const tflYear = toYear(birthYear) ? toYear(birthYear)! + TFL_AGE : null;
+  // The 36 months before retired pay starts, a row per calendar year.
+  const high3Years = toYear(retireYear) ? high3Window(toYear(retireYear)!, retireMonthNum) : [];
+  const high3Cents = high3FromBasePay(
+    toYear(retireYear),
+    retireMonthNum,
+    Object.fromEntries(
+      Object.entries(basePay).map(([y, v]) => [y, Math.round(Number(v.replace(/[$,]/g, "")) * 100) || 0]),
+    ),
+  );
   const estimate = estimatePension(
     {
       retireYear: toYear(retireYear),
       retireMonth: retireMonth ? Number(retireMonth) : null,
       serviceStartYear: toYear(serviceStart),
       serviceStartMonth: serviceMonth ? Number(serviceMonth) : null,
-      high3MonthlyCents: high3.trim() ? Math.round(Number(high3.replace(/[$,]/g, "")) * 100) || null : null,
-      colaPct: plan.colaPct,
+      high3MonthlyCents: high3Cents,
       sbpEnabled,
       sbpPct: Number(sbpPct) || 0,
     },
@@ -1362,6 +1438,7 @@ function PlanModal({
       kind: l.kind,
       monthly: centsToDisplay(l.monthlyCents),
       startYear: l.startYear?.toString() ?? "",
+      startMonth: l.startMonth?.toString() ?? "",
       endYear: l.endYear?.toString() ?? "",
       taxable: l.taxable,
     })),
@@ -1451,6 +1528,8 @@ function PlanModal({
         kind,
         monthly: "",
         startYear: retireYear,
+        // Retired pay's own start month, so VA lines up with it by default.
+        startMonth: retireMonth,
         endYear: "",
         taxable: kind !== "va",
       },
@@ -1460,7 +1539,19 @@ function PlanModal({
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
-    formData.set("healthPlans", JSON.stringify(healthPlans.map(({ kind, amount }) => ({ kind, amount }))));
+    const planJson = <K extends string>(rows: PlanDraft<K>[]) =>
+      JSON.stringify(
+        rows.map((r) => ({
+          kind: r.kind,
+          amount: r.amount,
+          startYear: r.startYear,
+          startMonth: r.startMonth,
+          endYear: r.endYear,
+          endMonth: r.endMonth,
+        })),
+      );
+    formData.set("healthPlans", planJson(healthPlans));
+    formData.set("dentalPlans", planJson(dentalPlans));
     formData.set(
       "incomeLines",
       JSON.stringify(
@@ -1470,6 +1561,7 @@ function PlanModal({
           kind: l.kind,
           monthly: l.monthly,
           startYear: l.startYear,
+          startMonth: l.startMonth,
           endYear: l.endYear,
           taxable: l.taxable,
         })),
@@ -1514,8 +1606,10 @@ function PlanModal({
   return (
     <ModalShell
       title={
-        // Capped on a phone so the title, Save and Close share one line.
-        <span className="flex min-w-0 max-w-[calc(100vw-2.5rem)] items-center gap-2 text-base sm:max-w-none sm:gap-3 sm:text-lg">
+        // Capped on a phone so the title, Save and Close share one line. The
+        // modal's <h2> truncates (overflow hidden), so the padding keeps Close's
+        // 1px ring inside it instead of clipped at the edges.
+        <span className="flex min-w-0 max-w-[calc(100vw-2.5rem)] items-center gap-2 py-0.5 pr-0.5 text-base sm:max-w-none sm:gap-3 sm:text-lg">
           <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Retirement / FI Assumptions</span>
           {/* Outside the <form>, so it points at it by id. */}
           <button
@@ -1547,7 +1641,7 @@ function PlanModal({
         {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
         <h3 className={heading}>Info Data About You</h3>
         <Field label="Birth year" hint="Used to show your age on the chart.">
-          <input name="birthYear" inputMode="numeric" defaultValue={plan.birthYear ?? ""} className={inputClass} />
+          <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={inputClass} />
         </Field>
         <Field label="Plan until age" hint="How far the plan runs, and the last age shown under What is expected.">
           <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
@@ -1583,19 +1677,26 @@ function PlanModal({
             label="Service start"
           />
         </Field>
-        <Field
-          label="High-3 (/mo)"
-          hint={`Add total amount expected from monthly Base Pay${toYear(retireYear) ? ` in ${toYear(retireYear)}` : ""}.`}
-        >
-          <input
-            name="high3"
-            inputMode="decimal"
-            value={high3}
-            onChange={(e) => setHigh3(e.target.value)}
-            placeholder="0.00"
-            className={inputClass}
-          />
-        </Field>
+        {/* DFAS High-3: each year's monthly base pay counts for its months
+            in the 36 before retired pay starts (raises land Jan 1). */}
+        {high3Years.map((w) => (
+          <Field
+            key={w.year}
+            label={`${w.year} base pay (/mo)`}
+            hint={`× ${w.months} month${w.months === 1 ? "" : "s"} (${
+              w.months === 12 ? "all year" : w.months === 1 ? MONTHS[w.firstMonth - 1] : `${MONTHS[w.firstMonth - 1]}–${MONTHS[w.lastMonth - 1]}`
+            }).`}
+          >
+            <input
+              name={`basePay_${w.year}`}
+              inputMode="decimal"
+              value={basePay[String(w.year)] ?? ""}
+              onChange={(e) => setBasePay((prev) => ({ ...prev, [w.year]: e.target.value }))}
+              placeholder="0.00"
+              className={inputClass}
+            />
+          </Field>
+        ))}
         <Field
           id="fi-sbp"
           highlight={focusSbp}
@@ -1640,6 +1741,10 @@ function PlanModal({
         </Field>
         {estimate ? (
           <p className="rounded-md bg-background px-3 py-2 text-sm ring-1 ring-line sm:col-span-2">
+            <span className="block">
+              <span className="font-semibold">High-3: {formatMoney(high3Cents ?? 0, currency)}/mo</span>, the average of
+              those 36 months.
+            </span>
             <span className="font-semibold">Retired pay: {formatMoneyWhole(estimate.grossAtRetireCents, currency)}/mo</span>{" "}
             in {toYear(retireYear)}
             {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents, currency)} SBP` : ""}, before tax.
@@ -1647,7 +1752,7 @@ function PlanModal({
             <span className="block">
               <span className="font-semibold">Yearly: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}</span>
               {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents * 12, currency)} SBP` : ""}, before tax.
-              {" "}Goes up by the COLA each year after.
+              {" "}The same every year after.
             </span>
           </p>
         ) : null}
@@ -1659,72 +1764,83 @@ function PlanModal({
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
         <div className="space-y-2 sm:col-span-2">
-          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Health plan (/yr)</span>
           {healthPlans.length === 0 ? (
             <p className="text-xs text-foreground">No health plan premium before TRICARE For Life.</p>
           ) : null}
           {healthPlans.map((row) => (
-            <div key={row.key} className="flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-x-3">
-              <select
-                value={row.kind}
-                onChange={(e) => updateHealthPlan(row.key, { kind: e.target.value as HealthPlanKind })}
-                aria-label="Health plan"
-                className="w-40 cursor-pointer rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-44"
-              >
-                <option value="tricare_prime">TRICARE Prime</option>
-                <option value="tricare_select">TRICARE Select</option>
-                <option value="private">Private insurance</option>
-              </select>
-              <input
-                inputMode="decimal"
-                value={row.amount}
-                onChange={(e) => updateHealthPlan(row.key, { amount: e.target.value })}
-                placeholder="0.00"
-                aria-label="Premium per year"
-                className="w-24 rounded-md bg-surface px-2 py-1.5 text-center text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand sm:w-28"
-              />
-              <button
-                type="button"
-                onClick={() => setHealthPlans((rows) => rows.filter((r) => r.key !== row.key))}
-                aria-label="Remove health plan"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition hover:bg-negative/10 hover:text-negative"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-              <span className="basis-full text-xs leading-snug text-foreground sm:basis-0 sm:flex-1">
-                {row.kind === "private"
-                  ? "Private or employer plan premium, from the month you retire until TRICARE For Life starts."
-                  : `Retiree ${row.kind === "tricare_prime" ? "TRICARE Prime" : "TRICARE Select"} enrollment fee, from the month you retire until TRICARE For Life starts.`}
-              </span>
-            </div>
+            <PlanRow
+              key={row.key}
+              row={row}
+              kinds={HEALTH_PLAN_KINDS}
+              ariaLabel="Health plan"
+              onChange={(patch) => updateHealthPlan(row.key, patch)}
+              onRemove={() => setHealthPlans((rows) => rows.filter((r) => r.key !== row.key))}
+              endPlaceholder="TFL"
+              note={`${
+                row.kind === "private"
+                  ? "Private or employer plan premium."
+                  : `Retiree ${row.kind === "tricare_prime" ? "TRICARE Prime" : "TRICARE Select"} enrollment fee.`
+              } Blank end = until TRICARE For Life starts${tflYear ? ` (${tflYear})` : ""}.`}
+            />
           ))}
           <button
             type="button"
             onClick={() =>
-              setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "" }])
+              setHealthPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "private", amount: "", ...newPlanDates() }])
             }
             className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
           >
             + Add health plan
           </button>
         </div>
-        <Field
-          label="Dental & vision (/yr)"
-          hint="From the month you retire. TRICARE For Life covers neither."
-        >
-          <input
-            name="dentalVisionAnnual"
-            inputMode="decimal"
-            defaultValue={plan.dentalVisionAnnualCents ? centsToDisplay(plan.dentalVisionAnnualCents) : ""}
-            placeholder="0.00"
-            className={inputClass}
-          />
-        </Field>
+        {/* Dental & vision: a list like the health plans, each row FEDVIP or
+            private. TFL covers neither, so these run for life by default. */}
+        <div className="space-y-2 sm:col-span-2">
+          <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Dental &amp; vision (/yr)</span>
+          {dentalPlans.length === 0 ? <p className="text-xs text-foreground">No dental or vision premium.</p> : null}
+          {dentalPlans.map((row) => (
+            <PlanRow
+              key={row.key}
+              row={row}
+              kinds={DENTAL_PLAN_KINDS}
+              ariaLabel="Dental or vision plan"
+              onChange={(patch) => updateDentalPlan(row.key, patch)}
+              onRemove={() => setDentalPlans((rows) => rows.filter((r) => r.key !== row.key))}
+              endPlaceholder="Never"
+              note={`${
+                row.kind === "fedvip_dental"
+                  ? "Retiree dental through FEDVIP, which replaced TRICARE's."
+                  : row.kind === "fedvip_vision"
+                    ? "FEDVIP vision, open to you while on a TRICARE plan."
+                    : "Private plan premium."
+              } Blank end = for life.`}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              setDentalPlans((rows) => [...rows, { key: `new-${Date.now()}`, kind: "fedvip_vision", amount: "", ...newPlanDates() }])
+            }
+            className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-900/30"
+          >
+            + Add dental or vision plan
+          </button>
+        </div>
         <Field
           label="TRICARE For Life (/yr)"
-          hint="Your Medicare Part B premium. TFL itself has no fee."
+          hint={
+            <>
+              Your Medicare Part B premium{tflYear ? `, from ${tflYear} (age ${TFL_AGE})` : ""}.{" "}
+              <button
+                type="button"
+                onClick={() => setTflInfoOpen(true)}
+                className="whitespace-nowrap font-semibold underline underline-offset-2"
+                style={{ color: "var(--viz-savings)" }}
+              >
+                What is TRICARE For Life?
+              </button>
+            </>
+          }
         >
           <input
             name="healthcareAnnual"
@@ -1733,25 +1849,6 @@ function PlanModal({
             placeholder="0.00"
             className={inputClass}
           />
-        </Field>
-        <Field
-          label="TFL starts at age"
-          hint={
-            <>
-              At age 65, Medicare begins or adjust if earlier.{" "}
-              <a
-                href="https://www.tricare.mil/tfl"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="whitespace-nowrap font-semibold underline underline-offset-2"
-                style={{ color: "var(--viz-savings)" }}
-              >
-                Read about TRICARE For Life
-              </a>
-            </>
-          }
-        >
-          <input name="healthcareStartAge" inputMode="numeric" defaultValue={plan.healthcareStartAge} className={inputClass} />
         </Field>
         <Field label="Rises above inflation (%/yr)" hint="Medical costs grow faster than prices overall: inflation + this. 2.5% + 1.5% = 4% a year.">
           <input name="healthcareGrowthPct" inputMode="decimal" defaultValue={plan.healthcareGrowthPct} className={inputClass} />
@@ -1773,9 +1870,6 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
-        <Field label="Expected COLA increase (%)" hint="The yearly raise on retired pay, VA, Social Security and other income.">
-          <input name="colaPct" inputMode="decimal" defaultValue={plan.colaPct} className={inputClass} />
-        </Field>
         <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once you stop working. Needed = the yearly gap ÷ this rate.">
           <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
         </Field>
@@ -1791,12 +1885,12 @@ function PlanModal({
 
         <h3 className={heading}>Other income</h3>
         <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Per month at current rates, before tax; goes up by the COLA each year. If an amount changes, type an End Year on the old line,
+          Per month, before tax; stays the same every year. If an amount changes, type an End Year on the old line,
           then + Add income with the new amount starting the year after.
         </p>
         <div className="space-y-2 sm:col-span-2">
           {lines.map((l) => (
-            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_4.5rem_4.5rem_auto]">
+            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_9.5rem_4.5rem_auto]">
               <LineField label="Type" className="col-span-2 sm:col-span-1">
                 <select
                   value={l.kind}
@@ -1821,13 +1915,16 @@ function PlanModal({
                   className={`${lineInput} text-center`}
                 />
               </LineField>
-              <LineField label="First year">
-                <input
-                  inputMode="numeric"
-                  value={l.startYear}
-                  onChange={(e) => updateLine(l.key, { startYear: e.target.value })}
-                  placeholder="Now"
-                  className={`${lineInput} text-center`}
+              {/* Month + year: the first year only counts from this month on. */}
+              <LineField label="Starts">
+                <MonthYearBox
+                  label="Start"
+                  blankMonth="Jan"
+                  month={l.startMonth}
+                  onMonth={(v) => updateLine(l.key, { startMonth: v })}
+                  year={l.startYear}
+                  onYear={(v) => updateLine(l.key, { startYear: v })}
+                  yearPlaceholder="Now"
                 />
               </LineField>
               <LineField label="End year">
@@ -1991,6 +2088,7 @@ function PlanModal({
           <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p>
         ) : null}
       </form>
+      {tflInfoOpen ? <TflInfo tflYear={tflYear} onClose={() => setTflInfoOpen(false)} /> : null}
     </ModalShell>
   );
 }
@@ -2009,7 +2107,204 @@ function LineField({ label, className, children }: { label: string; className?: 
 
 // Sized to the longest value (80000.00), not the column — full-width boxes
 // holding "5" or "1981" were mostly empty space.
+/** "from Mar" on a line paid only part of the year (its first year). */
+const partNote = (p: { months?: number; firstMonth?: number }) =>
+  p.months != null && p.months < 12 && p.firstMonth ? `from ${MONTHS[p.firstMonth - 1]}` : "";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Medicare Part A starts at 65, and TRICARE For Life with it. */
+const TFL_AGE = 65;
+
+// What TRICARE For Life is and what it costs — opened from the TFL box's
+// "What is TRICARE For Life?" link (Victor, 2026-10-15). Figures checked
+// against CMS and TRICARE on 2026-10-15.
+function TflInfo({ tflYear, onClose }: { tflYear: number | null; onClose: () => void }) {
+  const link = "font-semibold underline underline-offset-2";
+  return (
+    <ModalShell title="TRICARE For Life" onClose={onClose} className="sm:max-w-lg">
+      <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-sm leading-relaxed">
+        <p>
+          <span className="font-semibold">What it is:</span>{" "}
+          your TRICARE once you&rsquo;re on Medicare. Medicare pays first; TFL pays most of what Medicare doesn&rsquo;t. It
+          replaces TRICARE Select or Prime.
+        </p>
+        <p>
+          <span className="font-semibold">When it starts:</span> at 65, the month Medicare starts
+          {tflYear ? ` — ${tflYear} for you` : ""}. Each person starts at their own 65.
+        </p>
+        <p>
+          <span className="font-semibold">What it costs:</span> TFL itself is free, but you must have Medicare Part B:{" "}
+          <span className="font-semibold">$202.90/mo per person in 2026</span> ($2,434.80 a year). Higher incomes pay more.
+        </p>
+        <p>
+          <span className="font-semibold">Don&rsquo;t skip Part B:</span> without it you lose TRICARE coverage at 65.
+        </p>
+        <p>
+          <span className="font-semibold">What to enter:</span> 2434.80 for one person, 4869.60 for two. It rises with medical
+          inflation each year.
+        </p>
+        <ul className="space-y-1 border-t border-line pt-3">
+          <li>
+            <a href="https://www.tricare.mil/tfl" target="_blank" rel="noopener noreferrer" className={link} style={{ color: "var(--viz-savings)" }}>
+              TRICARE For Life (tricare.mil)
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-deductibles"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={link}
+              style={{ color: "var(--viz-savings)" }}
+            >
+              2026 Part B premium (cms.gov)
+            </a>
+          </li>
+          <li>
+            <a href="https://www.medicare.gov/basics/costs/medicare-costs" target="_blank" rel="noopener noreferrer" className={link} style={{ color: "var(--viz-savings)" }}>
+              Medicare costs (medicare.gov)
+            </a>
+          </li>
+        </ul>
+      </div>
+    </ModalShell>
+  );
+}
+
+// One health or dental & vision plan: type, yearly premium, start, end and
+// Remove, with a short note under it.
+function PlanRow<K extends string>({
+  row,
+  kinds,
+  ariaLabel,
+  onChange,
+  onRemove,
+  endPlaceholder,
+  note,
+}: {
+  row: PlanDraft<K>;
+  kinds: { value: K; label: string }[];
+  ariaLabel: string;
+  onChange: (patch: Partial<PlanDraft<K>>) => void;
+  onRemove: () => void;
+  endPlaceholder: string;
+  note: string;
+}) {
+  return (
+    <div className="space-y-1.5 rounded-lg bg-background p-2 ring-1 ring-line">
+      <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_6rem_9.5rem_9.5rem_auto]">
+        <LineField label="Plan" className="col-span-2 sm:col-span-1">
+          <select
+            value={row.kind}
+            onChange={(e) => onChange({ kind: e.target.value as K } as Partial<PlanDraft<K>>)}
+            aria-label={ariaLabel}
+            className={`${lineInput} cursor-pointer`}
+          >
+            {kinds.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </select>
+        </LineField>
+        <LineField label="$ / yr">
+          <input
+            inputMode="decimal"
+            value={row.amount}
+            onChange={(e) => onChange({ amount: e.target.value })}
+            placeholder="0.00"
+            aria-label="Premium per year"
+            className={`${lineInput} text-center tabular-nums`}
+          />
+        </LineField>
+        <LineField label="Starts">
+          <MonthYearBox
+            label="Start"
+            blankMonth="Jan"
+            month={row.startMonth}
+            onMonth={(v) => onChange({ startMonth: v })}
+            year={row.startYear}
+            onYear={(v) => onChange({ startYear: v })}
+          />
+        </LineField>
+        <LineField label="Ends">
+          <MonthYearBox
+            label="End"
+            blankMonth="Dec"
+            month={row.endMonth}
+            onMonth={(v) => onChange({ endMonth: v })}
+            year={row.endYear}
+            onYear={(v) => onChange({ endYear: v })}
+            yearPlaceholder={endPlaceholder}
+          />
+        </LineField>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+        >
+          Remove
+        </button>
+      </div>
+      <p className="text-xs leading-snug text-foreground">{note}</p>
+    </div>
+  );
+}
+
+// A small month picker + year box for a start or end inside a row. A blank
+// month reads as `blankMonth` (Jan for a start, Dec for an end), and that's
+// what saving assumes too.
+function MonthYearBox({
+  label,
+  blankMonth,
+  month,
+  onMonth,
+  year,
+  onYear,
+  yearPlaceholder,
+  monthName,
+  yearName,
+}: {
+  label: string;
+  blankMonth: "Jan" | "Dec";
+  month: string;
+  onMonth: (v: string) => void;
+  year: string;
+  onYear: (v: string) => void;
+  yearPlaceholder?: string;
+  monthName?: string;
+  yearName?: string;
+}) {
+  const others = blankMonth === "Jan" ? MONTHS.map((m, i) => [m, i + 1] as const).slice(1) : MONTHS.map((m, i) => [m, i + 1] as const).slice(0, 11);
+  return (
+    <span className="flex gap-1">
+      <select
+        name={monthName}
+        value={month}
+        onChange={(e) => onMonth(e.target.value)}
+        aria-label={`${label} month`}
+        className="w-[4.5rem] shrink-0 cursor-pointer rounded-md bg-surface px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+      >
+        <option value="">{blankMonth}</option>
+        {others.map(([m, n]) => (
+          <option key={m} value={n}>
+            {m}
+          </option>
+        ))}
+      </select>
+      <input
+        name={yearName}
+        inputMode="numeric"
+        value={year}
+        onChange={(e) => onYear(e.target.value)}
+        placeholder={yearPlaceholder}
+        aria-label={`${label} year`}
+        className={`${lineInput} flex-1 text-center`}
+      />
+    </span>
+  );
+}
 
 // A month picker and a four-digit year box, side by side in one field.
 function MonthYear({

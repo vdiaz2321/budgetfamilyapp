@@ -4,9 +4,8 @@
  * Every figure is in the dollars of the year it lands in. Investments grow at
  * the expected rate of return; savings (checking and savings buckets) at the
  * savings APY, and each year's saving is split between the two. Retired pay,
- * VA, Social Security and other income rise by the COLA each year; spending,
- * healthcare and rentals by inflation — so a 2033 figure is what 2033
- * actually pays. Spending is what the table says for that year, grown by
+ * VA, Social Security and other income stay at the amount entered — no COLA
+ * (Victor, 2026-10-15); spending, healthcare and rentals rise by inflation. Spending is what the table says for that year, grown by
  * inflation from the year it was typed.
  *
  * The arithmetic is deliberately the plain version, so it can be checked by
@@ -325,8 +324,9 @@ export function ageInYear(birthYear: number | null, year: number): number | null
 
 // ---- Retirement income, year by year.
 //
-// Military retired pay, VA disability and Social Security all get a yearly
-// COLA, so each rises by the plan's COLA rate every year.
+// Military retired pay, VA disability, Social Security and the other lines
+// stay at the amount entered every year. Victor removed the COLA on
+// 2026-10-15: he'd rather plan on flat income than on a guessed raise.
 
 /** What an amount now has grown to by `year` at `pct` a year. */
 export function inflateTo(year: number, thisYear: number, pct: number): number {
@@ -352,6 +352,8 @@ export type IncomeLine = {
   monthlyCents: number;
   /** First year received; null = already arriving. */
   startYear: number | null;
+  /** First month received in startYear (1–12); null = January. */
+  startMonth: number | null;
   /** Last year received (inclusive); null = for life. */
   endYear: number | null;
   taxable: boolean;
@@ -372,8 +374,6 @@ export type MilitaryPension = {
   serviceStartMonth?: number | null;
   /** High-3 average monthly basic pay, in retirement-year dollars. */
   high3MonthlyCents: number | null;
-  /** The yearly COLA once retired pay starts. */
-  colaPct: number;
   sbpEnabled: boolean;
   /** SBP premium, % of gross retired pay (6.5% today). */
   sbpPct: number;
@@ -391,15 +391,8 @@ export type PensionEstimate = {
   /** SBP premium per month in the retirement year (0 when not elected). */
   sbpAtRetireCents: number;
   retireYear: number;
-  /** Yearly COLA after the retirement year. */
-  colaPct: number;
 };
 
-/** Gross retired pay and SBP per month in `year`, with every COLA since retiring. */
-function pensionIn(p: PensionEstimate, year: number) {
-  const cola = inflateTo(year, p.retireYear, p.colaPct);
-  return { gross: Math.round(p.grossAtRetireCents * cola), sbp: Math.round(p.sbpAtRetireCents * cola) };
-}
 
 /** DFAS: High-3 × (2.5% × years of service), rounded down to the dollar. */
 export function estimatePension(p: MilitaryPension): PensionEstimate | null {
@@ -421,8 +414,50 @@ export function estimatePension(p: MilitaryPension): PensionEstimate | null {
     grossAtRetireCents,
     sbpAtRetireCents,
     retireYear: p.retireYear,
-    colaPct: p.colaPct,
   };
+}
+
+export type High3Year = {
+  year: number;
+  /** Months of that year inside the 36. */
+  months: number;
+  /** First and last of those months (1–12). */
+  firstMonth: number;
+  lastMonth: number;
+};
+
+/** The 36 months of base pay right before retired pay starts, grouped by
+ *  calendar year — pay raises land on January 1. */
+export function high3Window(retireYear: number, retireMonth: number | null | undefined): High3Year[] {
+  const start = retireYear * 12 + (retireMonth ?? 1) - 1 - 36;
+  const out: High3Year[] = [];
+  for (let i = start; i < start + 36; i++) {
+    const year = Math.floor(i / 12);
+    const month = (i % 12) + 1;
+    const last = out[out.length - 1];
+    if (last && last.year === year) {
+      last.months++;
+      last.lastMonth = month;
+    } else out.push({ year, months: 1, firstMonth: month, lastMonth: month });
+  }
+  return out;
+}
+
+/** DFAS High-3: the average monthly base pay over those 36 months, each year's
+ *  rate counted for its months. Null until every year in the window has pay. */
+export function high3FromBasePay(
+  retireYear: number | null,
+  retireMonth: number | null | undefined,
+  basePayByYear: Record<string, number>,
+): number | null {
+  if (retireYear == null) return null;
+  let total = 0;
+  for (const w of high3Window(retireYear, retireMonth)) {
+    const pay = basePayByYear[String(w.year)];
+    if (!pay) return null;
+    total += pay * w.months;
+  }
+  return Math.round(total / 36);
 }
 
 /**
@@ -443,6 +478,10 @@ export type IncomePart = {
   monthlyAfterTaxCents: number;
   /** Same, before tax (still after SBP) — so the breakdown can show the tax. */
   monthlyBeforeTaxCents: number;
+  /** Months paid that year — under 12 only in a line's first year (Mar start → 10). */
+  months?: number;
+  /** First month paid when months < 12 (1–12). */
+  firstMonth?: number;
 };
 
 export type YearIncome = {
@@ -457,6 +496,13 @@ export type YearIncome = {
 const active = (year: number, start: number | null, end: number | null) =>
   (start == null || year >= start) && (end == null || year <= end);
 
+/** Months a line pays in `year`: from its start month in its first year, else all 12. */
+const lineMonths = (line: IncomeLine, year: number) =>
+  line.startYear != null && year === line.startYear ? 13 - (line.startMonth ?? 1) : 12;
+
+/** A part's money for the whole year. */
+const yearlyOf = (p: IncomePart, cents: number) => cents * (p.months ?? 12);
+
 /**
  * What the income lines and retired pay put in the bank in one year.
  * SBP comes off before tax (its premiums aren't taxed); VA is never taxed.
@@ -467,13 +513,11 @@ export function incomeForYear(
   pensionStartYear: number | null,
   lines: IncomeLine[],
   taxPct: number,
-  thisYear: number,
-  colaPct: number,
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
   if (pension && pensionStartYear != null && year >= pensionStartYear) {
-    const { gross, sbp } = pensionIn(pension, year);
+    const { grossAtRetireCents: gross, sbpAtRetireCents: sbp } = pension;
     parts.push({
       name: "Military retired pay",
       kind: "pension",
@@ -481,21 +525,23 @@ export function incomeForYear(
       monthlyBeforeTaxCents: gross - sbp,
     });
   }
-  const lineGrowth = inflateTo(year, thisYear, colaPct);
   for (const line of lines) {
     if (!active(year, line.startYear, line.endYear) || line.monthlyCents <= 0) continue;
-    const monthly = Math.round(line.monthlyCents * lineGrowth);
+    const monthly = line.monthlyCents;
+    const months = lineMonths(line, year);
     parts.push({
       name: line.name,
       kind: line.kind,
       monthlyAfterTaxCents: Math.round(monthly * (line.taxable ? keep : 1)),
       monthlyBeforeTaxCents: monthly,
+      months,
+      firstMonth: 13 - months,
     });
   }
-  const afterTaxCents = parts.reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
+  const afterTaxCents = parts.reduce((s, p) => s + yearlyOf(p, p.monthlyAfterTaxCents), 0);
   const guaranteedCents = parts
     .filter((p) => GUARANTEED_KINDS.has(p.kind))
-    .reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
+    .reduce((s, p) => s + yearlyOf(p, p.monthlyAfterTaxCents), 0);
   return { parts, afterTaxCents, guaranteedCents };
 }
 
@@ -515,13 +561,11 @@ export function survivorIncomeForYear(
   sbpEnabled: boolean,
   lines: IncomeLine[],
   taxPct: number,
-  thisYear: number,
-  colaPct: number,
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
   if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
-    const annuity = Math.round(pensionIn(pension, year).gross * 0.55);
+    const annuity = Math.round(pension.grossAtRetireCents * 0.55);
     parts.push({
       name: "SBP annuity (55%)",
       kind: "pension",
@@ -532,38 +576,96 @@ export function survivorIncomeForYear(
   const live = lines.filter((l) => active(year, l.startYear, l.endYear) && l.monthlyCents > 0);
   const ss = live.filter((l) => l.kind === "social_security");
   const largestSs = ss.reduce<IncomeLine | null>((best, l) => (best == null || l.monthlyCents > best.monthlyCents ? l : best), null);
-  const lineGrowth = inflateTo(year, thisYear, colaPct);
   for (const line of live) {
     if (line.kind === "va" || line.kind === "job") continue;
     if (line.kind === "social_security" && line !== largestSs) continue;
-    const monthly = Math.round(line.monthlyCents * lineGrowth);
+    const monthly = line.monthlyCents;
     parts.push({
       name: line.kind === "social_security" ? "Social Security (survivor)" : line.name,
       kind: line.kind,
       monthlyAfterTaxCents: Math.round(monthly * (line.taxable ? keep : 1)),
       monthlyBeforeTaxCents: monthly,
+      months: lineMonths(line, year),
+      firstMonth: 13 - lineMonths(line, year),
     });
   }
-  const afterTaxCents = parts.reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
+  const afterTaxCents = parts.reduce((s, p) => s + yearlyOf(p, p.monthlyAfterTaxCents), 0);
   const guaranteedCents = parts
     .filter((p) => GUARANTEED_KINDS.has(p.kind))
-    .reduce((s, p) => s + p.monthlyAfterTaxCents * 12, 0);
+    .reduce((s, p) => s + yearlyOf(p, p.monthlyAfterTaxCents), 0);
   return { parts, afterTaxCents, guaranteedCents };
 }
 
 export type HealthPlanKind = "tricare_prime" | "tricare_select" | "private";
 
-export type HealthPlan = { kind: HealthPlanKind; annualCents: number };
+/** When a healthcare cost starts and ends. Blank start = the retirement
+ *  month; blank end = until TRICARE For Life (health plans) or for life
+ *  (dental & vision). A blank month is January for a start, December for an end. */
+export type CostDates = {
+  startYear: number | null;
+  startMonth: number | null;
+  endYear: number | null;
+  endMonth: number | null;
+};
 
-/** A stored `health_plans` list, with anything malformed dropped. */
-export function parseHealthPlans(raw: unknown): HealthPlan[] {
+export type HealthPlan = { kind: HealthPlanKind; annualCents: number } & CostDates;
+
+/** Retiree dental & vision come through FEDVIP (it replaced the TRICARE
+ *  Retiree Dental Program), or a private plan. */
+export type DentalPlanKind = "fedvip_dental" | "fedvip_vision" | "private_dental" | "private_vision";
+
+export const DENTAL_PLAN_KINDS: { value: DentalPlanKind; label: string }[] = [
+  { value: "fedvip_dental", label: "FEDVIP dental" },
+  { value: "fedvip_vision", label: "FEDVIP vision" },
+  { value: "private_dental", label: "Private dental" },
+  { value: "private_vision", label: "Private vision" },
+];
+
+export type DentalPlan = { kind: DentalPlanKind; annualCents: number } & CostDates;
+
+const yearOrNull = (v: unknown) => {
+  const n = Number(v);
+  return v != null && v !== "" && Number.isInteger(n) && n > 1900 && n < 2200 ? n : null;
+};
+const monthOrNull = (v: unknown) => {
+  const n = Number(v);
+  return v != null && v !== "" && Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
+};
+
+/** A stored plan list (`health_plans`, `dental_plans`), with anything
+ *  malformed or of another kind dropped. */
+function parsePlans<K extends string>(raw: unknown, kinds: readonly K[]): ({ kind: K; annualCents: number } & CostDates)[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((p) => {
     const kind = p?.kind;
     const cents = Number(p?.annualCents);
-    if (kind !== "tricare_prime" && kind !== "tricare_select" && kind !== "private") return [];
-    return [{ kind, annualCents: Number.isFinite(cents) && cents > 0 ? Math.round(cents) : 0 }];
+    if (!kinds.includes(kind)) return [];
+    return [
+      {
+        kind,
+        annualCents: Number.isFinite(cents) && cents > 0 ? Math.round(cents) : 0,
+        startYear: yearOrNull(p?.startYear),
+        startMonth: monthOrNull(p?.startMonth),
+        endYear: yearOrNull(p?.endYear),
+        endMonth: monthOrNull(p?.endMonth),
+      },
+    ];
   });
+}
+
+export const parseHealthPlans = (raw: unknown): HealthPlan[] =>
+  parsePlans(raw, ["tricare_prime", "tricare_select", "private"] as const);
+
+export const parseDentalPlans = (raw: unknown): DentalPlan[] =>
+  parsePlans(raw, DENTAL_PLAN_KINDS.map((k) => k.value));
+
+type YearMonth = { year: number; month: number };
+
+/** Months of `year` between `from` and `to` (inclusive); no `to` = no end. */
+export function monthsInYear(year: number, from: YearMonth, to: YearMonth | null): number {
+  const first = Math.max(year * 12, from.year * 12 + from.month - 1);
+  const last = to ? Math.min(year * 12 + 11, to.year * 12 + to.month - 1) : year * 12 + 11;
+  return Math.max(0, last - first + 1);
 }
 
 export type HealthcarePlan = {
@@ -571,14 +673,14 @@ export type HealthcarePlan = {
   /** Military retirement — the health plan and dental & vision start then. */
   retireYear: number | null;
   retireMonth: number | null;
-  /** Every health plan's premium per year, added up (TRICARE Prime/Select,
-   *  private), from retirement until TRICARE For Life starts. */
-  planAnnualCents: number | null;
+  /** Each health plan (TRICARE Prime/Select, private) with its yearly
+   *  premium and dates; by default from retirement until TFL starts. */
+  plans: HealthPlan[];
   /** TRICARE For Life: the Medicare Part B premium per year, from `tflStartAge`. */
   tflAnnualCents: number | null;
   tflStartAge: number;
-  /** Dental & vision per year, from retirement on (TFL covers neither). */
-  dentalVisionAnnualCents: number | null;
+  /** Dental & vision plans, by default from retirement on (TFL covers neither). */
+  dentalPlans: DentalPlan[];
   /** How much faster than inflation medical costs rise, % a year. */
   growthPct: number;
   inflationPct: number;
@@ -586,17 +688,28 @@ export type HealthcarePlan = {
 
 /**
  * Healthcare as its own yearly cost, rising inflation + `growthPct` a year
- * (medical costs run ahead of prices overall), counted from this year. Three lines: the health plan from military retirement until
- * TRICARE For Life starts, TFL (Medicare Part B) from its start age, and
- * dental & vision from retirement on. The retirement year only pays from the
- * retirement month.
+ * (medical costs run ahead of prices overall), counted from this year. Three
+ * lines: each health plan for the months between its start and end (by
+ * default from the retirement month until TRICARE For Life starts), TFL
+ * (Medicare Part B) from the year of its start age, and each dental & vision
+ * plan for its months (by default from the retirement month on).
  */
 export function healthcareForYear(year: number, plan: HealthcarePlan, thisYear: number): number {
-  const retiredShare = retiredShareOfYear(year, plan.retireYear, plan.retireMonth);
-  const onTfl = plan.birthYear != null && year - plan.birthYear >= plan.tflStartAge;
+  const tflYear = plan.birthYear != null ? plan.birthYear + plan.tflStartAge : null;
+  const onTfl = tflYear != null && year >= tflYear;
+  const retired: YearMonth | null =
+    plan.retireYear != null ? { year: plan.retireYear, month: plan.retireMonth ?? 1 } : null;
+  const share = (d: CostDates, defaultEnd: YearMonth | null) => {
+    const from = d.startYear != null ? { year: d.startYear, month: d.startMonth ?? 1 } : retired;
+    if (!from) return 0;
+    const to = d.endYear != null ? { year: d.endYear, month: d.endMonth ?? 12 } : defaultEnd;
+    return monthsInYear(year, from, to) / 12;
+  };
+  const untilTfl = tflYear != null ? { year: tflYear - 1, month: 12 } : null;
   const base =
-    (onTfl ? plan.tflAnnualCents ?? 0 : (plan.planAnnualCents ?? 0) * retiredShare) +
-    (plan.dentalVisionAnnualCents ?? 0) * retiredShare;
+    (onTfl ? plan.tflAnnualCents ?? 0 : 0) +
+    plan.plans.reduce((t, p) => t + p.annualCents * share(p, untilTfl), 0) +
+    plan.dentalPlans.reduce((t, p) => t + p.annualCents * share(p, null), 0);
   if (base <= 0) return 0;
   return Math.round(base * inflateTo(year, thisYear, plan.inflationPct + plan.growthPct));
 }
