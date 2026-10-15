@@ -142,7 +142,8 @@ export function FiSection({
   const open = !!collapse.open;
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
-  const [editing, setEditing] = useState(false);
+  // true = open at the top; "sbp" = open scrolled to the SBP box.
+  const [editing, setEditing] = useState<boolean | "sbp">(false);
 
   const portfolioCents = measured.assetsCents;
   // The projection starts from this year's planned year-end net worth (the
@@ -247,9 +248,11 @@ export function FiSection({
   const at80 = endAt(80);
   const runsOutAge = fi.runsOutYear && plan.birthYear ? fi.runsOutYear - plan.birthYear : null;
 
-  // Monthly income in the first FULL year of military retirement, by source —
-  // the same year as a row of the table, so "Left to save" matches it.
-  const incomeYear = firstFullRetiredYear;
+  // Monthly income by source in a retired year — the first FULL year of
+  // military retirement until another is picked (Victor, 2026-10-15). Always
+  // a row of the table, so "Left to save" matches it.
+  const [incomeYearPick, setIncomeYear] = useState<number | null>(null);
+  const incomeYear = Math.max(firstFullRetiredYear, incomeYearPick ?? firstFullRetiredYear);
   const retireIncome = (() => {
     if (!plan.targetRetireYear) return null;
     const base = incomeIn(incomeYear);
@@ -284,8 +287,13 @@ export function FiSection({
   const ssLine = plan.incomeLines.find((l) => l.kind === "social_security" && l.startYear != null) ?? null;
 
   // ---- Bad-market test: the same plan, but the portfolio drops in the year
-  // retirement starts, the worst year for it to happen.
-  const [dropPct, setDropPct] = useState(30);
+  // retirement starts, the worst year for it to happen. Drawn on the chart
+  // rather than as its own card (Victor, 2026-10-15); off until a drop is
+  // picked, so the chart opens clean.
+  const [dropPct, setDropPct] = useState<number | null>(null);
+  // What the chart's bars show: net worth, or each year's income against
+  // spending (Victor, 2026-10-15). One chart either way.
+  const [chartView, setChartView] = useState<"nw" | "flow">("nw");
   const shockYear = Math.max(thisYear + 1, withdrawYear ?? fi.fiYear ?? thisYear + 1);
   const baseInputs = {
     portfolioCents: startCents,
@@ -297,15 +305,16 @@ export function FiSection({
     cash: { nowCents: measured.cashCents, pct: plan.cashReturnPct, toInvestPct },
   };
   const stressed = useMemo(
-    () => projectFi({ ...baseInputs, schedule, shock: { year: shockYear, pct: dropPct } }, thisYear),
+    () =>
+      dropPct == null ? null : projectFi({ ...baseInputs, schedule, shock: { year: shockYear, pct: dropPct } }, thisYear),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [startCents, measured.contributionCents, measured.spendCents, measured.cashCents, plan.investmentReturnPct, plan.cashReturnPct, toInvestPct, plan.withdrawalRatePct, schedule, untilYear, thisYear, shockYear, dropPct],
   );
   const endOf = (years: { year: number; endCents: number }[]) =>
     untilYear == null ? null : years.find((y) => y.year === untilYear)?.endCents ?? null;
-  const shockRow = stressed.years.find((y) => y.year === shockYear) ?? null;
+  const shockRow = stressed?.years.find((y) => y.year === shockYear) ?? null;
   const planEnd = endOf(fi.years);
-  const stressEnd = endOf(stressed.years);
+  const stressEnd = stressed ? endOf(stressed.years) : null;
 
   // ---- Survivor view: the plan from `deathYear` on, if Victor dies first.
   // Only from the first FULL year of military retirement: before it, the
@@ -358,6 +367,12 @@ export function FiSection({
   })();
   const yearOptions =
     untilYear == null ? [] : Array.from({ length: Math.max(0, untilYear - survivorFirst + 1) }, (_, i) => survivorFirst + i);
+  // The Income card's years: retired years the table has a row for.
+  const lastPlanYear = projection.at(-1)?.year ?? firstFullRetiredYear;
+  const incomeYearOptions = Array.from(
+    { length: Math.max(1, Math.min(untilYear ?? lastPlanYear, lastPlanYear) - firstFullRetiredYear + 1) },
+    (_, i) => firstFullRetiredYear + i,
+  );
 
   // The button that opens the rates that rebuild the table, above it.
   const assumptions = (
@@ -368,7 +383,7 @@ export function FiSection({
         // Soft blue from the viz palette (not brand indigo — no purple on data).
         className="rounded-md px-2 py-0.5 text-xs font-semibold sm:text-sm ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
       >
-        Edit assumptions
+        Edit Retirement / FI Assumptions
       </button>
     </p>
   );
@@ -398,29 +413,39 @@ export function FiSection({
       </button>
       {open ? (
         <div>
-          {/* Two panels instead of five scattered cards: what retirement
-              pays (before tax, the tax, after tax, against spending) and what
-              the investments have to do about the gap. Each reads top to
-              bottom as one sum. */}
-          <div className={`mt-3 grid gap-3 ${retireIncome ? "md:grid-cols-2" : ""}`}>
+          {/* Three panels side by side: what retirement pays, what the
+              investments have to do about the gap, and the family's income if
+              Victor dies first. Each reads top to bottom as one sum. */}
+          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {retireIncome && plan.targetRetireYear ? (
               <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-                <p className="text-center text-sm font-bold sm:text-lg">
-                  Income in {incomeYear}
-                  {plan.birthYear ? ` · age ${incomeYear - plan.birthYear}` : ""}
-                  {incomeYear !== plan.targetRetireYear ? (
-                    <span className="block text-xs font-normal sm:text-sm">First full year retired</span>
+                {/* A year picker in the title, like the survivor card's. */}
+                <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
+                  Income in
+                  <select
+                    value={incomeYear}
+                    onChange={(e) => setIncomeYear(Number(e.target.value))}
+                    aria-label="Year"
+                    className="cursor-pointer rounded-md bg-surface px-1 py-0.5 text-sm font-bold sm:text-lg text-foreground ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    {incomeYearOptions.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  {plan.birthYear ? `· age ${incomeYear - plan.birthYear}` : ""}
+                  {incomeYear === firstFullRetiredYear && incomeYear !== plan.targetRetireYear ? (
+                    <span className="block basis-full text-xs font-normal sm:text-sm">First full year retired</span>
                   ) : null}
                 </p>
                 {retireIncome.parts.length === 0 ? (
-                  <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit assumptions.</p>
+                  <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit Retirement / FI Assumptions.</p>
                 ) : (
-                  <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
+                  <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                     <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
                       <span />
                       <span className="flex shrink-0">
-                        <span className="w-[4.5rem] text-right sm:w-24">Monthly</span>
-                        <span className="w-[5.75rem] text-right sm:w-28">Yearly</span>
+                        <span className="w-[4.5rem] text-right sm:w-24 xl:w-20 2xl:w-24">Monthly</span>
+                        <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">Yearly</span>
                       </span>
                     </li>
                     {retireIncome.parts.map((part, i) => (
@@ -455,6 +480,7 @@ export function FiSection({
                       monthly={-retireSpendMonthly}
                       yearly={-retireSpendYearly}
                       currency={currency}
+                      tone="text-negative"
                     />
                     {(() => {
                       const net = Math.round(retireIncome.afterTaxCents / 12) - retireSpendMonthly;
@@ -473,20 +499,27 @@ export function FiSection({
                   </ul>
                 )}
                 {pension ? null : (
-                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and High-3 in Edit assumptions.</p>
+                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and High-3 in Edit Retirement / FI Assumptions.</p>
                 )}
               </div>
             ) : null}
 
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
               <p className="text-center text-sm font-bold sm:text-lg">Investments</p>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                 {mile ? (
                   <>
+                    {/* No gap means nothing for the investments to fund —
+                        said in words, since "$0" read like a missing figure. */}
                     <ValueRow
                       label={`Needed in ${mile.year}`}
-                      note={`to cover the gap at ${plan.withdrawalRatePct}% a year`}
-                      value={formatMoneyWhole(mile.targetCents, currency)}
+                      note={
+                        mile.targetCents > 0
+                          ? `to cover the gap at ${plan.withdrawalRatePct}% a year`
+                          : "Retired pay covers spending"
+                      }
+                      value={mile.targetCents > 0 ? formatMoneyWhole(mile.targetCents, currency) : "Nothing"}
+                      tone={mile.targetCents > 0 ? "" : "text-positive"}
                     />
                     <ValueRow label={`Expected in ${mile.year}`} value={formatMoneyWhole(mile.endCents, currency)} />
                     <ValueRow
@@ -542,57 +575,9 @@ export function FiSection({
                 />
               </ul>
             </div>
-          </div>
 
-          {/* What-ifs: a bad market at retirement, and the family's income if
-              Victor dies first. Each reruns the same plan with one thing changed. */}
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
-              <p className="text-center text-sm font-bold sm:text-lg">Bad-market test</p>
-              <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-xs sm:text-sm">
-                <span className="text-foreground">Drop in {shockYear}:</span>
-                {[20, 30, 40].map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    onClick={() => setDropPct(pct)}
-                    aria-pressed={dropPct === pct}
-                    className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${
-                      dropPct === pct
-                        ? "bg-negative/15 text-foreground ring-negative/30"
-                        : "bg-surface text-foreground ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
-                    }`}
-                  >
-                    −{pct}%
-                  </button>
-                ))}
-              </div>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
-                <ValueRow
-                  label={`Lost in ${shockYear}`}
-                  value={shockRow ? `−${formatMoneyWhole(Math.abs(shockRow.growthCents), currency)}` : "—"}
-                  tone="text-negative"
-                />
-                <ValueRow
-                  label="Money lasts"
-                  value={
-                    untilYear == null
-                      ? "Add birth year"
-                      : stressed.runsOutYear
-                        ? `Runs out at age ${stressed.runsOutYear - (plan.birthYear ?? 0)}`
-                        : `To age ${plan.longevityAge}`
-                  }
-                  tone={untilYear == null ? "" : stressed.runsOutYear ? "text-negative" : "text-positive"}
-                  bold
-                />
-                <ValueRow
-                  label={`Left at age ${plan.longevityAge}`}
-                  note={planEnd != null ? `Without the drop: ${formatMoneyWhole(Math.max(0, planEnd), currency)}` : undefined}
-                  value={stressEnd == null ? "—" : formatMoneyWhole(Math.max(0, stressEnd), currency)}
-                />
-              </ul>
-            </div>
-
+            {/* What-if: the same plan with Victor's income gone from the
+                year picked. */}
             <div className="rounded-lg bg-background px-3 py-2 ring-1 ring-line">
               <p className="flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm font-bold sm:text-lg">
                 If you die first, in
@@ -608,12 +593,12 @@ export function FiSection({
                   ))}
                 </select>
               </p>
-              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg">
+              <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                 <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
                   <span>Family income</span>
                   <span className="flex shrink-0">
-                    <span className="w-[4.5rem] text-right sm:w-24">Monthly</span>
-                    <span className="w-[5.75rem] text-right sm:w-28">Yearly</span>
+                    <span className="w-[4.5rem] text-right sm:w-24 xl:w-20 2xl:w-24">Monthly</span>
+                    <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">Yearly</span>
                   </span>
                 </li>
                 {survivorYear.parts.map((part, i) => (
@@ -652,6 +637,7 @@ export function FiSection({
                   monthly={-survivorYear.spendMonthly}
                   yearly={-survivorYear.spendMonthly * 12}
                   currency={currency}
+                  tone="text-negative"
                 />
                 {(() => {
                   const net = survivorYear.afterTaxMonthly - survivorYear.spendMonthly;
@@ -687,10 +673,104 @@ export function FiSection({
                   bold
                 />
               </ul>
+              {/* Without SBP the retired pay stops at death, which is why
+                  family income can read $0 — said here, with the way to fix it
+                  one press away (Victor, 2026-10-15). */}
+              {!plan.sbpEnabled ? (
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-md bg-negative/10 px-2 py-1.5 text-center text-xs sm:text-sm">
+                  <span className="text-foreground">
+                    <span className="font-semibold text-negative">SBP: off</span> — retired pay stops for the family
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setEditing("sbp")}
+                    className="rounded-md bg-surface px-2 py-0.5 font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                  >
+                    Turn on SBP
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
 
+          {/* Which picture the chart draws. */}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-xs sm:text-sm">
+            <span className="font-semibold text-foreground">Chart:</span>
+            {(
+              [
+                ["nw", "Net worth"],
+                ["flow", "Income & spending"],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setChartView(v)}
+                aria-pressed={chartView === v}
+                className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${
+                  chartView === v
+                    ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50"
+                    : "bg-surface text-foreground ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Bad-market test, on the chart: pick a drop and each bar gets a
+              red mark where that year would close after it. Net worth view
+              only — a drop doesn't change income or spending. */}
+          {chartView === "nw" ? (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-xs sm:text-sm">
+            <span className="font-semibold text-foreground">Bad-market test · drop in {shockYear}:</span>
+            {[null, 20, 30, 40].map((pct) => (
+              <button
+                key={pct ?? "off"}
+                type="button"
+                onClick={() => setDropPct(pct)}
+                aria-pressed={dropPct === pct}
+                className={`rounded-full px-2.5 py-0.5 font-semibold ring-1 transition ${
+                  dropPct === pct
+                    ? pct == null
+                      ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50"
+                      : "bg-negative/15 text-foreground ring-negative/30"
+                    : "bg-surface text-foreground ring-line hover:bg-sky-100 hover:ring-sky-400 dark:hover:bg-sky-950/40"
+                }`}
+              >
+                {pct == null ? "Off" : `−${pct}%`}
+              </button>
+            ))}
+          </div>
+          ) : null}
+          {stressed && chartView === "nw" ? (
+            <p className="mt-1 text-center text-xs tabular-nums text-foreground sm:text-sm">
+              Lost in {shockYear}:{" "}
+              <span className="font-semibold text-negative">
+                {shockRow ? `−${formatMoneyWhole(Math.abs(shockRow.growthCents), currency)}` : "—"}
+              </span>
+              {" · "}Money lasts:{" "}
+              <span className={`font-semibold ${untilYear == null ? "" : stressed.runsOutYear ? "text-negative" : "text-positive"}`}>
+                {untilYear == null
+                  ? "Add birth year"
+                  : stressed.runsOutYear
+                    ? `Runs out at age ${stressed.runsOutYear - (plan.birthYear ?? 0)}`
+                    : `To age ${plan.longevityAge}`}
+              </span>
+              {stressEnd != null ? (
+                <>
+                  {" · "}Left at age {plan.longevityAge}:{" "}
+                  <span className="font-semibold">{formatMoneyWhole(Math.max(0, stressEnd), currency)}</span>
+                  {planEnd != null ? ` (without the drop ${formatMoneyWhole(Math.max(0, planEnd), currency)})` : ""}
+                </>
+              ) : null}
+            </p>
+          ) : null}
+
           <FiChart
+            view={chartView}
+            stressEnds={stressed && chartView === "nw" ? new Map(stressed.years.map((y) => [y.year, y.endCents])) : null}
+            stressPct={dropPct}
             fi={fi}
             thisYear={thisYear}
             birthYear={plan.birthYear}
@@ -708,7 +788,13 @@ export function FiSection({
     <>
       {children({ assumptions, details })}
       {editing ? (
-        <PlanModal plan={plan} thisYear={thisYear} currency={currency} onClose={() => setEditing(false)} />
+        <PlanModal
+          plan={plan}
+          thisYear={thisYear}
+          currency={currency}
+          focusSbp={editing === "sbp"}
+          onClose={() => setEditing(false)}
+        />
       ) : null}
     </>
   );
@@ -752,6 +838,9 @@ const PICKED_YEAR_KEY = "fi-chart:picked-year";
 const MARKER_LINE = "color-mix(in srgb, var(--foreground) 70%, transparent)";
 
 function FiChart({
+  view,
+  stressEnds,
+  stressPct,
   fi,
   thisYear,
   birthYear,
@@ -760,6 +849,11 @@ function FiChart({
   projection,
   currency,
 }: {
+  /** "nw" = net worth bars; "flow" = income and spending side by side. */
+  view: "nw" | "flow";
+  /** Bad-market test: each year's close after the drop, by year; null = off. */
+  stressEnds: Map<number, number> | null;
+  stressPct: number | null;
   fi: ReturnType<typeof projectFi>;
   thisYear: number;
   birthYear: number | null;
@@ -806,7 +900,16 @@ function FiChart({
   if (count === 0) return null;
 
   // Only the bars are drawn, so only the bars set the scale.
-  const max = Math.max(1, ...fi.years.map((y) => Math.max(0, y.endCents)));
+  const flow = view === "flow";
+  const planOf = new Map(projection.map((p) => [p.year, p]));
+  const max = Math.max(
+    1,
+    ...fi.years.map((y) => {
+      if (!flow) return Math.max(0, y.endCents);
+      const p = planOf.get(y.year);
+      return p ? Math.max(0, p.incomeCents, p.spendingCents) : 0;
+    }),
+  );
   // The top of the scale sits above the tallest bar, so the three marker
   // labels (Financially free / Retire / Social Security, stacked 0–56px from
   // the top of a 192px plot) always have clear space. Scaled to the tallest
@@ -896,8 +999,38 @@ function FiChart({
                 onClick={() => setPickedYear(y.year)}
                 aria-label={`${y.year}: ${formatMoneyWhole(y.endCents, currency)}`}
                 aria-pressed={i === selectedIndex}
-                className="group flex h-full flex-1 cursor-pointer items-end rounded-t-[2px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                className="group relative flex h-full flex-1 cursor-pointer items-end justify-center gap-px rounded-t-[2px] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                style={flow && i === selectedIndex ? { backgroundColor: "var(--viz-sel)" } : undefined}
               >
+                {flow ? (
+                  (() => {
+                    const p = planOf.get(y.year);
+                    if (!p) return null;
+                    return (
+                      <>
+                        <span
+                          className="w-1/2 rounded-t-[1px] transition-opacity group-hover:opacity-80"
+                          style={{ height: `${Math.max(0, (p.incomeCents / top) * 100)}%`, backgroundColor: "var(--viz-income)" }}
+                        />
+                        <span
+                          className="w-1/2 rounded-t-[1px] transition-opacity group-hover:opacity-80"
+                          style={{ height: `${Math.max(0, (p.spendingCents / top) * 100)}%`, backgroundColor: "var(--viz-spending)" }}
+                        />
+                      </>
+                    );
+                  })()
+                ) : (
+                <>
+                {/* Where the year would close after the bad-market drop. */}
+                {stressEnds?.has(y.year) ? (
+                  <span
+                    className="pointer-events-none absolute inset-x-0 z-[1] h-[3px] rounded-full"
+                    style={{
+                      bottom: `${Math.min(100, Math.max(0, (stressEnds.get(y.year)! / top) * 100))}%`,
+                      backgroundColor: "var(--negative)",
+                    }}
+                  />
+                ) : null}
                 <span
                   className="w-full rounded-t-[2px] transition-opacity group-hover:opacity-80"
                   style={{
@@ -910,6 +1043,8 @@ function FiChart({
                     outlineOffset: i === selectedIndex ? "1px" : undefined,
                   }}
                 />
+                </>
+                )}
               </button>
             ))}
           </div>
@@ -1038,6 +1173,19 @@ function FiChart({
       {/* What the two bar colours mean. The chart has no hover state on
           purpose — the colours have to say it on their own. */}
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 max-sm:text-[12px] sm:text-sm text-foreground">
+        {flow ? (
+          <>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2.5 rounded-[1px]" style={{ backgroundColor: "var(--viz-income)" }} />
+              Income
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2.5 rounded-[1px]" style={{ backgroundColor: "var(--viz-spending)" }} />
+              Spending
+            </span>
+          </>
+        ) : (
+        <>
         <span className="flex items-center gap-1.5">
           <span
             className="inline-block h-2 w-2.5 rounded-[1px]"
@@ -1052,12 +1200,20 @@ function FiChart({
           />
           Financially free
         </span>
+        {stressEnds ? (
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-[3px] w-2.5 rounded-full" style={{ backgroundColor: "var(--negative)" }} />
+            After a −{stressPct}% drop
+          </span>
+        ) : null}
         {fi.runsOutYear != null ? (
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2.5 rounded-[1px]" style={{ backgroundColor: "var(--negative)" }} />
             Money ran out
           </span>
         ) : null}
+        </>
+        )}
       </div>
     </div>
   );
@@ -1140,14 +1296,23 @@ function PlanModal({
   plan,
   thisYear,
   currency,
+  focusSbp = false,
   onClose,
 }: {
   plan: FiPlan;
   thisYear: number;
   currency: string;
+  /** Opened from "Turn on SBP": scroll to that box and outline it. */
+  focusSbp?: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
+  useEffect(() => {
+    if (!focusSbp) return;
+    const box = document.getElementById("fi-sbp");
+    box?.scrollIntoView({ block: "center" });
+    box?.querySelector("input")?.focus({ preventScroll: true });
+  }, [focusSbp]);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -1342,12 +1507,15 @@ function PlanModal({
   }
 
   const heading = "sm:col-span-2 border-t border-line pt-3 text-sm font-bold uppercase tracking-wide first:border-t-0 first:pt-0";
+  // Light red, so Close reads apart from Save.
+  const closeButtonClass =
+    "shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20";
 
   return (
     <ModalShell
       title={
         // Capped on a phone so the title, Save and Close share one line.
-        <span className="flex min-w-0 max-w-[calc(100vw-5.5rem)] items-center gap-2 text-base sm:max-w-none sm:gap-3 sm:text-lg">
+        <span className="flex min-w-0 max-w-[calc(100vw-2.5rem)] items-center gap-2 text-base sm:max-w-none sm:gap-3 sm:text-lg">
           <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Retirement / FI Assumptions</span>
           {/* Outside the <form>, so it points at it by id. */}
           <button
@@ -1358,9 +1526,16 @@ function PlanModal({
           >
             {pending ? "Saving…" : "Save"}
           </button>
+          {/* A worded Close in place of the X, beside Save rather than at the
+              far edge (Victor, 2026-10-15). */}
+          <button type="button" onClick={onClose} className={closeButtonClass}>
+            Close
+          </button>
         </span>
       }
       onClose={onClose}
+      // Empty: Close sits in the title row above, so no X at the edge.
+      headerEnd={<></>}
       className="sm:max-w-3xl"
     >
       <form
@@ -1422,6 +1597,8 @@ function PlanModal({
           />
         </Field>
         <Field
+          id="fi-sbp"
+          highlight={focusSbp}
           label="SBP (Survivor Benefit Plan)"
           hint={
             <>
@@ -1798,13 +1975,16 @@ function PlanModal({
           </button>
         </div>
 
-        <div className="sm:col-span-full flex items-center justify-end gap-2 border-t border-line pt-3">
+        <div className="sm:col-span-full flex items-center justify-start gap-2 border-t border-line pt-3">
           <button
             type="submit"
             disabled={pending}
             className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
           >
             {pending ? "Saving…" : "Save"}
+          </button>
+          <button type="button" onClick={onClose} className={closeButtonClass}>
+            Close
           </button>
         </div>
         {error ? (
@@ -1883,9 +2063,25 @@ const inputClass =
 
 // Each field: bold title on top, then the box with its note beside it, so
 // the note explains the box it sits next to.
-function Field({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
+function Field({
+  id,
+  highlight = false,
+  label,
+  hint,
+  children,
+}: {
+  id?: string;
+  /** Light-blue outline for the box a button sent you to. */
+  highlight?: boolean;
+  label: string;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <label className="block">
+    <label
+      id={id}
+      className={`block ${highlight ? "-m-2 rounded-md bg-sky-50 p-2 ring-2 ring-sky-400 dark:bg-sky-950/40" : ""}`}
+    >
       <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
       <span className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3">
         {children}
@@ -1924,8 +2120,8 @@ function IncomeRow({
         {note ? <span className="block text-xs font-normal text-foreground sm:text-sm">{note}</span> : null}
       </span>
       <span className={`flex shrink-0 tabular-nums ${tone}`}>
-        <span className="w-[4.5rem] text-right sm:w-24">{formatMoneyWhole(monthly, currency)}</span>
-        <span className="w-[5.75rem] text-right sm:w-28">{formatMoneyWhole(yearly, currency)}</span>
+        <span className="w-[4.5rem] text-right sm:w-24 xl:w-20 2xl:w-24">{formatMoneyWhole(monthly, currency)}</span>
+        <span className="w-[5.75rem] text-right sm:w-28 xl:w-24 2xl:w-28">{formatMoneyWhole(yearly, currency)}</span>
       </span>
     </li>
   );

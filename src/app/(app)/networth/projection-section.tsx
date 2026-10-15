@@ -165,6 +165,9 @@ export function ProjectionSection({
   const open = !!collapse.open;
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
+  // The year-by-year table folds on its own, so Retirement details under it
+  // is reachable without scrolling past it (Victor, 2026-10-15).
+  const tableOpen = collapse.table === true;
   const [editing, setEditing] = useState<ProjectionYear | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -308,6 +311,30 @@ export function ProjectionSection({
       {open ? (
         <>
           {assumptions ? <div className="px-4 pb-3">{assumptions}</div> : null}
+          <div className="border-t border-line px-4 py-3">
+            <button
+              type="button"
+              onClick={() => setCollapse((s) => ({ ...s, table: s.table !== true }))}
+              aria-expanded={tableOpen}
+              className="flex w-full min-w-0 items-center gap-2 text-left"
+            >
+              <svg
+                aria-hidden
+                viewBox="0 0 20 20"
+                className={`h-3.5 w-3.5 shrink-0 text-foreground transition-transform ${tableOpen ? "" : "-rotate-90"}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M5 7.5 10 12.5 15 7.5" />
+              </svg>
+              <span className="text-sm font-semibold sm:text-lg">Year by year</span>
+            </button>
+          </div>
+          {tableOpen ? (
+          <>
           {/* The grid scrolls in its own box so thirty years of projection
               don't push the rest of the page down — and sticky only works
               against a bounded height, which is what gives the header row
@@ -315,7 +342,7 @@ export function ProjectionSection({
               header cards and the table read as one set. */}
           <div className="mx-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
           <div className="max-h-[70vh] overflow-auto">
-            <table className="w-full min-w-[720px] text-sm sm:text-lg">
+            <table className="w-full min-w-[900px] text-sm sm:text-lg">
               <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
                 <tr className="max-sm:text-[12px] sm:text-base uppercase tracking-wide text-foreground">
                   <th className="px-2.5 py-2 text-center font-semibold">Year</th>
@@ -323,6 +350,8 @@ export function ProjectionSection({
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Income</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Spending</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Income -<br />Spending</th>
+                  <th className="px-2.5 py-2 text-center font-semibold">Contributed</th>
+                  <th className="px-2.5 py-2 text-center font-semibold">Invested<br />Gains</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Current<br />NW</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Proj<br />EOY NW</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Actual -<br />Proj NW</th>
@@ -384,54 +413,46 @@ export function ProjectionSection({
                             currency,
                           )}
                         </span>
-                        {/* The year still running: logged income less logged
-                            spending — the same sum as the column, so plan and
-                            "Currently" compare like for like. It showed
-                            Contributed + Gains before, which isn't this column's
-                            figure (Victor, 2026-10-13); that split is in the
-                            year popup. */}
-                        {y.year === thisYear ? (
-                          y.actualIncomeCents != null && y.actualSpendingCents != null ? (
-                            (() => {
-                              const left = y.actualIncomeCents - y.actualSpendingCents;
-                              return (
-                                <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                                  Currently: {left < 0 ? "−" : ""}
-                                  {formatMoneyWhole(Math.abs(left), currency)}
-                                </span>
-                              );
-                            })()
-                          ) : null
+                        {/* Logged income less logged spending — the same sum
+                            as the column, so plan and actual compare like for
+                            like. Contributed and Gains have their own columns
+                            now (Victor, 2026-10-15). */}
+                        {y.actualIncomeCents != null && y.actualSpendingCents != null ? (
+                          <Actual
+                            cents={y.actualIncomeCents - y.actualSpendingCents}
+                            currency={currency}
+                            row={y}
+                            thisYear={thisYear}
+                          />
+                        ) : null}
+                      </td>
+                      {/* Est. Contributed from the year popup on top, what
+                          Invest / Savings recorded underneath — same as the
+                          popup's Contributed. */}
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
+                        {y.contributedCents == null ? (
+                          <span className="text-foreground">—</span>
                         ) : (
-                          <>
-                            <Actual
-                              cents={y.actualSavedCents}
-                              currency={currency}
-                              row={y}
-                              thisYear={thisYear}
-                              noun="Contributed"
-                            />
-                            {/* Gains are the sheet's Growth row, measured. The
-                                reviewed year-end figure from Invest / Savings wins
-                                where it exists; while a year is still running the
-                                snapshots stand in, so the column isn't blank for
-                                most of the year in the row you look at most. */}
-                            {(() => {
-                              const banked = y.actualGainsCents ?? y.runningGainsCents;
-                              if (!banked) return null;
-                              return (
-                                <span
-                                  className={`block max-sm:text-[12px] sm:text-base font-normal ${
-                                    banked < 0 ? "text-negative" : "text-positive"
-                                  }`}
-                                >
-                                  {banked < 0 ? "−" : "+"}
-                                  {formatMoneyWhole(Math.abs(banked), currency)} Gains
-                                </span>
-                              );
-                            })()}
-                          </>
+                          <span style={{ color: "var(--viz-savings)" }}>
+                            {formatMoneyWhole(y.contributedCents, currency)}
+                          </span>
                         )}
+                        <Actual cents={y.actualInvestedCents} currency={currency} row={y} thisYear={thisYear} always />
+                      </td>
+                      {/* Est. gains on top; underneath, the reviewed year-end
+                          figure where it exists, else what the snapshots
+                          measure so the running year isn't blank. */}
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
+                        <span className={y.growthCents < 0 ? "text-negative" : "text-positive"}>
+                          {formatMoneyWhole(y.growthCents, currency)}
+                        </span>
+                        <Actual
+                          cents={y.actualGainsCents ?? y.runningGainsCents}
+                          currency={currency}
+                          row={y}
+                          thisYear={thisYear}
+                          always
+                        />
                       </td>
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
                         {y.actualCents == null ? (
@@ -518,6 +539,8 @@ export function ProjectionSection({
           ) : null}
           {!error && notice ? (
             <p className="px-4 pb-3 text-sm font-medium text-foreground">{notice}</p>
+          ) : null}
+          </>
           ) : null}
           {details}
         </>
@@ -1238,6 +1261,7 @@ function Actual({
   row,
   thisYear,
   noun = "",
+  always = false,
 }: {
   cents: number | null;
   currency: string;
@@ -1245,10 +1269,13 @@ function Actual({
   thisYear: number;
   /** Label after the amount, e.g. "Saved"; replaces the "Currently:" / "actual" qualifier. */
   noun?: string;
+  /** Skip the register-coverage check — for figures from Invest / Savings,
+   *  which don't depend on how many months the register holds. */
+  always?: boolean;
 }) {
   if (!cents) return null;
   const running = row.year === thisYear;
-  if (!running && row.actualMonths < MIN_MONTHS_FOR_ACTUALS) return null;
+  if (!always && !running && row.actualMonths < MIN_MONTHS_FOR_ACTUALS) return null;
   return (
     <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
       {/* A named figure reads as "$21,208 Saved" — the Actual column beside it
