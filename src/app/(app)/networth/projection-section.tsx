@@ -735,10 +735,10 @@ function GroupBreakdown({ groups, currency, year }: { groups: StoredGroupYear[];
         <table className="w-full min-w-[520px] text-xs sm:text-sm">
           <thead className="bg-sky-100 dark:bg-sky-900/50">
             <tr className="uppercase tracking-wide text-foreground">
-              <th className={`${cell} text-left font-semibold`}>Group</th>
+              <th className={`${cell} text-left font-semibold`}>Account Type</th>
               <th className={`${cell} font-semibold`}>Start</th>
-              <th className={`${cell} font-semibold`}>Added</th>
-              <th className={`${cell} font-semibold`}>Taken out</th>
+              <th className={`${cell} font-semibold`}>Contributed</th>
+              <th className={`${cell} font-semibold`}>Withdraw</th>
               <th className={`${cell} font-semibold`}>Gains</th>
               <th className={`${cell} font-semibold`}>End</th>
             </tr>

@@ -1571,8 +1571,9 @@ function PlanModal({
       // so typing never runs into it ("Other iMilncome").
       name: l.name === DEFAULT_LINE_NAME[l.kind] ? "" : l.name,
       kind: l.kind,
-      // Shown the way it was typed: per year or per month.
-      monthly: centsToDisplay(l.annualCents != null ? l.annualCents : Math.round(l.monthlyCents)),
+      // Shown the way it was typed: per year or per month, no ".00" on a
+      // whole amount (125000.00 is cut off in the phone's box).
+      monthly: centsToDisplay(l.annualCents != null ? l.annualCents : Math.round(l.monthlyCents)).replace(/\.00$/, ""),
       per: l.annualCents != null ? "yr" : "mo",
       startYear: l.startYear?.toString() ?? "",
       startMonth: l.startMonth?.toString() ?? "",
@@ -1600,7 +1601,7 @@ function PlanModal({
         taxable: true,
       });
     }
-    return saved;
+    return byLineDates(saved, payStop(plan.targetRetireYear, plan.targetRetireMonth, plan.withdrawStartYear), thisYear);
   });
   const [rentalDrafts, setRentalDrafts] = useState<RentalDraft[]>(() =>
     plan.rentalRows.map((r) => ({
@@ -1955,7 +1956,14 @@ function PlanModal({
         <div className={isOpen("income") ? "contents" : "hidden"}>
         <div className="space-y-2 sm:col-span-2">
           {lines.map((l) => (
-            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(12rem,1fr)_10rem_11rem_8rem_8.5rem_8.5rem_auto]">
+            <div
+              key={l.key}
+              // Re-sorted once you leave the row, not while typing a year.
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                  setLines((prev) => byLineDates(prev, stopNow, thisYear));
+              }}
+              className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(7rem,1fr)_10rem_11rem_8rem_8.5rem_8.5rem_auto]">
               {/* Your own name ("Mil Pay"); the type decides how it is
                   treated — COLA, survivor, when Pay stops (Victor, 2026-10-16).
                   Blank shows the type's name as a hint and saves it. */}
@@ -1990,7 +1998,7 @@ function PlanModal({
                     value={l.monthly}
                     onChange={(e) => updateLine(l.key, { monthly: e.target.value })}
                     placeholder="0.00"
-                    className={lineInput}
+                    className={`${lineInput} text-center`}
                   />
                   <select
                     value={l.per}
@@ -2017,7 +2025,7 @@ function PlanModal({
                 </LineField>
               ) : (
                 <LineField label="Pay Increase %/yr">
-                  <span className="block py-1.5 text-sm text-foreground">COLA</span>
+                  <span className="block py-1.5 text-center text-sm text-foreground">COLA</span>
                 </LineField>
               )}
               {/* Month + year: the first year only counts from this month on. */}
@@ -2089,7 +2097,7 @@ function PlanModal({
 
         <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
         <div className={isOpen("rates") ? "contents" : "hidden"}>
-        <Field label="Expected rate of return (%)" hint="What your investments earn a year. Each group below uses it unless you set its own.">
+        <Field label="Expected rate of return (%)" hint="What your investments earn a year. Each account group uses it unless you set its own.">
           <input name="investmentReturnPct" inputMode="decimal" value={investDefault} onChange={(e) => setInvestDefault(e.target.value)} className={inputClass} />
         </Field>
         <Field label="Savings APY (%)" hint="What your checking and savings accounts earn a year — the Cash group.">
@@ -2118,11 +2126,20 @@ function PlanModal({
           />
         </Field>
 
+        </div>
+
         {/* Each kind of money on its own: return, what goes in, what comes
-            out, and the tax on it. Blank boxes use the default shown. */}
+            out, and the tax on it. Blank boxes use the default shown. Its own
+            section — it was lost under the rates (Victor, 2026-10-16). */}
+        <SectionHead
+          title="Account Groups"
+          open={isOpen("groups")}
+          onToggle={() => toggleSection("groups")}
+          note="Contributions and withdrawals by account type."
+        />
+        <div className={isOpen("groups") ? "contents" : "hidden"}>
         <div className="space-y-2 sm:col-span-2">
-          <p className="border-t border-line pt-3 text-sm font-bold uppercase tracking-wide text-foreground">Account groups</p>
-          <p className="-mt-1 text-xs sm:text-sm text-foreground">
+          <p className="text-xs sm:text-sm text-foreground">
             Blank = default. Take out: today&rsquo;s dollars, rises with inflation.
           </p>
           {GROUP_KINDS.filter(
@@ -2131,7 +2148,10 @@ function PlanModal({
               plan.accountGroups.rows.some((r) => r.kind === kind && (r.add_annual_cents || r.take_annual_cents)),
           ).map((kind) => {
             const d = groupDrafts[kind];
-            const slots = plan.accountGroups.slots.filter((s) => slotGroups[slotKey(s)] === kind);
+            // Biggest balance first.
+            const slots = plan.accountGroups.slots
+              .filter((s) => slotGroups[slotKey(s)] === kind)
+              .sort((a, b) => b.balanceCents - a.balanceCents);
             const todayCents = slots.reduce((t, s) => t + s.balanceCents, 0);
             const measuredCents = plan.accountGroups.measuredAddCents[kind];
             const isCash = kind === "cash";
@@ -2148,7 +2168,7 @@ function PlanModal({
               <div key={kind} className="rounded-lg bg-background p-2 ring-1 ring-line">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                   <p className="text-sm font-semibold text-foreground">
-                    {GROUP_LABEL[kind]}{" "}
+                    {GROUP_LABEL[kind]} · Current Amount:{" "}
                     <span className="tabular-nums" style={{ color: "var(--viz-savings)" }}>
                       {formatMoneyWhole(todayCents, currency)}
                     </span>
@@ -2167,34 +2187,40 @@ function PlanModal({
                   {!isCash && measuredCents > 0 ? ` · added last 12 mo: ${formatMoneyWhole(measuredCents, currency)}/yr` : ""}
                 </p>
                 {accountsOpen ? (
-                  <div className="mt-1.5 space-y-1">
+                  // Three across on a wide screen, so name, balance and group
+                  // sit together instead of at opposite edges.
+                  <div className="mt-1.5 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {slots.length === 0 ? <p className="text-xs text-foreground">No accounts in this group.</p> : null}
                     {slots.map((s) => (
-                      <div key={slotKey(s)} className="flex items-center gap-2 text-xs sm:text-sm">
-                        <span className="min-w-0 flex-1 truncate text-foreground">{s.name}</span>
-                        <span className="tabular-nums text-foreground">{formatMoneyWhole(s.balanceCents, currency)}</span>
+                      // Name on its own line — long names stay whole — with
+                      // balance and group under it.
+                      <div key={slotKey(s)} className="min-w-0 rounded-md px-2 py-1.5 text-xs ring-1 ring-line sm:text-sm">
+                        <p className="break-words leading-snug text-foreground">{s.name}</p>
+                        <div className="mt-1 flex items-center gap-2">
+                        <span className="flex-1 text-center tabular-nums text-foreground">{formatMoneyWhole(s.balanceCents, currency)}</span>
                         <select
                           value={slotGroups[slotKey(s)]}
                           onChange={(e) => setSlotGroups((prev) => ({ ...prev, [slotKey(s)]: e.target.value as GroupKind }))}
                           aria-label={`Group for ${s.name}`}
-                          className="w-32 shrink-0 rounded-md sm:w-40 bg-surface px-1.5 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                          className="w-32 shrink-0 rounded-md bg-surface px-1.5 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
                         >
                           {GROUP_KINDS.map((k) => (
                             <option key={k} value={k}>{GROUP_LABEL[k]}</option>
                           ))}
                         </select>
+                        </div>
                       </div>
                     ))}
                   </div>
                 ) : null}
-                <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+                <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-8">
                   <LineField label="Return %">
                     <input
                       inputMode="decimal"
                       value={d.returnPct}
                       onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
                       placeholder={isCash ? cashDefault : investDefault}
-                      className={`${lineInput}`}
+                      className={`${lineInput} text-center`}
                     />
                   </LineField>
                   {isCash ? null : (
@@ -2205,7 +2231,7 @@ function PlanModal({
                           value={d.add}
                           onChange={(e) => updateGroup(kind, { add: e.target.value })}
                           placeholder={dollars(measuredCents)}
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                       <LineField label="Add from">
@@ -2214,7 +2240,7 @@ function PlanModal({
                           value={d.addStart}
                           onChange={(e) => updateGroup(kind, { addStart: e.target.value })}
                           placeholder="Now"
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                       <LineField label="Add to">
@@ -2229,7 +2255,7 @@ function PlanModal({
                               toYear(d.takeStart),
                             )?.toString() ?? "Always"
                           }
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                       <LineField label="Take out $ / yr">
@@ -2238,7 +2264,7 @@ function PlanModal({
                           value={d.take}
                           onChange={(e) => updateGroup(kind, { take: e.target.value })}
                           placeholder="0"
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                       <LineField label="Take from">
@@ -2246,7 +2272,7 @@ function PlanModal({
                           inputMode="numeric"
                           value={d.takeStart}
                           onChange={(e) => updateGroup(kind, { takeStart: e.target.value })}
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                       <LineField label="Take to">
@@ -2255,7 +2281,7 @@ function PlanModal({
                           value={d.takeEnd}
                           onChange={(e) => updateGroup(kind, { takeEnd: e.target.value })}
                           placeholder="For life"
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                       <LineField label="Tax %">
@@ -2264,7 +2290,7 @@ function PlanModal({
                           value={d.taxPct}
                           onChange={(e) => updateGroup(kind, { taxPct: e.target.value })}
                           placeholder={String(DEFAULT_TAX_PCT[kind])}
-                          className={`${lineInput}`}
+                          className={`${lineInput} text-center`}
                         />
                       </LineField>
                     </>
@@ -2847,6 +2873,27 @@ type GroupDraft = {
   takeEnd: string;
   taxPct: string;
 };
+
+/** Income lines in date order: start, then end. A blank start is now, a
+ *  blank Pay end is when work stops, any other blank end is never. */
+function byLineDates(
+  lines: LineDraft[],
+  stop: { endYear: number; endMonth: number } | null,
+  thisYear: number,
+): LineDraft[] {
+  const yr = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
+  const start = (l: LineDraft) => {
+    const y = yr(l.startYear);
+    return y == null ? thisYear * 12 + new Date().getMonth() + 1 : y * 12 + (Number(l.startMonth) || 1);
+  };
+  const end = (l: LineDraft) => {
+    const y = yr(l.endYear);
+    if (y != null) return y * 12 + (Number(l.endMonth) || 12);
+    if (l.kind === "pay" && stop) return stop.endYear * 12 + stop.endMonth;
+    return Number.MAX_SAFE_INTEGER;
+  };
+  return [...lines].sort((a, b) => start(a) - start(b) || end(a) - end(b));
+}
 
 const lineInput =
   "w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";

@@ -35,7 +35,7 @@ export const GROUP_LABEL: Record<GroupKind, string> = {
   roth: "Roth retirement",
   brokerage: "Brokerage",
   crypto: "Crypto",
-  metals: "Metals & other",
+  metals: "Metals",
 };
 
 /** What each group usually holds — the line under its name. */
