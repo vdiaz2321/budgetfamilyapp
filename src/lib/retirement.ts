@@ -4,9 +4,11 @@
  * Every figure is in the dollars of the year it lands in. Investments grow at
  * the expected rate of return; savings (checking and savings buckets) at the
  * savings APY, and each year's saving is split between the two. Retired pay,
- * VA, Social Security and other income stay at the amount entered — no COLA
- * (Victor, 2026-10-15); spending, healthcare and rentals rise by inflation. Spending is what the table says for that year, grown by
- * inflation from the year it was typed.
+ * VA and Social Security rise by the COLA — each one only when its switch is
+ * on, and by the actual COLA in any year one is typed; other income stays at
+ * the amount entered. Spending, healthcare and rentals rise by inflation.
+ * Spending is what the table says for that year, grown by inflation from the
+ * year it was typed.
  *
  * The arithmetic is deliberately the plain version, so it can be checked by
  * hand: growth on the balance you started the year with, then the year's
@@ -324,9 +326,13 @@ export function ageInYear(birthYear: number | null, year: number): number | null
 
 // ---- Retirement income, year by year.
 //
-// Military retired pay, VA disability, Social Security and the other lines
-// stay at the amount entered every year. Victor removed the COLA on
-// 2026-10-15: he'd rather plan on flat income than on a guessed raise.
+// Military retired pay, VA disability and Social Security get the same
+// yearly COLA (CPI-W, Q3 over Q3), each behind its own switch and each from
+// its own start: retired pay the January after retiring (the first one cut by
+// the retirement quarter), VA from its start, Social Security from age 62.
+// The other lines stay at the amount entered. Victor took a flat 2.5% COLA out on 2026-10-15
+// and asked for it back on 2026-10-16 as switches plus the actual COLA per
+// year, typed from MOAA's newsletter as each one is announced.
 
 /** What an amount now has grown to by `year` at `pct` a year. */
 export function inflateTo(year: number, thisYear: number, pct: number): number {
@@ -343,12 +349,49 @@ export const INCOME_LINE_KINDS: { value: IncomeLineKind; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
+/** The COLA plan. A COLA is keyed by the year the raised payment is first
+ *  received: the "2027 COLA" is announced in October 2026, effective
+ *  December 1 and paid from January 2027 — how SSA, DFAS and MOAA all name it. */
+export type ColaPlan = {
+  /** Future COLA, % a year, for any year without an actual one typed. */
+  pct: number;
+  /** Actual COLAs, % by payment year. */
+  byYear: Record<string, number>;
+  military: boolean;
+  va: boolean;
+  socialSecurity: boolean;
+};
+
+export const NO_COLA: ColaPlan = { pct: 0, byYear: {}, military: false, va: false, socialSecurity: false };
+
+/** The COLA paid from January of `year`: the typed one, else the future rate. */
+export const colaFor = (cola: ColaPlan, year: number): number => cola.byYear[String(year)] ?? cola.pct;
+
+/** What an amount has grown to by `year` from every COLA paid after `fromYear`. */
+export function colaGrowth(cola: ColaPlan, fromYear: number, year: number): number {
+  let f = 1;
+  for (let y = fromYear + 1; y <= year; y++) f *= 1 + colaFor(cola, y) / 100;
+  return f;
+}
+
+/** A stored `cola_by_year` with anything that isn't a year → % dropped. */
+export function parseColaByYear(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Number(v);
+    if (/^\d{4}$/.test(k) && v != null && v !== "" && Number.isFinite(n)) out[k] = n;
+  }
+  return out;
+}
+
 /** A source of income that switches on and off by year. */
 export type IncomeLine = {
   id: string;
   name: string;
   kind: IncomeLineKind;
-  /** Per month at current rates, before tax; rises with inflation. */
+  /** Per month at this year's rates, before tax. VA and Social Security rise
+   *  by the COLA when their switch is on; the rest stay as entered. */
   monthlyCents: number;
   /** First year received; null = already arriving. */
   startYear: number | null;
@@ -391,6 +434,8 @@ export type PensionEstimate = {
   /** SBP premium per month in the retirement year (0 when not elected). */
   sbpAtRetireCents: number;
   retireYear: number;
+  /** First month on retired pay (1–12). */
+  retireMonth: number;
 };
 
 
@@ -414,7 +459,56 @@ export function estimatePension(p: MilitaryPension): PensionEstimate | null {
     grossAtRetireCents,
     sbpAtRetireCents,
     retireYear: p.retireYear,
+    retireMonth: p.retireMonth ?? 1,
   };
+}
+
+/**
+ * Share of the first COLA after retiring, by the quarter retired pay starts
+ * (10 USC 1401a(d), High-3): it only counts the CPI rise after that quarter.
+ * DFAS's table for the 2026 COLA (2.8%) paid 2.6 / 1.6 / 0.7 / 0.0% to Jan–Mar
+ * / Apr–Jun / Jul–Sep / Oct–Dec 2025 retirements — about these shares.
+ */
+const FIRST_COLA_SHARE = [0.93, 0.57, 0.25, 0];
+
+/** Retired pay's growth by `year` from its COLAs: the first one, paid the
+ *  January after retiring, cut by FIRST_COLA_SHARE; every one after it full.
+ *  A November 2033 start gets 0% in 2034 and the full COLA from 2035. */
+export function pensionColaGrowth(cola: ColaPlan, retireYear: number, retireMonth: number, year: number): number {
+  if (year <= retireYear) return 1;
+  const first = 1 + (colaFor(cola, retireYear + 1) / 100) * FIRST_COLA_SHARE[Math.floor((retireMonth - 1) / 3)];
+  return first * colaGrowth(cola, retireYear + 1, year);
+}
+
+/** Share of the first COLA after retiring in `retireMonth` (1–12). */
+export const firstColaShare = (retireMonth: number) => FIRST_COLA_SHARE[Math.floor((retireMonth - 1) / 3)];
+
+/** First payment year retired pay actually rises: the January after
+ *  retiring, or the one after that when the first COLA is cut to 0%. */
+export const firstPensionColaYear = (retireYear: number, retireMonth: number) =>
+  retireYear + (FIRST_COLA_SHARE[Math.floor((retireMonth - 1) / 3)] > 0 ? 1 : 2);
+
+/** Actual COLAs by payment year (SSA; military retired pay and VA disability
+ *  got the same % every year). 2027 announced 2026-10-14. */
+export const COLA_HISTORY: Record<number, number> = {
+  2007: 3.3, 2008: 2.3, 2009: 5.8, 2010: 0, 2011: 0, 2012: 3.6, 2013: 1.7,
+  2014: 1.5, 2015: 1.7, 2016: 0, 2017: 0.3, 2018: 2.0, 2019: 2.8, 2020: 1.6,
+  2021: 1.3, 2022: 5.9, 2023: 8.7, 2024: 3.2, 2025: 2.5, 2026: 2.8, 2027: 3.6,
+};
+
+/** Compound average COLA over the last `years` on record, % rounded to 0.1. */
+export function colaAverage(years: number): number {
+  const last = Math.max(...Object.keys(COLA_HISTORY).map(Number));
+  let f = 1;
+  for (let y = last - years + 1; y <= last; y++) f *= 1 + (COLA_HISTORY[y] ?? 0) / 100;
+  return Math.round((Math.pow(f, 1 / years) - 1) * 1000) / 10;
+}
+
+/** Gross retired pay and SBP per month in `year`, with its COLAs (SBP is a
+ *  share of gross, so it rises with it). */
+function pensionIn(p: PensionEstimate, year: number, cola: ColaPlan) {
+  const g = cola.military ? pensionColaGrowth(cola, p.retireYear, p.retireMonth, year) : 1;
+  return { gross: Math.round(p.grossAtRetireCents * g), sbp: Math.round(p.sbpAtRetireCents * g) };
 }
 
 export type High3Year = {
@@ -500,6 +594,35 @@ const active = (year: number, start: number | null, end: number | null) =>
 const lineMonths = (line: IncomeLine, year: number) =>
   line.startYear != null && year === line.startYear ? 13 - (line.startMonth ?? 1) : 12;
 
+/** What the COLA dates hang on: the year amounts are typed at, and the
+ *  birth year Social Security's age-62 start comes from. */
+export type ColaWhen = { thisYear: number; birthYear: number | null };
+
+/**
+ * The year a line's COLAs count from (each one paid after it), or null when
+ * the line never gets one. Amounts are typed at this year's rates, so nothing
+ * before this year counts.
+ * - VA disability: from the year it starts — a future VA line is typed at the
+ *   rate it starts on.
+ * - Social Security: from the year its earner turns 62, claimed or not
+ *   (SSA adds COLAs from age 62; a statement estimate is in today's dollars
+ *   and isn't raised before then). No birth year: from its start.
+ */
+export function lineColaBase(line: IncomeLine, cola: ColaPlan, when: ColaWhen): number | null {
+  const start = line.startYear ?? when.thisYear;
+  if (line.kind === "va") return cola.va ? Math.max(when.thisYear, start) : null;
+  if (line.kind === "social_security" && cola.socialSecurity) {
+    return Math.max(when.thisYear, when.birthYear != null ? when.birthYear + 62 : start);
+  }
+  return null;
+}
+
+/** A line's monthly amount in `year`, with every COLA paid after its base. */
+function lineIn(line: IncomeLine, year: number, cola: ColaPlan, when: ColaWhen): number {
+  const base = lineColaBase(line, cola, when);
+  return base == null ? line.monthlyCents : Math.round(line.monthlyCents * colaGrowth(cola, base, year));
+}
+
 /** A part's money for the whole year. */
 const yearlyOf = (p: IncomePart, cents: number) => cents * (p.months ?? 12);
 
@@ -513,11 +636,13 @@ export function incomeForYear(
   pensionStartYear: number | null,
   lines: IncomeLine[],
   taxPct: number,
+  cola: ColaPlan = NO_COLA,
+  when: ColaWhen = { thisYear: year, birthYear: null },
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
   if (pension && pensionStartYear != null && year >= pensionStartYear) {
-    const { grossAtRetireCents: gross, sbpAtRetireCents: sbp } = pension;
+    const { gross, sbp } = pensionIn(pension, year, cola);
     parts.push({
       name: "Military retired pay",
       kind: "pension",
@@ -527,7 +652,7 @@ export function incomeForYear(
   }
   for (const line of lines) {
     if (!active(year, line.startYear, line.endYear) || line.monthlyCents <= 0) continue;
-    const monthly = line.monthlyCents;
+    const monthly = lineIn(line, year, cola, when);
     const months = lineMonths(line, year);
     parts.push({
       name: line.name,
@@ -561,11 +686,14 @@ export function survivorIncomeForYear(
   sbpEnabled: boolean,
   lines: IncomeLine[],
   taxPct: number,
+  cola: ColaPlan = NO_COLA,
+  when: ColaWhen = { thisYear: year, birthYear: null },
 ): YearIncome {
   const keep = 1 - taxPct / 100;
   const parts: IncomePart[] = [];
   if (pension && sbpEnabled && pensionStartYear != null && year >= pensionStartYear) {
-    const annuity = Math.round(pension.grossAtRetireCents * 0.55);
+    // The annuity gets the same COLAs retired pay would have.
+    const annuity = Math.round(pensionIn(pension, year, cola).gross * 0.55);
     parts.push({
       name: "SBP annuity (55%)",
       kind: "pension",
@@ -579,7 +707,7 @@ export function survivorIncomeForYear(
   for (const line of live) {
     if (line.kind === "va" || line.kind === "job") continue;
     if (line.kind === "social_security" && line !== largestSs) continue;
-    const monthly = line.monthlyCents;
+    const monthly = lineIn(line, year, cola, when);
     parts.push({
       name: line.kind === "social_security" ? "Social Security (survivor)" : line.name,
       kind: line.kind,

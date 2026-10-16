@@ -1,4 +1,4 @@
-import { CASH_KINDS, inflatedSpending, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
+import { CASH_KINDS, inflatedSpending, parseColaByYear, parseDentalPlans, parseHealthPlans, toRentalProperty, type RentalRow } from "@/lib/retirement";
 import { withCurrentMonth, captureSnapshots, currentMonthFirst } from "@/lib/snapshots";
 import { NetworthBoard, type GridRow, type MonthPoint } from "./networth-board";
 import { isDebtExcludedFromNetWorth, PROPERTY_KIND } from "@/lib/net-worth";
@@ -145,7 +145,7 @@ export default async function NetworthPage() {
     // ---- Financial independence inputs.
     supabase
       .from("retirement_plan")
-      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct")
+      .select("birth_year, target_retire_year, target_retire_month, service_start_month, annual_spend_cents, annual_contribution_cents, investment_return_pct, withdrawal_rate_pct, withdraw_start_year, guaranteed_income_cents, guaranteed_income_start_year, service_start_year, high3_monthly_cents, base_pay_by_year, inflation_pct, cash_return_pct, sbp_enabled, sbp_pct, longevity_age, healthcare_annual_cents, health_plans, dental_plans, healthcare_start_age, healthcare_growth_pct, cola_pct, cola_by_year, cola_military, cola_va, cola_social_security")
       .eq("household_id", household.id)
       .maybeSingle(),
     // A year of actual living costs and actual saving, straight from the
@@ -940,6 +940,13 @@ export default async function NetworthPage() {
         basePayByYear: (planRow?.base_pay_by_year ?? {}) as Record<string, number>,
         inflationPct: planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
         cashReturnPct: planRow?.cash_return_pct == null ? 3 : Number(planRow.cash_return_pct),
+        cola: {
+          pct: planRow?.cola_pct == null ? 2.5 : Number(planRow.cola_pct),
+          byYear: parseColaByYear(planRow?.cola_by_year),
+          military: planRow?.cola_military ?? true,
+          va: planRow?.cola_va ?? true,
+          socialSecurity: planRow?.cola_social_security ?? true,
+        },
         sbpEnabled: !!planRow?.sbp_enabled,
         sbpPct: planRow?.sbp_pct == null ? 6.5 : Number(planRow.sbp_pct),
         longevityAge: planRow?.longevity_age ?? 90,

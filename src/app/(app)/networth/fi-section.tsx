@@ -3,11 +3,15 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
-import { useSessionCollapse } from "@/lib/use-session-collapse";
+import { usePersistentCollapse, useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, formatMoney, formatMoneyWhole } from "@/lib/money";
 import {
   INCOME_LINE_KINDS,
   ageInYear,
+  colaAverage,
+  firstColaShare,
+  firstPensionColaYear,
+  lineColaBase,
   estimatePension,
   high3FromBasePay,
   high3Window,
@@ -18,6 +22,7 @@ import {
   rentalForYear,
   rentalsForYear,
   survivorIncomeForYear,
+  type ColaPlan,
   type FiScheduleYear,
   type HealthPlan,
   type HealthPlanKind,
@@ -58,6 +63,8 @@ export type FiPlan = {
   inflationPct: number;
   /** What savings (checking + savings buckets) earn a year. */
   cashReturnPct: number;
+  /** The COLA: future rate, actual ones by year, and which incomes get it. */
+  cola: ColaPlan;
   sbpEnabled: boolean;
   sbpPct: number;
   /** The age the plan runs to. */
@@ -141,13 +148,32 @@ export function FiSection({
   projection: FiProjectionYear[];
   /** Where the pieces go: Current and Projected Net Worth lays them out, so
    *  the plan, its rates and its retirement read as one section. */
-  children: (parts: { assumptions: React.ReactNode; details: React.ReactNode }) => React.ReactNode;
+  children: (parts: {
+    assumptions: React.ReactNode;
+    details: React.ReactNode;
+    /** Today's Money vs Not Today's Money — one choice for the whole page. */
+    todays: boolean;
+    setTodays: (v: boolean) => void;
+  }) => React.ReactNode;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
   const [collapse, setCollapse] = useSessionCollapse("networth-fi", () => ({ open: false }));
   const open = !!collapse.open;
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
+  // Today's Money: every later year's NET WORTH shrunk by inflation back to
+  // this year — the table, these panels and the chart alike, one toggle for
+  // the page (Victor, 2026-10-16). Income, spending and gains always show the
+  // dollars actually paid: retired pay is the $95,640 the High-3 pays. Kept
+  // across logins.
+  const [moneyPref, setMoneyPref] = usePersistentCollapse("networth-money", () => ({ todays: true }));
+  const todays = moneyPref.todays !== false;
+  const setTodays = (v: boolean) => setMoneyPref({ todays: v });
+  /** What a dollar in `year` is worth today: 1 for this year and earlier. */
+  const deflator = (year: number) =>
+    todays ? Math.pow(1 + plan.inflationPct / 100, Math.max(0, year - thisYear)) : 1;
+  const sh = (year: number, cents: number) => Math.round(cents / deflator(year));
+
   // true = open at the top; "sbp" = open scrolled to the SBP box.
   const [editing, setEditing] = useState<boolean | "sbp">(false);
 
@@ -164,7 +190,7 @@ export function FiSection({
       ? thisYear + 1
       : plan.targetRetireYear + ((plan.targetRetireMonth ?? 1) > 1 ? 1 : 0);
 
-  // Military retired pay from the DFAS High-3 formula — the same every year, no COLA.
+  // Military retired pay from the DFAS High-3 formula; COLAs on top when on.
   const pension = estimatePension(
     {
       retireYear: plan.targetRetireYear,
@@ -176,9 +202,10 @@ export function FiSection({
       sbpPct: plan.sbpPct,
     },
   );
+  const colaWhen = { thisYear, birthYear: plan.birthYear };
   // Income is gross: taxes are budgeted as spending.
   const incomeIn = (year: number) =>
-    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, 0);
+    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, 0, plan.cola, colaWhen);
   const rentIn = (year: number) => rentalsForYear(plan.rentals, year, thisYear, plan.inflationPct, 0);
 
   // The Net Worth Plan table, each year as typed (round figures typed by
@@ -332,7 +359,7 @@ export function FiSection({
   const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
   const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
   const survIn = (year: number) =>
-    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, 0);
+    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, 0, plan.cola, colaWhen);
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
     // The plan's years carried forward to the plan-until year, so a death
@@ -383,6 +410,23 @@ export function FiSection({
     { length: Math.max(1, Math.min(untilYear ?? lastPlanYear, lastPlanYear) - firstFullRetiredYear + 1) },
     (_, i) => firstFullRetiredYear + i,
   );
+
+  // The chart's net worth in the chosen money; income, spending and gains
+  // stay the dollars actually paid, like the table.
+  const fiShown = {
+    ...fi,
+    years: fi.years.map((y) => ({
+      ...y,
+      startCents: sh(y.year, y.startCents),
+      endCents: sh(y.year, y.endCents),
+      targetCents: sh(y.year, y.targetCents),
+    })),
+  };
+  const projectionShown = projection.map((p) => ({
+    ...p,
+    eoyCents: sh(p.year, p.eoyCents),
+    actualCents: p.actualCents == null ? p.actualCents : sh(p.year, p.actualCents),
+  }));
 
   // The button that opens the rates that rebuild the table, above it.
   const assumptions = (
@@ -529,16 +573,16 @@ export function FiSection({
                           ? `to cover the gap at ${plan.withdrawalRatePct}% a year`
                           : "Retired pay covers spending"
                       }
-                      value={mile.targetCents > 0 ? formatMoneyWhole(mile.targetCents, currency) : "Nothing"}
+                      value={mile.targetCents > 0 ? formatMoneyWhole(sh(mile.year, mile.targetCents), currency) : "Nothing"}
                       tone={mile.targetCents > 0 ? "" : "text-positive"}
                     />
-                    <ValueRow label={`Expected in ${mile.year}`} value={formatMoneyWhole(mile.endCents, currency)} />
+                    <ValueRow label={`Expected in ${mile.year}`} value={formatMoneyWhole(sh(mile.year, mile.endCents), currency)} />
                     <ValueRow
                       label="Status"
                       value={
                         mile.endCents >= mile.targetCents
                           ? "On track"
-                          : `Short ${formatMoneyWhole(mile.targetCents - mile.endCents, currency)}`
+                          : `Short ${formatMoneyWhole(sh(mile.year, mile.targetCents - mile.endCents), currency)}`
                       }
                       tone={mile.endCents >= mile.targetCents ? "text-positive" : "text-negative"}
                       bold
@@ -582,7 +626,7 @@ export function FiSection({
                   // The year that age falls in — the balance is its year-end
                   // bar in the chart below.
                   note={plan.birthYear ? `Year: ${plan.birthYear + 80}` : undefined}
-                  value={at80 == null ? "—" : formatMoneyWhole(Math.max(0, at80), currency)}
+                  value={at80 == null ? "—" : formatMoneyWhole(sh(plan.birthYear! + 80, Math.max(0, at80)), currency)}
                 />
               </ul>
             </div>
@@ -772,8 +816,8 @@ export function FiSection({
               {stressEnd != null ? (
                 <>
                   {" · "}Left at age {plan.longevityAge}:{" "}
-                  <span className="font-semibold">{formatMoneyWhole(Math.max(0, stressEnd), currency)}</span>
-                  {planEnd != null ? ` (without the drop ${formatMoneyWhole(Math.max(0, planEnd), currency)})` : ""}
+                  <span className="font-semibold">{formatMoneyWhole(sh(untilYear!, Math.max(0, stressEnd)), currency)}</span>
+                  {planEnd != null ? ` (without the drop ${formatMoneyWhole(sh(untilYear!, Math.max(0, planEnd)), currency)})` : ""}
                 </>
               ) : null}
             </p>
@@ -781,14 +825,14 @@ export function FiSection({
 
           <FiChart
             view={chartView}
-            stressEnds={stressed && chartView === "nw" ? new Map(stressed.years.map((y) => [y.year, y.endCents])) : null}
+            stressEnds={stressed && chartView === "nw" ? new Map(stressed.years.map((y) => [y.year, sh(y.year, y.endCents)])) : null}
             stressPct={dropPct}
-            fi={fi}
+            fi={fiShown}
             thisYear={thisYear}
             birthYear={plan.birthYear}
             targetRetireYear={plan.targetRetireYear}
             ssYear={ssLine?.startYear ?? null}
-            projection={projection}
+            projection={projectionShown}
             currency={currency}
           />
         </div>
@@ -798,7 +842,7 @@ export function FiSection({
 
   return (
     <>
-      {children({ assumptions, details })}
+      {children({ assumptions, details, todays, setTodays })}
       {editing ? (
         <PlanModal
           plan={plan}
@@ -1348,6 +1392,18 @@ function PlanModal({
   }, [focusSbp]);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Every section opens collapsed — the header and its footnote only — so
+  // the popup isn't a wall of numbers (Victor, 2026-10-16). Collapsed fields
+  // stay in the form, hidden, so Save still sends them.
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(focusSbp ? ["military"] : []));
+  const isOpen = (id: string) => openSections.has(id);
+  const toggleSection = (id: string) =>
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // The retired-pay inputs are live so the estimate under them updates as
   // they're typed.
@@ -1361,6 +1417,15 @@ function PlanModal({
   const [inflation, setInflation] = useState(String(plan.inflationPct));
   const [sbpEnabled, setSbpEnabled] = useState(plan.sbpEnabled);
   const [sbpPct, setSbpPct] = useState(String(plan.sbpPct));
+  // COLA: which incomes get it, the future rate, and the actual one per
+  // payment year.
+  const [colaMilitary, setColaMilitary] = useState(plan.cola.military);
+  const [colaVa, setColaVa] = useState(plan.cola.va);
+  const [colaSs, setColaSs] = useState(plan.cola.socialSecurity);
+  const [colaPct, setColaPct] = useState(String(plan.cola.pct));
+  const [colaByYear, setColaByYear] = useState<Record<string, string>>(() =>
+    Object.fromEntries(Object.entries(plan.cola.byYear).map(([y, pct]) => [y, String(pct)])),
+  );
   // A blank start means the retirement month, so it's filled in with it —
   // the box shows the date the cost really starts.
   // The month boxes show January (starts) and December (ends) as blank.
@@ -1403,6 +1468,10 @@ function PlanModal({
   const newPlanDates = () => ({ ...datesDraft(NO_DATES), startYear: retireYear, startMonth: startMonthDraft(retireMonth) });
   const [birthYear, setBirthYear] = useState(plan.birthYear?.toString() ?? "");
   const [tflInfoOpen, setTflInfoOpen] = useState(false);
+  const [colaWhyOpen, setColaWhyOpen] = useState(false);
+  // The longer notes behind a section's one-line footnote.
+  const [info, setInfo] = useState<"income" | "rentals" | null>(null);
+  const infoLink = "whitespace-nowrap font-semibold underline underline-offset-2";
 
   const toYear = (v: string) => (/^\d{4}$/.test(v.trim()) ? Number(v) : null);
   const retireMonthNum = retireMonth ? Number(retireMonth) : null;
@@ -1516,6 +1585,60 @@ function PlanModal({
     return { first, cashMonthly: Math.round(y.cashFlowCents / 12), payMonthly, purchaseCash: y.purchaseCashCents, equity: y.equityEndCents };
   };
 
+  // The first January each income actually rises, from its own start:
+  // retired pay after the retirement month, VA from its start, Social
+  // Security from age 62. Only what this plan has, so a household without
+  // military service sees no retired-pay switch.
+  const colaWhen = { thisYear, birthYear: toYear(birthYear) };
+  const colaAll = { pct: 0, byYear: {}, military: true, va: true, socialSecurity: true };
+  const firstColaOf = (l: LineDraft) => {
+    const base = lineColaBase(
+      { id: l.key, name: l.name, kind: l.kind, monthlyCents: 1, startYear: toYear(l.startYear), startMonth: null, endYear: null, taxable: false },
+      colaAll,
+      colaWhen,
+    );
+    return base == null ? null : base + 1;
+  };
+  const earliest = (ys: (number | null)[]) => {
+    const real = ys.filter((y): y is number => y != null);
+    return real.length > 0 ? Math.min(...real) : null;
+  };
+  const colaStarts = {
+    military: estimate ? firstPensionColaYear(estimate.retireYear, estimate.retireMonth) : null,
+    va: earliest(lines.filter((l) => l.kind === "va").map(firstColaOf)),
+    socialSecurity: earliest(lines.filter((l) => l.kind === "social_security").map(firstColaOf)),
+  };
+  const firstCola = earliest([
+    colaMilitary ? colaStarts.military : null,
+    colaVa ? colaStarts.va : null,
+    colaSs ? colaStarts.socialSecurity : null,
+  ]);
+  // Why each income's first raise lands when it does.
+  const ssLineDraft = lines.find((l) => l.kind === "social_security" && toYear(l.startYear) != null);
+  const colaNotes = [
+    estimate && colaStarts.military != null
+      ? (() => {
+          const share = firstColaShare(estimate.retireMonth);
+          const mon = MONTHS[estimate.retireMonth - 1];
+          return share > 0
+            ? `Retired pay: ${Math.round(share * 100)}% of the ${estimate.retireYear + 1} COLA (${mon} retirement), full from ${estimate.retireYear + 2}.`
+            : `Retired pay: 0% in ${estimate.retireYear + 1} (${mon} retirement), full from ${estimate.retireYear + 2}.`;
+        })()
+      : null,
+    ssLineDraft && colaStarts.socialSecurity != null && toYear(ssLineDraft.startYear)! > colaStarts.socialSecurity
+      ? `Social Security: COLAs from ${
+          toYear(birthYear) != null && toYear(birthYear)! + 63 === colaStarts.socialSecurity
+            ? `age 62 (${colaStarts.socialSecurity})`
+            : colaStarts.socialSecurity
+        }, paid from ${toYear(ssLineDraft.startYear)}.`
+      : null,
+  ].filter((n): n is string => n != null);
+
+  // A box per year from the first COLA through next year's, the newest one
+  // announced. A later year's COLA isn't known yet, so it uses the future rate.
+  const colaYears =
+    firstCola == null ? [] : Array.from({ length: Math.max(0, thisYear + 1 - firstCola + 1) }, (_, i) => firstCola + i);
+
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const addLine = (kind: IncomeLineKind) =>
@@ -1550,6 +1673,11 @@ function PlanModal({
           endMonth: r.endMonth,
         })),
       );
+    // Only the years shown: a COLA before any income gets one changes nothing.
+    formData.set(
+      "colaByYear",
+      JSON.stringify(colaYears.map((y) => ({ year: String(y), pct: colaByYear[String(y)] ?? "" }))),
+    );
     formData.set("healthPlans", planJson(healthPlans));
     formData.set("dentalPlans", planJson(dentalPlans));
     formData.set(
@@ -1598,7 +1726,6 @@ function PlanModal({
     });
   }
 
-  const heading = "sm:col-span-2 border-t border-line pt-3 text-sm font-bold uppercase tracking-wide first:border-t-0 first:pt-0";
   // Light red, so Close reads apart from Save.
   const closeButtonClass =
     "shrink-0 rounded-md bg-negative/10 px-3 py-1.5 text-xs font-semibold text-negative ring-1 ring-negative/30 transition hover:bg-negative/20";
@@ -1639,15 +1766,18 @@ function PlanModal({
       >
         {/* Also up here, so a rejected save from the top Save is seen. */}
         {error ? <p className="sm:col-span-full text-sm font-medium text-negative">{error}</p> : null}
-        <h3 className={heading}>Info Data About You</h3>
+        <SectionHead title="Info Data About You" open={isOpen("info")} onToggle={() => toggleSection("info")} />
+        <div className={isOpen("info") ? "contents" : "hidden"}>
         <Field label="Birth year" hint="Used to show your age on the chart.">
           <input name="birthYear" inputMode="numeric" value={birthYear} onChange={(e) => setBirthYear(e.target.value)} className={inputClass} />
         </Field>
         <Field label="Plan until age" hint="How far the plan runs, and the last age shown under What is expected.">
           <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
         </Field>
+        </div>
 
-        <h3 className={heading}>Military retirement</h3>
+        <SectionHead title="Military retirement" open={isOpen("military")} onToggle={() => toggleSection("military")} />
+        <div className={isOpen("military") ? "contents" : "hidden"}>
         <Field label="Month & Year expected to retire" hint="Active-duty pay stops and retired pay starts that month.">
           <MonthYear
             monthName="targetRetireMonth"
@@ -1752,20 +1882,102 @@ function PlanModal({
             <span className="block">
               <span className="font-semibold">Yearly: {formatMoneyWhole(estimate.grossAtRetireCents * 12, currency)}</span>
               {estimate.sbpAtRetireCents > 0 ? `, minus ${formatMoneyWhole(estimate.sbpAtRetireCents * 12, currency)} SBP` : ""}, before tax.
-              {" "}The same every year after.
+              {" "}
+              {colaMilitary ? "Rises with the COLA each year after." : "The same every year after."}
             </span>
           </p>
         ) : null}
+        </div>
 
-        <h3 className={heading}>Healthcare in retirement</h3>
-        <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Yearly premiums for the family at current rates. Each one is added to that year&rsquo;s spending.
+        {colaStarts.military != null || colaStarts.va != null || colaStarts.socialSecurity != null ? (
+          <>
+            <SectionHead title="COLA (yearly raise)" open={isOpen("cola")} onToggle={() => toggleSection("cola")} />
+            <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
+              One COLA each January, from each income&rsquo;s own start.
+            </p>
+            <div className={isOpen("cola") ? "contents" : "hidden"}>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 sm:col-span-2">
+              <span className="w-full max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Rises with COLA</span>
+              {colaStarts.military != null ? (
+                <ColaSwitch name="colaMilitary" label="Military retired pay" from={colaStarts.military} checked={colaMilitary} onChange={setColaMilitary} />
+              ) : null}
+              {colaStarts.va != null ? (
+                <ColaSwitch name="colaVa" label="VA disability" from={colaStarts.va} checked={colaVa} onChange={setColaVa} />
+              ) : null}
+              {colaStarts.socialSecurity != null ? (
+                <ColaSwitch name="colaSocialSecurity" label="Social Security" from={colaStarts.socialSecurity} checked={colaSs} onChange={setColaSs} />
+              ) : null}
+            </div>
+            {firstCola != null ? (
+              <div className="-mt-2 space-y-0.5 text-xs sm:text-sm text-foreground sm:col-span-2">
+                {colaNotes.map((n) => (
+                  <p key={n}>{n}</p>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setColaWhyOpen(true)}
+                  className={infoLink}
+                  style={{ color: "var(--viz-savings)" }}
+                >
+                  Why these years?
+                </button>
+              </div>
+            ) : null}
+            <Field className="sm:col-span-2" label="Future COLA (%/yr)" hint={`Last 20 years averaged ${colaAverage(20)}%; last 10, ${colaAverage(10)}%.`}>
+              <input name="colaPct" inputMode="decimal" value={colaPct} onChange={(e) => setColaPct(e.target.value)} className={inputClass} />
+            </Field>
+            <div className="sm:col-span-2">
+              <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Actual COLA by year</span>
+              {colaYears.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  {colaYears.map((y) => (
+                    <label key={y} className="block text-center">
+                      <span className="mb-0.5 block text-xs font-semibold tabular-nums text-foreground sm:text-sm">{y}</span>
+                      <span className="relative block">
+                        <input
+                          inputMode="decimal"
+                          value={colaByYear[String(y)] ?? ""}
+                          onChange={(e) => setColaByYear((prev) => ({ ...prev, [y]: e.target.value }))}
+                          placeholder={colaPct}
+                          aria-label={`COLA ${y} %`}
+                          className={`${lineInput} pr-6 text-center tabular-nums`}
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground">%</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              <p className="mt-1 text-xs sm:text-sm text-foreground">
+                {firstCola == null
+                  ? "No income set to rise."
+                  : colaYears.length > 0
+                    ? "Blank: the future COLA. A new year's box opens each January."
+                    : `First COLA: January ${firstCola}. Its box opens in ${firstCola - 1}.`}
+              </p>
+            </div>
+            </div>
+
+          </>
+        ) : null}
+        {/* A switch for an income this plan doesn't have keeps what was saved. */}
+        {colaStarts.military == null && colaMilitary ? <input type="hidden" name="colaMilitary" value="on" /> : null}
+        {colaStarts.va == null && colaVa ? <input type="hidden" name="colaVa" value="on" /> : null}
+        {colaStarts.socialSecurity == null && colaSs ? <input type="hidden" name="colaSocialSecurity" value="on" /> : null}
+        {colaStarts.military == null && colaStarts.va == null && colaStarts.socialSecurity == null ? (
+          <input type="hidden" name="colaPct" value={colaPct} />
+        ) : null}
+
+        <SectionHead title="Healthcare in retirement" open={isOpen("health")} onToggle={() => toggleSection("health")} />
+        <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
+          Family premiums per year, at today&rsquo;s rates. Added to spending.
         </p>
+        <div className={isOpen("health") ? "contents" : "hidden"}>
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
         <div className="space-y-2 sm:col-span-2">
           {healthPlans.length === 0 ? (
-            <p className="text-xs text-foreground">No health plan premium before TRICARE For Life.</p>
+            <p className="text-xs sm:text-sm text-foreground">No health plan premium before TRICARE For Life.</p>
           ) : null}
           {healthPlans.map((row) => (
             <PlanRow
@@ -1797,7 +2009,7 @@ function PlanModal({
             private. TFL covers neither, so these run for life by default. */}
         <div className="space-y-2 sm:col-span-2">
           <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Dental &amp; vision (/yr)</span>
-          {dentalPlans.length === 0 ? <p className="text-xs text-foreground">No dental or vision premium.</p> : null}
+          {dentalPlans.length === 0 ? <p className="text-xs sm:text-sm text-foreground">No dental or vision premium.</p> : null}
           {dentalPlans.map((row) => (
             <PlanRow
               key={row.key}
@@ -1853,8 +2065,10 @@ function PlanModal({
         <Field label="Rises above inflation (%/yr)" hint="Medical costs grow faster than prices overall: inflation + this. 2.5% + 1.5% = 4% a year.">
           <input name="healthcareGrowthPct" inputMode="decimal" defaultValue={plan.healthcareGrowthPct} className={inputClass} />
         </Field>
+        </div>
 
-        <h3 className={heading}>Rates &amp; withdrawals</h3>
+        <SectionHead title="Rates & withdrawals" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
+        <div className={isOpen("rates") ? "contents" : "hidden"}>
         <Field label="Expected rate of return (%)" hint="What your investments earn a year. Only investments — not income or savings.">
           <input name="investmentReturnPct" inputMode="decimal" defaultValue={plan.investmentReturnPct} className={inputClass} />
         </Field>
@@ -1882,12 +2096,16 @@ function PlanModal({
             className={inputClass}
           />
         </Field>
+        </div>
 
-        <h3 className={heading}>Other income</h3>
-        <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Per month, before tax; stays the same every year. If an amount changes, type an End Year on the old line,
-          then + Add income with the new amount starting the year after.
+        <SectionHead title="Other income" open={isOpen("income")} onToggle={() => toggleSection("income")} />
+        <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
+          Per month, before tax, at today&rsquo;s rates.{" "}
+          <button type="button" onClick={() => setInfo("income")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
+            How it works
+          </button>
         </p>
+        <div className={isOpen("income") ? "contents" : "hidden"}>
         <div className="space-y-2 sm:col-span-2">
           {lines.map((l) => (
             <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_9.5rem_4.5rem_auto]">
@@ -1959,13 +2177,16 @@ function PlanModal({
             ))}
           </select>
         </div>
+        </div>
 
-        <h3 className={heading}>Rental properties</h3>
-        <p className="-mt-2 text-xs text-foreground sm:col-span-2">
-          Prices, rent and costs at current rates; they go up with inflation each year. Net rent counts as income; equity
-          (value − loan) counts toward net worth. Planning to buy? Fill it in here. Already own one? Add it on
-          Accounts under Property, then pick it in Property.
+        <SectionHead title="Rental properties" open={isOpen("rentals")} onToggle={() => toggleSection("rentals")} />
+        <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
+          Prices, rent and costs at today&rsquo;s rates.{" "}
+          <button type="button" onClick={() => setInfo("rentals")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
+            How it works
+          </button>
         </p>
+        <div className={isOpen("rentals") ? "contents" : "hidden"}>
         <div className="space-y-2 sm:col-span-2">
           {rentalDrafts.map((r) => {
             const owned = !!r.propertyAccountId;
@@ -1992,7 +2213,7 @@ function PlanModal({
                     {(() => {
                       const linkedLoan = plan.propertyAccounts.find((a) => a.id === r.propertyAccountId)?.loanCents ?? null;
                       return linkedLoan != null ? (
-                        <p className="col-span-2 self-center text-xs text-foreground">
+                        <p className="col-span-2 self-center text-xs sm:text-sm text-foreground">
                           <span className="font-semibold">Loan {formatMoneyWhole(linkedLoan, currency)}</span> — the
                           mortgage linked to this property on Accounts.
                         </p>
@@ -2044,7 +2265,7 @@ function PlanModal({
                 >
                   Remove
                 </button>
-                <p className="col-span-2 text-xs text-foreground sm:col-span-4">
+                <p className="col-span-2 text-xs sm:text-sm text-foreground sm:col-span-4">
                   {preview ? (
                     <>
                       {preview.first}:{" "}
@@ -2071,6 +2292,7 @@ function PlanModal({
             + Add rental
           </button>
         </div>
+        </div>
 
         <div className="sm:col-span-full flex items-center justify-start gap-2 border-t border-line pt-3">
           <button
@@ -2089,7 +2311,102 @@ function PlanModal({
         ) : null}
       </form>
       {tflInfoOpen ? <TflInfo tflYear={tflYear} onClose={() => setTflInfoOpen(false)} /> : null}
+      {info === "income" ? (
+        <InfoPopup
+          title="Other income"
+          onClose={() => setInfo(null)}
+          items={[
+            ["Rises with COLA", "VA and Social Security, when ticked under COLA. Other lines stay the same."],
+            ["Amount changes", "Type an End Year on the old line, then + Add income with the new amount from the year after."],
+          ]}
+        />
+      ) : null}
+      {info === "rentals" ? (
+        <InfoPopup
+          title="Rental properties"
+          onClose={() => setInfo(null)}
+          items={[
+            ["Prices", "Price, rent and costs at today's rates; they rise with inflation each year."],
+            ["Counts as", "Net rent is income. Equity (value − loan) is net worth."],
+            ["Planning to buy", "Fill it in here."],
+            ["Already own one", "Add it on Accounts under Property, then pick it here."],
+          ]}
+        />
+      ) : null}
+      {colaWhyOpen ? (
+        <ColaWhy
+          retire={estimate && colaMilitary ? { year: estimate.retireYear, month: estimate.retireMonth } : null}
+          ss={
+            ssLineDraft && colaStarts.socialSecurity != null && colaSs
+              ? {
+                  colaFrom: colaStarts.socialSecurity,
+                  paidFrom: toYear(ssLineDraft.startYear)!,
+                  age62Year: toYear(birthYear) != null ? toYear(birthYear)! + 62 : null,
+                }
+              : null
+          }
+          onClose={() => setColaWhyOpen(false)}
+        />
+      ) : null}
     </ModalShell>
+  );
+}
+
+/** A popup section's header: tap to open or fold what's under it. */
+function SectionHead({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
+  return (
+    <h3 className="sm:col-span-2 border-t border-line pt-3 first:border-t-0 first:pt-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left text-sm font-bold uppercase tracking-wide"
+      >
+        <svg
+          aria-hidden
+          viewBox="0 0 20 20"
+          className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M5 7.5 10 12.5 15 7.5" />
+        </svg>
+        {title}
+      </button>
+    </h3>
+  );
+}
+
+/** A COLA checkbox, with the year that income's first raise lands. */
+function ColaSwitch({
+  name,
+  label,
+  from,
+  checked,
+  onChange,
+}: {
+  name: string;
+  label: string;
+  from: number;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        name={name}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="size-4 cursor-pointer accent-[color:var(--brand)]"
+      />
+      <span>
+        {label} <span className="whitespace-nowrap font-semibold tabular-nums">from {from}</span>
+      </span>
+    </label>
   );
 }
 
@@ -2119,6 +2436,90 @@ const TFL_AGE = 65;
 // What TRICARE For Life is and what it costs — opened from the TFL box's
 // "What is TRICARE For Life?" link (Victor, 2026-10-15). Figures checked
 // against CMS and TRICARE on 2026-10-15.
+/** Why each COLA starts when it does, worked out from the plan as typed, so
+ *  the years move with the retirement date and birth year. */
+function ColaWhy({
+  retire,
+  ss,
+  onClose,
+}: {
+  retire: { year: number; month: number } | null;
+  /** Social Security's first raise, first payment, and the year its earner
+   *  turns 62 (null without a birth year). */
+  ss: { colaFrom: number; paidFrom: number; age62Year: number | null } | null;
+  onClose: () => void;
+}) {
+  const share = retire ? firstColaShare(retire.month) : 0;
+  const mon = retire ? MONTHS[retire.month - 1] : "";
+  const firstYear = retire ? retire.year + 1 : 0;
+  return (
+    <ModalShell title="Why these COLA years" onClose={onClose} className="sm:max-w-lg">
+      <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-sm leading-relaxed">
+        {retire ? (
+          share > 0 ? (
+            <p>
+              <span className="font-semibold">Why {firstYear}:</span>{" "}
+              it&rsquo;s the DFAS rule. The first COLA after you
+              retire only counts the months you were retired. For your {mon} {retire.year} retirement that&rsquo;s{" "}
+              {Math.round(share * 100)}% of the January {firstYear} COLA, then the full COLA from January {firstYear + 1}.
+            </p>
+          ) : (
+            <p>
+              <span className="font-semibold">
+                Why {firstYear + 1}, not {firstYear}:
+              </span>{" "}
+              it&rsquo;s the DFAS rule, not a mistake. If you retire between October and December, you get 0% of the
+              first COLA after retiring. For your {mon} {retire.year} retirement that&rsquo;s the January {firstYear}{" "}
+              COLA, so your first real raise is January {firstYear + 1}.
+            </p>
+          )
+        ) : null}
+        {retire ? (
+          <p>
+            <span className="font-semibold">First COLA by retirement month:</span> Jan–Mar 93%, Apr–Jun 57%, Jul–Sep
+            25%, Oct–Dec 0%. Full every year after.
+          </p>
+        ) : null}
+        {ss ? (
+          ss.paidFrom > ss.colaFrom ? (
+            <p>
+              <span className="font-semibold">
+                Why Social Security says {ss.colaFrom} but starts in {ss.paidFrom}:
+              </span>{" "}
+              both are right. SSA starts adding COLAs at age 62
+              {ss.age62Year != null && ss.age62Year + 1 === ss.colaFrom
+                ? ` (yours is ${ss.age62Year}, so the first raise lands in ${ss.colaFrom})`
+                : ""}, even
+              though your payments start in {ss.paidFrom}.
+            </p>
+          ) : (
+            <p>
+              <span className="font-semibold">Social Security from {ss.colaFrom}:</span> SSA adds COLAs from age 62
+              {ss.age62Year != null && ss.age62Year + 1 === ss.colaFrom ? ` (${ss.age62Year} for you)` : ""}, so your
+              first raise is January {ss.colaFrom}.
+            </p>
+          )
+        ) : null}
+      </div>
+    </ModalShell>
+  );
+}
+
+/** A section's longer notes: one bold label and a short line each. */
+function InfoPopup({ title, items, onClose }: { title: string; items: [string, string][]; onClose: () => void }) {
+  return (
+    <ModalShell title={title} onClose={onClose} className="sm:max-w-lg">
+      <div className="space-y-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-sm leading-relaxed sm:text-base">
+        {items.map(([label, text]) => (
+          <p key={label}>
+            <span className="font-semibold">{label}:</span> {text}
+          </p>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
 function TflInfo({ tflYear, onClose }: { tflYear: number | null; onClose: () => void }) {
   const link = "font-semibold underline underline-offset-2";
   return (
@@ -2247,7 +2648,7 @@ function PlanRow<K extends string>({
           Remove
         </button>
       </div>
-      <p className="text-xs leading-snug text-foreground">{note}</p>
+      <p className="text-xs leading-snug text-foreground sm:text-sm">{note}</p>
     </div>
   );
 }
@@ -2360,12 +2761,14 @@ const inputClass =
 // the note explains the box it sits next to.
 function Field({
   id,
+  className,
   highlight = false,
   label,
   hint,
   children,
 }: {
   id?: string;
+  className?: string;
   /** Light-blue outline for the box a button sent you to. */
   highlight?: boolean;
   label: string;
@@ -2375,12 +2778,12 @@ function Field({
   return (
     <label
       id={id}
-      className={`block ${highlight ? "-m-2 rounded-md bg-sky-50 p-2 ring-2 ring-sky-400 dark:bg-sky-950/40" : ""}`}
+      className={`block ${className ?? ""} ${highlight ? "-m-2 rounded-md bg-sky-50 p-2 ring-2 ring-sky-400 dark:bg-sky-950/40" : ""}`}
     >
       <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">{label}</span>
       <span className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3">
         {children}
-        {hint ? <span className="text-xs leading-snug text-foreground">{hint}</span> : null}
+        {hint ? <span className="text-xs leading-snug text-foreground sm:text-sm">{hint}</span> : null}
       </span>
     </label>
   );

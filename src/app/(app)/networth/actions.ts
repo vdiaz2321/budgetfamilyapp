@@ -24,9 +24,11 @@ import {
   type CostDates,
   type DentalPlan,
   type HealthPlan,
+  parseColaByYear,
   parseDentalPlans,
   parseHealthPlans,
   rentalsForYear,
+  type ColaPlan,
   toRentalProperty,
   type IncomeLine,
   type IncomeLineKind,
@@ -417,6 +419,29 @@ export async function saveRetirementPlan(formData: FormData) {
   if (healthPlans.some(endsBeforeStart)) return { error: "Health plan: the end can't be before the start." };
   if (dentalPlans.some(endsBeforeStart)) return { error: "Dental & vision: the end can't be before the start." };
   const healthGrowth = num("healthcareGrowthPct");
+  const colaPct = num("colaPct");
+  if (colaPct != null && (colaPct < 0 || colaPct > 15)) return { error: "Future COLA has to be between 0% and 15%." };
+  // Actual COLAs ride along as JSON rows: a payment year and its %, one per
+  // year from the plan's first COLA.
+  let colaRows: { year?: string; pct?: string }[] = [];
+  try {
+    colaRows = JSON.parse(String(formData.get("colaByYear") ?? "[]"));
+    if (!Array.isArray(colaRows)) colaRows = [];
+  } catch {
+    return { error: "Couldn't read the COLA years." };
+  }
+  const colaByYear: Record<string, number> = {};
+  for (const r of colaRows) {
+    const y = String(r.year ?? "").trim();
+    const pct = String(r.pct ?? "").trim();
+    // A blank box uses the future COLA.
+    if (!pct) continue;
+    if (!/^\d{4}$/.test(y)) return { error: "COLA: each year has to be a four-digit year." };
+    const n = Number(pct);
+    if (!Number.isFinite(n) || n < -5 || n > 20) return { error: `COLA ${y}: enter a % between -5 and 20.` };
+    if (y in colaByYear) return { error: `COLA ${y} is in the list twice.` };
+    colaByYear[y] = n;
+  }
 
   if (!year(birthYear)) return { error: "Enter a four-digit birth year." };
   if (!year(targetYear)) return { error: "Enter a four-digit military retirement year." };
@@ -637,6 +662,11 @@ export async function saveRetirementPlan(formData: FormData) {
       dental_plans: dentalPlans,
       healthcare_start_age: healthStartAge ?? 65,
       healthcare_growth_pct: healthGrowth ?? 1.5,
+      cola_pct: colaPct ?? 0,
+      cola_by_year: colaByYear,
+      cola_military: formData.get("colaMilitary") === "on",
+      cola_va: formData.get("colaVa") === "on",
+      cola_social_security: formData.get("colaSocialSecurity") === "on",
       // Replaced by the Net Worth Plan table (spending, saving) and the income
       // lines (guaranteed income). Cleared so an old figure can't quietly win.
       annual_spend_cents: null,
@@ -816,6 +846,13 @@ async function recomputeRetirementIncome(
     },
   );
   const inflationPct = Number(plan.inflation_pct ?? 2.5);
+  const cola: ColaPlan = {
+    pct: Number(plan.cola_pct ?? 2.5),
+    byYear: parseColaByYear(plan.cola_by_year),
+    military: plan.cola_military ?? true,
+    va: plan.cola_va ?? true,
+    socialSecurity: plan.cola_social_security ?? true,
+  };
   const balances = new Map((acctRes.data ?? []).map((a) => [a.id as string, Number(a.current_balance_cents ?? 0)]));
   const loanByProperty = new Map<string, number>();
   for (const d of loanRes.data ?? []) {
@@ -883,7 +920,7 @@ async function recomputeRetirementIncome(
     const retiredShare = retiredShareOfYear(row.year, retireYear, retireMonth);
     const work = Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare));
     // Income is gross: taxes are budgeted as spending.
-    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0);
+    const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0, cola, { thisYear, birthYear: plan.birth_year ?? null });
     const pensionYearly = (yearIncome.parts.find((p) => p.kind === "pension")?.monthlyAfterTaxCents ?? 0) * 12;
     const lineIncome = yearIncome.afterTaxCents - Math.round(pensionYearly * (1 - retiredShare));
     // Rentals: net rent is income; equity is part of net worth but earns no

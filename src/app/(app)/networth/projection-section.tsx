@@ -143,6 +143,9 @@ export function ProjectionSection({
   seed,
   militaryRetireYear,
   currentNwCents,
+  inflationPct,
+  todays,
+  onTodays,
   assumptions,
   details,
 }: {
@@ -155,6 +158,11 @@ export function ProjectionSection({
   currentNwCents: number;
   /** The finished month that figure closed (YYYY-MM-01); null = live. */
   currentNwMonth: string | null;
+  /** The plan's inflation — what turns a future year's dollars into today's. */
+  inflationPct: number;
+  /** Today's Money (true) or Not Today's Money — the page's one toggle. */
+  todays: boolean;
+  onTodays: (v: boolean) => void;
   /** From the retirement plan: the Edit assumptions line that rebuilds this
    *  table, and the retirement details under it. */
   assumptions?: React.ReactNode;
@@ -175,6 +183,16 @@ export function ProjectionSection({
   const router = useRouter();
 
   const current = years.find((y) => y.year === thisYear) ?? null;
+
+  // Today's money: each future year's NET WORTH shrunk by inflation back to
+  // this year, so 2071's figure reads as what it buys now (Victor,
+  // 2026-10-16). Income, spending and gains stay the dollars actually paid —
+  // retired pay reads $95,640, what the High-3 pays, not a shrunk figure.
+  // This year and earlier are already today's money.
+  const inToday = (year: number, cents: number) =>
+    Math.round(cents / Math.pow(1 + inflationPct / 100, Math.max(0, year - thisYear)));
+  const shown = (year: number, cents: number) => (todays ? inToday(year, cents) : cents);
+  const m = (year: number, cents: number, cur: string) => formatMoneyWhole(shown(year, cents), cur);
 
   const forecastFor = (y: ProjectionYear) => yearForecast(y, thisYear)?.cents ?? null;
   const forecast = current ? forecastFor(current) : null;
@@ -298,10 +316,20 @@ export function ProjectionSection({
           {last ? (
             <Figure
               label={`Net worth in ${last.year}`}
-              value={formatMoneyWhole(last.eoyCents, currency)}
+              value={m(last.year, last.eoyCents, currency)}
               tone=""
               style={{ color: "var(--viz-savings)" }}
-              sub={last.age != null ? `Expected at age ${last.age}` : "Expected"}
+              sub={
+                <>
+                  {last.age != null ? `Expected at age ${last.age}` : "Expected"}
+                  <span className="block">
+                    {todays ? "Not Today's Money" : "Today's Money"}:{" "}
+                    <span className="font-semibold">
+                      {formatMoneyWhole(todays ? last.eoyCents : inToday(last.year, last.eoyCents), currency)}
+                    </span>
+                  </span>
+                </>
+              }
               className="col-span-2 sm:col-span-1"
             />
           ) : null}
@@ -332,6 +360,30 @@ export function ProjectionSection({
               </svg>
               <span className="text-sm font-semibold sm:text-lg">Year by year</span>
             </button>
+          </div>
+          {/* Which dollars the table and the end-of-plan card show. */}
+          <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+            {([
+              [true, "Today's Money"],
+              [false, "Not Today's Money"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onTodays(value)}
+                aria-pressed={todays === value}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 transition sm:text-sm ${
+                  todays === value
+                    ? "bg-sky-100 text-foreground ring-sky-400 dark:bg-sky-900/50"
+                    : "text-foreground ring-line hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            <span className="text-xs text-foreground sm:text-sm">
+              {todays ? `Net worth shrunk by ${inflationPct}% inflation a year.` : "Net worth in each year's dollars."}
+            </span>
           </div>
           {tableOpen ? (
           <>
@@ -459,7 +511,7 @@ export function ProjectionSection({
                           <span className="text-muted">—</span>
                         ) : (
                           <>
-                            {formatMoneyWhole(y.actualCents, currency)}
+                            {m(y.year, y.actualCents, currency)}
                             {y.inProgress ? (
                               <span className="block max-sm:text-[12px] sm:text-base font-normal text-foreground">
                                 {/* Net worth at the end of the last finished month. */}
@@ -470,7 +522,7 @@ export function ProjectionSection({
                         )}
                       </td>
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
-                        {formatMoneyWhole(y.eoyCents, currency)}
+                        {m(y.year, y.eoyCents, currency)}
                         {/* Named under the close it moved, rather than given a
                             ninth column — the grid already scrolls sideways on
                             a phone, and a one-off is rare enough that a column
@@ -495,7 +547,7 @@ export function ProjectionSection({
                             >
                               {/* Two lines on a phone, so the longer label
                                   doesn't push past the column's edge. */}
-                              <span className="max-sm:block">Proj Forecast NW:</span> {formatMoneyWhole(f, currency)}
+                              <span className="max-sm:block">Proj Forecast NW:</span> {m(y.year, f, currency)}
                             </span>
                           );
                         })()}
@@ -510,7 +562,7 @@ export function ProjectionSection({
                             }`}
                           >
                             {diff >= 0 ? "+" : "−"}
-                            {formatMoneyWhole(Math.abs(diff), currency)}
+                            {m(y.year, Math.abs(diff), currency)}
                           </span>
                         )}
                       </td>
