@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoneyWhole } from "@/lib/money";
+import { GROUP_LABEL, type StoredGroupYear } from "@/lib/account-groups";
 import {
   appendProjectionYears,
   saveProjectionYear,
@@ -34,6 +35,17 @@ export type ProjectionYear = {
   /** Expected contributions into savings / investments that year — tracking
    *  only, never part of EOY. Null = no estimate typed. */
   contributedCents: number | null;
+  /** Taken out of the account groups that year — planned, required minimums
+   *  and shortfall draws, before tax. Null on years the groups didn't run. */
+  withdrawnCents: number | null;
+  /** Tax on those withdrawals; already inside spendingCents. */
+  withdrawalTaxCents: number;
+  /** Planned contributions into the groups that year. */
+  plannedAddCents: number | null;
+  /** Each group's year, for the popup. */
+  groups: StoredGroupYear[];
+  /** The year's income by source (pay, retired pay, VA…). */
+  incomeParts: { name: string; cents: number }[];
   eoyCents: number;
   /** Net worth actually recorded for that year, when there is one. */
   actualCents: number | null;
@@ -148,12 +160,16 @@ export function ProjectionSection({
   onTodays,
   assumptions,
   details,
+  onEditIncome,
 }: {
   years: ProjectionYear[];
   currency: string;
   thisYear: number;
   seed: ProjectionSeed;
   militaryRetireYear: number | null;
+  /** Opens Edit Future Projections at Income; with no Pay line yet,
+   *  one is started at the given yearly amount. */
+  onEditIncome?: (suggestYearlyCents: number | null) => void;
   /** Today's net worth at the last finished month's close. */
   currentNwCents: number;
   /** The finished month that figure closed (YYYY-MM-01); null = live. */
@@ -168,8 +184,9 @@ export function ProjectionSection({
   assumptions?: React.ReactNode;
   details?: React.ReactNode;
 }) {
-  // Collapsed on a fresh login, remembered while navigating.
-  const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: false }));
+  // Open on a fresh login — the one section that starts expanded (Victor,
+  // 2026-10-16); a fold is still remembered while navigating.
+  const [collapse, setCollapse] = useSessionCollapse("networth-projection", () => ({ open: true }));
   const open = !!collapse.open;
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) =>
     setCollapse((s) => ({ ...s, open: typeof next === "function" ? next(!!s.open) : next }));
@@ -338,7 +355,8 @@ export function ProjectionSection({
 
       {open ? (
         <>
-          {assumptions ? <div className="px-4 pb-3">{assumptions}</div> : null}
+          {/* With the table open, the Edit button sits in the money-toggle row. */}
+          {assumptions && !tableOpen ? <div className="px-4 pb-3">{assumptions}</div> : null}
           <div className="border-t border-line px-4 py-3">
             <button
               type="button"
@@ -361,8 +379,12 @@ export function ProjectionSection({
               <span className="text-sm font-semibold sm:text-lg">Year by year</span>
             </button>
           </div>
-          {/* Which dollars the table and the end-of-plan card show. */}
+          {tableOpen ? (
+          <>
+          {/* Which dollars the table and the end-of-plan card show — tucked
+              inside Year by year (Victor, 2026-10-16). */}
           <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+            {assumptions}
             {([
               [true, "Today's Money"],
               [false, "Not Today's Money"],
@@ -381,12 +403,7 @@ export function ProjectionSection({
                 {label}
               </button>
             ))}
-            <span className="text-xs text-foreground sm:text-sm">
-              {todays ? `Net worth shrunk by ${inflationPct}% inflation a year.` : "Net worth in each year's dollars."}
-            </span>
           </div>
-          {tableOpen ? (
-          <>
           {/* The grid scrolls in its own box so thirty years of projection
               don't push the rest of the page down — and sticky only works
               against a bounded height, which is what gives the header row
@@ -394,7 +411,7 @@ export function ProjectionSection({
               header cards and the table read as one set. */}
           <div className="mx-4 overflow-hidden rounded-lg bg-background ring-1 ring-line">
           <div className="max-h-[70vh] overflow-auto">
-            <table className="w-full min-w-[900px] text-sm sm:text-lg">
+            <table className="w-full min-w-[1000px] text-sm sm:text-lg">
               <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
                 <tr className="max-sm:text-[12px] sm:text-base uppercase tracking-wide text-foreground">
                   <th className="px-2.5 py-2 text-center font-semibold">Year</th>
@@ -403,6 +420,7 @@ export function ProjectionSection({
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Spending</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Income -<br />Spending</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Contributed</th>
+                  <th className="px-2.5 py-2 text-center font-semibold">Withdraw</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Invested<br />Gains</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Current<br />NW</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Proj<br />EOY NW</th>
@@ -432,9 +450,11 @@ export function ProjectionSection({
                         {/* Before military retirement: the other income on top
                             of the typed pay. Income is gross — taxes are
                             budgeted as spending. */}
+                        {/* Only the year in progress has typed pay; later
+                            years are all income lines. */}
                         {(militaryRetireYear == null || y.year < militaryRetireYear) &&
                         y.incomeCents !== y.workIncomeCents &&
-                        y.year >= thisYear ? (
+                        y.year === thisYear ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
                             incl. {formatMoneyWhole(y.incomeCents - y.workIncomeCents, currency)} other
                           </span>
@@ -443,9 +463,14 @@ export function ProjectionSection({
                       </td>
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums text-negative">
                         {formatMoneyWhole(y.spendingCents, currency)}
-                        {y.spendingCents - y.baseSpendingCents + y.debtFreedCents > 0 ? (
+                        {y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents > 0 ? (
                           <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                            incl. {formatMoneyWhole(y.spendingCents - y.baseSpendingCents + y.debtFreedCents, currency)} health
+                            incl. {formatMoneyWhole(y.spendingCents - y.baseSpendingCents + y.debtFreedCents - y.withdrawalTaxCents, currency)} health
+                          </span>
+                        ) : null}
+                        {y.withdrawalTaxCents > 0 ? (
+                          <span className="block whitespace-nowrap max-sm:text-[12px] sm:text-base font-normal text-foreground">
+                            incl. {formatMoneyWhole(y.withdrawalTaxCents, currency)} tax
                           </span>
                         ) : null}
                         <Actual cents={y.actualSpendingCents} currency={currency} row={y} thisYear={thisYear} />
@@ -482,14 +507,27 @@ export function ProjectionSection({
                           Invest / Savings recorded underneath — same as the
                           popup's Contributed. */}
                       <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
-                        {y.contributedCents == null ? (
+                        {/* A typed estimate wins; otherwise what the account
+                            groups plan to add that year. */}
+                        {(y.contributedCents ?? (y.plannedAddCents || null)) == null ? (
                           <span className="text-foreground">—</span>
                         ) : (
                           <span style={{ color: "var(--viz-savings)" }}>
-                            {formatMoneyWhole(y.contributedCents, currency)}
+                            {formatMoneyWhole((y.contributedCents ?? y.plannedAddCents)!, currency)}
                           </span>
                         )}
                         <Actual cents={y.actualInvestedCents} currency={currency} row={y} thisYear={thisYear} always />
+                      </td>
+                      {/* Out of the account groups: planned, required minimums
+                          and anything drawn to cover a shortfall. */}
+                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
+                        {y.withdrawnCents ? (
+                          <span style={{ color: "var(--viz-spending)" }}>
+                            {formatMoneyWhole(y.withdrawnCents, currency)}
+                          </span>
+                        ) : (
+                          <span className="text-foreground">—</span>
+                        )}
                       </td>
                       {/* Est. gains on top; underneath, the reviewed year-end
                           figure where it exists, else what the snapshots
@@ -619,6 +657,16 @@ export function ProjectionSection({
           thisYear={thisYear}
           militaryRetireYear={militaryRetireYear}
           onClose={() => setEditing(null)}
+          onEditIncome={
+            onEditIncome
+              ? () => {
+                  // Suggest this year's typed pay for a first Pay line.
+                  const now = years.find((y) => y.year === thisYear);
+                  setEditing(null);
+                  onEditIncome(now && now.workIncomeCents > 0 ? now.workIncomeCents : null);
+                }
+              : undefined
+          }
         />
       ) : null}
     </section>
@@ -664,6 +712,63 @@ function LeftOverBreakdown({ row, currency }: { row: ProjectionYear; currency: s
           {$(cashCents)}
         </span>
       </Line>
+    </div>
+  );
+}
+
+// Each account group's year: start, what went in, what came out, what it
+// earned, where it ended. Taken out includes required minimums and anything
+// drawn to cover a shortfall, each named under the figure.
+function GroupBreakdown({ groups, currency, year }: { groups: StoredGroupYear[]; currency: string; year: number }) {
+  const $ = (cents: number) => formatMoneyWhole(cents, currency);
+  const total = groups.reduce(
+    (t, g) => ({ start: t.start + g.start, add: t.add + g.add, out: t.out + g.take + g.auto, gain: t.gain + g.gain, end: t.end + g.end }),
+    { start: 0, add: 0, out: 0, gain: 0, end: 0 },
+  );
+  const cell = "px-2 py-1 text-center tabular-nums";
+  return (
+    <div className="sm:col-span-2">
+      <p className="border-t border-line pt-3 text-center max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
+        By account group: {year}
+      </p>
+      <div className="mt-1 overflow-x-auto rounded-md ring-1 ring-line">
+        <table className="w-full min-w-[520px] text-xs sm:text-sm">
+          <thead className="bg-sky-100 dark:bg-sky-900/50">
+            <tr className="uppercase tracking-wide text-foreground">
+              <th className={`${cell} text-left font-semibold`}>Group</th>
+              <th className={`${cell} font-semibold`}>Start</th>
+              <th className={`${cell} font-semibold`}>Added</th>
+              <th className={`${cell} font-semibold`}>Taken out</th>
+              <th className={`${cell} font-semibold`}>Gains</th>
+              <th className={`${cell} font-semibold`}>End</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => (
+              <tr key={g.kind} className="border-t border-line/60">
+                <td className={`${cell} text-left font-semibold`}>{GROUP_LABEL[g.kind]}</td>
+                <td className={cell}>{$(g.start)}</td>
+                <td className={cell} style={g.add ? { color: "var(--viz-savings)" } : undefined}>{g.add ? $(g.add) : "—"}</td>
+                <td className={cell}>
+                  {g.take + g.auto ? <span style={{ color: "var(--viz-spending)" }}>{$(g.take + g.auto)}</span> : "—"}
+                  {g.rmd > 0 ? <span className="block text-foreground">{$(g.rmd)} required</span> : null}
+                  {g.auto > 0 ? <span className="block text-foreground">{$(g.auto)} to cover a gap</span> : null}
+                </td>
+                <td className={`${cell} ${g.gain < 0 ? "text-negative" : "text-positive"}`}>{$(g.gain)}</td>
+                <td className={`${cell} font-semibold ${g.end < 0 ? "text-negative" : ""}`}>{$(g.end)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-line font-semibold">
+              <td className={`${cell} text-left`}>Total</td>
+              <td className={cell}>{$(total.start)}</td>
+              <td className={cell} style={{ color: "var(--viz-savings)" }}>{$(total.add)}</td>
+              <td className={cell} style={{ color: "var(--viz-spending)" }}>{$(total.out)}</td>
+              <td className={`${cell} text-positive`}>{$(total.gain)}</td>
+              <td className={cell}>{$(total.end)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -749,18 +854,21 @@ function YearModal({
   thisYear,
   militaryRetireYear,
   onClose,
+  onEditIncome,
 }: {
   row: ProjectionYear;
   currency: string;
   thisYear: number;
   militaryRetireYear: number | null;
   onClose: () => void;
+  onEditIncome?: () => void;
 }) {
-  // From the military retirement year on, income is the income lines (after
-  // tax) and the typed pay isn't used. Future gains are the real return on the
-  // opening balance, figured when the plan saves, so they aren't typed.
-  const retired = militaryRetireYear != null && row.year >= militaryRetireYear;
+  // Future years' income comes only from Edit Future Projections, and
+  // from the military retirement year on so does this one's — typed pay isn't
+  // used. Future gains are the real return on the opening balance, figured
+  // when the plan saves, so they aren't typed.
   const futureYear = row.year > thisYear;
+  const retired = futureYear || (militaryRetireYear != null && row.year >= militaryRetireYear);
   const linesCents = row.incomeCents - (retired ? 0 : row.workIncomeCents);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -814,8 +922,9 @@ function YearModal({
   const [income, setIncome] = useState(toWhole(row.workIncomeCents));
   // The box edits the typed spending; healthcare from the plan rides on top.
   // Healthcare adds and paid-off debt subtracts; both come from the plan.
-  const healthCents = row.spendingCents - row.baseSpendingCents + row.debtFreedCents;
-  const planAdjustCents = healthCents - row.debtFreedCents;
+  // Tax on the account groups' withdrawals rides on top too.
+  const healthCents = row.spendingCents - row.baseSpendingCents + row.debtFreedCents - row.withdrawalTaxCents;
+  const planAdjustCents = healthCents - row.debtFreedCents + row.withdrawalTaxCents;
   const [spending, setSpending] = useState(toWhole(row.baseSpendingCents));
   const [gains, setGains] = useState(toWhole(row.growthCents));
   const [oneOff, setOneOff] = useState(row.oneOffCents ? toWhole(row.oneOffCents) : "");
@@ -1026,9 +1135,23 @@ function YearModal({
             />
           </Field>
           {retired ? (
-            <Field label="Total Income" hint="Retired pay + income lines">
+            <Field label="Total Income">
               <input type="hidden" name="income" value={income} />
               <input value={formatMoneyWhole(row.incomeCents, currency)} readOnly disabled className={`${inputClass} opacity-60 text-positive`} />
+              {/* Set in one place for every year: this opens it. */}
+              {onEditIncome ? (
+                <button
+                  type="button"
+                  onClick={onEditIncome}
+                  className={`mx-auto mt-1 block rounded-md px-2.5 py-1 text-xs font-semibold transition sm:text-sm ${
+                    row.incomeCents > 0
+                      ? "text-foreground ring-1 ring-sky-400 hover:bg-sky-100 dark:hover:bg-sky-950/40"
+                      : "bg-brand text-white hover:bg-brand-strong"
+                  }`}
+                >
+                  {row.incomeCents > 0 ? "Edit income" : "Add income"}
+                </button>
+              ) : null}
             </Field>
           ) : (
             <Field
@@ -1049,6 +1172,7 @@ function YearModal({
             hint={
               [
                 healthCents > 0 ? `+${formatMoneyWhole(healthCents, currency)} healthcare` : "",
+                row.withdrawalTaxCents > 0 ? `+${formatMoneyWhole(row.withdrawalTaxCents, currency)} tax on withdrawals` : "",
                 // A new amount here is this year's; later years add inflation.
                 futureYear ? "Later years add inflation" : "",
               ].filter(Boolean).join(" · ") || undefined
@@ -1088,6 +1212,20 @@ function YearModal({
             />
           </Field>
         </div>
+        {/* Where the income comes from, so $0 is never a mystery. */}
+        {retired ? (
+          <p className="sm:col-span-2 text-xs sm:text-sm text-foreground">
+            <span className="font-semibold">Income {row.year}:</span>{" "}
+            {row.incomeParts.length > 0
+              ? row.incomeParts.map((p, i) => (
+                  <span key={`${p.name}-${i}`}>
+                    {i > 0 ? " · " : ""}
+                    {p.name} <span className="font-semibold text-positive tabular-nums">{formatMoneyWhole(p.cents, currency)}</span>
+                  </span>
+                ))
+              : "none set — add Pay, retired pay or other income."}
+          </p>
+        ) : null}
         <div className="sm:col-span-2 grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
           {/* Signed, and one number rather than a purchase model: the net
               effect on this year's close (a house ≈ minus closing costs). */}
@@ -1137,6 +1275,8 @@ function YearModal({
             Income − Total Spending — what&apos;s left over.
           </p>
         </div>
+
+        {row.groups.length > 0 ? <GroupBreakdown groups={row.groups} currency={currency} year={row.year} /> : null}
 
         {/* The plan and the forecast worked out together, so neither is a
             black box — under the footnotes (Victor, 2026-09-29). Month-end

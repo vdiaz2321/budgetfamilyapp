@@ -339,9 +339,10 @@ export function inflateTo(year: number, thisYear: number, pct: number): number {
   return Math.pow(1 + pct / 100, Math.max(0, year - thisYear));
 }
 
-export type IncomeLineKind = "va" | "social_security" | "job" | "spouse" | "other";
+export type IncomeLineKind = "pay" | "va" | "social_security" | "job" | "spouse" | "other";
 
 export const INCOME_LINE_KINDS: { value: IncomeLineKind; label: string }[] = [
+  { value: "pay", label: "Pay (work)" },
   { value: "va", label: "VA disability" },
   { value: "social_security", label: "Social Security" },
   { value: "job", label: "Second job" },
@@ -399,8 +400,42 @@ export type IncomeLine = {
   startMonth: number | null;
   /** Last year received (inclusive); null = for life. */
   endYear: number | null;
+  /** Last month received in endYear (1–12); null = December. */
+  endMonth?: number | null;
+  /** The yearly raise, % each January after the start year (not VA or Social Security). */
+  raisePct?: number | null;
+  /** Typed per year: the amount as typed. `monthlyCents` is then a twelfth of it. */
+  annualCents?: number | null;
   taxable: boolean;
 };
+
+/**
+ * When pay with no end of its own stops — the month you stop working: the
+ * month before military retired pay starts, else the December before
+ * withdrawals start. Null when neither is set: it doesn't stop.
+ */
+export function payStop(
+  retireYear: number | null,
+  retireMonth: number | null | undefined,
+  withdrawStartYear: number | null,
+): { endYear: number; endMonth: number; why: "military" | "withdrawals" } | null {
+  if (retireYear != null) {
+    const m = retireMonth ?? 1;
+    return m > 1
+      ? { endYear: retireYear, endMonth: m - 1, why: "military" }
+      : { endYear: retireYear - 1, endMonth: 12, why: "military" };
+  }
+  if (withdrawStartYear != null) return { endYear: withdrawStartYear - 1, endMonth: 12, why: "withdrawals" };
+  return null;
+}
+
+/** The lines as the plan runs them: a Pay line with no end stops at `stop`. */
+export function withPayEnds(lines: IncomeLine[], stop: { endYear: number; endMonth: number } | null): IncomeLine[] {
+  if (!stop) return lines;
+  return lines.map((l) =>
+    l.kind === "pay" && l.endYear == null ? { ...l, endYear: stop.endYear, endMonth: stop.endMonth } : l,
+  );
+}
 
 /** Income that arrives whether or not anyone works: it lowers the FI goal.
  *  A second job or a spouse's pay can stop, so it only helps cash flow. */
@@ -590,9 +625,13 @@ export type YearIncome = {
 const active = (year: number, start: number | null, end: number | null) =>
   (start == null || year >= start) && (end == null || year <= end);
 
-/** Months a line pays in `year`: from its start month in its first year, else all 12. */
-const lineMonths = (line: IncomeLine, year: number) =>
-  line.startYear != null && year === line.startYear ? 13 - (line.startMonth ?? 1) : 12;
+/** Months a line pays in `year`: from its start month in its first year,
+ *  through its end month in its last, else all 12. */
+const lineMonths = (line: IncomeLine, year: number) => {
+  const from = line.startYear != null && year === line.startYear ? line.startMonth ?? 1 : 1;
+  const to = line.endYear != null && year === line.endYear ? line.endMonth ?? 12 : 12;
+  return Math.max(0, to - from + 1);
+};
 
 /** What the COLA dates hang on: the year amounts are typed at, and the
  *  birth year Social Security's age-62 start comes from. */
@@ -619,6 +658,13 @@ export function lineColaBase(line: IncomeLine, cola: ColaPlan, when: ColaWhen): 
 
 /** A line's monthly amount in `year`, with every COLA paid after its base. */
 function lineIn(line: IncomeLine, year: number, cola: ColaPlan, when: ColaWhen): number {
+  // Pay-like income rises by its own raise each January after its start
+  // year (or this year, if already arriving); VA and Social Security rise by
+  // the COLA instead.
+  if (line.raisePct && line.kind !== "va" && line.kind !== "social_security") {
+    const base = Math.max(when.thisYear, line.startYear ?? when.thisYear);
+    return Math.round(line.monthlyCents * Math.pow(1 + line.raisePct / 100, Math.max(0, year - base)));
+  }
   const base = lineColaBase(line, cola, when);
   return base == null ? line.monthlyCents : Math.round(line.monthlyCents * colaGrowth(cola, base, year));
 }
@@ -654,6 +700,7 @@ export function incomeForYear(
     if (!active(year, line.startYear, line.endYear) || line.monthlyCents <= 0) continue;
     const monthly = lineIn(line, year, cola, when);
     const months = lineMonths(line, year);
+    if (months <= 0) continue;
     parts.push({
       name: line.name,
       kind: line.kind,
@@ -674,7 +721,7 @@ export function incomeForYear(
  * The same year's income if Victor has died and Jo is the survivor:
  * - retired pay becomes the SBP annuity, 55% of gross retired pay (taxable),
  *   or nothing when SBP wasn't elected;
- * - VA disability and a second job stop — they were his;
+ * - his pay, VA disability and a second job stop — they were his;
  * - of the Social Security lines only the largest is kept, because a survivor
  *   receives the higher of her own and his benefit, not both;
  * - a spouse's own income and anything else carries on.
@@ -705,7 +752,7 @@ export function survivorIncomeForYear(
   const ss = live.filter((l) => l.kind === "social_security");
   const largestSs = ss.reduce<IncomeLine | null>((best, l) => (best == null || l.monthlyCents > best.monthlyCents ? l : best), null);
   for (const line of live) {
-    if (line.kind === "va" || line.kind === "job") continue;
+    if (line.kind === "pay" || line.kind === "va" || line.kind === "job") continue;
     if (line.kind === "social_security" && line !== largestSs) continue;
     const monthly = lineIn(line, year, cola, when);
     parts.push({

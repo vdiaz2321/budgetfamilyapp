@@ -9,6 +9,8 @@ import { LIABILITY_KINDS as SHARED_LIABILITY_KINDS } from "@/lib/debt-identity";
 import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions";
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 import { loadUpcomingTravelPlanCents } from "../travel/upcoming-plan";
+import { loadGroupInputs } from "@/lib/account-groups-load";
+import { parseStoredGroups } from "@/lib/account-groups";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
@@ -47,6 +49,11 @@ export default async function NetworthPage() {
     new Date().toISOString().slice(0, 10),
     Number(fiToMonth.slice(0, 4)),
   );
+
+  // The account groups: which account sits where, today's balances and the
+  // last twelve months' contributions, for the assumptions popup.
+  const groupInputsPromise = loadGroupInputs(supabase, household.id);
+  groupInputsPromise.catch(() => {});
 
   // The Estate guide's life insurance and survivor benefits, for the
   // planner's "If Victor dies first" view.
@@ -166,7 +173,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -186,7 +193,7 @@ export default async function NetworthPage() {
     // Retirement income that switches on and off by year (VA, SS, a job…).
     supabase
       .from("retirement_income_lines")
-      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, taxable")
+      .select("id, name, kind, monthly_cents, start_year, start_month, end_year, end_month, raise_pct, annual_cents, taxable")
       .eq("household_id", household.id)
       .order("sort_order")
       .order("created_at"),
@@ -847,7 +854,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -855,6 +862,7 @@ export default async function NetworthPage() {
 
 
   const upcomingTravelCents = await upcomingTravelPromise;
+  const groupInputs = await groupInputsPromise;
   await capturePromise;
 
   // The typed spending each year, grown by inflation from the year it was typed —
@@ -877,6 +885,18 @@ export default async function NetworthPage() {
     growthCents: r.growth_cents ?? 0,
     oneOffCents: r.one_off_cents ?? 0,
     contributedCents: r.contributed_cents ?? null,
+    // From the account groups (future years only; null on years they
+    // haven't run).
+    withdrawnCents: r.withdrawn_cents ?? null,
+    withdrawalTaxCents: r.withdrawal_tax_cents ?? 0,
+    plannedAddCents: r.planned_add_cents ?? null,
+    groups: parseStoredGroups(r.groups),
+    // Where the year's income comes from, as the recompute worked it out.
+    incomeParts: Array.isArray(r.income_parts)
+      ? (r.income_parts as { name?: unknown; cents?: unknown }[])
+          .filter((p) => typeof p?.name === "string" && Number.isFinite(Number(p?.cents)))
+          .map((p) => ({ name: p.name as string, cents: Number(p.cents) }))
+      : [],
     eoyCents: r.eoy_cents ?? 0,
     actualCents: netByYear.get(r.year) ?? null,
     // Where the year actually started: last year's recorded close. The pace
@@ -976,14 +996,19 @@ export default async function NetworthPage() {
           insurance: insurance.map((i) => ({ name: i.name as string, cents: i.amount_cents as number })),
           benefits: benefits.map((i) => ({ name: i.name as string, monthlyCents: i.amount_cents as number })),
         },
+        accountGroups: groupInputs,
         incomeLines: (incomeLineRows ?? []).map((l) => ({
           id: l.id,
           name: l.name,
           kind: l.kind,
-          monthlyCents: l.monthly_cents,
+          // Typed per year: exactly a twelfth of it.
+          monthlyCents: l.annual_cents != null ? Number(l.annual_cents) / 12 : l.monthly_cents,
+          annualCents: l.annual_cents == null ? null : Number(l.annual_cents),
           startYear: l.start_year,
           startMonth: l.start_month ?? null,
           endYear: l.end_year,
+          endMonth: l.end_month ?? null,
+          raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
           taxable: l.taxable,
         })),
       }}

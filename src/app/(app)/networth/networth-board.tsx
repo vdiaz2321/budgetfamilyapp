@@ -268,13 +268,14 @@ export function NetworthBoard({
         thisYear={thisYear}
         projection={projectionYears}
       >
-        {({ assumptions, details, todays, setTodays }) => (
+        {({ assumptions, details, todays, setTodays, editIncome }) => (
           <ProjectionSection
             years={projectionYears}
             currency={currency}
             thisYear={thisYear}
             seed={projectionSeed}
             militaryRetireYear={fiPlan.targetRetireYear}
+            onEditIncome={editIncome}
             currentNwCents={fiMeasured.assetsCents}
             currentNwMonth={fiMeasured.asOfMonth}
             inflationPct={fiPlan.inflationPct}

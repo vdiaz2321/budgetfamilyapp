@@ -17,6 +17,8 @@ import {
   high3Window,
   incomeForYear,
   inflateTo,
+  payStop,
+  withPayEnds,
   investShareOfNew,
   projectFi,
   rentalForYear,
@@ -36,6 +38,17 @@ import {
   type RentalRow,
 } from "@/lib/retirement";
 import { saveRetirementPlan } from "./actions";
+import {
+  DEFAULT_TAX_PCT,
+  defaultAddEnd,
+  GROUP_HINT,
+  GROUP_KINDS,
+  GROUP_LABEL,
+  isGroupKind,
+  rmdStartAge,
+  type GroupKind,
+} from "@/lib/account-groups";
+import type { GroupInputs } from "@/lib/account-groups-load";
 
 export type FiPlan = {
   birthYear: number | null;
@@ -80,6 +93,9 @@ export type FiPlan = {
   healthcareStartAge: number;
   healthcareGrowthPct: number;
   incomeLines: IncomeLine[];
+  /** Account groups: settings as stored, which account sits where, today's
+   *  balances and the last twelve months' contributions. */
+  accountGroups: GroupInputs;
   /** Rentals as stored (for editing) and as the model reads them (linked
    *  Accounts balances already applied). */
   rentalRows: RentalRow[];
@@ -154,6 +170,8 @@ export function FiSection({
     /** Today's Money vs Not Today's Money — one choice for the whole page. */
     todays: boolean;
     setTodays: (v: boolean) => void;
+    /** Opens the assumptions at Income (a first Pay line at the amount given). */
+    editIncome: (suggestYearlyCents: number | null) => void;
   }) => React.ReactNode;
 }) {
   // Collapsed on a fresh login, remembered while navigating.
@@ -174,8 +192,14 @@ export function FiSection({
     todays ? Math.pow(1 + plan.inflationPct / 100, Math.max(0, year - thisYear)) : 1;
   const sh = (year: number, cents: number) => Math.round(cents / deflator(year));
 
-  // true = open at the top; "sbp" = open scrolled to the SBP box.
-  const [editing, setEditing] = useState<boolean | "sbp">(false);
+  // true = open at the top; "sbp" = open scrolled to the SBP box; "income" =
+  // open at Income (from a year's Edit income).
+  const [editing, setEditing] = useState<boolean | "sbp" | "income">(false);
+  const [suggestPayCents, setSuggestPayCents] = useState<number | null>(null);
+  const editIncome = (suggest: number | null) => {
+    setSuggestPayCents(suggest);
+    setEditing("income");
+  };
 
   const portfolioCents = measured.assetsCents;
   // The projection starts from this year's planned year-end net worth (the
@@ -203,9 +227,14 @@ export function FiSection({
     },
   );
   const colaWhen = { thisYear, birthYear: plan.birthYear };
+  // The lines as the plan runs them: Pay with no end stops when you stop working.
+  const modelLines = withPayEnds(
+    plan.incomeLines,
+    payStop(plan.targetRetireYear, plan.targetRetireMonth, plan.withdrawStartYear),
+  );
   // Income is gross: taxes are budgeted as spending.
   const incomeIn = (year: number) =>
-    incomeForYear(year, pension, plan.targetRetireYear, plan.incomeLines, 0, plan.cola, colaWhen);
+    incomeForYear(year, pension, plan.targetRetireYear, modelLines, 0, plan.cola, colaWhen);
   const rentIn = (year: number) => rentalsForYear(plan.rentals, year, thisYear, plan.inflationPct, 0);
 
   // The Net Worth Plan table, each year as typed (round figures typed by
@@ -359,7 +388,7 @@ export function FiSection({
   const insuranceCents = plan.survivorExtras.insurance.reduce((t, i) => t + i.cents, 0);
   const benefitsMonthly = plan.survivorExtras.benefits.reduce((t, b) => t + b.monthlyCents, 0);
   const survIn = (year: number) =>
-    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, plan.incomeLines, 0, plan.cola, colaWhen);
+    survivorIncomeForYear(year, pension, plan.targetRetireYear, plan.sbpEnabled, modelLines, 0, plan.cola, colaWhen);
   const survivor = useMemo(() => {
     if (!usingGrid || untilYear == null) return null;
     // The plan's years carried forward to the plan-until year, so a death
@@ -429,17 +458,27 @@ export function FiSection({
   }));
 
   // The button that opens the rates that rebuild the table, above it.
+  // Same pill as Today's Money, set apart by a pencil and a sky-400 ring.
   const assumptions = (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs sm:text-sm text-foreground">
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        // Soft blue from the viz palette (not brand indigo — no purple on data).
-        className="rounded-md px-2 py-0.5 text-xs font-semibold sm:text-sm ring-1 transition bg-[color-mix(in_srgb,var(--viz-savings)_12%,transparent)] text-[color-mix(in_srgb,var(--viz-savings)_80%,var(--foreground))] ring-[color-mix(in_srgb,var(--viz-savings)_30%,transparent)] hover:bg-[color-mix(in_srgb,var(--viz-savings)_22%,transparent)]"
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-foreground ring-1 ring-sky-400 whitespace-nowrap transition hover:bg-sky-100 sm:text-sm dark:bg-sky-950/40 dark:hover:bg-sky-900/50"
+    >
+      <svg
+        aria-hidden
+        viewBox="0 0 20 20"
+        className="h-3.5 w-3.5 shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       >
-        Edit Retirement / FI Assumptions
-      </button>
-    </p>
+        <path d="M13.5 3.5l3 3L7 16H4v-3z" />
+      </svg>
+      Edit Future Projections
+    </button>
   );
 
   // Everything behind the Retirement card, under the table, closed by default.
@@ -492,7 +531,7 @@ export function FiSection({
                   ) : null}
                 </p>
                 {retireIncome.parts.length === 0 ? (
-                  <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit Retirement / FI Assumptions.</p>
+                  <p className="mt-1 text-center text-xs sm:text-sm text-foreground">No retirement income yet — add it in Edit Future Projections.</p>
                 ) : (
                   <ul className="mt-1.5 divide-y divide-line/60 text-sm sm:mx-auto sm:max-w-xl sm:text-lg xl:text-base 2xl:text-lg">
                     <li className="flex justify-between gap-3 py-1 max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
@@ -554,7 +593,7 @@ export function FiSection({
                   </ul>
                 )}
                 {pension ? null : (
-                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and base pay in Edit Retirement / FI Assumptions.</p>
+                  <p className="mt-1.5 text-center text-xs sm:text-sm text-foreground">Add service start and base pay in Edit Future Projections.</p>
                 )}
               </div>
             ) : null}
@@ -842,13 +881,14 @@ export function FiSection({
 
   return (
     <>
-      {children({ assumptions, details, todays, setTodays })}
+      {children({ assumptions, details, todays, setTodays, editIncome })}
       {editing ? (
         <PlanModal
           plan={plan}
           thisYear={thisYear}
           currency={currency}
-          focusSbp={editing === "sbp"}
+          focus={editing === "sbp" ? "sbp" : editing === "income" ? "income" : null}
+          suggestPayCents={editing === "income" ? suggestPayCents : null}
           onClose={() => setEditing(false)}
         />
       ) : null}
@@ -1320,6 +1360,12 @@ type LineDraft = {
   /** "1"–"12", or "" for January. */
   startMonth: string;
   endYear: string;
+  /** "1"–"12", or "" for December. */
+  endMonth: string;
+  /** Pay only: yearly raise %, "" = none. */
+  raisePct: string;
+  /** What `monthly` is typed per: a month or a year. */
+  per: "mo" | "yr";
   taxable: boolean;
 };
 
@@ -1362,6 +1408,7 @@ type RentalDraft = {
 };
 
 const DEFAULT_LINE_NAME: Record<IncomeLineKind, string> = {
+  pay: "Pay",
   va: "VA disability",
   social_security: "Social Security",
   job: "Second job",
@@ -1373,29 +1420,41 @@ function PlanModal({
   plan,
   thisYear,
   currency,
-  focusSbp = false,
+  focus = null,
+  suggestPayCents = null,
   onClose,
 }: {
   plan: FiPlan;
   thisYear: number;
   currency: string;
-  /** Opened from "Turn on SBP": scroll to that box and outline it. */
-  focusSbp?: boolean;
+  /** "sbp": opened from "Turn on SBP" — scroll to that box and outline it.
+   *  "income": opened from a year's Edit income — open at Income. */
+  focus?: "sbp" | "income" | null;
+  /** With focus "income" and no Pay line yet: start one at this yearly amount. */
+  suggestPayCents?: number | null;
   onClose: () => void;
 }) {
   const router = useRouter();
+  const focusSbp = focus === "sbp";
   useEffect(() => {
-    if (!focusSbp) return;
-    const box = document.getElementById("fi-sbp");
-    box?.scrollIntoView({ block: "center" });
-    box?.querySelector("input")?.focus({ preventScroll: true });
-  }, [focusSbp]);
+    if (focus === "sbp") {
+      const box = document.getElementById("fi-sbp");
+      box?.scrollIntoView({ block: "center" });
+      box?.querySelector("input")?.focus({ preventScroll: true });
+    } else if (focus === "income") {
+      document.getElementById("fi-income")?.scrollIntoView({ block: "start" });
+    }
+  }, [focus]);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Save keeps the popup open (Victor, 2026-10-16); the button says Saved for a moment instead.
+  const [justSaved, setJustSaved] = useState(false);
   // Every section opens collapsed — the header and its footnote only — so
   // the popup isn't a wall of numbers (Victor, 2026-10-16). Collapsed fields
   // stay in the form, hidden, so Save still sends them.
-  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(focusSbp ? ["military"] : []));
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    () => new Set(focus === "sbp" ? ["military"] : focus === "income" ? ["income"] : []),
+  );
   const isOpen = (id: string) => openSections.has(id);
   const toggleSection = (id: string) =>
     setOpenSections((prev) => {
@@ -1419,12 +1478,17 @@ function PlanModal({
   const [sbpPct, setSbpPct] = useState(String(plan.sbpPct));
   // COLA: which incomes get it, the future rate, and the actual one per
   // payment year.
-  const [colaMilitary, setColaMilitary] = useState(plan.cola.military);
-  const [colaVa, setColaVa] = useState(plan.cola.va);
-  const [colaSs, setColaSs] = useState(plan.cola.socialSecurity);
+  // There's always a COLA (Victor, 2026-10-16): retired pay, VA and Social
+  // Security all rise with it, with no switch to turn it off.
+  const colaMilitary = true;
+  const colaVa = true;
+  const colaSs = true;
   const [colaPct, setColaPct] = useState(String(plan.cola.pct));
-  const [colaByYear, setColaByYear] = useState<Record<string, string>>(() =>
-    Object.fromEntries(Object.entries(plan.cola.byYear).map(([y, pct]) => [y, String(pct)])),
+  // A row per year the COLA differs from COLA (%/yr), added with a button.
+  const [colaRows, setColaRows] = useState<{ key: string; year: string; pct: string }[]>(() =>
+    Object.entries(plan.cola.byYear)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([y, pct]) => ({ key: `cola-${y}`, year: y, pct: String(pct) })),
   );
   // A blank start means the retirement month, so it's filled in with it —
   // the box shows the date the cost really starts.
@@ -1499,19 +1563,45 @@ function PlanModal({
     },
   );
 
-  const [lines, setLines] = useState<LineDraft[]>(() =>
-    plan.incomeLines.map((l) => ({
+  const [lines, setLines] = useState<LineDraft[]>(() => {
+    const saved: LineDraft[] = plan.incomeLines.map((l) => ({
       key: l.id,
       id: l.id,
-      name: l.name,
+      // A name still at its type's default shows as the box's hint instead,
+      // so typing never runs into it ("Other iMilncome").
+      name: l.name === DEFAULT_LINE_NAME[l.kind] ? "" : l.name,
       kind: l.kind,
-      monthly: centsToDisplay(l.monthlyCents),
+      // Shown the way it was typed: per year or per month.
+      monthly: centsToDisplay(l.annualCents != null ? l.annualCents : Math.round(l.monthlyCents)),
+      per: l.annualCents != null ? "yr" : "mo",
       startYear: l.startYear?.toString() ?? "",
       startMonth: l.startMonth?.toString() ?? "",
       endYear: l.endYear?.toString() ?? "",
+      endMonth: l.endMonth == null || l.endMonth === 12 ? "" : String(l.endMonth),
+      raisePct: l.raisePct ? String(l.raisePct) : "",
       taxable: l.taxable,
-    })),
-  );
+    }));
+    // Opened from a year's Add income with no Pay yet: start one at this
+    // year's pay — per year, the way pay is thought of — ending when you stop
+    // working. Not saved until Save.
+    if (focus === "income" && !saved.some((l) => l.kind === "pay")) {
+      saved.unshift({
+        key: "new-pay",
+        id: null,
+        name: "",
+        kind: "pay",
+        monthly: suggestPayCents ? centsToDisplay(suggestPayCents) : "",
+        per: "yr",
+        startYear: "",
+        startMonth: "",
+        endYear: "",
+        endMonth: "",
+        raisePct: "",
+        taxable: true,
+      });
+    }
+    return saved;
+  });
   const [rentalDrafts, setRentalDrafts] = useState<RentalDraft[]>(() =>
     plan.rentalRows.map((r) => ({
       key: r.id,
@@ -1533,6 +1623,42 @@ function PlanModal({
   );
   const updateRental = (key: string, patch: Partial<RentalDraft>) =>
     setRentalDrafts((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  // Account groups: each one's settings as typed (blank = the default), and
+  // which group each account or bucket sits in.
+  const [groupDrafts, setGroupDrafts] = useState<Record<GroupKind, GroupDraft>>(() => {
+    const byKind = new Map(plan.accountGroups.rows.filter((r) => isGroupKind(r.kind)).map((r) => [r.kind as GroupKind, r]));
+    const text = (v: number | string | null | undefined) => (v == null || v === "" ? "" : String(Number(v)));
+    const cents = (v: number | null | undefined) => (v == null ? "" : centsToDisplay(v));
+    return Object.fromEntries(
+      GROUP_KINDS.map((kind) => {
+        const r = byKind.get(kind);
+        return [
+          kind,
+          {
+            returnPct: text(r?.return_pct),
+            add: cents(r?.add_annual_cents),
+            addStart: r?.add_start_year?.toString() ?? "",
+            addEnd: r?.add_end_year?.toString() ?? "",
+            take: cents(r?.take_annual_cents),
+            takeStart: r?.take_start_year?.toString() ?? "",
+            takeEnd: r?.take_end_year?.toString() ?? "",
+            taxPct: text(r?.tax_pct),
+          },
+        ];
+      }),
+    ) as Record<GroupKind, GroupDraft>;
+  });
+  const updateGroup = (kind: GroupKind, patch: Partial<GroupDraft>) =>
+    setGroupDrafts((prev) => ({ ...prev, [kind]: { ...prev[kind], ...patch } }));
+  const slotKey = (s: { accountId: string; bucketId: string | null }) => `${s.accountId}:${s.bucketId ?? ""}`;
+  const [slotGroups, setSlotGroups] = useState<Record<string, GroupKind>>(() =>
+    Object.fromEntries(plan.accountGroups.slots.map((s) => [slotKey(s), s.group])),
+  );
+  const [groupAccountsOpen, setGroupAccountsOpen] = useState<Set<GroupKind>>(() => new Set());
+  // Live, so each group's blank return shows the default it falls back to.
+  const [investDefault, setInvestDefault] = useState(String(plan.investmentReturnPct));
+  const [cashDefault, setCashDefault] = useState(String(plan.cashReturnPct));
   const addRental = () =>
     setRentalDrafts((prev) => [
       ...prev,
@@ -1636,24 +1762,36 @@ function PlanModal({
 
   // A box per year from the first COLA through next year's, the newest one
   // announced. A later year's COLA isn't known yet, so it uses the future rate.
-  const colaYears =
-    firstCola == null ? [] : Array.from({ length: Math.max(0, thisYear + 1 - firstCola + 1) }, (_, i) => firstCola + i);
+  // The next year without a row, from the first COLA on.
+  const nextColaYear = () => {
+    const taken = colaRows.map((r) => Number(r.year)).filter((y) => Number.isFinite(y) && y > 0);
+    return taken.length > 0 ? Math.max(...taken) + 1 : (firstCola ?? thisYear + 1);
+  };
 
   const updateLine = (key: string, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  // When a Pay line with a blank end stops, from the dates as typed right now:
+  // the month before military retired pay, else when withdrawals start.
+  const [withdrawStartDraft, setWithdrawStartDraft] = useState(plan.withdrawStartYear?.toString() ?? "");
+  const stopNow = payStop(toYear(retireYear), retireMonth ? Number(retireMonth) : null, toYear(withdrawStartDraft));
   const addLine = (kind: IncomeLineKind) =>
     setLines((prev) => [
       ...prev,
       {
         key: `new-${Date.now()}`,
         id: null,
-        name: DEFAULT_LINE_NAME[kind],
+        // Blank: the type's name shows as a hint and is saved if left blank.
+        name: "",
         kind,
         monthly: "",
-        startYear: retireYear,
-        // Retired pay's own start month, so VA lines up with it by default.
-        startMonth: retireMonth,
-        endYear: "",
+        // Pay runs from now and, left blank, stops when you stop working.
+        ...(kind === "pay"
+          ? { startYear: "", startMonth: "", endYear: "", endMonth: "" }
+          : // Retired pay's own start month, so VA lines up with it by default.
+            { startYear: retireYear, startMonth: retireMonth, endYear: "", endMonth: "" }),
+        raisePct: "",
+        // Pay is thought of per year; benefits are paid and quoted per month.
+        per: kind === "pay" || kind === "job" || kind === "spouse" ? "yr" : "mo",
         taxable: kind !== "va",
       },
     ]);
@@ -1676,7 +1814,7 @@ function PlanModal({
     // Only the years shown: a COLA before any income gets one changes nothing.
     formData.set(
       "colaByYear",
-      JSON.stringify(colaYears.map((y) => ({ year: String(y), pct: colaByYear[String(y)] ?? "" }))),
+      JSON.stringify(colaRows.map((r) => ({ year: r.year.trim(), pct: r.pct.trim() }))),
     );
     formData.set("healthPlans", planJson(healthPlans));
     formData.set("dentalPlans", planJson(dentalPlans));
@@ -1685,12 +1823,16 @@ function PlanModal({
       JSON.stringify(
         lines.map((l) => ({
           id: l.id,
-          name: l.name,
+          // A cleared name falls back to the type's.
+          name: l.name.trim() || DEFAULT_LINE_NAME[l.kind],
           kind: l.kind,
           monthly: l.monthly,
           startYear: l.startYear,
           startMonth: l.startMonth,
           endYear: l.endYear,
+          endMonth: l.endMonth,
+          raisePct: l.raisePct,
+          per: l.per,
           taxable: l.taxable,
         })),
       ),
@@ -1716,12 +1858,30 @@ function PlanModal({
         })),
       ),
     );
+    formData.set(
+      "accountGroups",
+      JSON.stringify(GROUP_KINDS.map((kind) => ({ kind, ...groupDrafts[kind] }))),
+    );
+    // Only the accounts moved; one moved back to its own type goes automatic.
+    formData.set(
+      "groupMoves",
+      JSON.stringify(
+        plan.accountGroups.slots
+          .filter((s) => slotGroups[slotKey(s)] !== s.group)
+          .map((s) => {
+            const to = slotGroups[slotKey(s)];
+            return { accountId: s.accountId, bucketId: s.bucketId, group: to === s.inferred ? "" : to };
+          }),
+      ),
+    );
     start(async () => {
       const result = await saveRetirementPlan(formData);
       if (result?.error) setError(result.error);
       else {
+        setError(null);
         router.refresh();
-        onClose();
+        setJustSaved(true);
+        window.setTimeout(() => setJustSaved(false), 2000);
       }
     });
   }
@@ -1737,7 +1897,7 @@ function PlanModal({
         // modal's <h2> truncates (overflow hidden), so the padding keeps Close's
         // 1px ring inside it instead of clipped at the edges.
         <span className="flex min-w-0 max-w-[calc(100vw-2.5rem)] items-center gap-2 py-0.5 pr-0.5 text-base sm:max-w-none sm:gap-3 sm:text-lg">
-          <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Retirement / FI Assumptions</span>
+          <span className="min-w-0 whitespace-normal leading-tight sm:truncate">Edit Future Projections</span>
           {/* Outside the <form>, so it points at it by id. */}
           <button
             type="submit"
@@ -1745,7 +1905,7 @@ function PlanModal({
             disabled={pending}
             className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
           >
-            {pending ? "Saving…" : "Save"}
+            {pending ? "Saving…" : justSaved ? "Saved" : "Save"}
           </button>
           {/* A worded Close in place of the X, beside Save rather than at the
               far edge (Victor, 2026-10-15). */}
@@ -1757,7 +1917,9 @@ function PlanModal({
       onClose={onClose}
       // Empty: Close sits in the title row above, so no X at the edge.
       headerEnd={<></>}
-      className="sm:max-w-3xl"
+      // Wide enough on desktop for each section's title and footnote to share
+      // one line (Victor, 2026-10-16).
+      className="sm:max-w-3xl lg:max-w-5xl xl:max-w-6xl"
     >
       <form
         id="fi-plan-form"
@@ -1774,6 +1936,348 @@ function PlanModal({
         <Field label="Plan until age" hint="How far the plan runs, and the last age shown under What is expected.">
           <input name="longevityAge" inputMode="numeric" defaultValue={plan.longevityAge} className={inputClass} />
         </Field>
+        </div>
+
+        <SectionHead
+          id="fi-income"
+          title="Income"
+          open={isOpen("income")}
+          onToggle={() => toggleSection("income")}
+          note={
+            <>
+              Before tax, at today&rsquo;s rates.{" "}
+              <button type="button" onClick={() => setInfo("income")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
+                How it works
+              </button>
+            </>
+          }
+        />
+        <div className={isOpen("income") ? "contents" : "hidden"}>
+        <div className="space-y-2 sm:col-span-2">
+          {lines.map((l) => (
+            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(12rem,1fr)_10rem_11rem_8rem_8.5rem_8.5rem_auto]">
+              {/* Your own name ("Mil Pay"); the type decides how it is
+                  treated — COLA, survivor, when Pay stops (Victor, 2026-10-16).
+                  Blank shows the type's name as a hint and saves it. */}
+              <LineField label="Name">
+                <input
+                  value={l.name}
+                  onChange={(e) => updateLine(l.key, { name: e.target.value })}
+                  placeholder={DEFAULT_LINE_NAME[l.kind]}
+                  className={lineInput}
+                />
+              </LineField>
+              <LineField label="Type">
+                <select
+                  value={l.kind}
+                  onChange={(e) => {
+                    const kind = e.target.value as IncomeLineKind;
+                    updateLine(l.key, { kind, taxable: kind !== "va" });
+                  }}
+                  className={lineInput}
+                >
+                  {INCOME_LINE_KINDS.map((k) => (
+                    <option key={k.value} value={k.value}>{k.label}</option>
+                  ))}
+                </select>
+              </LineField>
+              {/* Typed per month or per year — pay is thought of yearly,
+                  benefits monthly (Victor, 2026-10-16). */}
+              <LineField label="Amount">
+                <span className="flex gap-1">
+                  <input
+                    inputMode="decimal"
+                    value={l.monthly}
+                    onChange={(e) => updateLine(l.key, { monthly: e.target.value })}
+                    placeholder="0.00"
+                    className={lineInput}
+                  />
+                  <select
+                    value={l.per}
+                    onChange={(e) => updateLine(l.key, { per: e.target.value as "mo" | "yr" })}
+                    aria-label="Per month or per year"
+                    className="w-[4.25rem] shrink-0 cursor-pointer rounded-md bg-surface px-1.5 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    <option value="mo">/mo</option>
+                    <option value="yr">/yr</option>
+                  </select>
+                </span>
+              </LineField>
+              {/* Pay-like income rises by its own raise each January; VA and
+                  Social Security rise by the COLA instead. */}
+              {RAISE_KINDS.includes(l.kind) ? (
+                <LineField label="Pay Increase %/yr">
+                  <input
+                    inputMode="decimal"
+                    value={l.raisePct}
+                    onChange={(e) => updateLine(l.key, { raisePct: e.target.value })}
+                    placeholder="0"
+                    className={`${lineInput} text-center`}
+                  />
+                </LineField>
+              ) : (
+                <LineField label="Pay Increase %/yr">
+                  <span className="block py-1.5 text-sm text-foreground">COLA</span>
+                </LineField>
+              )}
+              {/* Month + year: the first year only counts from this month on. */}
+              <LineField label="Starts">
+                <MonthYearBox
+                  label="Start"
+                  blankMonth="Jan"
+                  month={l.startMonth}
+                  onMonth={(v) => updateLine(l.key, { startMonth: v })}
+                  year={l.startYear}
+                  onYear={(v) => updateLine(l.key, { startYear: v })}
+                  yearPlaceholder="Now"
+                />
+              </LineField>
+              {/* Month + year: the last year only counts through this month. */}
+              <LineField label="Ends">
+                <MonthYearBox
+                  label="End"
+                  blankMonth="Dec"
+                  month={l.endMonth}
+                  onMonth={(v) => updateLine(l.key, { endMonth: v })}
+                  year={l.endYear}
+                  onYear={(v) => updateLine(l.key, { endYear: v })}
+                  yearPlaceholder={l.kind === "pay" && stopNow ? String(stopNow.endYear) : "Never"}
+                />
+              </LineField>
+              <button
+                type="button"
+                onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
+                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+              >
+                Remove
+              </button>
+              {/* A year's worth, and when a blank Pay end stops it — in words
+                  that fit anyone, served or not. */}
+              {money(l.monthly) > 0 || (l.kind === "pay" && !l.endYear.trim()) ? (
+                <p className="col-span-2 text-center text-xs sm:col-span-7 sm:text-sm text-foreground">
+                  {/* The same amount the other way round. */}
+                  {money(l.monthly) > 0
+                    ? l.per === "yr"
+                      ? `Estimated Monthly Income: ${formatMoneyWhole(money(l.monthly) / 12, currency)} `
+                      : `Estimated Yearly Income: ${formatMoneyWhole(money(l.monthly) * 12, currency)} `
+                    : ""}
+                  {l.kind === "pay" && !l.endYear.trim()
+                    ? stopNow
+                      ? `Blank end: stops ${MONTHS[stopNow.endMonth - 1]} ${stopNow.endYear}, when you retire.`
+                      : "Blank end: never stops. Set your retirement year under Return, Withdrawal, & Inflation Rates."
+                    : null}
+                </p>
+              ) : null}
+            </div>
+          ))}
+          {/* Picking a type adds a line of that type, then resets. */}
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) addLine(e.target.value as IncomeLineKind);
+            }}
+            aria-label="Add income"
+            className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-sky-950/40"
+          >
+            <option value="">+ Add income</option>
+            {INCOME_LINE_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>{k.label}</option>
+            ))}
+          </select>
+        </div>
+        </div>
+
+        <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
+        <div className={isOpen("rates") ? "contents" : "hidden"}>
+        <Field label="Expected rate of return (%)" hint="What your investments earn a year. Each group below uses it unless you set its own.">
+          <input name="investmentReturnPct" inputMode="decimal" value={investDefault} onChange={(e) => setInvestDefault(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Savings APY (%)" hint="What your checking and savings accounts earn a year — the Cash group.">
+          <input name="cashReturnPct" inputMode="decimal" value={cashDefault} onChange={(e) => setCashDefault(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="Spending inflation (%)" hint="How much your spending, healthcare and rental costs go up each year.">
+          <input
+            name="inflationPct"
+            inputMode="decimal"
+            value={inflation}
+            onChange={(e) => setInflation(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once you stop working. Needed = the yearly gap ÷ this rate.">
+          <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
+        </Field>
+        <Field label="Retirement year (stop working)" hint="Pay and contributions stop; withdrawals can start.">
+          <input
+            name="withdrawStartYear"
+            inputMode="numeric"
+            value={withdrawStartDraft}
+            onChange={(e) => setWithdrawStartDraft(e.target.value)}
+            placeholder={plan.targetRetireYear ? String(plan.targetRetireYear) : ""}
+            className={inputClass}
+          />
+        </Field>
+
+        {/* Each kind of money on its own: return, what goes in, what comes
+            out, and the tax on it. Blank boxes use the default shown. */}
+        <div className="space-y-2 sm:col-span-2">
+          <p className="border-t border-line pt-3 text-sm font-bold uppercase tracking-wide text-foreground">Account groups</p>
+          <p className="-mt-1 text-xs sm:text-sm text-foreground">
+            Blank = default. Take out: today&rsquo;s dollars, rises with inflation.
+          </p>
+          {GROUP_KINDS.filter(
+            (kind) =>
+              plan.accountGroups.slots.some((s) => slotGroups[slotKey(s)] === kind) ||
+              plan.accountGroups.rows.some((r) => r.kind === kind && (r.add_annual_cents || r.take_annual_cents)),
+          ).map((kind) => {
+            const d = groupDrafts[kind];
+            const slots = plan.accountGroups.slots.filter((s) => slotGroups[slotKey(s)] === kind);
+            const todayCents = slots.reduce((t, s) => t + s.balanceCents, 0);
+            const measuredCents = plan.accountGroups.measuredAddCents[kind];
+            const isCash = kind === "cash";
+            const accountsOpen = groupAccountsOpen.has(kind);
+            const toggleAccounts = () =>
+              setGroupAccountsOpen((prev) => {
+                const next = new Set(prev);
+                if (next.has(kind)) next.delete(kind);
+                else next.add(kind);
+                return next;
+              });
+            const dollars = (cents: number) => String(Math.round(cents / 100));
+            return (
+              <div key={kind} className="rounded-lg bg-background p-2 ring-1 ring-line">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    {GROUP_LABEL[kind]}{" "}
+                    <span className="tabular-nums" style={{ color: "var(--viz-savings)" }}>
+                      {formatMoneyWhole(todayCents, currency)}
+                    </span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={toggleAccounts}
+                    aria-expanded={accountsOpen}
+                    className="rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                  >
+                    {accountsOpen ? "Hide accounts" : `Accounts (${slots.length})`}
+                  </button>
+                </div>
+                <p className="text-xs sm:text-sm text-foreground">
+                  {GROUP_HINT[kind]}
+                  {!isCash && measuredCents > 0 ? ` · added last 12 mo: ${formatMoneyWhole(measuredCents, currency)}/yr` : ""}
+                </p>
+                {accountsOpen ? (
+                  <div className="mt-1.5 space-y-1">
+                    {slots.length === 0 ? <p className="text-xs text-foreground">No accounts in this group.</p> : null}
+                    {slots.map((s) => (
+                      <div key={slotKey(s)} className="flex items-center gap-2 text-xs sm:text-sm">
+                        <span className="min-w-0 flex-1 truncate text-foreground">{s.name}</span>
+                        <span className="tabular-nums text-foreground">{formatMoneyWhole(s.balanceCents, currency)}</span>
+                        <select
+                          value={slotGroups[slotKey(s)]}
+                          onChange={(e) => setSlotGroups((prev) => ({ ...prev, [slotKey(s)]: e.target.value as GroupKind }))}
+                          aria-label={`Group for ${s.name}`}
+                          className="w-32 shrink-0 rounded-md sm:w-40 bg-surface px-1.5 py-1 text-xs ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand"
+                        >
+                          {GROUP_KINDS.map((k) => (
+                            <option key={k} value={k}>{GROUP_LABEL[k]}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+                  <LineField label="Return %">
+                    <input
+                      inputMode="decimal"
+                      value={d.returnPct}
+                      onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
+                      placeholder={isCash ? cashDefault : investDefault}
+                      className={`${lineInput}`}
+                    />
+                  </LineField>
+                  {isCash ? null : (
+                    <>
+                      <LineField label="Add $ / yr">
+                        <input
+                          inputMode="decimal"
+                          value={d.add}
+                          onChange={(e) => updateGroup(kind, { add: e.target.value })}
+                          placeholder={dollars(measuredCents)}
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                      <LineField label="Add from">
+                        <input
+                          inputMode="numeric"
+                          value={d.addStart}
+                          onChange={(e) => updateGroup(kind, { addStart: e.target.value })}
+                          placeholder="Now"
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                      <LineField label="Add to">
+                        <input
+                          inputMode="numeric"
+                          value={d.addEnd}
+                          onChange={(e) => updateGroup(kind, { addEnd: e.target.value })}
+                          placeholder={
+                            defaultAddEnd(
+                              plan.withdrawStartYear ?? toYear(retireYear),
+                              money(d.take),
+                              toYear(d.takeStart),
+                            )?.toString() ?? "Always"
+                          }
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                      <LineField label="Take out $ / yr">
+                        <input
+                          inputMode="decimal"
+                          value={d.take}
+                          onChange={(e) => updateGroup(kind, { take: e.target.value })}
+                          placeholder="0"
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                      <LineField label="Take from">
+                        <input
+                          inputMode="numeric"
+                          value={d.takeStart}
+                          onChange={(e) => updateGroup(kind, { takeStart: e.target.value })}
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                      <LineField label="Take to">
+                        <input
+                          inputMode="numeric"
+                          value={d.takeEnd}
+                          onChange={(e) => updateGroup(kind, { takeEnd: e.target.value })}
+                          placeholder="For life"
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                      <LineField label="Tax %">
+                        <input
+                          inputMode="decimal"
+                          value={d.taxPct}
+                          onChange={(e) => updateGroup(kind, { taxPct: e.target.value })}
+                          placeholder={String(DEFAULT_TAX_PCT[kind])}
+                          className={`${lineInput}`}
+                        />
+                      </LineField>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-xs sm:text-sm text-foreground">
+            Short a year: drawn from Brokerage, Crypto, Metals, Pre-tax, then Roth.
+            {plan.birthYear ? ` Pre-tax required minimums from age ${rmdStartAge(plan.birthYear)}.` : ""}
+          </p>
+        </div>
         </div>
 
         <SectionHead title="Military retirement" open={isOpen("military")} onToggle={() => toggleSection("military")} />
@@ -1829,16 +2333,19 @@ function PlanModal({
         ))}
         <Field
           id="fi-sbp"
+          // Its own row, so the note reads as one line with the link under it
+          // (Victor, 2026-10-16).
+          className="sm:col-span-2"
           highlight={focusSbp}
           label="SBP (Survivor Benefit Plan)"
           hint={
             <>
-              Select and the rate comes off gross retired pay, before tax.{" "}
+              Select and the rate comes off gross retired pay, before tax.
               <a
                 href="https://www.dfas.mil/RetiredMilitary/provide/sbp/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="whitespace-nowrap font-semibold underline underline-offset-2"
+                className="block w-fit whitespace-nowrap font-semibold underline underline-offset-2"
                 style={{ color: "var(--viz-savings)" }}
               >
                 Read about SBP (DFAS)
@@ -1891,25 +2398,19 @@ function PlanModal({
 
         {colaStarts.military != null || colaStarts.va != null || colaStarts.socialSecurity != null ? (
           <>
-            <SectionHead title="COLA (yearly raise)" open={isOpen("cola")} onToggle={() => toggleSection("cola")} />
-            <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
-              One COLA each January, from each income&rsquo;s own start.
-            </p>
+            <SectionHead
+              title="COLA (yearly raise)"
+              open={isOpen("cola")}
+              onToggle={() => toggleSection("cola")}
+              note={<>Raises retired pay, VA and Social Security every January.</>}
+            />
             <div className={isOpen("cola") ? "contents" : "hidden"}>
-            <div className="flex flex-wrap gap-x-5 gap-y-2 sm:col-span-2">
-              <span className="w-full max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Rises with COLA</span>
-              {colaStarts.military != null ? (
-                <ColaSwitch name="colaMilitary" label="Military retired pay" from={colaStarts.military} checked={colaMilitary} onChange={setColaMilitary} />
-              ) : null}
-              {colaStarts.va != null ? (
-                <ColaSwitch name="colaVa" label="VA disability" from={colaStarts.va} checked={colaVa} onChange={setColaVa} />
-              ) : null}
-              {colaStarts.socialSecurity != null ? (
-                <ColaSwitch name="colaSocialSecurity" label="Social Security" from={colaStarts.socialSecurity} checked={colaSs} onChange={setColaSs} />
-              ) : null}
-            </div>
+            {/* Two columns on desktop: which incomes rise and any year the COLA
+                differs on the left; the yearly rate on the right. */}
+            <div className="space-y-2">
+            <span className="block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Rises with COLA</span>
             {firstCola != null ? (
-              <div className="-mt-2 space-y-0.5 text-xs sm:text-sm text-foreground sm:col-span-2">
+              <div className="space-y-0.5 text-xs sm:text-sm text-foreground">
                 {colaNotes.map((n) => (
                   <p key={n}>{n}</p>
                 ))}
@@ -1923,55 +2424,78 @@ function PlanModal({
                 </button>
               </div>
             ) : null}
-            <Field className="sm:col-span-2" label="Future COLA (%/yr)" hint={`Last 20 years averaged ${colaAverage(20)}%; last 10, ${colaAverage(10)}%.`}>
-              <input name="colaPct" inputMode="decimal" value={colaPct} onChange={(e) => setColaPct(e.target.value)} className={inputClass} />
-            </Field>
-            <div className="sm:col-span-2">
-              <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">Actual COLA by year</span>
-              {colaYears.length > 0 ? (
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                  {colaYears.map((y) => (
-                    <label key={y} className="block text-center">
-                      <span className="mb-0.5 block text-xs font-semibold tabular-nums text-foreground sm:text-sm">{y}</span>
-                      <span className="relative block">
-                        <input
-                          inputMode="decimal"
-                          value={colaByYear[String(y)] ?? ""}
-                          onChange={(e) => setColaByYear((prev) => ({ ...prev, [y]: e.target.value }))}
-                          placeholder={colaPct}
-                          aria-label={`COLA ${y} %`}
-                          className={`${lineInput} pr-6 text-center tabular-nums`}
-                        />
-                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground">%</span>
-                      </span>
-                    </label>
-                  ))}
+            <div className="pt-2">
+            <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">COLA changes by year (all incomes)</span>
+            {firstCola == null ? (
+              <p className="text-xs sm:text-sm text-foreground">No income set to rise.</p>
+            ) : (
+              <div className="space-y-2">
+                {colaRows.map((r) => (
+                  <div key={r.key} className="flex flex-wrap items-center gap-2">
+                    <span className="block w-20">
+                      <input
+                        inputMode="numeric"
+                        value={r.year}
+                        onChange={(e) => setColaRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, year: e.target.value } : x)))}
+                        aria-label="COLA year"
+                        className={`${lineInput} text-center tabular-nums`}
+                      />
+                    </span>
+                    <span className="relative block w-24">
+                      <input
+                        inputMode="decimal"
+                        value={r.pct}
+                        onChange={(e) => setColaRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, pct: e.target.value } : x)))}
+                        placeholder={colaPct}
+                        aria-label={`COLA ${r.year} %`}
+                        className={`${lineInput} pr-6 text-center tabular-nums`}
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-sm text-foreground">%</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setColaRows((prev) => prev.filter((x) => x.key !== r.key))}
+                      className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const y = nextColaYear();
+                      setColaRows((prev) => [...prev, { key: `cola-new-${Date.now()}`, year: String(y), pct: "" }]);
+                    }}
+                    className="shrink-0 rounded-md bg-surface px-2.5 py-1 text-xs font-semibold text-foreground ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 sm:text-sm dark:hover:bg-sky-900/50"
+                  >
+                    + Change a year
+                  </button>
+                  <span className="min-w-0 text-xs sm:flex-1 sm:text-sm text-foreground">Replaces Every year COLA (%/yr) for that year.</span>
                 </div>
-              ) : null}
-              <p className="mt-1 text-xs sm:text-sm text-foreground">
-                {firstCola == null
-                  ? "No income set to rise."
-                  : colaYears.length > 0
-                    ? "Blank: the future COLA. A new year's box opens each January."
-                    : `First COLA: January ${firstCola}. Its box opens in ${firstCola - 1}.`}
-              </p>
+              </div>
+            )}
+            </div>
+            </div>
+            <div>
+            <Field label="Every year COLA (%/yr)" hint={`Last 20 years averaged ${colaAverage(20)}%; last 10, ${colaAverage(10)}%.`}>
+              <input name="colaPct" inputMode="decimal" value={colaPct} onChange={(e) => setColaPct(e.target.value)} className={`${inputClass} text-center`} />
+            </Field>
             </div>
             </div>
 
           </>
         ) : null}
-        {/* A switch for an income this plan doesn't have keeps what was saved. */}
-        {colaStarts.military == null && colaMilitary ? <input type="hidden" name="colaMilitary" value="on" /> : null}
-        {colaStarts.va == null && colaVa ? <input type="hidden" name="colaVa" value="on" /> : null}
-        {colaStarts.socialSecurity == null && colaSs ? <input type="hidden" name="colaSocialSecurity" value="on" /> : null}
+        {/* Always on: every income that can rise with the COLA does. */}
+        <input type="hidden" name="colaMilitary" value="on" />
+        <input type="hidden" name="colaVa" value="on" />
+        <input type="hidden" name="colaSocialSecurity" value="on" />
         {colaStarts.military == null && colaStarts.va == null && colaStarts.socialSecurity == null ? (
           <input type="hidden" name="colaPct" value={colaPct} />
         ) : null}
 
         <SectionHead title="Healthcare in retirement" open={isOpen("health")} onToggle={() => toggleSection("health")} />
-        <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
-          Family premiums per year, at today&rsquo;s rates. Added to spending.
-        </p>
         <div className={isOpen("health") ? "contents" : "hidden"}>
         {/* One row per plan; two can run side by side (a TRICARE plan plus a
             private supplement). All of them stop when TFL starts. */}
@@ -2067,125 +2591,19 @@ function PlanModal({
         </Field>
         </div>
 
-        <SectionHead title="Rates & withdrawals" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
-        <div className={isOpen("rates") ? "contents" : "hidden"}>
-        <Field label="Expected rate of return (%)" hint="What your investments earn a year. Only investments — not income or savings.">
-          <input name="investmentReturnPct" inputMode="decimal" defaultValue={plan.investmentReturnPct} className={inputClass} />
-        </Field>
-        <Field label="Savings APY (%)" hint="What your checking and savings accounts on Accounts earn a year.">
-          <input name="cashReturnPct" inputMode="decimal" defaultValue={plan.cashReturnPct} className={inputClass} />
-        </Field>
-        <Field label="Spending inflation (%)" hint="How much your spending, healthcare and rental costs go up each year.">
-          <input
-            name="inflationPct"
-            inputMode="decimal"
-            value={inflation}
-            onChange={(e) => setInflation(e.target.value)}
-            className={inputClass}
-          />
-        </Field>
-        <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once you stop working. Needed = the yearly gap ÷ this rate.">
-          <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
-        </Field>
-        <Field label="Withdrawals start (year)" hint="When you stop working and start drawing on investments. Blank = the military retirement year.">
-          <input
-            name="withdrawStartYear"
-            inputMode="numeric"
-            defaultValue={plan.withdrawStartYear ?? ""}
-            placeholder={plan.targetRetireYear ? String(plan.targetRetireYear) : ""}
-            className={inputClass}
-          />
-        </Field>
-        </div>
-
-        <SectionHead title="Other income" open={isOpen("income")} onToggle={() => toggleSection("income")} />
-        <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
-          Per month, before tax, at today&rsquo;s rates.{" "}
-          <button type="button" onClick={() => setInfo("income")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
-            How it works
-          </button>
-        </p>
-        <div className={isOpen("income") ? "contents" : "hidden"}>
-        <div className="space-y-2 sm:col-span-2">
-          {lines.map((l) => (
-            <div key={l.key} className="grid grid-cols-2 items-end gap-2 rounded-lg bg-background p-2 ring-1 ring-line sm:grid-cols-[minmax(0,1fr)_6rem_9.5rem_4.5rem_auto]">
-              <LineField label="Type" className="col-span-2 sm:col-span-1">
-                <select
-                  value={l.kind}
-                  onChange={(e) => {
-                    // The type is the line's name — there is no separate Name field.
-                    const kind = e.target.value as IncomeLineKind;
-                    updateLine(l.key, { kind, taxable: kind !== "va", name: DEFAULT_LINE_NAME[kind] });
-                  }}
-                  className={lineInput}
-                >
-                  {INCOME_LINE_KINDS.map((k) => (
-                    <option key={k.value} value={k.value}>{k.label}</option>
-                  ))}
-                </select>
-              </LineField>
-              <LineField label="$ / mo">
-                <input
-                  inputMode="decimal"
-                  value={l.monthly}
-                  onChange={(e) => updateLine(l.key, { monthly: e.target.value })}
-                  placeholder="0.00"
-                  className={`${lineInput} text-center`}
-                />
-              </LineField>
-              {/* Month + year: the first year only counts from this month on. */}
-              <LineField label="Starts">
-                <MonthYearBox
-                  label="Start"
-                  blankMonth="Jan"
-                  month={l.startMonth}
-                  onMonth={(v) => updateLine(l.key, { startMonth: v })}
-                  year={l.startYear}
-                  onYear={(v) => updateLine(l.key, { startYear: v })}
-                  yearPlaceholder="Now"
-                />
-              </LineField>
-              <LineField label="End year">
-                <input
-                  inputMode="numeric"
-                  value={l.endYear}
-                  onChange={(e) => updateLine(l.key, { endYear: e.target.value })}
-                  className={`${lineInput} text-center`}
-                />
-              </LineField>
-              <button
-                type="button"
-                onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))}
-                className="h-[34px] rounded-md px-2 text-xs font-semibold text-negative ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-              >
-                Remove
+        <SectionHead
+          title="Rental properties"
+          open={isOpen("rentals")}
+          onToggle={() => toggleSection("rentals")}
+          note={
+            <>
+              Prices, rent and costs at today&rsquo;s rates.{" "}
+              <button type="button" onClick={() => setInfo("rentals")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
+                How it works
               </button>
-            </div>
-          ))}
-          {/* Picking a type adds a line of that type, then resets. */}
-          <select
-            value=""
-            onChange={(e) => {
-              if (e.target.value) addLine(e.target.value as IncomeLineKind);
-            }}
-            aria-label="Add income"
-            className="cursor-pointer rounded-md bg-surface px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-100 hover:ring-sky-400 focus:outline-none focus:ring-2 focus:ring-brand dark:hover:bg-sky-950/40"
-          >
-            <option value="">+ Add income</option>
-            {INCOME_LINE_KINDS.map((k) => (
-              <option key={k.value} value={k.value}>{k.label}</option>
-            ))}
-          </select>
-        </div>
-        </div>
-
-        <SectionHead title="Rental properties" open={isOpen("rentals")} onToggle={() => toggleSection("rentals")} />
-        <p className="-mt-2 text-xs sm:text-sm text-foreground sm:col-span-2">
-          Prices, rent and costs at today&rsquo;s rates.{" "}
-          <button type="button" onClick={() => setInfo("rentals")} className={infoLink} style={{ color: "var(--viz-savings)" }}>
-            How it works
-          </button>
-        </p>
+            </>
+          }
+        />
         <div className={isOpen("rentals") ? "contents" : "hidden"}>
         <div className="space-y-2 sm:col-span-2">
           {rentalDrafts.map((r) => {
@@ -2219,44 +2637,44 @@ function PlanModal({
                         </p>
                       ) : (
                         <LineField label="Loan balance" className="col-span-2 sm:col-span-1">
-                          <input inputMode="decimal" value={r.loanBalance} onChange={(e) => updateRental(r.key, { loanBalance: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                          <input inputMode="decimal" value={r.loanBalance} onChange={(e) => updateRental(r.key, { loanBalance: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
                         </LineField>
                       );
                     })()}
                     <LineField label="Years left">
-                      <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} className={`${lineInput} text-center`} />
+                      <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} className={`${lineInput}`} />
                     </LineField>
                   </>
                 ) : (
                   <>
                     <LineField label="Buy in">
-                      <input inputMode="numeric" value={r.purchaseYear} onChange={(e) => updateRental(r.key, { purchaseYear: e.target.value })} className={`${lineInput} text-center`} />
+                      <input inputMode="numeric" value={r.purchaseYear} onChange={(e) => updateRental(r.key, { purchaseYear: e.target.value })} className={`${lineInput}`} />
                     </LineField>
                     <LineField label="Price">
-                      <input inputMode="decimal" value={r.value} onChange={(e) => updateRental(r.key, { value: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                      <input inputMode="decimal" value={r.value} onChange={(e) => updateRental(r.key, { value: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
                     </LineField>
                     <LineField label="Down %">
-                      <input inputMode="decimal" value={r.downPaymentPct} onChange={(e) => updateRental(r.key, { downPaymentPct: e.target.value })} className={`${lineInput} text-center`} />
+                      <input inputMode="decimal" value={r.downPaymentPct} onChange={(e) => updateRental(r.key, { downPaymentPct: e.target.value })} className={`${lineInput}`} />
                     </LineField>
                     <LineField label="Closing %">
-                      <input inputMode="decimal" value={r.closingCostPct} onChange={(e) => updateRental(r.key, { closingCostPct: e.target.value })} className={`${lineInput} text-center`} />
+                      <input inputMode="decimal" value={r.closingCostPct} onChange={(e) => updateRental(r.key, { closingCostPct: e.target.value })} className={`${lineInput}`} />
                     </LineField>
                     <LineField label="Loan years">
-                      <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} className={`${lineInput} text-center`} />
+                      <input inputMode="numeric" value={r.loanYears} onChange={(e) => updateRental(r.key, { loanYears: e.target.value })} className={`${lineInput}`} />
                     </LineField>
                   </>
                 )}
                 <LineField label="Loan rate %">
-                  <input inputMode="decimal" value={r.loanRatePct} onChange={(e) => updateRental(r.key, { loanRatePct: e.target.value })} className={`${lineInput} text-center`} />
+                  <input inputMode="decimal" value={r.loanRatePct} onChange={(e) => updateRental(r.key, { loanRatePct: e.target.value })} className={`${lineInput}`} />
                 </LineField>
                 <LineField label="Rent / mo">
-                  <input inputMode="decimal" value={r.rent} onChange={(e) => updateRental(r.key, { rent: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                  <input inputMode="decimal" value={r.rent} onChange={(e) => updateRental(r.key, { rent: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
                 </LineField>
                 <LineField label="Costs / mo">
-                  <input inputMode="decimal" value={r.costs} onChange={(e) => updateRental(r.key, { costs: e.target.value })} placeholder="0.00" className={`${lineInput} text-center`} />
+                  <input inputMode="decimal" value={r.costs} onChange={(e) => updateRental(r.key, { costs: e.target.value })} placeholder="0.00" className={`${lineInput}`} />
                 </LineField>
                 <LineField label="Value growth %">
-                  <input inputMode="decimal" value={r.appreciationPct} onChange={(e) => updateRental(r.key, { appreciationPct: e.target.value })} className={`${lineInput} text-center`} />
+                  <input inputMode="decimal" value={r.appreciationPct} onChange={(e) => updateRental(r.key, { appreciationPct: e.target.value })} className={`${lineInput}`} />
                 </LineField>
                 <button
                   type="button"
@@ -2300,7 +2718,7 @@ function PlanModal({
             disabled={pending}
             className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
           >
-            {pending ? "Saving…" : "Save"}
+            {pending ? "Saving…" : justSaved ? "Saved" : "Save"}
           </button>
           <button type="button" onClick={onClose} className={closeButtonClass}>
             Close
@@ -2313,11 +2731,14 @@ function PlanModal({
       {tflInfoOpen ? <TflInfo tflYear={tflYear} onClose={() => setTflInfoOpen(false)} /> : null}
       {info === "income" ? (
         <InfoPopup
-          title="Other income"
+          title="Income"
           onClose={() => setInfo(null)}
           items={[
-            ["Rises with COLA", "VA and Social Security, when ticked under COLA. Other lines stay the same."],
-            ["Amount changes", "Type an End Year on the old line, then + Add income with the new amount from the year after."],
+            ["Only income", "Future years use only these lines and retired pay. No lines: $0."],
+            ["Pay (work)", "Your pay from work. Blank end: stops when you retire."],
+            ["Pay Increase %/yr", "Added every January after the start year, on top of last year. VA and Social Security use the COLA."],
+            ["Rises with COLA", "VA and Social Security. Other lines stay the same."],
+            ["Amount changes", "End the old line, then + Add income with the new amount from the month after."],
           ]}
         />
       ) : null}
@@ -2353,14 +2774,31 @@ function PlanModal({
 }
 
 /** A popup section's header: tap to open or fold what's under it. */
-function SectionHead({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
+function SectionHead({
+  title,
+  open,
+  onToggle,
+  note,
+  id,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  /** The section's one-line footnote: beside the title on desktop, under it
+   *  on a phone (Victor, 2026-10-16). */
+  note?: React.ReactNode;
+  id?: string;
+}) {
   return (
-    <h3 className="sm:col-span-2 border-t border-line pt-3 first:border-t-0 first:pt-0">
+    <h3
+      id={id}
+      className="sm:col-span-2 flex scroll-mt-2 flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 first:border-t-0 first:pt-0"
+    >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 text-left text-sm font-bold uppercase tracking-wide"
+        className={`flex items-center gap-2 text-left text-sm font-bold uppercase tracking-wide ${note ? "shrink-0 max-sm:w-full" : "w-full"}`}
       >
         <svg
           aria-hidden
@@ -2376,39 +2814,39 @@ function SectionHead({ title, open, onToggle }: { title: string; open: boolean; 
         </svg>
         {title}
       </button>
+      {/* The rest of the row opens the section too — only the title did, so a
+          click beside it did nothing (Victor, 2026-10-16). A link or button
+          inside the note ("How it works") keeps its own click. */}
+      {note ? (
+        <span
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("button, a")) return;
+            onToggle();
+          }}
+          className="min-w-0 flex-1 cursor-pointer self-stretch text-xs font-normal text-foreground sm:flex sm:items-center sm:text-sm"
+        >
+          <span>{note}</span>
+        </span>
+      ) : null}
     </h3>
   );
 }
 
 /** A COLA checkbox, with the year that income's first raise lands. */
-function ColaSwitch({
-  name,
-  label,
-  from,
-  checked,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  from: number;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        name={name}
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="size-4 cursor-pointer accent-[color:var(--brand)]"
-      />
-      <span>
-        {label} <span className="whitespace-nowrap font-semibold tabular-nums">from {from}</span>
-      </span>
-    </label>
-  );
-}
+/** Income that rises by its own yearly raise; VA and Social Security get the COLA. */
+const RAISE_KINDS: IncomeLineKind[] = ["pay", "job", "spouse", "other"];
+
+/** An account group's settings as typed; blank = the default. */
+type GroupDraft = {
+  returnPct: string;
+  add: string;
+  addStart: string;
+  addEnd: string;
+  take: string;
+  takeStart: string;
+  takeEnd: string;
+  taxPct: string;
+};
 
 const lineInput =
   "w-full min-w-0 rounded-md bg-surface px-2 py-1.5 text-sm ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
@@ -2616,7 +3054,7 @@ function PlanRow<K extends string>({
             onChange={(e) => onChange({ amount: e.target.value })}
             placeholder="0.00"
             aria-label="Premium per year"
-            className={`${lineInput} text-center tabular-nums`}
+            className={`${lineInput} tabular-nums`}
           />
         </LineField>
         <LineField label="Starts">

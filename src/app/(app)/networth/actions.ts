@@ -15,10 +15,9 @@ import {
   high3Window,
   incomeForYear,
   inflatedSpending,
-  CASH_KINDS,
-  investShareOfNew,
-  nextCash,
-  yearGrowth,
+  ageInYear,
+  payStop,
+  withPayEnds,
   retiredShareOfYear,
   type HealthcarePlan,
   type CostDates,
@@ -34,6 +33,17 @@ import {
   type IncomeLineKind,
   type RentalRow,
 } from "@/lib/retirement";
+import {
+  GROUP_KINDS,
+  GROUP_LABEL,
+  groupsYear,
+  isGroupKind,
+  resolveGroupSettings,
+  scaleBalances,
+  toStoredGroups,
+  type GroupKind,
+} from "@/lib/account-groups";
+import { loadGroupInputs } from "@/lib/account-groups-load";
 
 const MONTH_RE = /^\d{4}-\d{2}-01$/;
 
@@ -420,7 +430,7 @@ export async function saveRetirementPlan(formData: FormData) {
   if (dentalPlans.some(endsBeforeStart)) return { error: "Dental & vision: the end can't be before the start." };
   const healthGrowth = num("healthcareGrowthPct");
   const colaPct = num("colaPct");
-  if (colaPct != null && (colaPct < 0 || colaPct > 15)) return { error: "Future COLA has to be between 0% and 15%." };
+  if (colaPct != null && (colaPct < 0 || colaPct > 15)) return { error: "COLA has to be between 0% and 15%." };
   // Actual COLAs ride along as JSON rows: a payment year and its %, one per
   // year from the plan's first COLA.
   let colaRows: { year?: string; pct?: string }[] = [];
@@ -503,6 +513,10 @@ export async function saveRetirementPlan(formData: FormData) {
     startYear?: string;
     startMonth?: string;
     endYear?: string;
+    endMonth?: string;
+    raisePct?: string;
+    /** "yr" = the amount is per year; else per month. */
+    per?: string;
     taxable?: boolean;
   };
   let linesIn: LineIn[] = [];
@@ -526,6 +540,9 @@ export async function saveRetirementPlan(formData: FormData) {
     start_year: number | null;
     start_month: number | null;
     end_year: number | null;
+    end_month: number | null;
+    raise_pct: number | null;
+    annual_cents: number | null;
     taxable: boolean;
     sort_order: number;
   }> = [];
@@ -535,7 +552,7 @@ export async function saveRetirementPlan(formData: FormData) {
     const label = name || `Income line ${i + 1}`;
     if (!name) return { error: `${label}: give it a name.` };
     if (!LINE_KINDS.includes(kind)) return { error: `${label}: pick a type.` };
-    if (!String(l.monthly ?? "").trim()) return { error: `${label}: enter the monthly amount.` };
+    if (!String(l.monthly ?? "").trim()) return { error: `${label}: enter the amount.` };
     const start = lineYear(l.startYear);
     const end = lineYear(l.endYear);
     if (start === "bad") return { error: `${label}: first year has to be a four-digit year.` };
@@ -544,18 +561,34 @@ export async function saveRetirementPlan(formData: FormData) {
       return { error: `${label}: pick a start month.` };
     }
     if (end === "bad") return { error: `${label}: last year has to be a four-digit year.` };
-    if (start != null && end != null && end < start) {
-      return { error: `${label}: last year can't be before the first year.` };
+    const endMonth = String(l.endMonth ?? "").trim() ? Number(l.endMonth) : null;
+    if (endMonth != null && !(Number.isInteger(endMonth) && endMonth >= 1 && endMonth <= 12)) {
+      return { error: `${label}: pick an end month.` };
+    }
+    if (start != null && end != null && end * 12 + (endMonth ?? 12) < start * 12 + (startMonth ?? 1)) {
+      return { error: `${label}: the end can't be before the start.` };
+    }
+    const raiseRaw = String(l.raisePct ?? "").trim();
+    const raise = kind !== "va" && kind !== "social_security" && raiseRaw ? Number(raiseRaw) : null;
+    if (raise != null && !(Number.isFinite(raise) && raise >= 0 && raise <= 20)) {
+      return { error: `${label}: raise has to be between 0% and 20%.` };
     }
     lines.push({
       id: l.id || null,
       name,
       kind,
-      monthly_cents: Math.max(0, displayToCents(String(l.monthly))),
+      // Typed per year: kept as typed, and a twelfth of it as the monthly.
+      monthly_cents:
+        l.per === "yr"
+          ? Math.round(Math.max(0, displayToCents(String(l.monthly))) / 12)
+          : Math.max(0, displayToCents(String(l.monthly))),
+      annual_cents: l.per === "yr" ? Math.max(0, displayToCents(String(l.monthly))) : null,
       start_year: start,
       // A month only means something with a first year.
       start_month: start == null ? null : startMonth,
       end_year: end,
+      end_month: end == null ? null : endMonth,
+      raise_pct: raise,
       // VA disability is never taxed, whatever the box says.
       taxable: kind === "va" ? false : !!l.taxable,
       sort_order: i,
@@ -636,6 +669,79 @@ export async function saveRetirementPlan(formData: FormData) {
       monthly_costs_cents: cents(r.costs),
       appreciation_pct: appreciation,
       sort_order: i,
+    });
+  }
+
+  // Account groups ride along as JSON: each group's settings, and any account
+  // or bucket moved to a different group.
+  type GroupIn = {
+    kind?: string;
+    returnPct?: string;
+    add?: string;
+    addStart?: string;
+    addEnd?: string;
+    take?: string;
+    takeStart?: string;
+    takeEnd?: string;
+    taxPct?: string;
+  };
+  type MoveIn = { accountId?: string; bucketId?: string | null; group?: string };
+  let groupsIn: GroupIn[] = [];
+  let movesIn: MoveIn[] = [];
+  try {
+    groupsIn = JSON.parse(String(formData.get("accountGroups") ?? "[]"));
+    if (!Array.isArray(groupsIn)) groupsIn = [];
+    movesIn = JSON.parse(String(formData.get("groupMoves") ?? "[]"));
+    if (!Array.isArray(movesIn)) movesIn = [];
+  } catch {
+    return { error: "Couldn't read the account groups." };
+  }
+  const groupRows: Array<Record<string, unknown>> = [];
+  for (const g of groupsIn) {
+    if (!isGroupKind(g.kind)) continue;
+    const label = GROUP_LABEL[g.kind];
+    const pct = (raw: string | undefined, min: number, max: number, what: string): number | null | { error: string } => {
+      const t = String(raw ?? "").trim();
+      if (!t) return null;
+      const n = Number(t);
+      return Number.isFinite(n) && n >= min && n <= max ? n : { error: `${label}: ${what}` };
+    };
+    const ret = pct(g.returnPct, -20, 30, "return has to be between -20% and 30%.");
+    const tax = pct(g.taxPct, 0, 60, "tax has to be between 0% and 60%.");
+    if (ret && typeof ret === "object") return ret;
+    if (tax && typeof tax === "object") return tax;
+    const yr = (raw: string | undefined, what: string): number | null | { error: string } => {
+      const v = lineYear(raw);
+      return v === "bad" ? { error: `${label}: ${what} has to be a four-digit year.` } : v;
+    };
+    const addStart = yr(g.addStart, "add from");
+    const addEnd = yr(g.addEnd, "add to");
+    const takeStart = yr(g.takeStart, "take out from");
+    const takeEnd = yr(g.takeEnd, "take out to");
+    for (const v of [addStart, addEnd, takeStart, takeEnd]) if (v && typeof v === "object") return v;
+    if (addStart != null && addEnd != null && (addEnd as number) < (addStart as number)) {
+      return { error: `${label}: the last year added can't be before the first.` };
+    }
+    if (takeStart != null && takeEnd != null && (takeEnd as number) < (takeStart as number)) {
+      return { error: `${label}: the last year taken out can't be before the first.` };
+    }
+    const money = (raw: string | undefined) => (String(raw ?? "").trim() ? Math.max(0, displayToCents(String(raw))) : null);
+    const take = money(g.take);
+    if (take != null && take > 0 && takeStart == null) {
+      return { error: `${label}: enter the year withdrawals start.` };
+    }
+    groupRows.push({
+      household_id: householdId,
+      kind: g.kind,
+      return_pct: ret,
+      add_annual_cents: g.kind === "cash" ? null : money(g.add),
+      add_start_year: addStart,
+      add_end_year: addEnd,
+      take_annual_cents: g.kind === "cash" ? null : take,
+      take_start_year: takeStart,
+      take_end_year: takeEnd,
+      tax_pct: tax,
+      updated_at: new Date().toISOString(),
     });
   }
 
@@ -721,6 +827,9 @@ export async function saveRetirementPlan(formData: FormData) {
           start_year: l.start_year,
           start_month: l.start_month,
           end_year: l.end_year,
+          end_month: l.end_month,
+          raise_pct: l.raise_pct,
+          annual_cents: l.annual_cents,
           taxable: l.taxable,
           sort_order: l.sort_order,
         })),
@@ -767,6 +876,32 @@ export async function saveRetirementPlan(formData: FormData) {
     if (rErr) return { error: `Couldn't save ${row.name} — ${rErr.message}` };
   }
 
+  if (groupRows.length > 0) {
+    const { error: gErr } = await supabase
+      .from("retirement_account_groups")
+      .upsert(groupRows, { onConflict: "household_id,kind" });
+    if (gErr) return { error: `Couldn't save the account groups — ${gErr.message}` };
+  }
+  // A move sets the account's (or bucket's) group; "" puts it back to automatic.
+  for (const m of movesIn) {
+    const accountId = String(m.accountId ?? "");
+    if (!accountId) continue;
+    const group = isGroupKind(m.group) ? m.group : null;
+    const { error: mErr } = m.bucketId
+      ? await supabase
+          .from("buckets")
+          .update({ plan_group: group })
+          .eq("household_id", householdId)
+          .eq("account_id", accountId)
+          .eq("id", m.bucketId)
+      : await supabase
+          .from("accounts")
+          .update({ plan_group: group })
+          .eq("household_id", householdId)
+          .eq("id", accountId);
+    if (mErr) return { error: `Couldn't move an account to its group — ${mErr.message}` };
+  }
+
   try {
     await recomputeRetirementIncome(supabase, householdId);
   } catch (e) {
@@ -776,16 +911,18 @@ export async function saveRetirementPlan(formData: FormData) {
   return { error: null };
 }
 
-const LINE_KINDS: IncomeLineKind[] = ["va", "social_security", "job", "spouse", "other"];
-
+const LINE_KINDS: IncomeLineKind[] = ["pay", "va", "social_security", "job", "spouse", "other"];
 // ---- Recompute the plan table from the retirement inputs.
 //
 // income_cents is each year's TOTAL take-home: the pay typed for the year
 // (work_income_cents, only before the military retirement year) plus every
-// income line paying that year, after SBP and tax. Future gains are the
-// investment return on the year's opening balance (cash at the cash rate), so
-// a balance that is being spent down earns less — and nothing once it is gone. The table is extended to the
-// plan-until age, carrying the last year's spending forward.
+// income line paying that year, after SBP and tax. Future years run through
+// the account groups (lib/account-groups): each kind of money earns its own
+// return on what it opened the year with, takes its planned contributions,
+// pays its planned withdrawals and required minimums, and covers any
+// shortfall in the usual low-tax order. Tax on withdrawals is added to the
+// year's spending. The table is extended to the plan-until age, carrying the
+// last year's spending forward.
 //
 // Years before this one are history and are never touched; this year keeps
 // its own gains (the register is measuring them).
@@ -794,7 +931,7 @@ async function recomputeRetirementIncome(
   householdId: string,
 ): Promise<boolean> {
   const thisYear = new Date().getFullYear();
-  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes] = await Promise.all([
+  const [planRes, linesRes, rowsRes, rentalsRes, acctRes, loanRes, groupInputs] = await Promise.all([
     supabase.from("retirement_plan").select("*").eq("household_id", householdId).maybeSingle(),
     supabase.from("retirement_income_lines").select("*").eq("household_id", householdId),
     supabase
@@ -810,6 +947,7 @@ async function recomputeRetirementIncome(
       .eq("household_id", householdId)
       .not("property_account_id", "is", null)
       .is("paid_off_at", null),
+    loadGroupInputs(supabase, householdId),
   ]);
   if (loanRes.error) throw new Error(`Could not read the mortgages: ${loanRes.error.message}`);
   if (rentalsRes.error) throw new Error(`Could not read the rentals: ${rentalsRes.error.message}`);
@@ -822,18 +960,28 @@ async function recomputeRetirementIncome(
   const rows = (rowsRes.data ?? []).map((r) => ({ ...r, one_off_cents: r.one_off_cents ?? 0 }));
   if (!plan || rows.length === 0) return false;
 
-  const lines: IncomeLine[] = (linesRes.data ?? []).map((l) => ({
-    id: l.id,
-    name: l.name,
-    kind: l.kind,
-    monthlyCents: l.monthly_cents,
-    startYear: l.start_year,
-    startMonth: l.start_month ?? null,
-    endYear: l.end_year,
-    taxable: l.taxable,
-  }));
   const retireYear: number | null = plan.target_retire_year;
   const retireMonth: number | null = plan.target_retire_month ?? null;
+  // A Pay line left without an end stops when you stop working — the month
+  // before military retired pay, else when withdrawals start — so changing
+  // the retirement date moves both.
+  const lines: IncomeLine[] = withPayEnds(
+    (linesRes.data ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      kind: l.kind,
+      // Typed per year: exactly a twelfth of it, not the rounded monthly.
+      monthlyCents: l.annual_cents != null ? Number(l.annual_cents) / 12 : l.monthly_cents,
+      annualCents: l.annual_cents == null ? null : Number(l.annual_cents),
+      startYear: l.start_year,
+      startMonth: l.start_month ?? null,
+      endYear: l.end_year,
+      endMonth: l.end_month ?? null,
+      raisePct: l.raise_pct == null ? null : Number(l.raise_pct),
+      taxable: l.taxable,
+    })),
+    payStop(retireYear, retireMonth, plan.withdraw_start_year ?? null),
+  );
   const pension = estimatePension(
     {
       retireYear,
@@ -871,19 +1019,16 @@ async function recomputeRetirementIncome(
     growthPct: Number(plan.healthcare_growth_pct ?? 1.5),
     inflationPct,
   };
-  // Investments grow at the expected return; savings (checking + savings
-  // buckets) at the APY, and each year's saving is split between them.
-  const returnPct = Number(plan.investment_return_pct ?? 7.5);
-  const cashPct = Number(plan.cash_return_pct ?? 3);
-  const liveAccounts = (acctRes.data ?? []).filter((a) => a.active && !a.is_kids_account);
-  const cashNow = liveAccounts
-    .filter((a) => (CASH_KINDS as readonly string[]).includes(a.kind))
-    .reduce((t, a) => t + Number(a.current_balance_cents ?? 0), 0);
-  const investNow = liveAccounts
-    .filter((a) => a.kind === "investment")
-    .reduce((t, a) => t + Number(a.current_balance_cents ?? 0), 0);
-  // New savings split like the accounts are today.
-  const toInvestPct = investShareOfNew(cashNow, investNow);
+  // Each group's return, contributions, withdrawals and tax; a blank return
+  // is the plan's (Cash: the savings APY), blank contributions what the last
+  // twelve months put in.
+  const settings = resolveGroupSettings(groupInputs.rows, {
+    investReturnPct: Number(plan.investment_return_pct ?? 7.5),
+    cashReturnPct: Number(plan.cash_return_pct ?? 3),
+    measuredAddCents: groupInputs.measuredAddCents,
+    // A blank "Add to" stops the year before you stop working.
+    stopWorkYear: plan.withdraw_start_year ?? plan.target_retire_year ?? null,
+  });
 
   // Run to the plan-until age, carrying the last year forward.
   const lastYear = plan.birth_year ? plan.birth_year + Number(plan.longevity_age ?? 90) : null;
@@ -909,41 +1054,87 @@ async function recomputeRetirementIncome(
   const stamp = new Date().toISOString();
   const out: Array<Record<string, unknown>> = [];
   let carry: number | null = null;
-  // Savings at the start of each future year; today's balance stands in for
-  // the close of this one.
-  let cash = cashNow;
+  // Each group's balance at the start of the next year; set from today's
+  // accounts at the first future year.
+  let groupBal: Record<GroupKind, number> | null = null;
   for (const row of rows) {
     if (row.year < thisYear) continue;
     const boy: number = carry ?? row.boy_cents;
     // The retirement year is split by month: a November retirement keeps ten
     // months of active-duty pay and gets two months of retired pay.
     const retiredShare = retiredShareOfYear(row.year, retireYear, retireMonth);
-    const work = Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare));
+    // Future income comes only from Edit Future Projections: retired
+    // pay and the income lines, pay from work included. The pay typed into the
+    // table only counts for the year in progress — later years carried an old
+    // sheet's stand-ins ($100k a year to 2071) into a plan with no income at
+    // all (Victor, 2026-10-16).
+    const work =
+      row.year === thisYear ? Math.round((row.work_income_cents ?? row.income_cents) * (1 - retiredShare)) : 0;
     // Income is gross: taxes are budgeted as spending.
     const yearIncome = incomeForYear(row.year, pension, retireYear, lines, 0, cola, { thisYear, birthYear: plan.birth_year ?? null });
     const pensionYearly = (yearIncome.parts.find((p) => p.kind === "pension")?.monthlyAfterTaxCents ?? 0) * 12;
-    const lineIncome = yearIncome.afterTaxCents - Math.round(pensionYearly * (1 - retiredShare));
+    // This year's typed pay already is the pay, so a Pay line isn't added on top.
+    const payThisYear =
+      row.year === thisYear
+        ? yearIncome.parts.filter((p) => p.kind === "pay").reduce((t, p) => t + p.monthlyAfterTaxCents * (p.months ?? 12), 0)
+        : 0;
+    const lineIncome = yearIncome.afterTaxCents - Math.round(pensionYearly * (1 - retiredShare)) - payThisYear;
     // Rentals: net rent is income; equity is part of net worth but earns no
     // investment return — it grows by principal paid and appreciation, and a
     // purchase moves the down payment out of savings (closing costs are gone).
     const rent = rentalsForYear(rentals, row.year, thisYear, inflationPct, 0);
     const income = work + lineIncome + rent.cashAfterTaxCents;
+    // The same income by source, for the year popup. Adds up to `income`.
+    const incomeParts: { name: string; cents: number }[] = [];
+    if (work) incomeParts.push({ name: "Pay (typed for this year)", cents: work });
+    for (const p of yearIncome.parts) {
+      if (row.year === thisYear && p.kind === "pay") continue;
+      const cents =
+        p.kind === "pension"
+          ? pensionYearly - Math.round(pensionYearly * (1 - retiredShare))
+          : p.monthlyAfterTaxCents * (p.months ?? 12);
+      if (cents) incomeParts.push({ name: p.name, cents });
+    }
+    if (rent.cashAfterTaxCents) incomeParts.push({ name: "Rentals (net)", cents: rent.cashAfterTaxCents });
     const baseSpend = row.base_spending_cents ?? row.spending_cents;
     // Spending is what was typed plus healthcare — nothing else. It used to
     // drop by each debt's payment once the Debts page projected it paid off,
     // which on two small 0% cards meant a −$33…−$900 line on every row from
     // 2028; Victor had it removed (2026-09-28).
-    const spending = Math.max(0, (grownSpend.get(row.year) ?? baseSpend) + healthcareForYear(row.year, health, thisYear));
-    const investable = boy - rent.equityStartCents;
+    const lifeSpending = Math.max(0, (grownSpend.get(row.year) ?? baseSpend) + healthcareForYear(row.year, health, thisYear));
     const propertyEffect = rent.equityEndCents - rent.equityStartCents - rent.purchaseCashCents;
-    const growth =
-      row.year === thisYear
-        ? row.growth_cents
-        : yearGrowth(investable, cash, cashPct, returnPct) + propertyEffect;
-    const eoy = boy + income - spending + growth + row.one_off_cents;
+    // This year keeps its own gains (the register is measuring them); later
+    // years run through the groups.
+    let growth = row.growth_cents;
+    let taxCents = 0;
+    let groupDetail: ReturnType<typeof groupsYear> | null = null;
     if (row.year > thisYear) {
-      cash = nextCash(cash, cashPct, income - spending + row.one_off_cents, toInvestPct, eoy - rent.equityEndCents);
+      // Everything but rental equity sits in the groups, and they have to add
+      // up to it: a gap (this year's remaining saving, debts netted off, a
+      // rental's equity moving) is spread across them at the start, and any
+      // later drift lands in Cash.
+      const investable = boy - rent.equityStartCents;
+      if (groupBal == null) {
+        groupBal = scaleBalances(groupInputs.liveCents, investable);
+      } else {
+        const sum = GROUP_KINDS.reduce((t, k) => t + groupBal![k], 0);
+        groupBal.cash += investable - sum;
+      }
+      groupDetail = groupsYear(groupBal, settings, {
+        year: row.year,
+        thisYear,
+        inflationPct,
+        flowCents: income - lifeSpending + row.one_off_cents - rent.purchaseCashCents,
+        age: ageInYear(plan.birth_year ?? null, row.year),
+        birthYear: plan.birth_year ?? null,
+      });
+      groupBal = groupDetail.balances;
+      taxCents = groupDetail.taxCents;
+      growth = groupDetail.gainCents + propertyEffect;
     }
+    // Tax on what the groups paid out is part of what the year costs.
+    const spending = lifeSpending + taxCents;
+    const eoy = boy + income - spending + growth + row.one_off_cents;
     out.push({
       household_id: householdId,
       year: row.year,
@@ -958,6 +1149,11 @@ async function recomputeRetirementIncome(
       one_off_cents: row.one_off_cents,
       eoy_cents: eoy,
       tax_pct: row.tax_pct,
+      withdrawn_cents: groupDetail?.withdrawnCents ?? null,
+      withdrawal_tax_cents: groupDetail ? taxCents : null,
+      planned_add_cents: groupDetail?.addCents ?? null,
+      groups: groupDetail ? toStoredGroups(groupDetail.groups) : null,
+      income_parts: incomeParts,
       updated_at: stamp,
     });
     carry = eoy;
@@ -1118,6 +1314,25 @@ export async function seedProjection(seed: {
   if (error) {
     console.error("[seedProjection]", error);
     return { error: `Couldn't start the projection — ${error.message}` };
+  }
+
+  // Future income comes from the income lines, so a first plan with none gets
+  // one Pay line at the measured rate — edit its end when work stops.
+  const { count: lineCount, error: lineCountError } = await supabase
+    .from("retirement_income_lines")
+    .select("id", { count: "exact", head: true })
+    .eq("household_id", householdId);
+  if (!lineCountError && (lineCount ?? 0) === 0 && income > 0) {
+    const { error: payError } = await supabase.from("retirement_income_lines").insert({
+      household_id: householdId,
+      name: "Pay",
+      kind: "pay",
+      monthly_cents: Math.round(income / 12),
+      annual_cents: income,
+      taxable: true,
+      sort_order: 0,
+    });
+    if (payError) console.error("[seedProjection:pay]", payError);
   }
 
   revalidatePath("/networth");
