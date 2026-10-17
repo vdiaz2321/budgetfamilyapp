@@ -42,6 +42,7 @@ import {
   GROUP_HINT,
   GROUP_KINDS,
   GROUP_LABEL,
+  groupAccountNames,
   isGroupKind,
   rmdStartAge,
   type GroupKind,
@@ -1658,6 +1659,17 @@ function PlanModal({
     Object.fromEntries(plan.accountGroups.slots.map((s) => [slotKey(s), s.group])),
   );
   const [groupAccountsOpen, setGroupAccountsOpen] = useState<Set<GroupKind>>(() => new Set());
+  // The account lists under the Rates section's category boxes. Each
+  // category opens on its own by clicking its name, like the year popup's
+  // groups — never one switch for all (Victor, 2026-10-17). Folded by default.
+  const [rateAccountsOpen, setRateAccountsOpen] = useState<Set<GroupKind>>(() => new Set());
+  const toggleRateAccounts = (kind: GroupKind) =>
+    setRateAccountsOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
   // Live, so each group's blank return shows the default it falls back to.
   const [investDefault, setInvestDefault] = useState(String(plan.investmentReturnPct));
   const [cashDefault, setCashDefault] = useState(String(plan.cashReturnPct));
@@ -1877,6 +1889,24 @@ function PlanModal({
       }
     });
   }
+
+  // The accounts in a group as grouped right now (Account Groups below can
+  // move one), buckets named (see groupAccountNames).
+  const accountsInGroup = (kind: GroupKind) =>
+    groupAccountNames(plan.accountGroups.slots, (x) => slotGroups[slotKey(x)] === kind);
+
+  // Which categories fall back to this rate — those whose own box below is
+  // blank — updating as one is typed.
+  const listNames = (names: string[]) =>
+    names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const usesDefault = GROUP_KINDS.filter((k) => k !== "cash" && groupDrafts[k].returnPct.trim() === "");
+  const ownRate = GROUP_KINDS.filter((k) => k !== "cash" && groupDrafts[k].returnPct.trim() !== "");
+  const returnHint =
+    usesDefault.length === 0
+      ? "Every category has its own rate below."
+      : ownRate.length === 0
+        ? "Used by every category below unless you type its own."
+        : `Used by ${listNames(usesDefault.map((k) => GROUP_LABEL[k]))}. ${listNames(ownRate.map((k) => GROUP_LABEL[k]))} ${ownRate.length === 1 ? "has its" : "have their"} own below.`;
 
   // Light red, so Close reads apart from Save.
   const closeButtonClass =
@@ -2101,13 +2131,68 @@ function PlanModal({
 
         <SectionHead title="Return, Withdrawal, & Inflation Rates" open={isOpen("rates")} onToggle={() => toggleSection("rates")} />
         <div className={isOpen("rates") ? "contents" : "hidden"}>
-        <Field label="Expected rate of return (%)" hint="What your investments earn a year. Each account group uses it unless you set its own.">
+        <Field label="Expected rate of return (%)" hint={returnHint}>
           <input name="investmentReturnPct" inputMode="decimal" value={investDefault} onChange={(e) => setInvestDefault(e.target.value)} className={inputClass} />
         </Field>
         <Field label="Savings APY (%)" hint="What your checking and savings accounts earn a year — the Cash group.">
           <input name="cashReturnPct" inputMode="decimal" value={cashDefault} onChange={(e) => setCashDefault(e.target.value)} className={inputClass} />
         </Field>
-        <Field label="Spending inflation (%)" hint="How much your spending, healthcare and rental costs go up each year.">
+        {/* Each category's own rate, side by side. Blank = the rate above.
+            Same setting the Account Groups section used to hold (Victor,
+            2026-10-17); the year popup can still change one year. */}
+        <div className="sm:col-span-2">
+          <span className="mb-1 block max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground">
+            Rate of return by category (%)
+          </span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {GROUP_KINDS.filter((k) => k !== "cash").map((kind) => {
+              // "Traditional / retirement", "Roth / retirement" on two lines.
+              const [first, ...rest] = GROUP_LABEL[kind].split(" ");
+              const names = accountsInGroup(kind);
+              return (
+                <div key={kind} className="min-w-0 self-start">
+                  {/* The name opens this category's accounts. */}
+                  <button
+                    type="button"
+                    onClick={() => toggleRateAccounts(kind)}
+                    aria-expanded={rateAccountsOpen.has(kind)}
+                    className="mb-0.5 flex w-full items-end justify-center gap-1 rounded-md text-center max-sm:text-[12px] sm:text-sm font-bold uppercase tracking-wide text-foreground transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 20 20"
+                      className={`mb-1 h-3 w-3 shrink-0 transition-transform ${rateAccountsOpen.has(kind) ? "" : "-rotate-90"}`}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M5 7.5 10 12.5 15 7.5" />
+                    </svg>
+                    <span>{rest.length > 0 ? <>{first}<br />{rest.join(" ")}</> : <><br className="max-sm:hidden" />{first}</>}</span>
+                  </button>
+                  <input
+                    inputMode="decimal"
+                    value={groupDrafts[kind].returnPct}
+                    onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
+                    placeholder={investDefault}
+                    aria-label={`${GROUP_LABEL[kind]} rate of return`}
+                    className={`${lineInput} text-center`}
+                  />
+                  {/* Which accounts earn this rate — each account (or bucket)
+                      sits in one group only. */}
+                  {rateAccountsOpen.has(kind) ? (
+                    <p className="mt-1 text-center text-xs leading-snug text-foreground sm:text-sm">
+                      {names.length > 0 ? names.join(" · ") : "No accounts"}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <Field label="Spending inflation (%)" hint="Annual Spending Amount Adjusted">
           <input
             name="inflationPct"
             inputMode="decimal"
@@ -2115,9 +2200,6 @@ function PlanModal({
             onChange={(e) => setInflation(e.target.value)}
             className={inputClass}
           />
-        </Field>
-        <Field label="Withdrawal rate (%)" hint="The most you plan to take from investments each year once you stop working. Needed = the yearly gap ÷ this rate.">
-          <input name="withdrawalRatePct" inputMode="decimal" defaultValue={plan.withdrawalRatePct} className={inputClass} />
         </Field>
 
         </div>
@@ -2207,16 +2289,10 @@ function PlanModal({
                     ))}
                   </div>
                 ) : null}
-                <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-8">
-                  <LineField label="Return %">
-                    <input
-                      inputMode="decimal"
-                      value={d.returnPct}
-                      onChange={(e) => updateGroup(kind, { returnPct: e.target.value })}
-                      placeholder={isCash ? cashDefault : investDefault}
-                      className={`${lineInput} text-center`}
-                    />
-                  </LineField>
+                {/* Return % lives under Rates, one box per category. Cash has
+                    nothing else to set here. */}
+                {isCash ? null : (
+                <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-7">
                   {isCash ? null : (
                     <>
                       <LineField label="Add $ / yr">
@@ -2290,12 +2366,13 @@ function PlanModal({
                     </>
                   )}
                 </div>
+                )}
               </div>
             );
           })}
           <p className="text-xs sm:text-sm text-foreground">
-            Short a year: drawn from Brokerage, Crypto, Metals, Pre-tax, then Roth.
-            {plan.birthYear ? ` Pre-tax required minimums from age ${rmdStartAge(plan.birthYear)}.` : ""}
+            Short a year: drawn from Brokerage, Crypto, Metals, Traditional, then Roth.
+            {plan.birthYear ? ` Traditional required minimums from age ${rmdStartAge(plan.birthYear)}.` : ""}
           </p>
         </div>
         </div>

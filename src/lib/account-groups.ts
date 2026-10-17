@@ -31,7 +31,8 @@ export const GROUP_KINDS: GroupKind[] = ["cash", "pretax", "roth", "brokerage", 
 
 export const GROUP_LABEL: Record<GroupKind, string> = {
   cash: "Cash",
-  pretax: "Pre-tax retirement",
+  // "Traditional", not "Pre-tax" — the word on his TSP statement (Victor, 2026-10-17).
+  pretax: "Traditional retirement",
   roth: "Roth retirement",
   brokerage: "Brokerage",
   crypto: "Crypto",
@@ -147,6 +148,8 @@ export type GroupSettings = {
 export type GroupYear = {
   kind: GroupKind;
   startCents: number;
+  /** The return the gain was worked out at (typed for the year, else the settings'). */
+  returnPct: number;
   gainCents: number;
   addCents: number;
   /** Planned withdrawal, the required minimum included. */
@@ -202,6 +205,189 @@ export function scaleBalances(live: Record<GroupKind, number>, totalCents: numbe
   return out;
 }
 
+/**
+ * The accounts a group holds, for the lists under a group's name. A bucketed
+ * account that sits wholly in the group reads "Crypto (Kraken, River, …)" so
+ * its buckets show; one split across groups (Fidelity, TSP) names just the
+ * buckets in this group ("TSP Roth", "Fidelity Roth Vic").
+ */
+export function groupAccountNames<T extends { accountId: string; bucketId: string | null; name: string; accountName: string }>(
+  slots: T[],
+  inGroup: (slot: T) => boolean,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of slots) {
+    if (seen.has(x.accountId)) continue;
+    seen.add(x.accountId);
+    const all = slots.filter((y) => y.accountId === x.accountId);
+    const mine = all.filter(inGroup);
+    if (mine.length === 0) continue;
+    if (all.every((y) => y.bucketId == null)) {
+      out.push(x.accountName);
+    } else if (mine.length === all.length) {
+      const prefix = `${x.accountName} · `;
+      const buckets = mine.map((y) => (y.name.startsWith(prefix) ? y.name.slice(prefix.length) : y.name));
+      out.push(`${x.accountName} (${buckets.join(", ")})`);
+    } else {
+      for (const y of mine) out.push(y.name);
+    }
+  }
+  return out;
+}
+
+// ---- Figures typed in the year popup (networth_projection.group_overrides).
+
+/** What one year typed for each group: add/take in cents, ret as a return
+ *  percent. A missing field = not typed. Cash only ever has ret. */
+export type TypedGroups = Partial<Record<GroupKind, { add?: number; take?: number; takePct?: number; ret?: number }>>;
+
+/** The year's typed Est. Withdraw: dollars (cents) or a percent of the
+ *  year's start. */
+export type TypedWithdraw = { cents: number } | { pct: number };
+
+/** One year's effective typed figures, and the year each was typed in.
+ *  `withdraw` is the year's withdrawal total (see groupsYear step 2): cents
+ *  already raised by inflation, or a percent of that year's start. */
+export type YearOverrides = Partial<
+  Record<
+    GroupKind,
+    { add?: number; take?: number; takePct?: number; ret?: number; addFrom?: number; takeFrom?: number; retFrom?: number }
+  >
+> & { withdraw?: { cents?: number; pct?: number; from: number } };
+
+/** The year's typed Est. Withdraw, stored beside the groups in
+ *  group_overrides as { withdraw } (cents) or { withdrawPct }. Null = not
+ *  typed that year. */
+export function parseTypedWithdraw(raw: unknown): TypedWithdraw | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { withdraw?: unknown; withdrawPct?: unknown };
+  const pct = Number(r.withdrawPct);
+  if (r.withdrawPct != null && Number.isFinite(pct) && pct >= 0) return { pct: clampWithdrawPct(pct) };
+  const n = Number(r.withdraw);
+  return r.withdraw != null && Number.isFinite(n) && n >= 0 ? { cents: Math.round(n) } : null;
+}
+
+/** What the investments hold: every group but Cash. A withdrawal % is of this. */
+export function investmentsCents(balances: Record<GroupKind, number>): number {
+  return GROUP_KINDS.reduce((t, k) => (k === "cash" ? t : t + Math.max(0, balances[k])), 0);
+}
+
+/**
+ * The 4% rule over the years: a percent typed in one year is that share of
+ * the investments that year; every later year it carries to takes the same
+ * dollars raised by inflation. Call once per year in order; it remembers the
+ * typed year's dollars. Returns the overrides with `cents` filled in.
+ */
+export function pctWithdrawCarrier(inflationPct: number) {
+  let base: { from: number; cents: number } | null = null;
+  return (year: number, opening: Record<GroupKind, number>, overrides: YearOverrides | undefined): YearOverrides | undefined => {
+    const w = overrides?.withdraw;
+    if (!overrides || !w || w.pct == null) return overrides;
+    if (!base || base.from !== w.from) {
+      base = { from: w.from, cents: Math.round((investmentsCents(opening) * w.pct) / 100) };
+    }
+    const cents = Math.round(base.cents * Math.pow(1 + inflationPct / 100, year - base.from));
+    return { ...overrides, withdraw: { ...w, cents } };
+  };
+}
+
+/** A typed withdrawal percent: 0–100, two decimals. */
+export function clampWithdrawPct(pct: number): number {
+  return Math.round(Math.min(100, Math.max(0, pct)) * 100) / 100;
+}
+
+export function parseTypedGroups(raw: unknown): TypedGroups {
+  const out: TypedGroups = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [kind, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isGroupKind(kind) || !v || typeof v !== "object") continue;
+    const add = Number((v as { add?: unknown }).add);
+    const take = Number((v as { take?: unknown }).take);
+    const ret = Number((v as { ret?: unknown }).ret);
+    const takePct = Number((v as { takePct?: unknown }).takePct);
+    const entry: { add?: number; take?: number; takePct?: number; ret?: number } = {};
+    if (kind !== "cash" && (v as { add?: unknown }).add != null && Number.isFinite(add) && add >= 0) entry.add = Math.round(add);
+    if (kind !== "cash" && (v as { take?: unknown }).take != null && Number.isFinite(take) && take >= 0) entry.take = Math.round(take);
+    if ((v as { ret?: unknown }).ret != null && Number.isFinite(ret)) entry.ret = clampReturnPct(ret);
+    if (kind !== "cash" && (v as { takePct?: unknown }).takePct != null && Number.isFinite(takePct)) entry.takePct = clampWithdrawPct(takePct);
+    if (entry.add != null || entry.take != null || entry.takePct != null || entry.ret != null) out[kind] = entry;
+  }
+  return out;
+}
+
+/** A typed return, held to the same range the group settings allow. */
+export function clampReturnPct(pct: number): number {
+  return Math.round(Math.min(30, Math.max(-20, pct)) * 100) / 100;
+}
+
+/**
+ * Each year's typed figures carried forward: a figure typed in one year holds
+ * for every later year until another year types a new one. A contribution
+ * stays flat; a withdrawal grows with inflation from the year it was typed,
+ * the way typed spending does; a return % stays as typed. Returns year →
+ * that year's overrides.
+ */
+export function resolveOverrides(
+  rows: { year: number; typed: TypedGroups; withdraw?: TypedWithdraw | null }[],
+  inflationPct: number,
+): Map<number, YearOverrides> {
+  const out = new Map<number, YearOverrides>();
+  let lastWithdraw: { typed: TypedWithdraw; year: number } | null = null;
+  const lastAdd = new Map<GroupKind, { cents: number; year: number }>();
+  const lastTake = new Map<GroupKind, { cents: number; year: number }>();
+  const lastRet = new Map<GroupKind, { pct: number; year: number }>();
+  const lastTakePct = new Map<GroupKind, { pct: number; year: number }>();
+  for (const r of [...rows].sort((a, b) => a.year - b.year)) {
+    const year: YearOverrides = {};
+    // A dollar total grows with inflation from the year it was typed, as a
+    // typed withdrawal always has; a percent stays the percent, taken of
+    // each later year's own start.
+    if (r.withdraw != null) lastWithdraw = { typed: r.withdraw, year: r.year };
+    if (lastWithdraw) {
+      const t = lastWithdraw.typed;
+      year.withdraw =
+        "pct" in t
+          ? { pct: t.pct, from: lastWithdraw.year }
+          : {
+              cents: Math.round(t.cents * Math.pow(1 + inflationPct / 100, r.year - lastWithdraw.year)),
+              from: lastWithdraw.year,
+            };
+    }
+    for (const kind of GROUP_KINDS) {
+      const t = r.typed[kind];
+      if (t?.add != null) lastAdd.set(kind, { cents: t.add, year: r.year });
+      // A withdrawal is either dollars or a percent; the newer one wins. A
+      // percent carries into later years like the rest (Victor, 2026-10-17),
+      // each later year showing it with "from 2027".
+      if (t?.take != null) {
+        lastTake.set(kind, { cents: t.take, year: r.year });
+        lastTakePct.delete(kind);
+      }
+      if (t?.takePct != null) {
+        lastTakePct.set(kind, { pct: t.takePct, year: r.year });
+        lastTake.delete(kind);
+      }
+      if (t?.ret != null) lastRet.set(kind, { pct: t.ret, year: r.year });
+      const a = lastAdd.get(kind);
+      const w = lastTake.get(kind);
+      const p = lastRet.get(kind);
+      const wp = lastTakePct.get(kind);
+      if (!a && !w && !p && !wp) continue;
+      year[kind] = {
+        ...(wp ? { takePct: wp.pct, takeFrom: wp.year } : {}),
+        ...(p ? { ret: p.pct, retFrom: p.year } : {}),
+        ...(a ? { add: a.cents, addFrom: a.year } : {}),
+        ...(w
+          ? { take: Math.round(w.cents * Math.pow(1 + inflationPct / 100, r.year - w.year)), takeFrom: w.year }
+          : {}),
+      };
+    }
+    out.set(r.year, year);
+  }
+  return out;
+}
+
 export function groupsYear(
   opening: Record<GroupKind, number>,
   settings: Record<GroupKind, GroupSettings>,
@@ -213,24 +399,68 @@ export function groupsYear(
     flowCents: number;
     age: number | null;
     birthYear: number | null;
+    /** Figures typed in the year popup, already carried to this year
+     *  (see resolveOverrides). They replace the settings' figure; the
+     *  return, the RMD floor and the Cash cap still apply. */
+    overrides?: YearOverrides;
   },
 ): GroupsYearResult {
   const rows = new Map<GroupKind, GroupYear>();
   for (const kind of GROUP_KINDS) {
     const start = opening[kind];
-    const gain = start > 0 ? Math.round((start * settings[kind].returnPct) / 100) : 0;
-    rows.set(kind, { kind, startCents: start, gainCents: gain, addCents: 0, takeCents: 0, rmdExtraCents: 0, autoCents: 0, taxCents: 0, endCents: start + gain });
+    const returnPct = ctx.overrides?.[kind]?.ret ?? settings[kind].returnPct;
+    const gain = start > 0 ? Math.round((start * returnPct) / 100) : 0;
+    rows.set(kind, { kind, startCents: start, returnPct, gainCents: gain, addCents: 0, takeCents: 0, rmdExtraCents: 0, autoCents: 0, taxCents: 0, endCents: start + gain });
   }
   const cash = rows.get("cash")!;
   const grow = Math.pow(1 + ctx.inflationPct / 100, Math.max(0, ctx.year - ctx.thisYear));
 
-  // 2. Planned withdrawals and the required minimum.
+  // 2. Planned withdrawals and the required minimum. A typed yearly total
+  // (Est. Withdraw Invested) replaces every group's own figure and is spread
+  // across the investment groups by balance.
+  // A percent is of the investments (every group but Cash) at the start of
+  // the year it was typed — the 4% rule. Later years get those dollars plus
+  // inflation, worked out by the caller as `cents`.
+  const w = ctx.overrides?.withdraw;
+  const typedTotal =
+    w?.cents ?? (w?.pct != null ? Math.max(0, Math.round((investmentsCents(opening) * w.pct) / 100)) : undefined);
+  // Spread across the investment groups by what each holds, so none is
+  // drained first (Victor, 2026-10-17 — the low-tax order took it all from
+  // Brokerage). Rounding pennies go to the biggest group.
+  const fromTotal = new Map<GroupKind, number>();
+  if (typedTotal != null && typedTotal > 0) {
+    const held = GROUP_KINDS.filter((k) => k !== "cash").map((k) => ({ kind: k, has: Math.max(0, rows.get(k)!.endCents) }));
+    const total = held.reduce((t, h) => t + h.has, 0);
+    const want = Math.min(typedTotal, total);
+    if (total > 0) {
+      let given = 0;
+      for (const h of held) {
+        const part = Math.floor((want * h.has) / total);
+        if (part > 0) fromTotal.set(h.kind, part);
+        given += part;
+      }
+      const biggest = held.reduce((a, b) => (b.has > a.has ? b : a));
+      fromTotal.set(biggest.kind, (fromTotal.get(biggest.kind) ?? 0) + want - given);
+    }
+  }
   for (const kind of GROUP_KINDS) {
     if (kind === "cash") continue;
     const s = settings[kind];
     const r = rows.get(kind)!;
     const available = Math.max(0, r.endCents);
-    let take = s.takeCents > 0 && inYears(ctx.year, s.takeStartYear, s.takeEndYear) ? Math.round(s.takeCents * grow) : 0;
+    const typedTake = ctx.overrides?.[kind]?.take;
+    // A typed percent is of the group's start this year, like its return.
+    const typedPct = ctx.overrides?.[kind]?.takePct;
+    let take =
+      typedTotal != null
+        ? fromTotal.get(kind) ?? 0
+        : typedTake != null
+          ? typedTake
+          : typedPct != null
+            ? Math.max(0, Math.round((Math.max(0, r.startCents) * typedPct) / 100))
+          : s.takeCents > 0 && inYears(ctx.year, s.takeStartYear, s.takeEndYear)
+            ? Math.round(s.takeCents * grow)
+            : 0;
     if (kind === "pretax") {
       const rmd = rmdCents(r.startCents, ctx.age, ctx.birthYear);
       if (rmd > take) {
@@ -254,7 +484,9 @@ export function groupsYear(
   // 4. Contributions, out of Cash and never more than it holds.
   const planned = GROUP_KINDS.filter((k) => k !== "cash").map((kind) => {
     const s = settings[kind];
-    const add = s.addCents > 0 && inYears(ctx.year, s.addStartYear, s.addEndYear) ? s.addCents : 0;
+    const typedAdd = ctx.overrides?.[kind]?.add;
+    const add =
+      typedAdd != null ? typedAdd : s.addCents > 0 && inYears(ctx.year, s.addStartYear, s.addEndYear) ? s.addCents : 0;
     return { kind, add };
   });
   const wanted = planned.reduce((t, p) => t + p.add, 0);
@@ -369,6 +601,8 @@ export function resolveGroupSettings(
 export type StoredGroupYear = {
   kind: GroupKind;
   start: number;
+  /** Return % behind `gain`; missing on rows saved before it was stored. */
+  rate?: number | null;
   gain: number;
   add: number;
   take: number;
@@ -376,6 +610,10 @@ export type StoredGroupYear = {
   auto: number;
   tax: number;
   end: number;
+  /** Real contributions / withdrawals that year from the register — only on
+   *  the year in progress (and any year the page measured). */
+  actualAdd?: number | null;
+  actualTake?: number | null;
 };
 
 export function toStoredGroups(groups: GroupYear[]): StoredGroupYear[] {
@@ -384,6 +622,7 @@ export function toStoredGroups(groups: GroupYear[]): StoredGroupYear[] {
     .map((g) => ({
       kind: g.kind,
       start: g.startCents,
+      rate: g.returnPct,
       gain: g.gainCents,
       add: g.addCents,
       take: g.takeCents,
@@ -401,6 +640,7 @@ export function parseStoredGroups(raw: unknown): StoredGroupYear[] {
     .map((g) => ({
       kind: g.kind,
       start: Number(g.start) || 0,
+      rate: g.rate == null || !Number.isFinite(Number(g.rate)) ? null : Number(g.rate),
       gain: Number(g.gain) || 0,
       add: Number(g.add) || 0,
       take: Number(g.take) || 0,

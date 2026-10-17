@@ -39,7 +39,14 @@ import {
   resolveGroupSettings,
   scaleBalances,
   toStoredGroups,
+  clampReturnPct,
+  clampWithdrawPct,
+  parseTypedGroups,
+  parseTypedWithdraw,
+  pctWithdrawCarrier,
+  resolveOverrides,
   type GroupKind,
+  type TypedGroups,
 } from "@/lib/account-groups";
 import { loadGroupInputs } from "@/lib/account-groups-load";
 
@@ -758,7 +765,9 @@ export async function saveRetirementPlan(formData: FormData) {
       investment_return_pct: investReturn ?? 7.5,
       withdraw_start_year: withdrawStart,
       spouse_retire_year: spouseRetire,
-      withdrawal_rate_pct: withdrawal ?? 4,
+      // No box for it any more (withdrawals are set year by year); keep
+      // what's stored rather than resetting it.
+      ...(formData.has("withdrawalRatePct") ? { withdrawal_rate_pct: withdrawal ?? 4 } : {}),
       inflation_pct: inflation ?? 2.5,
       cash_return_pct: cashReturn ?? 3,
       sbp_enabled: formData.get("sbpEnabled") === "on",
@@ -937,7 +946,7 @@ async function recomputeRetirementIncome(
     supabase.from("retirement_income_lines").select("*").eq("household_id", householdId),
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, one_off_cents, eoy_cents, tax_pct")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, one_off_cents, eoy_cents, tax_pct, group_overrides")
       .eq("household_id", householdId)
       .order("year"),
     supabase.from("rental_properties").select("*").eq("household_id", householdId),
@@ -1036,9 +1045,21 @@ async function recomputeRetirementIncome(
         year: y,
         age: plan.birth_year ? y - plan.birth_year : last.age == null ? null : last.age + (y - last.year),
         one_off_cents: 0,
+        // Typed only on the year it was typed; the carry happens below.
+        group_overrides: null,
       });
     }
   }
+
+  // Contributions / withdrawals typed per group in the year popup, carried
+  // into every later year until another year types a new figure.
+  // A typed withdrawal % becomes dollars in its own year, then rises with
+  // inflation (the 4% rule).
+  const carryPct = pctWithdrawCarrier(inflationPct);
+  const overridesByYear = resolveOverrides(
+    rows.map((r) => ({ year: r.year, typed: parseTypedGroups(r.group_overrides), withdraw: parseTypedWithdraw(r.group_overrides) })),
+    inflationPct,
+  );
 
   // Typed spending rises with inflation from the year it was typed.
   const grownSpend = inflatedSpending(
@@ -1123,6 +1144,7 @@ async function recomputeRetirementIncome(
         flowCents: income - lifeSpending + row.one_off_cents - rent.purchaseCashCents,
         age: ageInYear(plan.birth_year ?? null, row.year),
         birthYear: plan.birth_year ?? null,
+        overrides: carryPct(row.year, groupBal, overridesByYear.get(row.year)),
       });
       groupBal = groupDetail.balances;
       taxCents = groupDetail.taxCents;
@@ -1441,7 +1463,7 @@ export async function saveProjectionYear(formData: FormData) {
   const prev = unwrap(
     await supabase
       .from("networth_projection")
-      .select("income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, tax_pct")
+      .select("income_cents, work_income_cents, spending_cents, base_spending_cents, growth_cents, tax_pct, group_overrides")
       .eq("household_id", householdId)
       .eq("year", year)
       .maybeSingle(),
@@ -1454,6 +1476,95 @@ export async function saveProjectionYear(formData: FormData) {
   const spendingTyped = spendingWas === "" || displayToCents(spendingWas) !== spending;
   const prevBase = prev ? prev.base_spending_cents ?? prev.spending_cents : null;
   const baseSpending = !spendingTyped && prevBase != null ? prevBase : spending;
+
+  // Proj Contributed / Proj Withdraw per account group. Each box comes in
+  // with the figure it showed (gaddWas_…); only a changed box becomes this
+  // year's typed figure, and an emptied box drops what this year had typed —
+  // the year before's figure (or the group settings) take over again.
+  const typedGroups: TypedGroups = parseTypedGroups(prev?.group_overrides);
+  for (const kind of GROUP_KINDS) {
+    if (kind === "cash") continue;
+    for (const field of ["add", "take"] as const) {
+      const key = `g${field}_${kind}`;
+      if (!formData.has(key)) continue;
+      const raw = String(formData.get(key) ?? "").trim();
+      const was = String(formData.get(`g${field}Was_${kind}`) ?? "").trim();
+      const entry = { ...(typedGroups[kind] ?? {}) };
+      if (raw === "") {
+        delete entry[field];
+      } else {
+        const value = Math.max(0, displayToCents(raw));
+        if (was === "" || displayToCents(was) !== value) entry[field] = value;
+      }
+      if (entry.add == null && entry.take == null && entry.takePct == null && entry.ret == null) delete typedGroups[kind];
+      else typedGroups[kind] = entry;
+    }
+  }
+  // Return % per group, Cash included: same rule — only a changed box is
+  // typed, an emptied one goes back to the year before's (or the settings').
+  for (const kind of GROUP_KINDS) {
+    const key = `gret_${kind}`;
+    if (!formData.has(key)) continue;
+    const raw = String(formData.get(key) ?? "").replace(/[%\s]/g, "");
+    const was = String(formData.get(`gretWas_${kind}`) ?? "").replace(/[%\s]/g, "");
+    const entry = { ...(typedGroups[kind] ?? {}) };
+    if (raw === "") {
+      delete entry.ret;
+    } else {
+      const value = Number(raw);
+      if (Number.isFinite(value) && (was === "" || Number(was) !== value)) entry.ret = clampReturnPct(value);
+    }
+    if (entry.add == null && entry.take == null && entry.takePct == null && entry.ret == null) delete typedGroups[kind];
+    else typedGroups[kind] = entry;
+  }
+  // Proj Withdraw %, per investment group: the same rule. A typed percent
+  // replaces any dollar withdrawal the year held.
+  for (const kind of GROUP_KINDS) {
+    if (kind === "cash") continue;
+    const key = `gtakepct_${kind}`;
+    if (!formData.has(key)) continue;
+    const raw = String(formData.get(key) ?? "").replace(/[%\s]/g, "");
+    const was = String(formData.get(`gtakepctWas_${kind}`) ?? "").replace(/[%\s]/g, "");
+    const entry = { ...(typedGroups[kind] ?? {}) };
+    if (raw === "") {
+      delete entry.takePct;
+    } else {
+      const value = Number(raw);
+      if (Number.isFinite(value) && (was === "" || Number(was) !== value)) {
+        entry.takePct = clampWithdrawPct(value);
+        delete entry.take;
+      }
+    }
+    if (entry.add == null && entry.take == null && entry.takePct == null && entry.ret == null) delete typedGroups[kind];
+    else typedGroups[kind] = entry;
+  }
+
+  // The year's Est. Withdraw total: a changed box becomes this year's typed
+  // figure (0 stops withdrawals from here on); emptied, the year before's
+  // carries again.
+  // "3%" is a percent of each year's start; anything else is dollars.
+  let typedWithdraw = parseTypedWithdraw(prev?.group_overrides);
+  // The popup now types withdrawals per group; a yearly total saved before
+  // that would override them, so a save from the group boxes drops it.
+  if (!formData.has("withdraw") && [...formData.keys()].some((k) => k.startsWith("gtakepct_"))) typedWithdraw = null;
+  if (formData.has("withdraw")) {
+    const norm = (v: string) => v.replace(/[\s,$]/g, "");
+    const raw = norm(String(formData.get("withdraw") ?? ""));
+    const was = norm(String(formData.get("withdrawWas") ?? ""));
+    if (raw === "") typedWithdraw = null;
+    else if (raw !== was) {
+      if (raw.endsWith("%")) {
+        const pct = Number(raw.slice(0, -1));
+        if (Number.isFinite(pct)) typedWithdraw = { pct: clampWithdrawPct(pct) };
+      } else {
+        typedWithdraw = { cents: Math.max(0, displayToCents(raw)) };
+      }
+    }
+  }
+  const overridesOut = {
+    ...typedGroups,
+    ...(typedWithdraw == null ? {} : "pct" in typedWithdraw ? { withdrawPct: typedWithdraw.pct } : { withdraw: typedWithdraw.cents }),
+  };
 
   const { error } = await supabase.from("networth_projection").upsert(
     {
@@ -1471,6 +1582,7 @@ export async function saveProjectionYear(formData: FormData) {
       one_off_cents: oneOff,
       contributed_cents: contributed,
       tax_pct: taxPct,
+      group_overrides: Object.keys(overridesOut).length > 0 ? overridesOut : null,
       eoy_cents: 0,
       updated_at: new Date().toISOString(),
     },

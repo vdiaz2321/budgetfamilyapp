@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ModalShell } from "@/components/modal-shell";
 import { useSessionCollapse } from "@/lib/use-session-collapse";
 import { centsToDisplay, displayToCents, formatMoneyWhole } from "@/lib/money";
-import { GROUP_LABEL, type StoredGroupYear } from "@/lib/account-groups";
+import { GROUP_LABEL, groupAccountNames, type GroupKind, type StoredGroupYear, type YearOverrides } from "@/lib/account-groups";
+import type { GroupSlot } from "@/lib/account-groups-load";
 import {
   appendProjectionYears,
   saveProjectionYear,
@@ -44,6 +45,8 @@ export type ProjectionYear = {
   plannedAddCents: number | null;
   /** Each group's year, for the popup. */
   groups: StoredGroupYear[];
+  /** Proj Contributed / Withdraw typed in the popup, as they apply this year. */
+  groupOverrides: YearOverrides;
   /** The year's income by source (pay, retired pay, VA…). */
   incomeParts: { name: string; cents: number }[];
   eoyCents: number;
@@ -148,12 +151,20 @@ function yearForecast(y: ProjectionYear, thisYear: number): YearForecast | null 
   };
 }
 
+// Frozen Year + Age columns. Year has a fixed width so Age knows where to sit.
+const pinYear = "sticky left-0 z-10 w-[3.75rem] min-w-[3.75rem] sm:w-[4.75rem] sm:min-w-[4.75rem]";
+const pinAge = "sticky left-[3.75rem] sm:left-[4.75rem] z-10 shadow-[1px_0_0_0_var(--color-line)]";
+// Opaque versions of the row's this-year wash and hover.
+const pinNowBg = "bg-sky-100 dark:bg-[color-mix(in_srgb,var(--color-sky-900)_50%,var(--color-background))]";
+const pinHover = "group-hover:bg-sky-200 dark:group-hover:bg-sky-900";
+
 export function ProjectionSection({
   years,
   currency,
   thisYear,
   seed,
   militaryRetireYear,
+  groupSlots,
   currentNwCents,
   inflationPct,
   todays,
@@ -167,13 +178,14 @@ export function ProjectionSection({
   thisYear: number;
   seed: ProjectionSeed;
   militaryRetireYear: number | null;
+  /** Today's accounts and the group each sits in — named under each group
+   *  in the year popup. */
+  groupSlots: GroupSlot[];
   /** Opens Edit Future Projections at Income; with no Pay line yet,
    *  one is started at the given yearly amount. */
   onEditIncome?: (suggestYearlyCents: number | null) => void;
-  /** Today's net worth at the last finished month's close. */
+  /** Today's live net worth — the figure Accounts and the sidebar show. */
   currentNwCents: number;
-  /** The finished month that figure closed (YYYY-MM-01); null = live. */
-  currentNwMonth: string | null;
   /** The plan's inflation — what turns a future year's dollars into today's. */
   inflationPct: number;
   /** Today's Money (true) or Not Today's Money — the page's one toggle. */
@@ -193,7 +205,10 @@ export function ProjectionSection({
   // The year-by-year table folds on its own, so Retirement details under it
   // is reachable without scrolling past it (Victor, 2026-10-15).
   const tableOpen = collapse.table === true;
-  const [editing, setEditing] = useState<ProjectionYear | null>(null);
+  // The open year, by number: after a save the page sends fresh rows, and the
+  // popup stays open showing them (Victor, 2026-10-17 — it used to close).
+  const [editingYear, setEditingYear] = useState<number | null>(null);
+  const editing = editingYear == null ? null : years.find((y) => y.year === editingYear) ?? null;
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -235,6 +250,29 @@ export function ProjectionSection({
         : null;
   const gapIsPace = forecast != null;
   const last = years.at(-1) ?? null;
+  // The far-right card opens on the plan's last year (age 90) on a fresh
+  // login; the age picker on it swaps in any future year without opening the
+  // table (Victor, 2026-10-17). Remembered for the session, like the folds.
+  const pickYears = years.filter((y) => y.year >= thisYear && y.age != null);
+  const [pickedYear, setPickedYear] = useState<number | null>(null);
+  useEffect(() => {
+    try {
+      const saved = Number(window.sessionStorage.getItem("networth-card-year"));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setPickedYear(saved);
+    } catch {
+      // sessionStorage unavailable — the card just opens on the last year.
+    }
+  }, []);
+  const pickYear = (year: number) => {
+    setPickedYear(year);
+    try {
+      window.sessionStorage.setItem("networth-card-year", String(year));
+    } catch {
+      // Not remembered — fine.
+    }
+  };
+  const target = years.find((y) => y.year === pickedYear) ?? last;
 
   // Adding years rewrites the grid in one press, so it asks first — in an
   // in-app dialog rather than window.confirm(), which some browsers and every
@@ -330,19 +368,39 @@ export function ProjectionSection({
               subClassName={gapIsPace ? undefined : `font-semibold ${gap >= 0 ? "text-positive" : "text-negative"}`}
             />
           ) : null}
-          {last ? (
+          {target ? (
             <Figure
-              label={`Net worth in ${last.year}`}
-              value={m(last.year, last.eoyCents, currency)}
+              label={`Net worth in ${target.year}`}
+              value={m(target.year, target.eoyCents, currency)}
               tone=""
               style={{ color: "var(--viz-savings)" }}
               sub={
                 <>
-                  {last.age != null ? `Expected at age ${last.age}` : "Expected"}
+                  {target.age != null && pickYears.length > 1 ? (
+                    <label className="inline-flex items-center gap-1">
+                      Expected at age
+                      <select
+                        aria-label="Pick an age"
+                        value={target.year}
+                        onChange={(e) => pickYear(Number(e.target.value))}
+                        className="cursor-pointer rounded-md bg-sky-100 py-0.5 pl-1.5 pr-1 font-semibold text-foreground outline-none ring-1 ring-sky-300 focus:ring-brand dark:bg-sky-900/50 dark:ring-sky-700"
+                      >
+                        {pickYears.map((y) => (
+                          <option key={y.year} value={y.year}>
+                            {y.age}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : target.age != null ? (
+                    `Expected at age ${target.age}`
+                  ) : (
+                    "Expected"
+                  )}
                   <span className="block">
                     {todays ? "Not Today's Money" : "Today's Money"}:{" "}
                     <span className="font-semibold">
-                      {formatMoneyWhole(todays ? last.eoyCents : inToday(last.year, last.eoyCents), currency)}
+                      {formatMoneyWhole(todays ? target.eoyCents : inToday(target.year, target.eoyCents), currency)}
                     </span>
                   </span>
                 </>
@@ -414,8 +472,10 @@ export function ProjectionSection({
             <table className="w-full min-w-[1000px] text-sm sm:text-lg">
               <thead className="sticky top-0 z-20 bg-background shadow-[0_1px_0_0_var(--color-line)]">
                 <tr className="max-sm:text-[12px] sm:text-base uppercase tracking-wide text-foreground">
-                  <th className="px-2.5 py-2 text-center font-semibold">Year</th>
-                  <th className="px-2.5 py-2 text-center font-semibold">Age</th>
+                  {/* Year and Age stay pinned on the left so a row can be
+                      read while scrolling across to the NW columns. */}
+                  <th className={`${pinYear} bg-background px-2.5 py-2 text-center font-semibold`}>Year</th>
+                  <th className={`${pinAge} bg-background px-2.5 py-2 text-center font-semibold`}>Age</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Income</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Total<br />Spending</th>
                   <th className="px-2.5 py-2 text-center font-semibold">Diff Income -<br />Spending</th>
@@ -433,15 +493,17 @@ export function ProjectionSection({
                   return (
                     <tr
                       key={y.year}
-                      onClick={() => setEditing(y)}
-                      className={`cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-200 dark:hover:bg-sky-900 ${
+                      onClick={() => setEditingYear(y.year)}
+                      className={`group cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-sky-200 dark:hover:bg-sky-900 ${
                         y.year === thisYear ? "bg-sky-100 dark:bg-sky-900/50" : ""
                       }`}
                     >
-                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
+                      {/* Pinned cells need a solid fill or the scrolled
+                          columns show through; it matches the row's wash. */}
+                      <td className={`${pinYear} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                         {y.year}
                       </td>
-                      <td className="px-2.5 py-2 text-center font-semibold tabular-nums">
+                      <td className={`${pinAge} ${y.year === thisYear ? pinNowBg : "bg-background"} ${pinHover} px-2.5 py-2 text-center font-semibold tabular-nums`}>
                         {y.age ?? "—"}
                       </td>
                       {/* Plan on top, what actually happened underneath. */}
@@ -512,7 +574,7 @@ export function ProjectionSection({
                         {(y.contributedCents ?? (y.plannedAddCents || null)) == null ? (
                           <span className="text-foreground">—</span>
                         ) : (
-                          <span style={{ color: "var(--viz-savings)" }}>
+                          <span className="text-foreground">
                             {formatMoneyWhole((y.contributedCents ?? y.plannedAddCents)!, currency)}
                           </span>
                         )}
@@ -552,8 +614,8 @@ export function ProjectionSection({
                             {m(y.year, y.actualCents, currency)}
                             {y.inProgress ? (
                               <span className="block max-sm:text-[12px] sm:text-base font-normal text-foreground">
-                                {/* Net worth at the end of the last finished month. */}
-                                {y.monthsDone > 0 ? `As of ${MONTH_NAMES[y.monthsDone - 1]}` : "Currently"}
+                                {/* Today's live net worth, as on Accounts. */}
+                                Currently
                               </span>
                             ) : null}
                           </>
@@ -656,13 +718,14 @@ export function ProjectionSection({
           currency={currency}
           thisYear={thisYear}
           militaryRetireYear={militaryRetireYear}
-          onClose={() => setEditing(null)}
+          groupSlots={groupSlots}
+          onClose={() => setEditingYear(null)}
           onEditIncome={
             onEditIncome
               ? () => {
                   // Suggest this year's typed pay for a first Pay line.
                   const now = years.find((y) => y.year === thisYear);
-                  setEditing(null);
+                  setEditingYear(null);
                   onEditIncome(now && now.workIncomeCents > 0 ? now.workIncomeCents : null);
                 }
               : undefined
@@ -716,60 +779,279 @@ function LeftOverBreakdown({ row, currency }: { row: ProjectionYear; currency: s
   );
 }
 
-// Each account group's year: start, what went in, what came out, what it
-// earned, where it ended. Taken out includes required minimums and anything
-// drawn to cover a shortfall, each named under the figure.
-function GroupBreakdown({ groups, currency, year }: { groups: StoredGroupYear[]; currency: string; year: number }) {
+// Each account group's year: start, the plan's contributions and withdrawals
+// (boxes — what you type there is what the plan runs on, carried into later
+// years), what really went in and came out once the year is running, what it
+// earned, where it ended. Withdrawals name any required minimum or shortfall
+// draw under the box.
+function GroupBreakdown({
+  groups,
+  overrides,
+  slots,
+  currency,
+  year,
+  thisYear,
+}: {
+  groups: StoredGroupYear[];
+  overrides: YearOverrides;
+  slots: GroupSlot[];
+  currency: string;
+  year: number;
+  thisYear: number;
+}) {
   const $ = (cents: number) => formatMoneyWhole(cents, currency);
-  const total = groups.reduce(
-    (t, g) => ({ start: t.start + g.start, add: t.add + g.add, out: t.out + g.take + g.auto, gain: t.gain + g.gain, end: t.end + g.end }),
-    { start: 0, add: 0, out: 0, gain: 0, end: 0 },
-  );
+  const isCurrent = year === thisYear;
+  // Which of today's accounts each group holds, so "Roth retirement" reads
+  // as Schwab, the Fidelity Roths and TSP Roth rather than a bare type.
+  // An account named once when all of it sits in one group (Amex Savings, not
+  // its four buckets); by bucket only when it's split (Fidelity, TSP).
+  // Folded by default — Cash alone names seven accounts. Clicking a group's
+  // name opens just that group (Victor, 2026-10-17).
+  const [openKinds, setOpenKinds] = useState<GroupKind[]>([]);
+  const toggleKind = (kind: GroupKind) =>
+    setOpenKinds((list) => (list.includes(kind) ? list.filter((k) => k !== kind) : [...list, kind]));
+  const accountsIn = (kind: GroupKind) =>
+    groupAccountNames(slots, (x) => x.group === kind);
+  const sum = (pick: (g: StoredGroupYear) => number) => groups.reduce((t, g) => t + pick(g), 0);
+  const anyActual = groups.some((g) => g.actualAdd != null || g.actualTake != null);
   const cell = "px-2 py-1 text-center tabular-nums";
+  // Pinned so the row's name stays in view while the table scrolls sideways
+  // on a phone. Solid backgrounds, or the scrolled cells show through.
+  const pin = "sticky left-0 z-10 text-left";
+  const box =
+    "mx-auto block w-24 rounded-md bg-background px-1.5 py-1 text-center text-xs sm:text-sm tabular-nums ring-1 ring-line focus:outline-none focus:ring-2 focus:ring-brand";
+  // Where the box's figure came from: typed here, or carried from earlier.
+  const source = (from: number | undefined) =>
+    from == null ? null : (
+      <span className="block text-[11px] text-foreground">{from === year ? "typed" : `from ${from}`}</span>
+    );
   return (
     <div className="sm:col-span-2">
       <p className="border-t border-line pt-3 text-center max-sm:text-[12px] sm:text-base font-semibold uppercase tracking-wide text-foreground">
         By account group: {year}
       </p>
       <div className="mt-1 overflow-x-auto rounded-md ring-1 ring-line">
-        <table className="w-full min-w-[520px] text-xs sm:text-sm">
-          <thead className="bg-sky-100 dark:bg-sky-900/50">
+        <table className={`w-full text-xs sm:text-sm ${isCurrent ? "min-w-[780px]" : "min-w-[880px]"}`}>
+          <thead className="bg-sky-100 dark:bg-sky-900">
             <tr className="uppercase tracking-wide text-foreground">
-              <th className={`${cell} text-left font-semibold`}>Account Type</th>
+              <th className={`${cell} ${pin} bg-sky-100 font-semibold dark:bg-sky-900`}>Account Type</th>
               <th className={`${cell} font-semibold`}>Start</th>
-              <th className={`${cell} font-semibold`}>Contributed</th>
-              <th className={`${cell} font-semibold`}>Withdraw</th>
-              <th className={`${cell} font-semibold`}>Gains</th>
-              <th className={`${cell} font-semibold`}>End</th>
+              <th className={`${cell} font-semibold`}>Proj<br />Contributed</th>
+              <th className={`${cell} font-semibold`}>Proj<br /><span className="whitespace-nowrap">Withdraw %</span></th>
+              <th className={`${cell} font-semibold`}>Actual<br />Contributed</th>
+              {/* Left to right: what went in, what it earned, what it's worth,
+                  then what came out. This year that worth is today's balance;
+                  a future year ends after its withdrawals. */}
+              {/* A future year's gain is Start × the return; this year's is
+                  measured from the balances, so it has no rate to type. */}
+              {isCurrent ? null : <th className={`${cell} font-semibold`}>Proj<br />Return %</th>}
+              <th className={`${cell} font-semibold`}>{isCurrent ? <>Actual<br />Gains</> : "Gains"}</th>
+              {isCurrent ? <th className={`${cell} font-semibold`}>Current</th> : null}
+              <th className={`${cell} font-semibold`}>Actual<br />Withdraw</th>
+              {isCurrent ? null : <th className={`${cell} font-semibold`}>End</th>}
             </tr>
           </thead>
           <tbody>
-            {groups.map((g) => (
-              <tr key={g.kind} className="border-t border-line/60">
-                <td className={`${cell} text-left font-semibold`}>{GROUP_LABEL[g.kind]}</td>
-                <td className={cell}>{$(g.start)}</td>
-                <td className={cell} style={g.add ? { color: "var(--viz-savings)" } : undefined}>{g.add ? $(g.add) : "—"}</td>
-                <td className={cell}>
-                  {g.take + g.auto ? <span style={{ color: "var(--viz-spending)" }}>{$(g.take + g.auto)}</span> : "—"}
-                  {g.rmd > 0 ? <span className="block text-foreground">{$(g.rmd)} required</span> : null}
-                  {g.auto > 0 ? <span className="block text-foreground">{$(g.auto)} to cover a gap</span> : null}
-                </td>
-                <td className={`${cell} ${g.gain < 0 ? "text-negative" : "text-positive"}`}>{$(g.gain)}</td>
-                <td className={`${cell} font-semibold ${g.end < 0 ? "text-negative" : ""}`}>{$(g.end)}</td>
-              </tr>
-            ))}
+            {groups.map((g) => {
+              const o = overrides[g.kind];
+              const isCash = g.kind === "cash";
+              const addShown = o?.add ?? g.add;
+              // The withdrawal as a percent of the group's start: typed, else
+              // what the group's own settings come to.
+              const takePctShown =
+                o?.takePct ?? (g.start > 0 && g.take - g.rmd > 0 ? Math.round(((g.take - g.rmd) / g.start) * 10000) / 100 : 0);
+              // Rows saved before the rate was stored: read it back off the gain.
+              const rate = g.rate ?? o?.ret ?? (g.start > 0 ? Math.round((g.gain / g.start) * 10000) / 100 : null);
+              return (
+                <Fragment key={g.kind}>
+                <tr className="border-t border-line/60">
+                  <td className={`${cell} ${pin} whitespace-nowrap bg-surface`}>
+                    {accountsIn(g.kind).length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleKind(g.kind)}
+                        aria-expanded={openKinds.includes(g.kind)}
+                        className="flex w-full items-start gap-1 rounded-md text-left font-semibold transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                      >
+                        <svg
+                          aria-hidden
+                          viewBox="0 0 20 20"
+                          className={`mt-1 h-3 w-3 shrink-0 transition-transform ${openKinds.includes(g.kind) ? "" : "-rotate-90"}`}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M5 7.5 10 12.5 15 7.5" />
+                        </svg>
+                        {GROUP_LABEL[g.kind]}
+                      </button>
+                    ) : (
+                      <span className="block font-semibold">{GROUP_LABEL[g.kind]}</span>
+                    )}
+                  </td>
+                  <td className={cell}>{$(g.start)}</td>
+                  <td className={cell}>
+                    {isCash ? (
+                      "—"
+                    ) : (
+                      <>
+                        <input type="hidden" name={`gaddWas_${g.kind}`} value={toWhole(addShown)} />
+                        <input
+                          name={`gadd_${g.kind}`}
+                          inputMode="numeric"
+                          aria-label={`${GROUP_LABEL[g.kind]} proj contributed`}
+                          defaultValue={toWhole(addShown)}
+                          onFocus={(e) => e.currentTarget.select()}
+                          className={box}
+                          style={{ color: "var(--viz-savings)" }}
+                        />
+                        {source(o?.addFrom)}
+                        {!isCurrent && o?.add != null && g.add < o.add ? (
+                          <span className="block text-[11px] text-negative">{$(g.add)} fit — Cash short</span>
+                        ) : null}
+                      </>
+                    )}
+                  </td>
+                  <td className={cell}>
+                    {isCash ? (
+                      "—"
+                    ) : (
+                      <>
+                        {/* A percent of the group's start, typed per group;
+                            carries into later years, which show it with
+                            "from 2027" (Victor, 2026-10-17). */}
+                        <WithdrawPctBox
+                          kind={g.kind}
+                          startCents={g.start}
+                          shown={takePctShown}
+                          typed={o?.takePct != null}
+                          className={box}
+                          money={$}
+                        />
+                        {g.rmd > 0 ? <span className="block text-[11px] text-foreground">+{$(g.rmd)} required</span> : null}
+                      </>
+                    )}
+                  </td>
+                  <td className={cell} style={g.actualAdd ? { color: "var(--viz-savings)" } : undefined}>
+                    {g.actualAdd ? $(g.actualAdd) : "—"}
+                  </td>
+                  {isCurrent ? null : (
+                    <td className={cell}>
+                      <input type="hidden" name={`gretWas_${g.kind}`} value={rate ?? ""} />
+                      <input
+                        name={`gret_${g.kind}`}
+                        inputMode="decimal"
+                        aria-label={`${GROUP_LABEL[g.kind]} proj return %`}
+                        defaultValue={rate ?? ""}
+                        onFocus={(e) => e.currentTarget.select()}
+                        className={`${box} text-foreground`}
+                      />
+                      {source(o?.retFrom)}
+                    </td>
+                  )}
+                  <td className={`${cell} ${g.gain < 0 ? "text-negative" : "text-positive"}`}>
+                    {isCurrent && isCash ? <span className="text-foreground">—</span> : $(g.gain)}
+                    {/* The sum behind a projected gain, in plain sight. */}
+                    {!isCurrent && rate != null && g.start > 0 ? (
+                      <span className="block whitespace-nowrap text-[11px] text-foreground">
+                        {$(g.start)} × {rate}%
+                      </span>
+                    ) : null}
+                  </td>
+                  {isCurrent ? <td className={`${cell} font-semibold ${g.end < 0 ? "text-negative" : ""}`}>{$(g.end)}</td> : null}
+                  <td className={cell} style={g.actualTake ? { color: "var(--viz-spending)" } : undefined}>
+                    {g.actualTake ? $(g.actualTake) : "—"}
+                  </td>
+                  {isCurrent ? null : <td className={`${cell} font-semibold ${g.end < 0 ? "text-negative" : ""}`}>{$(g.end)}</td>}
+                </tr>
+                {/* The group's accounts on one line across the whole table,
+                    not stacked in the narrow name column. Pinned left so it
+                    stays in view while a phone scrolls the table sideways. */}
+                {openKinds.includes(g.kind) && accountsIn(g.kind).length > 0 ? (
+                  <tr>
+                    <td colSpan={isCurrent ? 8 : 9} className="px-2 pb-1.5 pt-0">
+                      <span className="sticky left-2 block max-w-[calc(100vw-4rem)] pl-4 text-xs font-semibold leading-snug text-foreground sm:max-w-none sm:text-sm">
+                        {accountsIn(g.kind).join(" · ")}
+                      </span>
+                    </td>
+                  </tr>
+                ) : null}
+                </Fragment>
+              );
+            })}
             <tr className="border-t border-line font-semibold">
-              <td className={`${cell} text-left`}>Total</td>
-              <td className={cell}>{$(total.start)}</td>
-              <td className={cell} style={{ color: "var(--viz-savings)" }}>{$(total.add)}</td>
-              <td className={cell} style={{ color: "var(--viz-spending)" }}>{$(total.out)}</td>
-              <td className={`${cell} text-positive`}>{$(total.gain)}</td>
-              <td className={cell}>{$(total.end)}</td>
+              <td className={`${cell} ${pin} bg-surface`}>Total</td>
+              <td className={cell}>{$(sum((g) => g.start))}</td>
+              <td className={cell} style={{ color: "var(--viz-savings)" }}>{$(sum((g) => g.add))}</td>
+              {/* Only what the boxes withdraw — not what the plan sells on its own
+                  to cover spending, which has no note here (Victor, 2026-10-17). */}
+              <td className={cell} style={{ color: "var(--viz-spending)" }}>{$(sum((g) => g.take))}</td>
+              <td className={cell} style={anyActual ? { color: "var(--viz-savings)" } : undefined}>
+                {anyActual ? $(sum((g) => g.actualAdd ?? 0)) : "—"}
+              </td>
+              {isCurrent ? null : <td className={cell} />}
+              <td className={`${cell} text-positive`}>{$(sum((g) => g.gain))}</td>
+              {isCurrent ? <td className={cell}>{$(sum((g) => g.end))}</td> : null}
+              <td className={cell} style={anyActual ? { color: "var(--viz-spending)" } : undefined}>
+                {anyActual ? $(sum((g) => g.actualTake ?? 0)) : "—"}
+              </td>
+              {isCurrent ? null : <td className={cell}>{$(sum((g) => g.end))}</td>}
             </tr>
           </tbody>
         </table>
       </div>
+      <p className="mt-1 text-xs text-foreground">
+        {isCurrent
+          ? "Actual = recorded so far this year. A Proj figure typed here carries into later years."
+          : "A Proj figure typed here carries into later years."}
+      </p>
     </div>
+  );
+}
+
+/**
+ * One group's Proj Withdraw % box, with what it comes to worked out as you
+ * type, on one line under it.
+ */
+function WithdrawPctBox({
+  kind,
+  startCents,
+  shown,
+  typed,
+  className,
+  money,
+}: {
+  kind: GroupKind;
+  startCents: number;
+  shown: number;
+  /** A 0 that was typed shows as 0; an untouched one starts empty, so typing
+   *  2 gives 2, not 02 (Victor, 2026-10-17). */
+  typed: boolean;
+  className: string;
+  money: (cents: number) => string;
+}) {
+  const [text, setText] = useState(shown === 0 && !typed ? "" : String(shown));
+  const pct = parseFloat(text);
+  const cents = Number.isFinite(pct) && pct > 0 && startCents > 0 ? Math.round((startCents * pct) / 100) : 0;
+  return (
+    <>
+      <input type="hidden" name={`gtakepctWas_${kind}`} value={shown === 0 && !typed ? "" : shown} />
+      <input
+        name={`gtakepct_${kind}`}
+        inputMode="decimal"
+        aria-label={`${GROUP_LABEL[kind]} proj withdraw %`}
+        value={text}
+        placeholder="0"
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => setText(e.target.value.replace(/%/g, ""))}
+        className={className}
+        style={{ color: "var(--viz-spending)" }}
+      />
+      {/* Just the amount (Victor, 2026-10-17 — no "from 2027"). */}
+      {cents > 0 ? <span className="block whitespace-nowrap text-negative">{money(cents)}</span> : null}
+    </>
   );
 }
 
@@ -789,7 +1071,7 @@ function ForecastBreakdown({
   const months = (n: number) => `${n} ${n === 1 ? "month" : "months"}`;
   return (
     <Line label="Proj Forecast NW">
-      Current NW {$(f.monthEndCents)} + <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> avg a
+      {MONTH_NAMES[f.monthsDone - 1]} NW {$(f.monthEndCents)} + <span className={sign(f.perMonthCents)}>{$(f.perMonthCents)}</span> avg a
       month × {months(f.monthsLeft)}
       {f.travelCents > 0 ? (
         <>
@@ -853,6 +1135,7 @@ function YearModal({
   currency,
   thisYear,
   militaryRetireYear,
+  groupSlots,
   onClose,
   onEditIncome,
 }: {
@@ -860,6 +1143,7 @@ function YearModal({
   currency: string;
   thisYear: number;
   militaryRetireYear: number | null;
+  groupSlots: GroupSlot[];
   onClose: () => void;
   onEditIncome?: () => void;
 }) {
@@ -872,6 +1156,8 @@ function YearModal({
   const linesCents = row.incomeCents - (retired ? 0 : row.workIncomeCents);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // "Saved" on the button for a moment, since the popup now stays open.
+  const [saved, setSaved] = useState(false);
 
   // What the rest of the app recorded for this year. Income and spending only
   // count once the register covers enough of the year to mean anything; gains
@@ -970,16 +1256,44 @@ function YearModal({
   }
 
   return (
-    <ModalShell title={`Year: ${row.year} EOY Net Worth`} onClose={onClose} className="sm:max-w-4xl">
+    <ModalShell
+      title={
+        // Capped on a phone so the title, Save and the X share one line — the
+        // title wraps instead of pushing the X onto a row of its own.
+        <span className="flex min-w-0 max-w-[calc(100vw-6rem)] items-center gap-2 py-0.5 sm:max-w-none sm:gap-3">
+          <span className="min-w-0 whitespace-normal leading-tight sm:truncate">{`Year: ${row.year} EOY Net Worth`}</span>
+          {/* Save at the top too, so a long popup needn't be scrolled to the
+              end (Victor, 2026-10-17). Outside the <form>, so it points at it by id. */}
+          <button
+            type="submit"
+            form="projection-year-form"
+            disabled={pending}
+            className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
+          >
+            {pending ? "Saving…" : saved ? "Saved ✓" : "Save year"}
+          </button>
+        </span>
+      }
+      onClose={onClose}
+      // Wider from lg up so the eight-column group table fits without a
+      // sideways scroll on a desktop monitor.
+      className="sm:max-w-4xl lg:max-w-6xl"
+    >
       <form
+        id="projection-year-form"
         action={(formData) =>
           start(async () => {
             const result = await saveProjectionYear(formData);
             if (result?.error) setError(result.error);
             // No router.refresh(): the action's revalidatePath already sends
             // the fresh page back with its reply, and a refresh on top fetched
-            // the whole page a second time (~0.8s).
-            else onClose();
+            // the whole page a second time (~0.8s). The popup stays open on
+            // the refreshed year.
+            else {
+              setError(null);
+              setSaved(true);
+              setTimeout(() => setSaved(false), 2000);
+            }
           })
         }
         className="grid grid-cols-1 gap-3 px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)] sm:grid-cols-2"
@@ -1126,7 +1440,10 @@ function YearModal({
         {/* Top row in the same order as the panel above: income, spending,
             contributed, gains. */}
         <div className="sm:col-span-2 grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-5">
-          <Field label={`Start of NW: ${row.year}`}>
+          {/* Withdrawals are typed per group in the table below — no total
+              box up here (Victor, 2026-10-17: it confused). Every label in this row on two lines from sm up, so the boxes
+              sit level (Victor, 2026-10-17). */}
+          <Field label={<>Start of NW:<br className="max-sm:hidden" />{row.year}</>}>
             <input
               value={formatMoneyWhole(row.boyCents, currency)}
               readOnly
@@ -1135,7 +1452,7 @@ function YearModal({
             />
           </Field>
           {retired ? (
-            <Field label="Total Income">
+            <Field label={<>Total<br className="max-sm:hidden" />Income</>}>
               <input type="hidden" name="income" value={income} />
               <input value={formatMoneyWhole(row.incomeCents, currency)} readOnly disabled className={`${inputClass} opacity-60 text-positive`} />
               {/* Set in one place for every year: this opens it. */}
@@ -1155,7 +1472,7 @@ function YearModal({
             </Field>
           ) : (
             <Field
-              label="Total Income"
+              label={<>Total<br className="max-sm:hidden" />Income</>}
               hint={linesCents > 0 ? `+${formatMoneyWhole(linesCents, currency)} other income` : undefined}
             >
               <input
@@ -1168,13 +1485,13 @@ function YearModal({
             </Field>
           )}
           <Field
-            label="Total Spending"
+            label={<>Total<br className="max-sm:hidden" />Spending</>}
             hint={
+              // Short: "incl. $7,839 tax" (Victor, 2026-10-17 — long notes here
+              // wrapped to three lines).
               [
-                healthCents > 0 ? `+${formatMoneyWhole(healthCents, currency)} healthcare` : "",
-                row.withdrawalTaxCents > 0 ? `+${formatMoneyWhole(row.withdrawalTaxCents, currency)} tax on withdrawals` : "",
-                // A new amount here is this year's; later years add inflation.
-                futureYear ? "Later years add inflation" : "",
+                healthCents > 0 ? `incl. ${formatMoneyWhole(healthCents, currency)} health` : "",
+                row.withdrawalTaxCents > 0 ? `incl. ${formatMoneyWhole(row.withdrawalTaxCents, currency)} tax` : "",
               ].filter(Boolean).join(" · ") || undefined
             }
           >
@@ -1188,18 +1505,20 @@ function YearModal({
           </Field>
           {/* Tracking only — moving money into investments doesn't change net
               worth, so it stays out of Proj EOY NW. */}
-          <Field label="Est. Contributed">
+          <Field label={<>Est.<br className="max-sm:hidden" />Contributed</>}>
             <input
               name="contributed"
               inputMode="numeric"
               value={contributed}
-              placeholder="0"
+              // Blank shows what the account groups plan to add — the same
+              // figure the Year by year table's Contributed column shows.
+              placeholder={row.plannedAddCents ? toWhole(row.plannedAddCents) : "0"}
               onChange={(e) => setContributed(e.target.value)}
               className={inputClass}
               style={{ color: "var(--viz-savings)" }}
             />
           </Field>
-          <Field label="Est. gains" hint={futureYear ? "Return on the start balance" : "Market growth"}>
+          <Field label={<>Est.<br className="max-sm:hidden" />Gains</>} hint={futureYear ? "Return on the start balance" : "Market growth"}>
             <input
               name="growth"
               inputMode="numeric"
@@ -1276,7 +1595,9 @@ function YearModal({
           </p>
         </div>
 
-        {row.groups.length > 0 ? <GroupBreakdown groups={row.groups} currency={currency} year={row.year} /> : null}
+        {row.groups.length > 0 ? (
+          <GroupBreakdown groups={row.groups} overrides={row.groupOverrides} slots={groupSlots} currency={currency} year={row.year} thisYear={thisYear} />
+        ) : null}
 
         {/* The plan and the forecast worked out together, so neither is a
             black box — under the footnotes (Victor, 2026-09-29). Month-end
@@ -1341,23 +1662,23 @@ function YearModal({
           </div>
         ) : null}
 
-        <div className="sm:col-span-2 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-3">
-          {hasMeasured && changes.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setPreview((v) => !v)}
-              className="mr-auto rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
-            >
-              Use {row.year} actuals
-            </button>
-          ) : null}
+        <div className="sm:col-span-2 flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <button
             type="submit"
             disabled={pending}
             className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-strong disabled:opacity-60"
           >
-            {pending ? "Saving…" : "Save year"}
+            {pending ? "Saving…" : saved ? "Saved ✓" : "Save year"}
           </button>
+          {hasMeasured && changes.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setPreview((v) => !v)}
+              className="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-line transition hover:bg-sky-50 dark:hover:bg-sky-950/40"
+            >
+              Use {row.year} actuals
+            </button>
+          ) : null}
         </div>
         {error ? <p className="sm:col-span-2 text-sm font-medium text-negative">{error}</p> : null}
       </form>
@@ -1560,7 +1881,7 @@ function Field({
   className = "",
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   /** Where the number comes from, when the box does not hold a figure of its
    *  own. Shown under the input, because a field that is calculated or locked
    *  has to say so on the screen — not on hover, which mobile never gets. */

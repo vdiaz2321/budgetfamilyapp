@@ -22,6 +22,8 @@ export type GroupSlot = {
   /** "Crypto · Kraken" for a bucket (just the bucket's name when it already
    *  says the account), the account's name otherwise. */
   name: string;
+  /** The account's own name, bucket or not. */
+  accountName: string;
   balanceCents: number;
   /** The group it lands in with nothing picked. */
   inferred: GroupKind;
@@ -37,6 +39,9 @@ export type GroupInputs = {
    *  a year when the record is younger than that. */
   measuredAddCents: Record<GroupKind, number>;
   rows: GroupRow[];
+  /** "accountId:bucketId" (bucketId blank for the account itself) → its
+   *  group, for matching register rows and snapshots to a group. */
+  slotGroup: Record<string, GroupKind>;
 };
 
 export async function loadGroupInputs(supabase: SupabaseClient, householdId: string): Promise<GroupInputs> {
@@ -104,7 +109,7 @@ export async function loadGroupInputs(supabase: SupabaseClient, householdId: str
         accountRetirementKind: a.retirement_kind,
       });
       const group = accountPick ?? inferred;
-      slots.push({ accountId: a.id, bucketId: null, name: a.name, balanceCents: Number(a.current_balance_cents ?? 0), inferred, group });
+      slots.push({ accountId: a.id, bucketId: null, name: a.name, accountName: a.name, balanceCents: Number(a.current_balance_cents ?? 0), inferred, group });
       groupOf.set(slotKey(a.id, null), group);
       continue;
     }
@@ -120,7 +125,7 @@ export async function loadGroupInputs(supabase: SupabaseClient, householdId: str
       const group = (isGroupKind(b.plan_group) ? b.plan_group : null) ?? accountPick ?? inferred;
       // "Fidelity Roth Vic", not "Fidelity · Fidelity Roth Vic".
       const name = b.name.toLowerCase().includes(a.name.toLowerCase()) ? b.name : `${a.name} · ${b.name}`;
-      slots.push({ accountId: a.id, bucketId: b.id, name, balanceCents: Number(b.balance_cents ?? 0), inferred, group });
+      slots.push({ accountId: a.id, bucketId: b.id, name, accountName: a.name, balanceCents: Number(b.balance_cents ?? 0), inferred, group });
       groupOf.set(slotKey(a.id, b.id), group);
     }
     // Contributions logged against the account itself, not a bucket.
@@ -150,5 +155,5 @@ export async function loadGroupInputs(supabase: SupabaseClient, householdId: str
     measuredAddCents[k] = Math.max(0, measuredAddCents[k]);
   }
 
-  return { slots, liveCents, measuredAddCents, rows: groupRows };
+  return { slots, liveCents, measuredAddCents, rows: groupRows, slotGroup: Object.fromEntries(groupOf) };
 }

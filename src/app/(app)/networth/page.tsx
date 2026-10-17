@@ -10,7 +10,16 @@ import { investSlotKey, resolveContributedCents } from "@/lib/fund-contributions
 import { throwIfAny, unwrap } from "@/lib/supabase-result";
 import { loadUpcomingTravelPlanCents } from "../travel/upcoming-plan";
 import { loadGroupInputs } from "@/lib/account-groups-load";
-import { parseStoredGroups } from "@/lib/account-groups";
+import {
+  GROUP_KINDS,
+  emptyBalances,
+  parseStoredGroups,
+  parseTypedGroups,
+  parseTypedWithdraw,
+  resolveGroupSettings,
+  resolveOverrides,
+  type StoredGroupYear,
+} from "@/lib/account-groups";
 
 export const metadata = { title: "Net Worth · Capitall" };
 
@@ -173,7 +182,7 @@ export default async function NetworthPage() {
     // The year-by-year plan Victor has kept since 2018.
     supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts, group_overrides")
       .eq("household_id", household.id)
       .order("year"),
     // The year-end gains typed on Invest / Savings — the sheet's "Growth" row,
@@ -188,7 +197,7 @@ export default async function NetworthPage() {
     // with it or the same money reads as two different numbers.
     supabase
       .from("v_investment_contributions")
-      .select("account_id, bucket_id, year, net_contribution_cents")
+      .select("account_id, bucket_id, year, net_contribution_cents, gross_contribution_cents, withdrawal_cents")
       .eq("household_id", household.id),
     // Retirement income that switches on and off by year (VA, SS, a job…).
     supabase
@@ -215,7 +224,7 @@ export default async function NetworthPage() {
     // This January's contributions — already inside a January opening balance.
     supabase
       .from("v_investment_contributions_monthly")
-      .select("account_id, net_contribution_cents")
+      .select("account_id, bucket_id, net_contribution_cents")
       .eq("household_id", household.id)
       .eq("month", `${fiToMonth.slice(0, 4)}-01-01`),
   ]);
@@ -668,6 +677,11 @@ export default async function NetworthPage() {
   for (const point of closedPoints) {
     netByYear.set(Number(point.month.slice(0, 4)), point.net);
   }
+  // This year's "Current NW" is today's live figure — the same one Accounts
+  // and the sidebar show (Victor, 2026-10-17). The pace forecast still runs on
+  // the last finished month (monthEndNet below).
+  const livePoint = points.find((p) => p.month === fiToMonth);
+  if (livePoint) netByYear.set(Number(fiToMonth.slice(0, 4)), livePoint.net);
   const thisYearNum = Number(fiToMonth.slice(0, 4));
   // The pace forecast runs on finished months: last month's close, over how
   // many months are done (September → the close of August, over 8).
@@ -854,7 +868,7 @@ export default async function NetworthPage() {
     // what was adopted rather than what it replaced.
     const refreshed = await supabase
       .from("networth_projection")
-      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts")
+      .select("year, age, boy_cents, income_cents, work_income_cents, spending_cents, base_spending_cents, debt_freed_cents, growth_cents, one_off_cents, contributed_cents, eoy_cents, tax_pct, withdrawn_cents, withdrawal_tax_cents, planned_add_cents, groups, income_parts, group_overrides")
       .eq("household_id", household.id)
       .order("year");
     if (refreshed.data) projectionRows = refreshed.data;
@@ -872,6 +886,133 @@ export default async function NetworthPage() {
     thisYearNum,
     planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct),
   );
+  // ---- Account groups in the year popup.
+  //
+  // Proj Contributed / Proj Withdraw: what the year popup typed, carried
+  // forward (lib/account-groups resolveOverrides) — the same figures the
+  // recompute runs on.
+  const planInflationPct = planRow?.inflation_pct == null ? 2.5 : Number(planRow.inflation_pct);
+  const overridesByYear = resolveOverrides(
+    (projectionRows ?? []).map((r) => ({ year: r.year, typed: parseTypedGroups(r.group_overrides), withdraw: parseTypedWithdraw(r.group_overrides) })),
+    planInflationPct,
+  );
+  // The year in progress isn't run through the groups (its gains are being
+  // measured), so its table is built from the real accounts instead: the
+  // opening close, what was actually put in and taken out so far, and today's
+  // balance — with the plan's figures beside them.
+  const currentGroups: StoredGroupYear[] = (() => {
+    const slotGroup = (accountId: string, bucketId: string | null) =>
+      groupInputs.slotGroup[`${accountId}:${bucketId ?? ""}`] ?? groupInputs.slotGroup[`${accountId}:`] ?? null;
+    const snapMonthsAll = [...snapshotMonths].sort((a, b) => a.localeCompare(b));
+    const priorDec = `${thisYearNum - 1}-12-01`;
+    const jan = `${thisYearNum}-01-01`;
+    // Same opening rule as the running gains above: last December's close,
+    // or January's when the whole record starts there.
+    const openMonth = snapshotMonths.has(priorDec) ? priorDec : snapMonthsAll[0] === jan ? jan : null;
+    if (!openMonth) return [];
+    const start = emptyBalances();
+    const bucketed = new Set(groupInputs.slots.filter((x) => x.bucketId).map((x) => x.accountId));
+    const tracked = new Set(groupInputs.slots.map((x) => `${x.accountId}:${x.bucketId ?? ""}`));
+    // A bucketed account uses its bucket snapshots — unless it had none that
+    // month (TSP's buckets start in August), when the account's own snapshot
+    // is split across its groups by today's bucket mix.
+    const bucketsSnapped = new Set(
+      bucketSnapsRead.filter((b) => b.month === openMonth).map((b) => b.account_id),
+    );
+    for (const snap of bucketSnapsRead) {
+      if (snap.month !== openMonth || !tracked.has(`${snap.account_id}:${snap.bucket_id}`)) continue;
+      const g = slotGroup(snap.account_id, snap.bucket_id);
+      if (g) start[g] += snap.balance_cents;
+    }
+    for (const snap of accSnapsRead) {
+      if (snap.month !== openMonth || bucketsSnapped.has(snap.account_id)) continue;
+      if (!bucketed.has(snap.account_id)) {
+        const g = tracked.has(`${snap.account_id}:`) ? slotGroup(snap.account_id, null) : null;
+        if (g) start[g] += snap.balance_cents;
+        continue;
+      }
+      const parts = groupInputs.slots.filter((x) => x.accountId === snap.account_id);
+      const whole = parts.reduce((t, x) => t + Math.max(0, x.balanceCents), 0);
+      let given = 0;
+      parts.forEach((x, i) => {
+        const share =
+          i === parts.length - 1
+            ? snap.balance_cents - given
+            : whole > 0
+              ? Math.round((snap.balance_cents * Math.max(0, x.balanceCents)) / whole)
+              : 0;
+        given += share;
+        start[x.group] += share;
+      });
+    }
+    // What went in per account, resolved exactly as Invest / Savings and the
+    // Contributed figure above resolve it (logged transactions, else the
+    // amount typed on Invest / Savings) — so the two can't disagree. Kraken's
+    // typed $1,000 with nothing logged was the $1,000 between them.
+    const addIn = emptyBalances();
+    const takeOut = emptyBalances();
+    const takenBySlot = new Map<string, number>();
+    for (const c of liveContribRows ?? []) {
+      if (c.year !== thisYearNum) continue;
+      const key = investSlotKey(c.account_id, c.bucket_id ?? null, c.year);
+      takenBySlot.set(key, (takenBySlot.get(key) ?? 0) + (c.withdrawal_cents ?? 0));
+    }
+    for (const key of slotKeys) {
+      const [accountId, bucketPart, yearText] = key.split(":");
+      if (Number(yearText) !== thisYearNum || !householdAccountIds.has(accountId) || kidsAccountIds.has(accountId)) continue;
+      const g = slotGroup(accountId, bucketPart === "_" ? null : bucketPart);
+      if (!g || g === "cash") continue;
+      const stored = storedBySlot.get(key);
+      const net = resolveContributedCents({
+        storedCents: stored ? stored.contributed : null,
+        liveCents: liveBySlot.get(key) ?? 0,
+        hasLive: liveBySlot.has(key),
+        isCurrentYear: true,
+      });
+      const taken = takenBySlot.get(key) ?? 0;
+      addIn[g] += net + taken;
+      takeOut[g] += taken;
+    }
+    // January's deposits are already inside a January opening.
+    const janIn = emptyBalances();
+    if (openMonth === jan) {
+      for (const c of janContribRows ?? []) {
+        if (!householdAccountIds.has(c.account_id)) continue;
+        const g = slotGroup(c.account_id, c.bucket_id ?? null);
+        if (g && g !== "cash") janIn[g] += c.net_contribution_cents ?? 0;
+      }
+    }
+    const settings = resolveGroupSettings(groupInputs.rows, {
+      investReturnPct: planRow?.investment_return_pct == null ? 7.5 : Number(planRow.investment_return_pct),
+      cashReturnPct: planRow?.cash_return_pct == null ? 3 : Number(planRow.cash_return_pct),
+      measuredAddCents: groupInputs.measuredAddCents,
+      stopWorkYear: planRow?.withdraw_start_year ?? planRow?.target_retire_year ?? null,
+    });
+    const typed = overridesByYear.get(thisYearNum) ?? {};
+    const inRange = (y: number, a: number | null, b: number | null) => (a == null || y >= a) && (b == null || y <= b);
+    return GROUP_KINDS.map((kind) => {
+      const st = settings[kind];
+      const end = groupInputs.liveCents[kind];
+      const isCash = kind === "cash";
+      const add = isCash ? 0 : typed[kind]?.add ?? (st.addCents > 0 && inRange(thisYearNum, st.addStartYear, st.addEndYear) ? st.addCents : 0);
+      const take = isCash ? 0 : typed[kind]?.take ?? (st.takeCents > 0 && inRange(thisYearNum, st.takeStartYear, st.takeEndYear) ? st.takeCents : 0);
+      return {
+        kind,
+        start: start[kind],
+        // Cash moves with every paycheck and bill, so its change isn't a gain.
+        gain: isCash ? 0 : end - start[kind] - (addIn[kind] - takeOut[kind] - janIn[kind]),
+        add,
+        take,
+        rmd: 0,
+        auto: 0,
+        tax: 0,
+        end,
+        actualAdd: isCash ? null : addIn[kind],
+        actualTake: isCash ? null : takeOut[kind],
+      };
+    }).filter((g) => g.start !== 0 || g.end !== 0 || g.add !== 0 || g.take !== 0 || g.actualAdd || g.actualTake);
+  })();
+
   const projectionYears = (projectionRows ?? []).map((r) => ({
     year: r.year,
     age: r.age ?? null,
@@ -890,7 +1031,10 @@ export default async function NetworthPage() {
     withdrawnCents: r.withdrawn_cents ?? null,
     withdrawalTaxCents: r.withdrawal_tax_cents ?? 0,
     plannedAddCents: r.planned_add_cents ?? null,
-    groups: parseStoredGroups(r.groups),
+    groups: r.year === thisYearNum ? currentGroups : parseStoredGroups(r.groups),
+    // What the popup's Proj boxes hold: typed this year or carried from an
+    // earlier one (with the year it came from).
+    groupOverrides: overridesByYear.get(r.year) ?? {},
     // Where the year's income comes from, as the recompute worked it out.
     incomeParts: Array.isArray(r.income_parts)
       ? (r.income_parts as { name?: unknown; cents?: unknown }[])

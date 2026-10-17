@@ -4,6 +4,8 @@ import {
   emptyBalances,
   groupsYear,
   inferGroup,
+  parseTypedGroups,
+  resolveOverrides,
   resolveGroupSettings,
   rmdCents,
   rmdStartAge,
@@ -117,6 +119,43 @@ test("Pre-tax pays at least the required minimum; Roth pays none", () => {
   assert.equal(r.balances.cash, 90_000);
 });
 
+test("a typed contribution replaces the plan's and still earns the return", () => {
+  const s = settingsWith([{ kind: "roth", add_annual_cents: 30_000 }]);
+  const open = { ...emptyBalances(), cash: 100_000, roth: 100_000 };
+  const r = groupsYear(open, s, ctx({ overrides: { roth: { add: 50_000 } } }));
+  const roth = r.groups.find((g) => g.kind === "roth");
+  assert.equal(roth.addCents, 50_000);
+  assert.equal(roth.gainCents, 10_000);
+  assert.equal(roth.endCents, 160_000);
+});
+
+test("a typed withdrawal replaces the plan's; the RMD floor still applies", () => {
+  const s = settingsWith([{ kind: "brokerage", take_annual_cents: 40_000 }]);
+  const open = { ...emptyBalances(), brokerage: 500_000, pretax: 1_000_000 };
+  const r = groupsYear(open, s, ctx({ age: 80, birthYear: 1950, overrides: { brokerage: { take: 10_000 }, pretax: { take: 0 } } }));
+  const by = Object.fromEntries(r.groups.map((g) => [g.kind, g]));
+  assert.equal(by.brokerage.takeCents, 10_000);
+  assert.equal(by.pretax.takeCents, rmdCents(1_000_000, 80, 1950));
+});
+
+test("typed figures carry forward; withdrawals grow with inflation, contributions stay flat", () => {
+  const map = resolveOverrides(
+    [
+      { year: 2030, typed: { roth: { add: 20_000, take: 10_000 } } },
+      { year: 2031, typed: {} },
+      { year: 2032, typed: { roth: { add: 5_000 } } },
+    ],
+    10,
+  );
+  assert.deepEqual(map.get(2031).roth, { add: 20_000, addFrom: 2030, take: 11_000, takeFrom: 2030 });
+  assert.deepEqual(map.get(2032).roth, { add: 5_000, addFrom: 2032, take: 12_100, takeFrom: 2030 });
+});
+
+test("parseTypedGroups ignores cash, junk and negatives", () => {
+  assert.deepEqual(parseTypedGroups({ cash: { add: 5 }, roth: { add: "100", take: -1 }, nope: { add: 1 } }), { roth: { add: 100 } });
+  assert.deepEqual(parseTypedGroups(null), {});
+});
+
 test("scaleBalances keeps the mix and hits the total exactly", () => {
   const out = scaleBalances({ ...emptyBalances(), cash: 100, roth: 300 }, 1_001);
   assert.equal(sum(out), 1_001);
@@ -167,4 +206,91 @@ test("Pay rises by its raise each January after this year", async () => {
   const when = { thisYear: 2026, birthYear: null };
   assert.equal(incomeForYear(2026, null, null, [pay], 0, undefined, when).afterTaxCents, 12_000_000);
   assert.equal(incomeForYear(2028, null, null, [pay], 0, undefined, when).afterTaxCents, 14_520_000);
+});
+
+test("a typed return % carries forward and drives the gain", async () => {
+  const { parseTypedGroups, resolveOverrides } = await import("../src/lib/account-groups.ts");
+  const typed = parseTypedGroups({ crypto: { ret: 0 }, cash: { ret: 99, add: 5 } });
+  assert.deepEqual(typed, { crypto: { ret: 0 }, cash: { ret: 30 } });
+  const by = resolveOverrides(
+    [
+      { year: 2027, typed },
+      { year: 2028, typed: {} },
+      { year: 2029, typed: { crypto: { ret: 4 } } },
+    ],
+    2.5,
+  );
+  assert.deepEqual(by.get(2028).crypto, { ret: 0, retFrom: 2027 });
+  assert.deepEqual(by.get(2029).crypto, { ret: 4, retFrom: 2029 });
+});
+
+test("group account lists name a whole bucketed account's buckets", async () => {
+  const { groupAccountNames } = await import("../src/lib/account-groups.ts");
+  const slots = [
+    { accountId: "c", bucketId: "k", name: "Crypto · Kraken", accountName: "Crypto", group: "crypto" },
+    { accountId: "c", bucketId: "r", name: "Crypto · River", accountName: "Crypto", group: "crypto" },
+    { accountId: "t", bucketId: "1", name: "TSP Roth", accountName: "TSP", group: "roth" },
+    { accountId: "t", bucketId: "2", name: "TSP Traditional", accountName: "TSP", group: "pretax" },
+    { accountId: "s", bucketId: null, name: "Charles Schwab", accountName: "Charles Schwab", group: "roth" },
+  ];
+  assert.deepEqual(groupAccountNames(slots, (x) => x.group === "crypto"), ["Crypto (Kraken, River)"]);
+  assert.deepEqual(groupAccountNames(slots, (x) => x.group === "roth"), ["TSP Roth", "Charles Schwab"]);
+});
+
+test("a typed Est. Withdraw total is spread across investments by balance and carries forward", async () => {
+  const { groupsYear, resolveGroupSettings, resolveOverrides, emptyBalances } = await import("../src/lib/account-groups.ts");
+  const settings = resolveGroupSettings([], { investReturnPct: 0, cashReturnPct: 0, measuredAddCents: emptyBalances() });
+  const opening = { ...emptyBalances(), cash: 0, brokerage: 30_000_00, crypto: 10_000_00, roth: 100_000_00 };
+  const by = resolveOverrides([{ year: 2040, typed: {}, withdraw: { cents: 35_000_00 } }, { year: 2041, typed: {} }], 0);
+  assert.deepEqual(by.get(2041).withdraw, { cents: 35_000_00, from: 2040 });
+  const r = groupsYear(opening, settings, {
+    year: 2040, thisYear: 2026, inflationPct: 0, flowCents: 0, age: 59, birthYear: 1981, overrides: by.get(2040),
+  });
+  const take = Object.fromEntries(r.groups.map((g) => [g.kind, g.takeCents]));
+  // $35,000 over $140,000 invested = 25% of each group.
+  assert.equal(take.brokerage, 7_500_00);
+  assert.equal(take.crypto, 2_500_00);
+  assert.equal(take.roth, 25_000_00);
+});
+
+test("a typed withdraw % follows the 4% rule: % of investments that year, then dollars + inflation", async () => {
+  const { groupsYear, resolveGroupSettings, resolveOverrides, emptyBalances, parseTypedWithdraw, pctWithdrawCarrier } = await import("../src/lib/account-groups.ts");
+  assert.deepEqual(parseTypedWithdraw({ withdrawPct: 3 }), { pct: 3 });
+  assert.deepEqual(parseTypedWithdraw({ withdraw: 100 }), { cents: 100 });
+  const by = resolveOverrides(
+    [
+      { year: 2038, typed: {}, withdraw: { cents: 30_000_00 } },
+      { year: 2040, typed: {}, withdraw: { pct: 3 } },
+      { year: 2041, typed: {} },
+    ],
+    2.5,
+  );
+  assert.deepEqual(by.get(2041).withdraw, { pct: 3, from: 2040 });
+  const settings = resolveGroupSettings([], { investReturnPct: 0, cashReturnPct: 0, measuredAddCents: emptyBalances() });
+  const carry = pctWithdrawCarrier(2.5);
+  // 2040: $100k cash is NOT counted — 3% of the $400k invested = $12,000.
+  const o2040 = carry(2040, { ...emptyBalances(), cash: 100_000_00, brokerage: 400_000_00 }, by.get(2040));
+  assert.equal(o2040.withdraw.cents, 12_000_00);
+  const r = groupsYear({ ...emptyBalances(), cash: 100_000_00, brokerage: 400_000_00 }, settings, {
+    year: 2040, thisYear: 2026, inflationPct: 2.5, flowCents: 0, age: 59, birthYear: 1981, overrides: o2040,
+  });
+  assert.equal(r.groups.find((g) => g.kind === "brokerage").takeCents, 12_000_00);
+  // 2041: the same dollars + 2.5%, whatever the balance did.
+  const o2041 = carry(2041, { ...emptyBalances(), brokerage: 900_000_00 }, by.get(2041));
+  assert.equal(o2041.withdraw.cents, 12_300_00);
+});
+
+test("a typed Proj Withdraw % takes that share of the group's start and carries forward", async () => {
+  const { groupsYear, resolveGroupSettings, resolveOverrides, emptyBalances, parseTypedGroups } = await import("../src/lib/account-groups.ts");
+  assert.deepEqual(parseTypedGroups({ roth: { takePct: 4 }, cash: { takePct: 4 } }), { roth: { takePct: 4 } });
+  const by = resolveOverrides([{ year: 2040, typed: { roth: { takePct: 4 } } }, { year: 2041, typed: {} }], 2.5);
+  assert.deepEqual(by.get(2040).roth, { takePct: 4, takeFrom: 2040 });
+  assert.deepEqual(by.get(2041).roth, { takePct: 4, takeFrom: 2040 }); // carries
+  const settings = resolveGroupSettings([], { investReturnPct: 0, cashReturnPct: 0, measuredAddCents: emptyBalances() });
+  const r = groupsYear({ ...emptyBalances(), roth: 500_000_00, brokerage: 100_000_00 }, settings, {
+    year: 2040, thisYear: 2026, inflationPct: 2.5, flowCents: 0, age: 59, birthYear: 1981, overrides: by.get(2040),
+  });
+  const take = Object.fromEntries(r.groups.map((g) => [g.kind, g.takeCents]));
+  assert.equal(take.roth, 20_000_00); // 4% of Roth's $500,000
+  assert.equal(take.brokerage, 0);
 });
